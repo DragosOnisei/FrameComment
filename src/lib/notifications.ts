@@ -1,0 +1,616 @@
+import { Comment } from '@prisma/client'
+import { prisma } from './db'
+import { sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendProjectApprovedEmail, sendAdminProjectApprovedEmail, getEmailSettings, sendEmail, getRecipientLocale } from './email'
+import { generateNotificationSummaryEmail, generateAdminSummaryEmail } from './email-templates'
+import { getProjectRecipients } from './recipients'
+import { generateShareUrl } from './url'
+import { getRedis } from './redis'
+import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
+import { buildUnsubscribeUrl, generateRecipientUnsubscribeToken } from './unsubscribe'
+import { normalizeNotificationDataTimecode } from '@/worker/notification-helpers'
+import { logError, logMessage } from '@/lib/logging'
+
+interface NotificationContext {
+  comment: Comment
+  project: { id: string; title: string; slug: string }
+  video: { name: string; versionLabel: string; fps?: number | null } | null
+  isReply: boolean
+  attachmentNames?: string[]
+}
+
+interface ApprovalNotificationContext {
+  project: { id: string; title: string; slug: string; clientNotificationSchedule: string; watermarkEnabled?: boolean }
+  video?: { id: string; name: string; versionLabel?: string | null }
+  approvedVideos?: Array<{ id: string; name: string }>
+  approved: boolean // true = approved, false = unapproved
+  authorName?: string | null
+  authorEmail?: string | null
+  isComplete?: boolean // true = all videos approved, false = partial approval
+}
+
+/**
+ * Send immediate notification (when schedule is IMMEDIATE)
+ * @param target - 'client' to send to clients, 'admin' to send to admins
+ */
+export async function sendImmediateNotification(context: NotificationContext, target: 'client' | 'admin' = 'client') {
+  const { comment, project, video, attachmentNames } = context
+
+  // Check if notification was cancelled (comment deleted)
+  const redis = getRedis()
+  const cancelled = await redis.get(`comment_cancelled:${comment.id}`)
+
+  if (cancelled) {
+    logMessage(`[IMMEDIATE] Comment ${comment.id} notification was cancelled, skipping send`)
+    return
+  }
+
+  const shareUrl = await generateShareUrl(project.slug)
+  const videoName = video?.name || 'Unknown Video'
+  const versionLabel = video?.versionLabel || 'Unknown Version'
+  const authorEmail = comment.authorEmail?.toLowerCase() || null
+
+  if (target === 'client') {
+    // Send to clients — skip author if they are a client
+    const allRecipients = await getProjectRecipients(comment.projectId)
+    const recipients = allRecipients.filter(r => {
+      if (!r.receiveNotifications || !r.email) return false
+      // Skip the author (client who wrote this comment)
+      if (!comment.isInternal && authorEmail && r.email.toLowerCase() === authorEmail) return false
+      return true
+    })
+
+    if (recipients.length === 0) {
+      logMessage(`[IMMEDIATE→CLIENT] Skipped - no recipients for project "${project.title}"`)
+      return
+    }
+
+    logMessage(`[IMMEDIATE→CLIENT] Sending to ${recipients.length} recipient(s) for "${project.title}"`)
+    logMessage(`[IMMEDIATE→CLIENT]   Video: ${videoName} (${versionLabel})`)
+    logMessage(`[IMMEDIATE→CLIENT]   Author: ${comment.authorName || (comment.isInternal ? 'Admin' : 'Client')}`)
+
+    const emailPromises = recipients.map(async (recipient) => {
+      let unsubscribeUrl: string | undefined
+      try {
+        const token = generateRecipientUnsubscribeToken({
+          recipientId: recipient.id!,
+          projectId: comment.projectId,
+          recipientEmail: recipient.email!,
+        })
+        unsubscribeUrl = buildUnsubscribeUrl(new URL(shareUrl).origin, token)
+      } catch {
+        unsubscribeUrl = undefined
+      }
+
+      // Resolve per-recipient locale
+      const recipientLocale = await getRecipientLocale(recipient.email!)
+
+      return sendCommentNotificationEmail({
+        clientEmail: recipient.email!,
+        clientName: recipient.name || 'Client',
+        projectTitle: project.title,
+        videoName,
+        versionLabel,
+        authorName: comment.authorName || (comment.isInternal ? 'Admin' : 'Client'),
+        commentContent: comment.content,
+        timecode: comment.timecode,
+        fps: video?.fps,
+        commentId: comment.id,
+        shareUrl,
+        unsubscribeUrl,
+        attachmentNames,
+        locale: recipientLocale,
+      }).then(result => {
+        if (result.success) {
+          logMessage(`[IMMEDIATE→CLIENT]   Sent to ${recipient.email}`)
+        } else {
+          logError(`[IMMEDIATE→CLIENT]   Failed to ${recipient.email}: ${result.error}`)
+        }
+        return result
+      })
+    })
+
+    await Promise.allSettled(emailPromises)
+  } else {
+    // Send to admins — skip author if they are an admin
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN' },
+      select: { email: true, name: true }
+    })
+
+    // Skip the author admin
+    const targetAdmins = admins.filter(a => {
+      if (comment.isInternal && authorEmail && a.email.toLowerCase() === authorEmail) return false
+      return true
+    })
+
+    if (targetAdmins.length === 0) {
+      logMessage(`[IMMEDIATE→ADMIN] Skipped - no admins to notify for "${project.title}"`)
+      return
+    }
+
+    logMessage(`[IMMEDIATE→ADMIN] Sending to ${targetAdmins.length} admin(s) for "${project.title}"`)
+    logMessage(`[IMMEDIATE→ADMIN]   Video: ${videoName} (${versionLabel})`)
+    logMessage(`[IMMEDIATE→ADMIN]   Author: ${comment.authorName || (comment.isInternal ? 'Admin' : 'Client')}`)
+
+    const result = await sendAdminCommentNotificationEmail({
+      adminEmails: targetAdmins.map(a => a.email),
+      clientName: comment.authorName || (comment.isInternal ? 'Admin' : 'Client'),
+      clientEmail: comment.authorEmail,
+      projectTitle: project.title,
+      projectId: project.id,
+      videoName,
+      versionLabel,
+      commentContent: comment.content,
+      timecode: comment.timecode,
+      fps: video?.fps,
+      commentId: comment.id,
+      shareUrl,
+      attachmentNames,
+    })
+
+    if (result.success) {
+      logMessage(`[IMMEDIATE→ADMIN]   ${result.message}`)
+    } else {
+      logError(`[IMMEDIATE→ADMIN]   Failed: ${result.message}`)
+    }
+  }
+}
+
+/**
+ * Queue notification for later batch sending (when schedule is not IMMEDIATE)
+ * @param alreadySentTo - sides already handled via IMMEDIATE, pre-mark as sent
+ */
+export async function queueNotification(
+  context: NotificationContext,
+  alreadySentTo?: { admins?: boolean; clients?: boolean }
+) {
+  const { comment, project, video, isReply, attachmentNames } = context
+
+  const type = comment.isInternal ? 'ADMIN_REPLY' : 'CLIENT_COMMENT'
+
+  logMessage(`[QUEUE] Adding ${type} to queue for "${project.title}"`)
+  logMessage(`[QUEUE]   Video: ${video?.name || 'N/A'} (${video?.versionLabel || 'N/A'})`)
+  logMessage(`[QUEUE]   Author: ${comment.authorName || (comment.isInternal ? 'Admin' : 'Client')}`)
+
+  // Get parent comment context if this is a reply
+  let parentCommentData = null
+  if (isReply && comment.parentId) {
+    const parentComment = await prisma.comment.findUnique({
+      where: { id: comment.parentId },
+      select: { authorName: true, content: true, timecode: true }
+    })
+
+    if (parentComment) {
+      parentCommentData = {
+        authorName: parentComment.authorName || 'Client',
+        content: parentComment.content,
+        timecode: parentComment.timecode
+      }
+    }
+  }
+
+  const now = new Date()
+
+  await prisma.notificationQueue.create({
+    data: {
+      projectId: comment.projectId,
+      type,
+      // Pre-mark sides that were already sent immediately
+      sentToAdmins: alreadySentTo?.admins || false,
+      adminSentAt: alreadySentTo?.admins ? now : undefined,
+      sentToClients: alreadySentTo?.clients || false,
+      clientSentAt: alreadySentTo?.clients ? now : undefined,
+      data: {
+        type, // Include type in data JSON for email templates
+        commentId: comment.id,
+        videoId: comment.videoId,
+        videoName: video?.name || 'Unknown Video',
+        videoLabel: video?.versionLabel,
+        fps: video?.fps || null,
+        authorName: comment.authorName || (comment.isInternal ? 'Admin' : 'Client'),
+        authorEmail: comment.authorEmail,
+        content: comment.content,
+        timecode: comment.timecode,
+        isReply,
+        parentCommentId: comment.parentId,
+        parentComment: parentCommentData,
+        attachmentNames: attachmentNames || [],
+        createdAt: comment.createdAt.toISOString()
+      }
+    }
+  })
+
+  logMessage(`[QUEUE]   Queued successfully`)
+}
+
+/**
+ * Handle approval notification (video or project)
+ * IMPORTANT: Approvals are ALWAYS sent immediately, regardless of schedule settings
+ */
+export async function handleApprovalNotification(context: ApprovalNotificationContext) {
+  const { project, video, approved, isComplete = false } = context
+
+  // Determine notification type based on whether ALL videos are approved
+  const type = isComplete ? 'PROJECT_APPROVED' : (approved ? 'VIDEO_APPROVED' : 'VIDEO_UNAPPROVED')
+
+  logMessage(`[APPROVAL] Handling ${type} for "${project.title}"`)
+  if (video) {
+    logMessage(`[APPROVAL]   Video: ${video.name}`)
+  }
+
+  // ALWAYS send approval notifications immediately, regardless of schedule
+  logMessage(`[APPROVAL]   Sending immediately (approvals always bypass schedule)...`)
+  await sendApprovalImmediately(context)
+}
+
+/**
+ * Send approval notification immediately
+ */
+async function sendApprovalImmediately(context: ApprovalNotificationContext) {
+  const { project, video, approvedVideos, approved, authorName, authorEmail, isComplete = false } = context
+
+  const shareUrl = await generateShareUrl(project.slug)
+  let adminShareUrl = ''
+  try {
+    const origin = new URL(shareUrl).origin
+    const returnUrl = `/admin/projects/${project.id}/share`
+    adminShareUrl = `${origin}/login?returnUrl=${encodeURIComponent(returnUrl)}`
+  } catch {
+    adminShareUrl = ''
+  }
+  const allRecipients = await getProjectRecipients(project.id)
+  const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
+
+  // Get all admins
+  const admins = await prisma.user.findMany({
+    where: { role: 'ADMIN' },
+    select: { email: true, name: true }
+  })
+
+  // Send to clients ONLY if complete project approval (all videos approved)
+  // Don't send for partial approvals - client knows they just clicked approve
+  if (recipients.length > 0 && isComplete && approved) {
+    logMessage(`[IMMEDIATE→CLIENT] Sending complete project approval to ${recipients.length} recipient(s)`)
+
+    const emailPromises = recipients.map(async (recipient) => {
+      let unsubscribeUrl: string | undefined
+      try {
+        const token = generateRecipientUnsubscribeToken({
+          recipientId: recipient.id!,
+          projectId: project.id,
+          recipientEmail: recipient.email!,
+        })
+        unsubscribeUrl = buildUnsubscribeUrl(new URL(shareUrl).origin, token)
+      } catch {
+        unsubscribeUrl = undefined
+      }
+
+      // Check if this recipient is the one who approved
+      const isApprover = authorEmail && recipient.email?.toLowerCase() === authorEmail.toLowerCase()
+
+      // Resolve per-recipient locale
+      const recipientLocale = await getRecipientLocale(recipient.email!)
+
+      return sendProjectApprovedEmail({
+        clientEmail: recipient.email!,
+        clientName: recipient.name || 'Client',
+        projectTitle: project.title,
+        approvedVideos: approvedVideos || (video ? [{ id: video.id, name: video.name }] : []),
+        shareUrl,
+        isComplete: true, // Only send when complete
+        unsubscribeUrl,
+        approverName: authorName || undefined,
+        isApprover: isApprover || false,
+        watermarkEnabled: project.watermarkEnabled ?? true,
+        locale: recipientLocale,
+      }).then(result => {
+        if (result.success) {
+          logMessage(`[IMMEDIATE→CLIENT]   Sent to ${recipient.email}`)
+        } else {
+          logError(`[IMMEDIATE→CLIENT]   Failed to ${recipient.email}: ${result.error}`)
+        }
+        return result
+      })
+    })
+
+    await Promise.allSettled(emailPromises)
+  } else if (recipients.length > 0 && !isComplete) {
+    logMessage(`[IMMEDIATE→CLIENT] Skipped - partial approval (${approvedVideos?.length || 0} videos), not sending to client`)
+  }
+
+  // Send to admins - notify them when client approves OR unapproves ANY video
+  if (admins.length > 0) {
+    const action = approved ? 'approval' : 'unapproval'
+    logMessage(`[IMMEDIATE→ADMIN] Sending ${action} notice to ${admins.length} admin(s)`)
+
+    const result = await sendAdminProjectApprovedEmail({
+      adminEmails: admins.map(a => a.email),
+      clientName: authorName || 'Client',
+      projectTitle: project.title,
+      approvedVideos: approvedVideos || (video ? [{ id: video.id, name: video.name }] : []),
+      isApproval: approved, // Pass whether this is approval or unapproval
+      isComplete, // Pass whether this is complete project or partial
+    })
+
+    if (result.success) {
+      logMessage(`[IMMEDIATE→ADMIN]   ${result.message}`)
+    } else {
+      logError(`[IMMEDIATE→ADMIN]   Failed: ${result.message}`)
+    }
+  }
+
+  const videoNames =
+    approvedVideos?.map(v => v.name).join(', ') ||
+    video?.name ||
+    'Unknown'
+
+  void enqueueExternalNotification({
+    eventType: 'VIDEO_APPROVAL',
+    title: `${authorName || 'Client'} ${approved ? 'Approved' : 'Unapproved'}: ${project.title}`,
+    body: [
+      `${authorName || 'A client'}${authorEmail ? ` (${authorEmail})` : ''} ${approved ? 'approved' : 'unapproved'} ${videoNames}`,
+      `Project: ${project.title}`,
+      isComplete ? 'All videos are now approved' : null,
+      adminShareUrl ? `Link: ${adminShareUrl}` : shareUrl ? `Link: ${shareUrl}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    notifyType: approved ? 'success' : 'warning',
+    pushData: {
+      projectTitle: project.title,
+      projectId: project.id,
+      videoName: videoNames,
+      authorName: authorName || undefined,
+      email: authorEmail || undefined,
+      url: adminShareUrl || undefined,
+    },
+  }).catch((notificationError) => {
+    logError('[APPROVAL] Failed to enqueue external notification', notificationError)
+  })
+}
+
+/**
+ * Flush all pending admin notifications immediately as a summary email.
+ * Called when admin notification schedule changes so queued items are not lost.
+ */
+export async function flushPendingAdminNotifications(): Promise<void> {
+  try {
+    const pendingNotifications = await prisma.notificationQueue.findMany({
+      where: {
+        sentToAdmins: false,
+        adminFailed: false,
+      },
+      include: {
+        project: {
+          select: { id: true, title: true, slug: true }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    })
+
+    if (pendingNotifications.length === 0) {
+      logMessage('[FLUSH-ADMIN] No pending notifications to flush')
+      return
+    }
+
+    // Filter out cancelled notifications
+    const redis = getRedis()
+    const validNotifications = []
+    const cancelledIds: string[] = []
+
+    for (const notification of pendingNotifications) {
+      const commentId = (notification.data as any).commentId
+      if (commentId) {
+        const isCancelled = await redis.get(`comment_cancelled:${commentId}`)
+        if (isCancelled) {
+          cancelledIds.push(notification.id)
+          continue
+        }
+      }
+      validNotifications.push(notification)
+    }
+
+    if (cancelledIds.length > 0) {
+      await prisma.notificationQueue.deleteMany({
+        where: { id: { in: cancelledIds } }
+      })
+    }
+
+    if (validNotifications.length === 0) {
+      logMessage('[FLUSH-ADMIN] All pending notifications were cancelled')
+      return
+    }
+
+    // Group by project
+    const projectGroups: Record<string, any> = {}
+    for (const notification of validNotifications) {
+      const projectId = notification.projectId
+      if (!projectGroups[projectId]) {
+        projectGroups[projectId] = {
+          projectId,
+          projectTitle: notification.project.title,
+          shareUrl: await generateShareUrl(notification.project.slug),
+          notifications: []
+        }
+      }
+      projectGroups[projectId].notifications.push(
+        normalizeNotificationDataTimecode(notification.data)
+      )
+    }
+
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN' },
+      select: { email: true, name: true }
+    })
+
+    if (admins.length === 0) {
+      logMessage('[FLUSH-ADMIN] No admins found')
+      return
+    }
+
+    const emailSettings = await getEmailSettings()
+    const companyName = emailSettings.companyName || 'FrameComment'
+    const projects = Object.values(projectGroups)
+
+    logMessage(`[FLUSH-ADMIN] Sending ${validNotifications.length} queued notification(s) to ${admins.length} admin(s)`)
+
+    for (const admin of admins) {
+      const summaryEmail = await generateAdminSummaryEmail({
+        companyName,
+        accentColor: emailSettings.accentColor || undefined,
+        appDomain: emailSettings.appDomain || undefined,
+        adminName: admin.name || '',
+        period: 'before schedule change',
+        projects,
+        locale: emailSettings.language || 'en',
+      })
+
+      await sendEmail({
+        to: admin.email,
+        subject: summaryEmail.subject,
+        html: summaryEmail.html,
+      })
+    }
+
+    // Mark as sent
+    const ids = validNotifications.map(n => n.id)
+    const now = new Date()
+    await prisma.notificationQueue.updateMany({
+      where: { id: { in: ids } },
+      data: { sentToAdmins: true, adminSentAt: now }
+    })
+
+    await prisma.settings.update({
+      where: { id: 'default' },
+      data: { lastAdminNotificationSent: now }
+    })
+
+    logMessage(`[FLUSH-ADMIN] Flushed ${validNotifications.length} notification(s)`)
+  } catch (error) {
+    logError('[FLUSH-ADMIN] Error flushing notifications:', error)
+  }
+}
+
+/**
+ * Flush all pending client notifications for a project immediately as a summary email.
+ * Called when a project's client notification schedule changes so queued items are not lost.
+ */
+export async function flushPendingClientNotifications(projectId: string): Promise<void> {
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        notificationQueue: {
+          where: {
+            sentToClients: false,
+            clientFailed: false,
+          },
+          orderBy: { createdAt: 'asc' }
+        }
+      }
+    })
+
+    if (!project || project.notificationQueue.length === 0) {
+      logMessage(`[FLUSH-CLIENT] No pending notifications for project ${projectId}`)
+      return
+    }
+
+    // Filter out cancelled notifications
+    const redis = getRedis()
+    const validNotifications = []
+    const cancelledIds: string[] = []
+
+    for (const notification of project.notificationQueue) {
+      const commentId = (notification.data as any).commentId
+      if (commentId) {
+        const isCancelled = await redis.get(`comment_cancelled:${commentId}`)
+        if (isCancelled) {
+          cancelledIds.push(notification.id)
+          continue
+        }
+      }
+      validNotifications.push(notification)
+    }
+
+    if (cancelledIds.length > 0) {
+      await prisma.notificationQueue.deleteMany({
+        where: { id: { in: cancelledIds } }
+      })
+    }
+
+    if (validNotifications.length === 0) {
+      logMessage(`[FLUSH-CLIENT] All pending notifications were cancelled for project ${projectId}`)
+      return
+    }
+
+    const allRecipients = await getProjectRecipients(projectId)
+    const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
+
+    if (recipients.length === 0) {
+      logMessage(`[FLUSH-CLIENT] No recipients with notifications enabled for project ${projectId}`)
+      return
+    }
+
+    const emailSettings = await getEmailSettings()
+    const companyName = emailSettings.companyName || 'FrameComment'
+    const shareUrl = await generateShareUrl(project.slug)
+    const notifications = validNotifications.map(n =>
+      normalizeNotificationDataTimecode(n.data as any)
+    )
+
+    logMessage(`[FLUSH-CLIENT] Sending ${validNotifications.length} queued notification(s) to ${recipients.length} recipient(s) for "${project.title}"`)
+
+    for (const recipient of recipients) {
+      let unsubscribeUrl: string | undefined
+      try {
+        const token = generateRecipientUnsubscribeToken({
+          recipientId: recipient.id!,
+          projectId: project.id,
+          recipientEmail: recipient.email!,
+        })
+        unsubscribeUrl = buildUnsubscribeUrl(new URL(shareUrl).origin, token)
+      } catch {
+        unsubscribeUrl = undefined
+      }
+
+      const summaryEmail = await generateNotificationSummaryEmail({
+        companyName,
+        accentColor: emailSettings.accentColor || undefined,
+        projectTitle: project.title,
+        shareUrl,
+        recipientName: recipient.name || recipient.email!,
+        recipientEmail: recipient.email!,
+        period: 'before schedule change',
+        notifications,
+        unsubscribeUrl,
+        locale: await getRecipientLocale(recipient.email!),
+      })
+
+      await sendEmail({
+        to: recipient.email!,
+        subject: summaryEmail.subject,
+        html: summaryEmail.html,
+      })
+    }
+
+    // Mark as sent
+    const ids = validNotifications.map(n => n.id)
+    const now = new Date()
+    await prisma.notificationQueue.updateMany({
+      where: { id: { in: ids } },
+      data: { sentToClients: true, clientSentAt: now }
+    })
+
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { lastClientNotificationSent: now }
+    })
+
+    logMessage(`[FLUSH-CLIENT] Flushed ${validNotifications.length} notification(s) for "${project.title}"`)
+  } catch (error) {
+    logError('[FLUSH-CLIENT] Error flushing notifications:', error)
+  }
+}

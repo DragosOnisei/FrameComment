@@ -1,0 +1,29 @@
+FrameComment
+Copyright (C) 2026 Dragos Onisei
+
+This product includes software derived from ViTransfer
+(https://github.com/MansiVisuals/ViTransfer), Copyright (C) MansiVisuals,
+licensed under the GNU Affero General Public License version 3.
+
+FrameComment was forked from ViTransfer at version 1.0.2 on 2026-05-02 and
+is distributed under the same license, the GNU Affero General Public License
+version 3 (AGPL-3.0-only). See the LICENSE file for the full text of the
+license.
+
+In accordance with section 5 of the AGPL-3.0, FrameComment carries prominent
+notices that:
+
+  * the program has been modified relative to the upstream source;
+  * the modified version is licensed under AGPL-3.0;
+  * users interacting with the program over a network may obtain the
+    corresponding source code from the canonical repository at
+    https://github.com/DragosOnisei/FrameComment.
+
+Acknowledgements
+----------------
+
+We thank the original author and contributors of ViTransfer for releasing
+their work as Free Software, which made this project possible.
+
+A summary of the changes introduced by FrameComment relative to upstream is
+maintained in CHANGELOG.md and docs/FORK-DIFF.md.

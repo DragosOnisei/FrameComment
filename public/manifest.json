@@ -1,0 +1,54 @@
+{
+  "name": "FrameComment",
+  "short_name": "FrameComment",
+  "description": "Professional video review and approval platform",
+  "start_url": "/admin",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/brand/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Projects",
+      "url": "/admin/projects",
+      "description": "View all projects"
+    },
+    {
+      "name": "Clients",
+      "url": "/admin/clients",
+      "description": "Manage clients"
+    },
+    {
+      "name": "Settings",
+      "url": "/admin/settings",
+      "description": "Open settings"
+    },
+    {
+      "name": "Users",
+      "url": "/admin/users",
+      "description": "Manage users"
+    }
+  ]
+}

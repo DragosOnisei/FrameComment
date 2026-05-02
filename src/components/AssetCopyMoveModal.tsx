@@ -1,0 +1,284 @@
+'use client'
+
+import { useCallback, useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
+import { Copy, FileIcon, Loader2 } from 'lucide-react'
+import { Button } from './ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import { formatFileSize } from '@/lib/utils'
+import { apiFetch, apiPost } from '@/lib/api-client'
+
+interface VideoAsset {
+  id: string
+  fileName: string
+  fileSize: string
+  fileType: string
+  category: string | null
+  createdAt: string
+}
+
+interface Video {
+  id: string
+  name: string
+  version: number
+  versionLabel: string
+}
+
+interface AssetCopyMoveModalProps {
+  currentVideoId: string
+  currentVideoName: string
+  currentVersionLabel: string
+  projectId: string
+  preSelectedAssetIds?: string[]
+  onClose: () => void
+  onComplete?: () => void
+  isOpen: boolean
+}
+
+export function AssetCopyMoveModal({
+  currentVideoId,
+  currentVideoName,
+  currentVersionLabel,
+  projectId,
+  preSelectedAssetIds,
+  onClose,
+  onComplete,
+  isOpen,
+}: AssetCopyMoveModalProps) {
+  const t = useTranslations('videos')
+  const tc = useTranslations('common')
+  const [assets, setAssets] = useState<VideoAsset[]>([])
+  const [videos, setVideos] = useState<Video[]>([])
+  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set())
+  const [targetVideoId, setTargetVideoId] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [copying, setCopying] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // If assets are pre-selected from parent, skip fetching the asset list
+      if (!preSelectedAssetIds) {
+        const assetsResponse = await apiFetch(`/api/videos/${currentVideoId}/assets`)
+        if (!assetsResponse.ok) {
+          throw new Error(t('failedToFetchAssets'))
+        }
+        const assetsData = await assetsResponse.json()
+        setAssets(assetsData.assets)
+        setSelectedAssets(new Set(assetsData.assets.map((a: VideoAsset) => a.id)))
+      } else {
+        setSelectedAssets(new Set(preSelectedAssetIds))
+      }
+
+      // Fetch all videos in project to choose target
+      const videosResponse = await apiFetch(`/api/projects/${projectId}`)
+      if (!videosResponse.ok) {
+        throw new Error(t('failedToFetchVideos'))
+      }
+      const videosData = await videosResponse.json()
+
+      // Only show other versions of the SAME video (same name, different id)
+      const sameNameVersions = videosData.videos.filter(
+        (v: Video) => v.id !== currentVideoId && v.name === currentVideoName
+      )
+      setVideos(sameNameVersions)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToLoadData'))
+    } finally {
+      setLoading(false)
+    }
+  }, [currentVideoId, currentVideoName, projectId, preSelectedAssetIds, t])
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchData()
+    }
+  }, [fetchData, isOpen])
+
+  const toggleAsset = (assetId: string) => {
+    const newSelected = new Set(selectedAssets)
+    if (newSelected.has(assetId)) {
+      newSelected.delete(assetId)
+    } else {
+      newSelected.add(assetId)
+    }
+    setSelectedAssets(newSelected)
+  }
+
+  const selectAll = () => {
+    if (selectedAssets.size === assets.length) {
+      setSelectedAssets(new Set())
+    } else {
+      setSelectedAssets(new Set(assets.map((a) => a.id)))
+    }
+  }
+
+  const handleCopyAssets = async () => {
+    if (selectedAssets.size === 0 || !targetVideoId) return
+
+    setCopying(true)
+    setError(null)
+    setSuccess(null)
+
+    // Copy assets in background without blocking UI
+    apiPost(`/api/videos/${currentVideoId}/assets/copy-to-version`, {
+      assetIds: Array.from(selectedAssets),
+      targetVideoId,
+    })
+      .then(() => {
+        setSuccess(t('copiedSuccessfully', { count: selectedAssets.size }))
+        setSelectedAssets(new Set())
+
+        if (onComplete) {
+          onComplete()
+        }
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : t('failedToCopy'))
+      })
+      .finally(() => {
+        setCopying(false)
+      })
+  }
+
+  const formatFileSizeBigInt = (bytes: string) => {
+    return formatFileSize(Number(bytes))
+  }
+
+  const getCategoryLabel = (category: string | null) => {
+    if (!category) return t('other')
+    return category.charAt(0).toUpperCase() + category.slice(1)
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Copy className="w-5 h-5 text-primary" />
+            {t('copyAssetsTitle')}
+          </DialogTitle>
+          <DialogDescription>
+            {currentVideoName} - {currentVersionLabel}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto space-y-6 py-4 px-1">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              {/* Target version selector */}
+              <div className="space-y-3">
+                <label htmlFor="target-version" className="font-medium text-sm">
+                  {t('selectTargetVersion')}
+                </label>
+                {videos.length === 0 ? (
+                  <div className="p-4 border-2 border-dashed border-border rounded-lg text-center text-sm text-muted-foreground">
+                    {t('noOtherVersions')}
+                  </div>
+                ) : (
+                  <Select value={targetVideoId} onValueChange={setTargetVideoId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('selectVersion')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {videos.map((video) => (
+                        <SelectItem key={video.id} value={video.id}>
+                          {video.name} - {video.versionLabel}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              {/* Assets selection — only shown when no pre-selection from parent */}
+              {!preSelectedAssetIds && (
+                assets.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  {t('noAssetsToCopy')}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-medium text-sm">{t('selectAssetsToCopy', { count: assets.length })}</h3>
+                    <Button variant="ghost" size="sm" onClick={selectAll}>
+                      {selectedAssets.size === assets.length ? tc('deselectAll') : tc('selectAll')}
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {assets.map((asset) => (
+                      <div
+                        key={asset.id}
+                        className="flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAssets.has(asset.id)}
+                          onChange={() => toggleAsset(asset.id)}
+                          className="h-4 w-4 rounded border-input"
+                        />
+                        <FileIcon className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{asset.fileName}</p>
+                          <div className="flex gap-3 text-xs text-muted-foreground">
+                            <span>{formatFileSizeBigInt(asset.fileSize)}</span>
+                            <span>•</span>
+                            <span>{getCategoryLabel(asset.category)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* Success message */}
+              {success && (
+                <div className="p-3 bg-success-visible border border-success-visible rounded-md text-success text-sm">
+                  {success}
+                </div>
+              )}
+
+              {/* Error message */}
+              {error && (
+                <div className="p-3 bg-destructive/10 border border-destructive rounded-md text-destructive text-sm">
+                  {error}
+                </div>
+              )}
+
+              <Button
+                onClick={handleCopyAssets}
+                disabled={copying || selectedAssets.size === 0 || !targetVideoId || videos.length === 0}
+                className="w-full"
+              >
+                {copying ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    {t('copyingAssets')}
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 mr-2" />
+                    {t('copyAssets', { count: selectedAssets.size })}
+                  </>
+                )}
+              </Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

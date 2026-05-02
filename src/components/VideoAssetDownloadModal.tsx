@@ -1,0 +1,390 @@
+'use client'
+
+import { useCallback, useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
+import { Download, FileIcon, Loader2 } from 'lucide-react'
+import { Button } from './ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog'
+import { formatFileSize } from '@/lib/utils'
+import { getAccessToken } from '@/lib/token-store'
+
+interface VideoAsset {
+  id: string
+  fileName: string
+  fileSize: string
+  fileType: string
+  category: string | null
+  createdAt: string
+}
+
+interface VideoAssetDownloadModalProps {
+  videoId: string
+  videoName: string
+  versionLabel: string
+  onClose: () => void
+  isOpen: boolean
+  shareToken?: string | null
+  isAdmin?: boolean
+}
+
+export function VideoAssetDownloadModal({
+  videoId,
+  videoName,
+  versionLabel,
+  onClose,
+  isOpen,
+  shareToken = null,
+  isAdmin = false,
+}: VideoAssetDownloadModalProps) {
+  const t = useTranslations('videos')
+  const tc = useTranslations('common')
+  const [assets, setAssets] = useState<VideoAsset[]>([])
+  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(true)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadingAll, setDownloadingAll] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchAssets = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const headers = buildAuthHeaders(shareToken, isAdmin)
+      const response = await fetch(`/api/videos/${videoId}/assets`, {
+        headers,
+      })
+      if (!response.ok) {
+        throw new Error(t('failedToFetchAssets'))
+      }
+
+      const data = await response.json()
+      setAssets(data.assets)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToLoadAssets'))
+    } finally {
+      setLoading(false)
+    }
+  }, [videoId, shareToken, isAdmin, t])
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchAssets()
+    }
+  }, [fetchAssets, isOpen])
+
+  const toggleAsset = (assetId: string) => {
+    const newSelected = new Set(selectedAssets)
+    if (newSelected.has(assetId)) {
+      newSelected.delete(assetId)
+    } else {
+      newSelected.add(assetId)
+    }
+    setSelectedAssets(newSelected)
+  }
+
+  const selectAll = () => {
+    if (selectedAssets.size === assets.length) {
+      setSelectedAssets(new Set())
+    } else {
+      setSelectedAssets(new Set(assets.map((a) => a.id)))
+    }
+  }
+
+  const downloadSingleAsset = async (assetId: string) => {
+    try {
+      setError(null)
+
+      // Use token-based download for everyone (instant, no memory loading)
+      const response = await fetch(`/api/videos/${videoId}/assets/${assetId}/download-token`, {
+        method: 'POST',
+        headers: buildAuthHeaders(shareToken, isAdmin),
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: t('failedToGenerateDownload') }))
+        throw new Error(data.error || t('failedToGenerateDownload'))
+      }
+
+      const { url: downloadUrl } = await response.json()
+      triggerDownload(downloadUrl)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('downloadFailed'))
+    }
+  }
+
+  const downloadVideoOnly = async () => {
+    try {
+      setError(null)
+
+      // Use token-based download for everyone (instant, no memory loading)
+      const response = await fetch(`/api/videos/${videoId}/download-token`, {
+        method: 'POST',
+        headers: buildAuthHeaders(shareToken, isAdmin),
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: t('failedToGenerateDownload') }))
+        throw new Error(data.error || t('failedToGenerateDownload'))
+      }
+
+      const { url: downloadUrl } = await response.json()
+      triggerDownload(downloadUrl)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('downloadFailed'))
+    }
+  }
+
+  const downloadSelectedAsZip = async () => {
+    if (selectedAssets.size === 0 || downloading) return
+
+    try {
+      setDownloading(true)
+      setError(null)
+
+      // Generate download token for ZIP (non-blocking, no memory loading)
+      const response = await fetch(`/api/videos/${videoId}/assets/download-zip-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildAuthHeaders(shareToken, isAdmin),
+        },
+        body: JSON.stringify({
+          assetIds: Array.from(selectedAssets),
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || t('downloadFailed'))
+      }
+
+      const { url: downloadUrl } = await response.json()
+
+      // Direct download via window.open (streaming, non-blocking, supports multiple simultaneous downloads)
+      triggerDownload(downloadUrl)
+
+      // Close modal shortly after initiating download
+      setTimeout(() => {
+        onClose()
+      }, 500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('downloadFailed'))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const downloadAll = async () => {
+    if (downloadingAll || assets.length === 0) return
+
+    try {
+      setDownloadingAll(true)
+      setError(null)
+
+      const response = await fetch(`/api/videos/${videoId}/assets/download-zip-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildAuthHeaders(shareToken, isAdmin),
+        },
+        body: JSON.stringify({
+          assetIds: assets.map((a) => a.id),
+          includeVideo: true,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || t('downloadFailed'))
+      }
+
+      const { url: downloadUrl } = await response.json()
+      triggerDownload(downloadUrl)
+
+      setTimeout(() => {
+        onClose()
+      }, 500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('downloadFailed'))
+    } finally {
+      setDownloadingAll(false)
+    }
+  }
+
+  const formatFileSizeBigInt = (bytes: string) => {
+    return formatFileSize(Number(bytes))
+  }
+
+  const getCategoryLabel = (category: string | null) => {
+    if (!category) return t('other')
+    return category.charAt(0).toUpperCase() + category.slice(1)
+  }
+
+  const triggerDownload = (url: string) => {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = ''
+    link.rel = 'noopener'
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Download className="w-5 h-5 text-primary" />
+            {t('downloadOptions')}
+          </DialogTitle>
+          <DialogDescription>
+            {videoName} - {versionLabel}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto space-y-6 py-4">
+          {/* Quick actions */}
+          <div className="space-y-3">
+            <h3 className="font-medium text-sm">{t('quickDownload')}</h3>
+            <button
+              onClick={downloadVideoOnly}
+              className="w-full p-4 border-2 border-border rounded-lg hover:border-primary transition-colors text-left"
+            >
+              <div className="flex items-center gap-3">
+                <Download className="h-5 w-5 text-primary flex-shrink-0" />
+                <div>
+                  <p className="font-medium">{t('downloadVideoOnly')}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t('downloadVideoDescription')}
+                  </p>
+                </div>
+              </div>
+            </button>
+            {!loading && assets.length > 0 && (
+              <button
+                onClick={downloadAll}
+                disabled={downloadingAll}
+                className="w-full p-4 border-2 border-primary rounded-lg hover:bg-primary/5 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  {downloadingAll ? (
+                    <Loader2 className="h-5 w-5 text-primary flex-shrink-0 animate-spin" />
+                  ) : (
+                    <Download className="h-5 w-5 text-primary flex-shrink-0" />
+                  )}
+                  <div>
+                    <p className="font-medium">{t('downloadAll')}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t('downloadAllDescription', { count: assets.length })}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            )}
+          </div>
+
+          {/* Assets section */}
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : assets.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              {t('noAdditionalAssets')}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-sm">
+                  {t('additionalAssets')} ({assets.length})
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={selectAll}
+                >
+                  {selectedAssets.size === assets.length ? tc('deselectAll') : tc('selectAll')}
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                {assets.map((asset) => (
+                  <div
+                    key={asset.id}
+                    className="flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedAssets.has(asset.id)}
+                      onChange={() => toggleAsset(asset.id)}
+                      className="h-4 w-4 rounded border-input"
+                    />
+                    <FileIcon className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{asset.fileName}</p>
+                      <div className="flex gap-3 text-xs text-muted-foreground">
+                        <span>{formatFileSizeBigInt(asset.fileSize)}</span>
+                        <span>•</span>
+                        <span>{getCategoryLabel(asset.category)}</span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => downloadSingleAsset(asset.id)}
+                      title={t('downloadThisFile')}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Download selected button */}
+              {selectedAssets.size > 0 && (
+                <Button
+                  onClick={downloadSelectedAsZip}
+                  disabled={downloading}
+                  className="w-full"
+                >
+                  {downloading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      {t('preparingDownload')}
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4 mr-2" />
+                      {tc('download')} {selectedAssets.size} {t('downloadSelectedZip')}
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* Error message */}
+          {error && (
+            <div className="p-3 bg-destructive/10 border border-destructive rounded-md text-destructive text-sm">
+              {error}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function buildAuthHeaders(shareToken?: string | null, isAdmin?: boolean) {
+  const headers: Record<string, string> = {}
+  const token = shareToken || (isAdmin ? getAccessToken() : null)
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  return headers
+}

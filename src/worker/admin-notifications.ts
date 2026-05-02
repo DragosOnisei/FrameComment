@@ -1,0 +1,196 @@
+import { prisma } from '../lib/db'
+import { getEmailSettings, sendEmail } from '../lib/email'
+import { generateAdminSummaryEmail } from '../lib/email-templates'
+import { generateShareUrl } from '../lib/url'
+import { getRedis } from '../lib/redis'
+import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
+import { logError, logMessage } from '../lib/logging'
+
+/**
+ * Process admin notification summaries
+ * Sends notifications to admins for client comments based on schedule
+ */
+export async function processAdminNotifications() {
+  try {
+    const emailSettings = await getEmailSettings()
+    const companyName = emailSettings.companyName || 'FrameComment'
+
+    // Get admin notification settings
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: {
+        adminNotificationSchedule: true,
+        adminNotificationTime: true,
+        adminNotificationDay: true,
+        lastAdminNotificationSent: true,
+      }
+    })
+
+    if (!settings || settings.adminNotificationSchedule === 'IMMEDIATE') {
+      logMessage('[ADMIN] Admin schedule is IMMEDIATE - notifications sent in real-time')
+      return
+    }
+
+    const now = new Date()
+    const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+    logMessage(`[ADMIN] Checking for admin notifications to send (time: ${timeString})`)
+    logMessage(`[ADMIN]   Schedule: ${settings.adminNotificationSchedule}`)
+    logMessage(`[ADMIN]   Target time: ${settings.adminNotificationTime || 'N/A'}`)
+    logMessage(`[ADMIN]   Last sent: ${settings.lastAdminNotificationSent ? new Date(settings.lastAdminNotificationSent).toISOString() : 'Never'}`)
+
+    // Check if it's time to send based on schedule
+    const shouldSend = shouldSendNow(
+      settings.adminNotificationSchedule,
+      settings.adminNotificationTime,
+      settings.adminNotificationDay,
+      settings.lastAdminNotificationSent,
+      now
+    )
+
+    if (!shouldSend) {
+      logMessage(`[ADMIN] Not time to send yet - waiting for schedule`)
+      return
+    }
+
+    logMessage(`[ADMIN] Time to send! Checking for pending notifications...`)
+
+    // Get pending admin notifications
+    const pendingNotifications = await prisma.notificationQueue.findMany({
+      where: {
+        sentToAdmins: false,
+        adminFailed: false,
+        adminAttempts: { lt: 3 }
+      },
+      include: {
+        project: {
+          select: { title: true, slug: true }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    })
+
+    if (pendingNotifications.length === 0) {
+      logMessage(`[ADMIN] No pending notifications found`)
+      return
+    }
+
+    logMessage(`[ADMIN] Found ${pendingNotifications.length} pending notification(s)`)
+
+    // Filter out cancelled notifications
+    const redis = getRedis()
+    const validNotifications = []
+    const cancelledNotificationIds = []
+
+    for (const notification of pendingNotifications) {
+      const commentId = (notification.data as any).commentId
+      if (commentId) {
+        const isCancelled = await redis.get(`comment_cancelled:${commentId}`)
+        if (isCancelled) {
+          logMessage(`[ADMIN]   Skipping cancelled notification for comment ${commentId}`)
+          cancelledNotificationIds.push(notification.id)
+          continue
+        }
+      }
+      validNotifications.push(notification)
+    }
+
+    // Clean up cancelled notifications from queue
+    if (cancelledNotificationIds.length > 0) {
+      await prisma.notificationQueue.deleteMany({
+        where: { id: { in: cancelledNotificationIds } }
+      })
+      logMessage(`[ADMIN]   Removed ${cancelledNotificationIds.length} cancelled notification(s)`)
+    }
+
+    if (validNotifications.length === 0) {
+      logMessage(`[ADMIN]   No valid notifications to send (all cancelled)`)
+      return
+    }
+
+    // Group notifications by project
+    const projectGroups: Record<string, any> = {}
+    for (const notification of validNotifications) {
+      const projectId = notification.projectId
+      if (!projectGroups[projectId]) {
+        projectGroups[projectId] = {
+          projectId,
+          projectTitle: notification.project.title,
+          shareUrl: await generateShareUrl(notification.project.slug),
+          notifications: []
+        }
+      }
+      projectGroups[projectId].notifications.push(
+        normalizeNotificationDataTimecode(notification.data)
+      )
+    }
+
+    // Get all admins
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN' },
+      select: { email: true, name: true }
+    })
+
+    if (admins.length === 0) {
+      logMessage('No admin users found, skipping notification summary')
+      return
+    }
+
+    const period = getPeriodString(settings.adminNotificationSchedule)
+    const notificationIds = validNotifications.map(n => n.id)
+
+    // Increment attempt counter before sending
+    await prisma.notificationQueue.updateMany({
+      where: { id: { in: notificationIds } },
+      data: { adminAttempts: { increment: 1 } }
+    })
+
+    const currentAttempts = validNotifications[0]?.adminAttempts + 1 || 1
+    logMessage(`[ADMIN] Attempt #${currentAttempts} for ${validNotifications.length} notification(s)`)
+
+    // Send summary to each admin
+    const result = await sendNotificationsWithRetry({
+      notificationIds,
+      currentAttempts,
+      isClientNotification: false,
+      logPrefix: '[ADMIN]',
+      onSuccess: async () => {
+        const projects = Object.values(projectGroups)
+
+        for (const admin of admins) {
+          const summaryEmail = await generateAdminSummaryEmail({
+            companyName,
+            accentColor: emailSettings.accentColor || undefined,
+            appDomain: emailSettings.appDomain || undefined,
+            adminName: admin.name || '',
+            period,
+            projects,
+            locale: emailSettings.language || 'en',
+          })
+
+          const result = await sendEmail({
+            to: admin.email,
+            subject: summaryEmail.subject,
+            html: summaryEmail.html,
+          })
+
+          if (result.success) {
+            logMessage(`[ADMIN]   Sent to ${admin.email}`)
+          } else {
+            throw new Error(`Failed to send to ${admin.email}: ${result.error}`)
+          }
+        }
+      }
+    })
+
+    // Update settings last sent timestamp on success
+    if (result.success) {
+      await prisma.settings.update({
+        where: { id: 'default' },
+        data: { lastAdminNotificationSent: now }
+      })
+      logMessage(`[ADMIN] Summary sent (${pendingNotifications.length} notifications to ${admins.length} admins)`)
+    }
+  } catch (error) {
+    logError('Failed to process admin notifications:', error)
+  }
+}

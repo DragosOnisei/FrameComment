@@ -1,0 +1,157 @@
+'use client'
+
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
+import { getAccessToken, getRefreshToken, clearTokens, subscribe } from '@/lib/token-store'
+
+const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000 // 15 minutes
+const CHECK_INTERVAL = 30 * 1000 // 30 seconds
+
+export default function SessionMonitor() {
+  const router = useRouter()
+  const t = useTranslations('session')
+  const [showWarning, setShowWarning] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(0)
+  const lastActivityRef = useRef<number>(Date.now())
+  const inactivityTimeoutRef = useRef<number>(DEFAULT_INACTIVITY_TIMEOUT_MS)
+
+  useEffect(() => {
+    let cancelled = false
+    let loaded = false
+
+    async function loadAdminTimeout(accessToken?: string | null) {
+      const token = accessToken || getAccessToken()
+      if (!token) return
+
+      try {
+        const response = await fetch('/api/settings/security', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+        if (!response.ok) return
+
+        const data = await response.json()
+        const value = Number.parseInt(String(data?.adminSessionTimeoutValue ?? '15'), 10)
+        const unit = String(data?.adminSessionTimeoutUnit ?? 'MINUTES')
+        if (!Number.isFinite(value) || value <= 0) return
+
+        const seconds = unit === 'HOURS' ? value * 60 * 60 : unit === 'MINUTES' ? value * 60 : null
+        if (!seconds || seconds <= 0) return
+
+        if (cancelled) return
+        inactivityTimeoutRef.current = Math.min(seconds, 24 * 60 * 60) * 1000
+        loaded = true
+      } catch {
+        // ignore and keep defaults
+      }
+    }
+
+    loadAdminTimeout()
+    const unsubscribe = subscribe(({ accessToken }) => {
+      if (!loaded && accessToken) {
+        loadAdminTimeout(accessToken)
+      }
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
+
+  const handleLogout = useCallback(async () => {
+    const accessToken = getAccessToken()
+    const refreshToken = getRefreshToken()
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...(refreshToken ? { 'X-Refresh-Token': `Bearer ${refreshToken}` } : {}),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refreshToken }),
+      })
+    } catch (error) {
+      // ignore
+    } finally {
+      clearTokens()
+      router.push('/login?sessionExpired=true')
+    }
+  }, [router])
+
+  useEffect(() => {
+    const onActivity = () => {
+      lastActivityRef.current = Date.now()
+      setShowWarning(false)
+    }
+
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click']
+    activityEvents.forEach(event => {
+      document.addEventListener(event, onActivity, { passive: true, capture: true })
+    })
+
+    const inactivityTimer = setInterval(() => {
+      const timeSinceActivity = Date.now() - lastActivityRef.current
+      const timeUntilLogout = inactivityTimeoutRef.current - timeSinceActivity
+
+      if (timeUntilLogout <= 0) {
+        handleLogout()
+      } else if (timeUntilLogout <= 2 * 60 * 1000) {
+        setShowWarning(true)
+        setTimeRemaining(Math.ceil(timeUntilLogout / 1000))
+      } else {
+        setShowWarning(false)
+      }
+    }, CHECK_INTERVAL)
+
+    return () => {
+      activityEvents.forEach(event => {
+        document.removeEventListener(event, onActivity, { capture: true } as any)
+      })
+      clearInterval(inactivityTimer)
+    }
+  }, [handleLogout])
+
+  if (!showWarning) {
+    return null
+  }
+
+  const minutes = Math.floor(timeRemaining / 60)
+  const seconds = timeRemaining % 60
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-5">
+      <div className="bg-warning-visible border-2 border-warning-visible rounded-lg shadow-lg p-4 max-w-sm">
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0">
+            <svg
+              className="w-6 h-6 text-warning"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-warning">
+              {t('inactivityWarning')}
+            </h3>
+            <p className="text-sm text-warning font-medium mt-1">
+              {t('logoutCountdown', { time: `${minutes}:${seconds.toString().padStart(2, '0')}` })}
+            </p>
+            <p className="text-xs text-warning font-medium mt-2">
+              {t('stayLoggedIn')}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

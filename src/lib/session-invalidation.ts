@@ -1,0 +1,320 @@
+import { getRedis } from './redis'
+import { prisma } from './db'
+import { revokeAllUserTokens } from './token-revocation'
+import { logError, logMessage } from '@/lib/logging'
+
+/**
+ * Session Invalidation Utilities
+ *
+ * Security-first approach: When security settings change, immediately invalidate
+ * affected sessions to enforce new security posture.
+ *
+ * Session Types:
+ * - Admin sessions: JWT tokens (access + refresh) → blacklist:user:{userId}
+ * - Client share sessions: bearer JWT sessionId revocation in Redis (revoked:share_session:{sessionId})
+ *
+ * Invalidation Triggers:
+ * 1. Session timeout changes → Invalidate ALL share sessions globally
+ * 2. Project password changes → Invalidate all share sessions for that project
+ * 3. Project auth mode changes → Invalidate all share sessions for that project
+ * 4. Hotlink protection changes → Invalidate ALL share sessions (more restrictive)
+ * 5. Password attempt changes → Clear rate limit counters
+ * 6. Admin removal → Revoke all admin tokens for deleted user
+ * 7. Admin password change → Revoke all admin tokens (handled in auth.ts)
+ * 8. Passkey change/deletion → Revoke all admin tokens as security measure
+ * 9. Recipient removal/changes → Invalidate recipient's share sessions
+ */
+
+/**
+ * Scan and delete Redis keys matching a pattern
+ * @private
+ */
+async function scanAndDeleteKeys(
+  pattern: string
+): Promise<number> {
+  const redis = getRedis()
+  const stream = redis.scanStream({ match: pattern, count: 100 })
+  const keysToDelete: string[] = []
+
+  for await (const keys of stream) {
+    keysToDelete.push(...keys)
+  }
+
+  // Delete all collected keys in pipeline
+  if (keysToDelete.length > 0) {
+    const pipeline = redis.pipeline()
+    keysToDelete.forEach(key => pipeline.del(key))
+    await pipeline.exec()
+  }
+
+  return keysToDelete.length
+}
+
+/**
+ * Clear all rate limit counters (password attempts, etc.)
+ *
+ * Use when:
+ * - Password attempt limit changes
+ * - Rate limit configuration changes
+ * - Admin wants to reset all lockouts
+ *
+ * @returns Number of rate limit entries cleared
+ */
+export async function clearAllRateLimits(): Promise<number> {
+  try {
+    const clearedCount = await scanAndDeleteKeys('ratelimit:*')
+
+    logMessage(`[SESSION_INVALIDATION] Cleared ${clearedCount} rate limit counters`)
+    return clearedCount
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error clearing rate limits:', error)
+    throw error
+  }
+}
+
+/**
+ * Invalidate all share token sessions for a specific project
+ * by revoking their sessionIds in Redis
+ *
+ * Use when:
+ * - Project auth mode changes
+ * - Project password changes
+ * - Project security settings change
+ *
+ * @param projectId - The project ID to invalidate sessions for
+ * @returns Number of sessions invalidated
+ */
+export async function invalidateShareTokensByProject(projectId: string): Promise<number> {
+  try {
+    const sessions = await prisma.sharePageAccess.findMany({
+      where: { projectId },
+      select: { sessionId: true },
+      distinct: ['sessionId']
+    })
+
+    const invalidated = await revokeShareSessions(sessions.map((session) => session.sessionId))
+    logMessage(`[SESSION_INVALIDATION] Invalidated ${invalidated} share sessions for project ${projectId}`)
+    return invalidated
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error invalidating share sessions:', error)
+    throw error
+  }
+}
+
+/**
+ * Invalidate all known share sessions globally.
+ *
+ * Use when:
+ * - Session timeout duration changes
+ * - Hotlink protection becomes more restrictive
+ * - Global security policy changes
+ *
+ * @returns Number of share sessions invalidated
+ */
+export async function invalidateAllShareSessions(): Promise<number> {
+  try {
+    const sessions = await prisma.sharePageAccess.findMany({
+      select: { sessionId: true },
+      distinct: ['sessionId']
+    })
+
+    const invalidated = await revokeShareSessions(sessions.map((session) => session.sessionId))
+    logMessage(`[SESSION_INVALIDATION] Invalidated ALL ${invalidated} share sessions globally`)
+    return invalidated
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error invalidating all share sessions:', error)
+    throw error
+  }
+}
+
+/**
+ * Check if a share session is revoked
+ * @param sessionId - The session ID to check
+ * @returns true if session is revoked
+ */
+export async function isShareSessionRevoked(sessionId: string): Promise<boolean> {
+  try {
+    const redis = getRedis()
+    const exists = await redis.exists(`revoked:share_session:${sessionId}`)
+    return exists === 1
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error checking session revocation:', error)
+    return true // Fail closed: deny access if Redis is unavailable
+  }
+}
+
+/**
+ * Invalidate all admin sessions for a specific user
+ *
+ * Use when:
+ * - Admin user is deleted
+ * - Admin passkey is deleted (security measure)
+ * - Admin account is compromised
+ * - Security-sensitive changes to admin account
+ *
+ * @param userId - The admin user ID to invalidate sessions for
+ */
+export async function invalidateAdminSessions(userId: string): Promise<void> {
+  try {
+    await revokeAllUserTokens(userId)
+    logMessage(`[SESSION_INVALIDATION] Invalidated all admin sessions for user ${userId}`)
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error invalidating admin sessions:', error)
+    throw error
+  }
+}
+
+/**
+ * Invalidate share sessions for a specific recipient
+ *
+ * Use when:
+ * - Recipient is removed from project
+ * - Recipient email is changed (forces re-authentication)
+ *
+ * @param recipientId - The recipient ID whose sessions should be invalidated
+ * @returns Number of sessions invalidated
+ */
+export async function invalidateRecipientSessions(recipientId: string): Promise<number> {
+  try {
+    // Find all share page access records for this recipient
+    const sessions = await prisma.sharePageAccess.findMany({
+      where: {
+        email: {
+          not: null
+        }
+      },
+      select: {
+        sessionId: true,
+        email: true
+      },
+      distinct: ['sessionId']
+    })
+
+    // Get recipient email to match
+    const recipient = await prisma.projectRecipient.findUnique({
+      where: { id: recipientId },
+      select: { email: true, projectId: true }
+    })
+
+    if (!recipient?.email) {
+      return 0
+    }
+
+    // Filter to only sessions that match this recipient's email
+    const recipientSessions = sessions.filter(s =>
+      s.email?.toLowerCase() === recipient.email?.toLowerCase()
+    )
+
+    const invalidated = await revokeShareSessions(recipientSessions.map((session) => session.sessionId))
+    logMessage(`[SESSION_INVALIDATION] Invalidated ${invalidated} sessions for recipient ${recipientId} (${recipient.email})`)
+    return invalidated
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error invalidating recipient sessions:', error)
+    throw error
+  }
+}
+
+/**
+ * Invalidate share sessions for a specific email across all projects
+ *
+ * Use when:
+ * - Email-based security concern (email compromised, etc.)
+ *
+ * @param email - The email address whose sessions should be invalidated
+ * @returns Number of sessions invalidated
+ */
+export async function invalidateSessionsByEmail(email: string): Promise<number> {
+  try {
+    const sessions = await prisma.sharePageAccess.findMany({
+      where: {
+        email: {
+          equals: email,
+          mode: 'insensitive'
+        }
+      },
+      select: { sessionId: true },
+      distinct: ['sessionId']
+    })
+
+    const invalidated = await revokeShareSessions(sessions.map((session) => session.sessionId))
+    logMessage(`[SESSION_INVALIDATION] Invalidated ${invalidated} sessions for email ${email}`)
+    return invalidated
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error invalidating sessions by email:', error)
+    throw error
+  }
+}
+
+/**
+ * Invalidate all guest sessions for a specific project
+ *
+ * Use when:
+ * - Guest mode is disabled but you want to keep authenticated sessions
+ * - Security concern with anonymous access
+ * - Need to force guests to re-enter (after guestLatestOnly changes)
+ *
+ * @param projectId - The project ID to invalidate guest sessions for
+ * @returns Number of guest sessions invalidated
+ */
+export async function invalidateGuestSessions(projectId: string): Promise<number> {
+  try {
+    // Get all unique session IDs for GUEST access method
+    const sessions = await prisma.sharePageAccess.findMany({
+      where: {
+        projectId,
+        accessMethod: 'GUEST'
+      },
+      select: { sessionId: true },
+      distinct: ['sessionId']
+    })
+
+    const invalidated = await revokeShareSessions(sessions.map((session) => session.sessionId))
+    logMessage(`[SESSION_INVALIDATION] Invalidated ${invalidated} guest sessions for project ${projectId}`)
+    return invalidated
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error invalidating guest sessions:', error)
+    throw error
+  }
+}
+
+async function revokeShareSessions(sessionIds: string[]): Promise<number> {
+  if (sessionIds.length === 0) return 0
+
+  const redis = getRedis()
+  const ttl = 7 * 24 * 60 * 60 // 7 days in seconds
+  const pipeline = redis.pipeline()
+
+  for (const sessionId of sessionIds) {
+    pipeline.setex(`revoked:share_session:${sessionId}`, ttl, '1')
+  }
+
+  await pipeline.exec()
+  return sessionIds.length
+}
+
+/**
+ * Clear pending passkey challenges for a user
+ *
+ * Use when:
+ * - User's passkey is deleted (prevent pending registrations)
+ * - Security concern with user's passkeys
+ *
+ * @param userId - The user ID whose challenges should be cleared
+ */
+export async function clearPasskeyChallenges(userId: string): Promise<void> {
+  try {
+    const redis = getRedis()
+    const pipeline = redis.pipeline()
+
+    // Clear both registration and authentication challenges
+    pipeline.del(`passkey:challenge:register:${userId}`)
+    pipeline.del(`passkey:challenge:auth:${userId}`)
+
+    await pipeline.exec()
+
+    logMessage(`[SESSION_INVALIDATION] Cleared passkey challenges for user ${userId}`)
+  } catch (error) {
+    logError('[SESSION_INVALIDATION] Error clearing passkey challenges:', error)
+    throw error
+  }
+}

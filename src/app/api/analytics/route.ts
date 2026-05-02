@@ -1,0 +1,100 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+import { requireApiAdmin } from '@/lib/auth'
+import { rateLimit } from '@/lib/rate-limit'
+import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+export const runtime = 'nodejs'
+
+export const dynamic = 'force-dynamic'
+
+// GET /api/analytics - Get analytics for all projects
+export async function GET(request: NextRequest) {
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const analyticsMessages = messages?.analytics || {}
+
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) {
+    return authResult
+  }
+
+  // Rate limiting: 100 requests per minute
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 60 * 1000,
+    maxRequests: 100,
+    message: analyticsMessages.tooManyRequestsSlowDown || 'Too many requests. Please slow down.'
+  }, 'admin-analytics-list')
+
+  if (rateLimitResult) {
+    return rateLimitResult
+  }
+
+  try {
+    const projects = await prisma.project.findMany({
+      include: {
+        videos: {
+          where: { status: 'READY' },
+        },
+        recipients: {
+          where: { isPrimary: true },
+          take: 1,
+        },
+        sharePageAccesses: {
+          select: {
+            accessMethod: true,
+            ipAddress: true,
+          },
+        },
+        analytics: {
+          where: { eventType: 'DOWNLOAD_COMPLETE' },
+          select: {
+            eventType: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+    })
+
+    const projectsWithAnalytics = projects.map(project => {
+      const totalDownloads = project.analytics.length
+      const displayName = project.companyName || project.recipients[0]?.name || project.recipients[0]?.email || 'Client'
+
+      // Calculate unique visitors by IP address
+      // (sessionId changes on every re-authentication, so IP is the stable identifier)
+      const uniqueVisitors = new Set(
+        project.sharePageAccesses.map(a => a.ipAddress).filter(Boolean)
+      ).size
+
+      // Count by access method
+      const accessByMethod = {
+        OTP: project.sharePageAccesses.filter(a => a.accessMethod === 'OTP').length,
+        PASSWORD: project.sharePageAccesses.filter(a => a.accessMethod === 'PASSWORD').length,
+        GUEST: project.sharePageAccesses.filter(a => a.accessMethod === 'GUEST').length,
+        NONE: project.sharePageAccesses.filter(a => a.accessMethod === 'NONE').length,
+      }
+
+      return {
+        id: project.id,
+        title: project.title,
+        recipientName: displayName,
+        recipientEmail: project.companyName ? null : project.recipients[0]?.email || null,
+        status: project.status,
+        videoCount: project.videos.length,
+        totalVisits: project.sharePageAccesses.length,
+        uniqueVisits: uniqueVisitors,
+        accessByMethod,
+        totalDownloads,
+        updatedAt: project.updatedAt,
+      }
+    })
+
+    return NextResponse.json({ projects: projectsWithAnalytics })
+  } catch (error) {
+    return NextResponse.json(
+      { error: analyticsMessages.unableToProcessRequest || 'Unable to process request' },
+      { status: 500 }
+    )
+  }
+}

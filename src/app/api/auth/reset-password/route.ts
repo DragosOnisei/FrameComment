@@ -1,0 +1,200 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+import { rateLimit } from '@/lib/rate-limit'
+import { verifyPasswordResetTokenWithReason } from '@/lib/password-reset'
+import { hashPassword, validatePassword } from '@/lib/encryption'
+import { invalidateAdminSessions } from '@/lib/session-invalidation'
+import { logSecurityEvent } from '@/lib/video-access'
+import { getRedis } from '@/lib/redis'
+import { getClientIpAddress } from '@/lib/utils'
+import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import crypto from 'crypto'
+import { logError, logMessage } from '@/lib/logging'
+
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+/**
+ * Reset Password
+ * 
+ * POST /api/auth/reset-password
+ * 
+ * SECURITY:
+ * - Rate limited
+ * - Token verification (encrypted, time-limited)
+ * - Single-use tokens (Redis tracking)
+ * - Password validation
+ * - Invalidates all existing sessions
+ * - Logs security event
+ */
+export async function POST(request: NextRequest) {
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const authMessages = messages?.auth || {}
+
+  // Rate limiting: 5 requests per 15 minutes
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 15 * 60 * 1000,
+    maxRequests: 5,
+    message: authMessages.tooManyPasswordResetAttempts || 'Too many password reset attempts. Please try again later.',
+  }, 'reset-password')
+
+  if (rateLimitResult) {
+    // Log rate limit hit
+    await logSecurityEvent({
+      type: 'ADMIN_PASSWORD_RESET_RATE_LIMIT_HIT',
+      severity: 'WARNING',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        reason: 'Too many password reset attempts',
+      },
+    })
+    return rateLimitResult
+  }
+
+  try {
+    const body = await request.json().catch(() => ({}))
+    const token = typeof body?.token === 'string' ? body.token.trim() : ''
+    const newPassword = typeof body?.password === 'string' ? body.password : ''
+
+    if (!token || token.length === 0) {
+      return NextResponse.json(
+        { error: authMessages.resetTokenRequired || 'Reset token is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!newPassword || newPassword.length === 0) {
+      return NextResponse.json(
+        { error: authMessages.newPasswordRequired || 'New password is required' },
+        { status: 400 }
+      )
+    }
+
+    // Validate password strength
+    const passwordValidation = validatePassword(newPassword)
+    if (!passwordValidation.isValid) {
+      return NextResponse.json(
+        { error: passwordValidation.errors[0] || 'Invalid password' },
+        { status: 400 }
+      )
+    }
+
+    // Verify and decode token
+    const tokenResult = verifyPasswordResetTokenWithReason(token)
+    if (!tokenResult.valid) {
+      const eventType = tokenResult.reason === 'expired'
+        ? 'ADMIN_PASSWORD_RESET_TOKEN_EXPIRED'
+        : 'ADMIN_PASSWORD_RESET_TOKEN_INVALID'
+      await logSecurityEvent({
+        type: eventType,
+        severity: 'WARNING',
+        ipAddress: getClientIpAddress(request),
+        details: {
+          reason: tokenResult.reason === 'expired' ? 'Token expired' : 'Invalid or malformed token',
+        },
+      })
+      return NextResponse.json(
+        { error: authMessages.invalidOrExpiredResetToken || 'Invalid or expired reset token' },
+        { status: 400 }
+      )
+    }
+    const payload = tokenResult.payload
+
+    // Atomically mark token as used (single-use enforcement via SETNX)
+    const redis = getRedis()
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    const tokenKey = `password_reset_used:${tokenHash}`
+
+    const wasSet = await redis.set(tokenKey, '1', 'EX', 30 * 60, 'NX')
+    if (!wasSet) {
+      // Token was already consumed by a prior request
+      await logSecurityEvent({
+        type: 'ADMIN_PASSWORD_RESET_TOKEN_INVALID',
+        severity: 'WARNING',
+        ipAddress: getClientIpAddress(request),
+        details: {
+          reason: 'Token already used',
+          userId: payload.userId,
+        },
+      })
+      return NextResponse.json(
+        { error: authMessages.resetLinkAlreadyUsed || 'This reset link has already been used. Please request a new one.' },
+        { status: 400 }
+      )
+    }
+
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+      },
+    })
+
+    if (!user) {
+      return NextResponse.json(
+        { error: authMessages.userNotFound || 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    // Verify email matches (extra security)
+    if (user.email.toLowerCase() !== payload.userEmail.toLowerCase()) {
+      // Log token mismatch (security concern)
+      await logSecurityEvent({
+        type: 'ADMIN_PASSWORD_RESET_TOKEN_INVALID',
+        severity: 'WARNING',
+        ipAddress: getClientIpAddress(request),
+        details: {
+          reason: 'Token email mismatch',
+          userId: user.id,
+        },
+      })
+      return NextResponse.json(
+        { error: authMessages.invalidResetToken || 'Invalid reset token' },
+        { status: 400 }
+      )
+    }
+
+    // Hash new password
+    const hashedPassword = await hashPassword(newPassword)
+
+    // Update password
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword },
+    })
+
+    // Invalidate all sessions for this user (security: force re-login everywhere)
+    await invalidateAdminSessions(user.id)
+
+    // Log security event (includes email for server-side audit trail)
+    await logSecurityEvent({
+      type: 'ADMIN_PASSWORD_RESET_COMPLETED',
+      severity: 'INFO',
+      ipAddress: getClientIpAddress(request),
+      details: {
+        userId: user.id,
+        email: user.email,
+      },
+    })
+
+    logMessage(`[PASSWORD_RESET] Password reset completed (userId=${user.id})`)
+
+    // Return generic success message (no user-specific information)
+    return NextResponse.json({
+      success: true,
+      message: authMessages.passwordResetCompleted || 'Password has been reset successfully',
+    })
+  } catch (error) {
+    logError('[PASSWORD_RESET] Error:', error)
+    return NextResponse.json(
+      { error: authMessages.failedToResetPasswordApi || 'Failed to reset password' },
+      { status: 500 }
+    )
+  }
+}

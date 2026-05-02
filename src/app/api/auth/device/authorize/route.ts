@@ -1,0 +1,113 @@
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
+import { NextRequest, NextResponse } from 'next/server'
+import { authorizeDeviceCode } from '@/lib/device-code'
+import { getCurrentUserFromRequest } from '@/lib/auth'
+import { rateLimit } from '@/lib/rate-limit'
+import { logSecurityEvent } from '@/lib/video-access'
+import { getClientIpAddress } from '@/lib/utils'
+import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { logError } from '@/lib/logging'
+
+
+/**
+ * POST /api/auth/device/authorize
+ *
+ * Browser-side endpoint to authorize a device code.
+ * Requires a valid admin access token (user must be authenticated).
+ *
+ * Input: { userCode: "ABCD-1234" }
+ * Output: { success: true }
+ */
+export async function POST(request: NextRequest) {
+  const ipAddress = getClientIpAddress(request)
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const authMessages = messages?.auth || {}
+
+  // Rate limit: 20 requests per 10 minutes
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 10 * 60 * 1000,
+    maxRequests: 20,
+    message: authMessages.tooManyAuthorizationAttempts || 'Too many authorization attempts.',
+  }, 'device-authorize')
+
+  if (rateLimitResult) {
+    void logSecurityEvent({
+      type: 'DEVICE_CODE_RATE_LIMIT_HIT',
+      severity: 'WARNING',
+      ipAddress,
+      details: { endpoint: 'device/authorize' },
+      wasBlocked: true,
+    })
+    return rateLimitResult
+  }
+
+  try {
+    // Require authenticated admin user
+    const user = await getCurrentUserFromRequest(request)
+    if (!user) {
+      return NextResponse.json(
+        { error: authMessages.authenticationRequired || 'Authentication required' },
+        { status: 401 }
+      )
+    }
+
+    const body = await request.json()
+    const rawUserCode = body?.userCode
+
+    // Normalize user code (uppercase, trim) - coerce to string safely
+    const normalizedCode = (typeof rawUserCode === 'string' ? rawUserCode : '').toUpperCase().trim()
+
+    // Validate format: XXXX-XXXX
+    if (!/^[A-Z]{4}-[0-9]{4}$/.test(normalizedCode)) {
+      return NextResponse.json(
+        { error: authMessages.invalidUserCodeFormat || 'Invalid user code format. Expected: ABCD-1234' },
+        { status: 400 }
+      )
+    }
+
+    // Authorize the device code
+    const result = await authorizeDeviceCode(normalizedCode, user.id)
+
+    if (!result.success) {
+      void logSecurityEvent({
+        type: 'DEVICE_CODE_AUTH_FAILED',
+        severity: 'WARNING',
+        ipAddress,
+        details: {
+          userId: user.id,
+          userCode: normalizedCode,
+          error: result.error,
+        },
+        wasBlocked: false,
+      })
+      return NextResponse.json(
+        { error: result.error || authMessages.authorizationFailed || 'Authorization failed' },
+        { status: 400 }
+      )
+    }
+
+    // Log successful authorization
+    void logSecurityEvent({
+      type: 'DEVICE_CODE_AUTHORIZED',
+      severity: 'INFO',
+      ipAddress,
+      details: {
+        userId: user.id,
+        userEmail: user.email,
+        userCode: normalizedCode,
+      },
+      wasBlocked: false,
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    logError('[Device Authorize] Error authorizing device:', error)
+    return NextResponse.json(
+      { error: authMessages.failedToAuthorizeDevice || 'Failed to authorize device' },
+      { status: 500 }
+    )
+  }
+}

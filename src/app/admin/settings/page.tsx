@@ -1,0 +1,871 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { Button } from '@/components/ui/button'
+import { Settings as SettingsIcon, Save, Palette, Mail, Video, Shield, Building2, ShieldCheck, FolderCog, Ban } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { useTranslations } from 'next-intl'
+import { AppearanceSection } from '@/components/settings/AppearanceSection'
+import { BrandingSection } from '@/components/settings/BrandingSection'
+import { PrivacySection } from '@/components/settings/PrivacySection'
+import { NotificationsSection } from '@/components/settings/NotificationsSection'
+import { VideoProcessingSettingsSection } from '@/components/settings/VideoProcessingSettingsSection'
+import { ProjectDefaultsSection } from '@/components/settings/ProjectDefaultsSection'
+import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
+import { BlocklistSection } from '@/components/settings/BlocklistSection'
+import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
+
+interface Settings {
+  id: string
+  language: string | null
+  defaultTheme: string | null
+  accentColor: string | null
+  companyName: string | null
+  brandingLogoPath: string | null
+  emailHeaderStyle: string | null
+  smtpServer: string | null
+  smtpPort: number | null
+  smtpUsername: string | null
+  smtpPassword: string | null
+  smtpFromAddress: string | null
+  smtpSecure: string | null
+  appDomain: string | null
+  defaultPreviewResolution: string | null
+  defaultSkipTranscoding: boolean | null
+  defaultWatermarkEnabled: boolean | null
+  defaultWatermarkText: string | null
+  defaultWatermarkPositions: string | null
+  defaultWatermarkOpacity: number | null
+  defaultWatermarkFontSize: string | null
+  defaultApplyPreviewLut: boolean | null
+  maxUploadSizeGB: number | null
+  maxCommentAttachments: number | null
+  maxReverseShareFiles: number | null
+  defaultTimestampDisplay: string | null
+  autoApproveProject: boolean | null
+  defaultUsePreviewForApprovedPlayback: boolean | null
+  defaultAllowClientAssetUpload: boolean | null
+  defaultAllowReverseShare: boolean | null
+  defaultShowClientTutorial: boolean | null
+  defaultAllowAssetDownload: boolean | null
+  defaultClientCanApprove: boolean | null
+  privacyDisclosureEnabled: boolean | null
+  privacyDisclosureText: string | null
+  adminNotificationSchedule: string | null
+  adminNotificationTime: string | null
+  adminNotificationDay: number | null
+}
+
+interface SecuritySettings {
+  id: string
+  httpsEnabled: boolean
+  httpsManagedByEnvironment?: boolean
+  hotlinkProtection: string
+  ipRateLimit: number
+  sessionRateLimit: number
+  shareSessionRateLimit?: number
+  shareTokenTtlSeconds?: number | null
+  passwordAttempts: number
+  sessionTimeoutValue: number
+  sessionTimeoutUnit: string
+  adminSessionTimeoutValue: number
+  adminSessionTimeoutUnit: string
+  trackAnalytics: boolean
+  trackSecurityLogs: boolean
+  viewSecurityEvents: boolean
+}
+
+interface BlockedIP {
+  id: string
+  ipAddress: string
+  reason: string | null
+  createdAt: string
+}
+
+interface BlockedDomain {
+  id: string
+  domain: string
+  reason: string | null
+  createdAt: string
+}
+
+export default function GlobalSettingsPage() {
+  const router = useRouter()
+  const t = useTranslations('settings')
+  const tc = useTranslations('common')
+
+  const [_settings, setSettings] = useState<Settings | null>(null)
+  const [_securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const [testEmailSending, setTestEmailSending] = useState(false)
+  const [testEmailResult, setTestEmailResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [testEmailAddress, setTestEmailAddress] = useState('')
+
+  // Form state for language
+  const [language, setLanguage] = useState('en')
+
+  // Form state for appearance
+  const [defaultTheme, setDefaultTheme] = useState('auto')
+  const [accentColor, setAccentColor] = useState('blue')
+  const [brandingLogoPath, setBrandingLogoPath] = useState<string | null>(null)
+  const [brandingLogoPreview, setBrandingLogoPreview] = useState<string | null>(null)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const [logoError, setLogoError] = useState('')
+  const [emailHeaderStyle, setEmailHeaderStyle] = useState('LOGO_AND_NAME')
+  // Pending logo changes (staged until save)
+  const [pendingLogoFile, setPendingLogoFile] = useState<File | null>(null)
+  const [pendingLogoRemoval, setPendingLogoRemoval] = useState(false)
+
+  // Form state for global settings
+  const [companyName, setCompanyName] = useState('')
+  const [smtpServer, setSmtpServer] = useState('')
+  const [smtpPort, setSmtpPort] = useState('587')
+  const [smtpUsername, setSmtpUsername] = useState('')
+  const [smtpPassword, setSmtpPassword] = useState('')
+  const [smtpFromAddress, setSmtpFromAddress] = useState('')
+  const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
+  const [appDomain, setAppDomain] = useState('')
+  const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('720p')
+  const [defaultSkipTranscoding, setDefaultSkipTranscoding] = useState(false)
+  const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
+  const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
+  const [defaultWatermarkPositions, setDefaultWatermarkPositions] = useState('center')
+  const [defaultWatermarkOpacity, setDefaultWatermarkOpacity] = useState(30)
+  const [defaultWatermarkFontSize, setDefaultWatermarkFontSize] = useState('medium')
+  const [defaultApplyPreviewLut, setDefaultApplyPreviewLut] = useState(true)
+  const [maxUploadSizeGB, setMaxUploadSizeGB] = useState('1')
+  const [maxCommentAttachments, setMaxCommentAttachments] = useState('10')
+  const [maxReverseShareFiles, setMaxReverseShareFiles] = useState('10')
+  const [defaultTimestampDisplay, setDefaultTimestampDisplay] = useState('TIMECODE')
+  const [autoApproveProject, setAutoApproveProject] = useState(true)
+  const [defaultUsePreviewForApprovedPlayback, setDefaultUsePreviewForApprovedPlayback] = useState(false)
+  const [defaultAllowClientAssetUpload, setDefaultAllowClientAssetUpload] = useState(false)
+  const [defaultAllowReverseShare, setDefaultAllowReverseShare] = useState(false)
+  const [defaultShowClientTutorial, setDefaultShowClientTutorial] = useState(true)
+  const [defaultAllowAssetDownload, setDefaultAllowAssetDownload] = useState(true)
+  const [defaultClientCanApprove, setDefaultClientCanApprove] = useState(true)
+
+  // Form state for privacy disclosure
+  const [privacyDisclosureEnabled, setPrivacyDisclosureEnabled] = useState(false)
+  const [privacyDisclosureText, setPrivacyDisclosureText] = useState('')
+
+  // Form state for admin notification settings
+  const [adminNotificationSchedule, setAdminNotificationSchedule] = useState('HOURLY')
+  const [adminNotificationTime, setAdminNotificationTime] = useState('09:00')
+  const [adminNotificationDay, setAdminNotificationDay] = useState(1)
+
+  // Form state for security settings
+  const [showSecuritySettings, setShowSecuritySettings] = useState(false)
+  const [httpsEnabled, setHttpsEnabled] = useState(false)
+  const [httpsManagedByEnvironment, setHttpsManagedByEnvironment] = useState(false)
+  const [hotlinkProtection, setHotlinkProtection] = useState('LOG_ONLY')
+  const [ipRateLimit, setIpRateLimit] = useState('1000')
+  const [sessionRateLimit, setSessionRateLimit] = useState('600')
+  const [shareSessionRateLimit, setShareSessionRateLimit] = useState('300')
+  const [shareTokenTtlSeconds, setShareTokenTtlSeconds] = useState('')
+  const [passwordAttempts, setPasswordAttempts] = useState('5')
+  const [sessionTimeoutValue, setSessionTimeoutValue] = useState('15')
+  const [sessionTimeoutUnit, setSessionTimeoutUnit] = useState('MINUTES')
+  const [adminSessionTimeoutValue, setAdminSessionTimeoutValue] = useState('15')
+  const [adminSessionTimeoutUnit, setAdminSessionTimeoutUnit] = useState('MINUTES')
+  const [trackAnalytics, setTrackAnalytics] = useState(true)
+  const [trackSecurityLogs, setTrackSecurityLogs] = useState(true)
+  const [viewSecurityEvents, setViewSecurityEvents] = useState(false)
+  const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([])
+  const [blockedDomains, setBlockedDomains] = useState<BlockedDomain[]>([])
+  const [newIP, setNewIP] = useState('')
+  const [newIPReason, setNewIPReason] = useState('')
+  const [newDomain, setNewDomain] = useState('')
+  const [newDomainReason, setNewDomainReason] = useState('')
+  const [blocklistsLoading, setBlocklistsLoading] = useState(false)
+
+  // Collapsible section state (all collapsed by default, used on mobile)
+  const [showAppearance, setShowAppearance] = useState(false)
+  const [showBranding, setShowBranding] = useState(false)
+  const [showPrivacy, setShowPrivacy] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [showVideoProcessing, setShowVideoProcessing] = useState(false)
+  const [showProjectDefaults, setShowProjectDefaults] = useState(false)
+  const [showBlocklist, setShowBlocklist] = useState(false)
+
+  // Desktop sidebar navigation
+  const [activeSection, setActiveSection] = useState('appearance')
+
+  const applySettingsToForm = useCallback((data: Settings) => {
+    setLanguage(data.language || 'en')
+    setDefaultTheme(data.defaultTheme || 'auto')
+    setAccentColor(data.accentColor || 'blue')
+    setCompanyName(data.companyName || '')
+    setBrandingLogoPath(data.brandingLogoPath || null)
+    setBrandingLogoPreview(data.brandingLogoPath ? `/api/branding/logo?ts=${Date.now()}` : null)
+    setPendingLogoFile(null)
+    setPendingLogoRemoval(false)
+    setEmailHeaderStyle(data.emailHeaderStyle || 'LOGO_AND_NAME')
+    setSmtpServer(data.smtpServer || '')
+    setSmtpPort(data.smtpPort?.toString() || '587')
+    setSmtpUsername(data.smtpUsername || '')
+    setSmtpPassword(data.smtpPassword || '')
+    setSmtpFromAddress(data.smtpFromAddress || '')
+    setSmtpSecure(data.smtpSecure || 'STARTTLS')
+    setAppDomain(data.appDomain || '')
+    setDefaultPreviewResolution(data.defaultPreviewResolution || '720p')
+    setDefaultSkipTranscoding(data.defaultSkipTranscoding ?? false)
+    setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
+    setDefaultWatermarkText(data.defaultWatermarkText || '')
+    setDefaultWatermarkPositions(data.defaultWatermarkPositions || 'center')
+    setDefaultWatermarkOpacity(data.defaultWatermarkOpacity ?? 30)
+    setDefaultWatermarkFontSize(data.defaultWatermarkFontSize || 'medium')
+    setDefaultApplyPreviewLut(data.defaultApplyPreviewLut ?? true)
+    setMaxUploadSizeGB(data.maxUploadSizeGB?.toString() || '1')
+    setMaxCommentAttachments(data.maxCommentAttachments?.toString() || '10')
+    setMaxReverseShareFiles(data.maxReverseShareFiles?.toString() || '10')
+    setDefaultTimestampDisplay(data.defaultTimestampDisplay || 'TIMECODE')
+    setAutoApproveProject(data.autoApproveProject ?? true)
+    setDefaultUsePreviewForApprovedPlayback(data.defaultUsePreviewForApprovedPlayback ?? false)
+    setDefaultAllowClientAssetUpload(data.defaultAllowClientAssetUpload ?? false)
+    setDefaultAllowReverseShare(data.defaultAllowReverseShare ?? false)
+    setDefaultShowClientTutorial(data.defaultShowClientTutorial ?? true)
+    setDefaultAllowAssetDownload(data.defaultAllowAssetDownload ?? true)
+    setDefaultClientCanApprove(data.defaultClientCanApprove ?? true)
+    setPrivacyDisclosureEnabled(data.privacyDisclosureEnabled ?? false)
+    setPrivacyDisclosureText(data.privacyDisclosureText || '')
+    setTestEmailAddress(data.smtpFromAddress || '')
+    setAdminNotificationSchedule(data.adminNotificationSchedule || 'HOURLY')
+    setAdminNotificationTime(data.adminNotificationTime || '09:00')
+    setAdminNotificationDay(data.adminNotificationDay ?? 1)
+  }, [])
+
+  const applySecuritySettingsToForm = useCallback((data: SecuritySettings) => {
+    setHttpsEnabled(data.httpsEnabled ?? false)
+    setHttpsManagedByEnvironment(data.httpsManagedByEnvironment ?? false)
+    setHotlinkProtection(data.hotlinkProtection || 'LOG_ONLY')
+    setIpRateLimit(data.ipRateLimit?.toString() || '1000')
+    setSessionRateLimit(data.sessionRateLimit?.toString() || '600')
+    setShareSessionRateLimit(data.shareSessionRateLimit?.toString() || '300')
+    setShareTokenTtlSeconds(data.shareTokenTtlSeconds ? data.shareTokenTtlSeconds.toString() : '')
+    setPasswordAttempts(data.passwordAttempts?.toString() || '5')
+    setSessionTimeoutValue(data.sessionTimeoutValue?.toString() || '15')
+    setSessionTimeoutUnit(data.sessionTimeoutUnit || 'MINUTES')
+    setAdminSessionTimeoutValue(data.adminSessionTimeoutValue?.toString() || '15')
+    setAdminSessionTimeoutUnit(data.adminSessionTimeoutUnit || 'MINUTES')
+    setTrackAnalytics(data.trackAnalytics ?? true)
+    setTrackSecurityLogs(data.trackSecurityLogs ?? true)
+    setViewSecurityEvents(data.viewSecurityEvents ?? false)
+  }, [])
+
+  // Validate and stage logo file for upload (mirrors server-side validation in /api/settings/logo)
+  const handleLogoUpload = useCallback(async (file: File) => {
+    setLogoError('')
+    setLogoUploading(true)
+    
+    try {
+      // File type validation
+      if (!file || (!file.type.includes('svg') && !file.name.toLowerCase().endsWith('.svg'))) {
+        setLogoError(t('onlySvg'))
+        return
+      }
+      
+      // Size validation (max 300KB)
+      if (file.size > 300 * 1024) {
+        setLogoError(t('svgTooLarge'))
+        return
+      }
+
+      const text = await file.text()
+      
+      // Magic byte check: must start with <svg or <?xml
+      const leading = text.trimStart().slice(0, 256).toLowerCase()
+      if (!leading.startsWith('<svg') && !leading.startsWith('<?xml')) {
+        setLogoError(t('invalidSvg'))
+        return
+      }
+      
+      // Security validation (isSafeSvg)
+      // Strip XML declaration if present before checking for <svg
+      const stripped = text.trim().replace(/^<\?xml[^?]*\?>\s*/i, '')
+      if (!/^<svg[\s>]/i.test(stripped)) {
+        setLogoError(t('unsafeSvg'))
+        return
+      }
+      if (/<script[\s>]/i.test(text)) {
+        setLogoError(t('unsafeSvg'))
+        return
+      }
+      if (/on[a-zA-Z]+\s*=/.test(text)) {
+        setLogoError(t('unsafeSvg'))
+        return
+      }
+      if (/javascript:/i.test(text)) {
+        setLogoError(t('unsafeSvg'))
+        return
+      }
+
+      // Stage file for upload on save
+      setPendingLogoFile(file)
+      setPendingLogoRemoval(false)
+      setBrandingLogoPreview(URL.createObjectURL(file))
+    } catch {
+      setLogoError(t('invalidSvg'))
+    } finally {
+      setLogoUploading(false)
+    }
+  }, [t])
+
+  // Stage logo removal for save
+  const handleLogoRemove = useCallback(async () => {
+    setLogoError('')
+    setPendingLogoFile(null)
+    setPendingLogoRemoval(true)
+    setBrandingLogoPreview(null)
+  }, [])
+
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const response = await apiFetch('/api/settings')
+        if (!response.ok) {
+          throw new Error(t('failedToLoad'))
+        }
+        const data = await response.json()
+        setSettings(data)
+
+        applySettingsToForm(data)
+
+        // Load security settings
+        const securityResponse = await apiFetch('/api/settings/security')
+        if (securityResponse.ok) {
+          const securityData = await securityResponse.json()
+          setSecuritySettings(securityData)
+          applySecuritySettingsToForm(securityData)
+        }
+      } catch (err) {
+        setError(t('failedToLoad'))
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadSettings()
+  }, [applySecuritySettingsToForm, applySettingsToForm, t])
+
+  const loadBlocklists = async () => {
+    setBlocklistsLoading(true)
+    try {
+      const [ipsResponse, domainsResponse] = await Promise.all([
+        apiFetch('/api/security/blocklist/ips'),
+        apiFetch('/api/security/blocklist/domains')
+      ])
+
+      if (ipsResponse.ok) {
+        const ipsData = await ipsResponse.json()
+        setBlockedIPs(ipsData.blockedIPs || [])
+      }
+
+      if (domainsResponse.ok) {
+        const domainsData = await domainsResponse.json()
+        setBlockedDomains(domainsData.blockedDomains || [])
+      }
+    } catch (err) {
+      // keep prior state on failure
+    } finally {
+      setBlocklistsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (showSecuritySettings || showBlocklist || activeSection === 'blocklist') {
+      loadBlocklists()
+    }
+  }, [showSecuritySettings, showBlocklist, activeSection])
+
+  const handleAddIP = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newIP.trim()) return
+
+    try {
+      const response = await apiFetch('/api/security/blocklist/ips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ipAddress: newIP.trim(), reason: newIPReason.trim() || null })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        setError(error.error || t('failedToBlockIP'))
+        return
+      }
+
+      setNewIP('')
+      setNewIPReason('')
+      loadBlocklists()
+    } catch {
+      setError(t('failedToBlockIP'))
+    }
+  }
+
+  const handleRemoveIP = async (id: string) => {
+    if (!confirm(t('confirmRemoveIP'))) return
+
+    try {
+      await apiFetch('/api/security/blocklist/ips', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      })
+
+      loadBlocklists()
+    } catch {
+      setError(t('failedToRemoveIP'))
+    }
+  }
+
+  const handleAddDomain = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newDomain.trim()) return
+
+    try {
+      const response = await apiFetch('/api/security/blocklist/domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: newDomain.trim(), reason: newDomainReason.trim() || null })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        setError(error.error || t('failedToBlockDomain'))
+        return
+      }
+
+      setNewDomain('')
+      setNewDomainReason('')
+      loadBlocklists()
+    } catch {
+      setError(t('failedToBlockDomain'))
+    }
+  }
+
+  const handleRemoveDomain = async (id: string) => {
+    if (!confirm(t('confirmRemoveDomain'))) return
+
+    try {
+      await apiFetch('/api/security/blocklist/domains', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      })
+
+      loadBlocklists()
+    } catch {
+      setError(t('failedToRemoveDomain'))
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setError('')
+    setSuccess(false)
+    setLogoError('')
+
+    try {
+      // Handle pending logo upload
+      let newLogoPath = brandingLogoPath
+      if (pendingLogoFile) {
+        setLogoUploading(true)
+        try {
+          const buffer = await pendingLogoFile.arrayBuffer()
+          const res = await apiFetch('/api/settings/logo', {
+            method: 'POST',
+            headers: { 'Content-Type': pendingLogoFile.type || 'image/svg+xml' },
+            body: buffer,
+          })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok) {
+            throw new Error(data?.error || t('failedToUploadLogo'))
+          }
+          newLogoPath = data.path || '/uploads/branding/logo.svg'
+          setPendingLogoFile(null)
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : t('failedToUploadLogo')
+          setLogoError(message)
+          throw err
+        } finally {
+          setLogoUploading(false)
+        }
+      } else if (pendingLogoRemoval && brandingLogoPath) {
+        // Handle pending logo removal
+        setLogoUploading(true)
+        try {
+          const res = await apiFetch('/api/settings/logo', { method: 'DELETE' })
+          if (!res.ok && res.status !== 404) {
+            const data = await res.json().catch(() => ({}))
+            throw new Error(data?.error || t('failedToRemoveLogo'))
+          }
+          newLogoPath = null
+          setPendingLogoRemoval(false)
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : t('failedToRemoveLogo')
+          setLogoError(message)
+          throw err
+        } finally {
+          setLogoUploading(false)
+        }
+      }
+
+      const updates = {
+        language: language || 'en',
+        defaultTheme: defaultTheme || 'auto',
+        accentColor: accentColor || 'blue',
+        companyName: companyName || null,
+        brandingLogoPath: newLogoPath || null,
+        emailHeaderStyle: emailHeaderStyle || 'LOGO_AND_NAME',
+        smtpServer: smtpServer || null,
+        smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
+        smtpUsername: smtpUsername || null,
+        smtpPassword: smtpPassword || null,
+        smtpFromAddress: smtpFromAddress || null,
+        smtpSecure: smtpSecure || 'STARTTLS',
+        appDomain: appDomain || null,
+        defaultPreviewResolution: defaultPreviewResolution || '720p',
+        defaultSkipTranscoding,
+        defaultWatermarkEnabled: defaultWatermarkEnabled,
+        defaultWatermarkText: defaultWatermarkText || null,
+        defaultWatermarkPositions: defaultWatermarkPositions || 'center',
+        defaultWatermarkOpacity: defaultWatermarkOpacity,
+        defaultWatermarkFontSize: defaultWatermarkFontSize || 'medium',
+        defaultApplyPreviewLut,
+        maxUploadSizeGB: parseInt(maxUploadSizeGB, 10) || 1,
+        maxCommentAttachments: parseInt(maxCommentAttachments, 10) || 10,
+        maxReverseShareFiles: parseInt(maxReverseShareFiles, 10) || 10,
+        defaultTimestampDisplay: defaultTimestampDisplay || 'TIMECODE',
+        autoApproveProject: autoApproveProject,
+        defaultUsePreviewForApprovedPlayback: defaultUsePreviewForApprovedPlayback,
+        defaultAllowClientAssetUpload: defaultAllowClientAssetUpload,
+        defaultAllowReverseShare: defaultAllowReverseShare,
+        defaultShowClientTutorial: defaultShowClientTutorial,
+        defaultAllowAssetDownload: defaultAllowAssetDownload,
+        defaultClientCanApprove: defaultClientCanApprove,
+        privacyDisclosureEnabled: privacyDisclosureEnabled,
+        privacyDisclosureText: privacyDisclosureText || null,
+        adminNotificationSchedule: adminNotificationSchedule,
+        adminNotificationTime: (adminNotificationSchedule === 'DAILY' || adminNotificationSchedule === 'WEEKLY') ? adminNotificationTime : null,
+        adminNotificationDay: adminNotificationSchedule === 'WEEKLY' ? adminNotificationDay : null,
+      }
+
+      // Save global settings
+      await apiPatch('/api/settings', updates)
+
+      // Save security settings
+      const securityUpdates = {
+        httpsEnabled,
+        hotlinkProtection,
+        ipRateLimit: parseInt(ipRateLimit, 10) || 1000,
+        sessionRateLimit: parseInt(sessionRateLimit, 10) || 600,
+        shareSessionRateLimit: parseInt(shareSessionRateLimit, 10) || 300,
+        shareTokenTtlSeconds: shareTokenTtlSeconds ? parseInt(shareTokenTtlSeconds, 10) : null,
+        passwordAttempts: parseInt(passwordAttempts, 10) || 5,
+        sessionTimeoutValue: parseInt(sessionTimeoutValue, 10) || 15,
+        sessionTimeoutUnit: sessionTimeoutUnit || 'MINUTES',
+        adminSessionTimeoutValue: parseInt(adminSessionTimeoutValue, 10) || 15,
+        adminSessionTimeoutUnit: adminSessionTimeoutUnit || 'MINUTES',
+        trackAnalytics,
+        trackSecurityLogs,
+        viewSecurityEvents,
+      }
+
+      await apiPatch('/api/settings/security', securityUpdates)
+
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
+
+      // Reload settings data to reflect changes
+      const refreshResponse = await apiFetch('/api/settings')
+      if (refreshResponse.ok) {
+        const refreshedData = await refreshResponse.json()
+        setSettings(refreshedData)
+        applySettingsToForm(refreshedData)
+      }
+
+      // Reload security settings data
+      const securityRefreshResponse = await apiFetch('/api/settings/security')
+      if (securityRefreshResponse.ok) {
+        const refreshedSecurityData = await securityRefreshResponse.json()
+        setSecuritySettings(refreshedSecurityData)
+        applySecuritySettingsToForm(refreshedSecurityData)
+      }
+
+      // Refresh the page to update server components (like AdminHeader menu)
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToSave'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleTestEmail() {
+    setTestEmailSending(true)
+    setTestEmailResult(null)
+
+    try {
+      // Prepare current form values as SMTP config
+      const smtpConfig = {
+        smtpServer: smtpServer || null,
+        smtpPort: smtpPort ? parseInt(smtpPort, 10) : null,
+        smtpUsername: smtpUsername || null,
+        smtpPassword: smtpPassword || null,
+        smtpFromAddress: smtpFromAddress || null,
+        smtpSecure: smtpSecure || 'STARTTLS',
+        companyName: companyName || 'FrameComment',
+        accentColor: accentColor || 'blue',
+      }
+
+      // Validate that all required fields are filled
+      if (!smtpConfig.smtpServer || !smtpConfig.smtpPort || !smtpConfig.smtpUsername ||
+          !smtpConfig.smtpPassword || !smtpConfig.smtpFromAddress) {
+        setTestEmailResult({
+          type: 'error',
+          message: t('fillSmtpFields')
+        })
+        setTestEmailSending(false)
+        return
+      }
+
+      const data = await apiPost('/api/settings/test-email', {
+        testEmail: testEmailAddress,
+        smtpConfig: smtpConfig
+      })
+
+      setTestEmailResult({
+        type: 'success',
+        message: data.message || t('testEmailSuccess')
+      })
+    } catch (error) {
+      setTestEmailResult({
+        type: 'error',
+        message: t('failedToSendTest')
+      })
+    } finally {
+      setTestEmailSending(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">{tc('loading')}</p>
+      </div>
+    )
+  }
+
+  const settingSections = [
+    { id: 'appearance', label: t('appearance.title'), icon: Palette },
+    { id: 'branding', label: t('branding.title'), icon: Building2 },
+    { id: 'privacy', label: t('privacy.title'), icon: ShieldCheck },
+    { id: 'notifications', label: t('notifications.title'), icon: Mail },
+    { id: 'video-processing', label: t('videoProcessing.title'), icon: Video },
+    { id: 'project-defaults', label: t('projectDefaults.title'), icon: FolderCog },
+    { id: 'security', label: t('security.title'), icon: Shield },
+    { id: 'blocklist', label: t('blocklist.title'), icon: Ban },
+  ]
+
+  const appearanceProps = {
+    language, setLanguage, defaultTheme, setDefaultTheme, accentColor, setAccentColor,
+  }
+
+  const brandingProps = {
+    companyName, setCompanyName, appDomain, setAppDomain,
+    brandingLogoUrl: brandingLogoPreview, onUploadLogo: handleLogoUpload,
+    onRemoveLogo: handleLogoRemove, logoUploading, logoError,
+    emailHeaderStyle, setEmailHeaderStyle,
+  }
+
+  const privacyProps = {
+    privacyDisclosureEnabled, setPrivacyDisclosureEnabled,
+    privacyDisclosureText, setPrivacyDisclosureText,
+  }
+
+  const notificationsProps = {
+    smtpServer, setSmtpServer, smtpPort, setSmtpPort,
+    smtpUsername, setSmtpUsername, smtpPassword, setSmtpPassword,
+    smtpFromAddress, setSmtpFromAddress, smtpSecure, setSmtpSecure,
+    testEmailAddress, setTestEmailAddress, testEmailSending, testEmailResult, handleTestEmail,
+    adminNotificationSchedule, setAdminNotificationSchedule,
+    adminNotificationTime, setAdminNotificationTime,
+    adminNotificationDay, setAdminNotificationDay,
+  }
+
+  const videoProcessingProps = {
+    defaultPreviewResolution, setDefaultPreviewResolution,
+    defaultSkipTranscoding, setDefaultSkipTranscoding,
+    defaultWatermarkEnabled, setDefaultWatermarkEnabled,
+    defaultWatermarkText, setDefaultWatermarkText,
+    defaultWatermarkPositions, setDefaultWatermarkPositions,
+    defaultWatermarkOpacity, setDefaultWatermarkOpacity,
+    defaultWatermarkFontSize, setDefaultWatermarkFontSize,
+    defaultApplyPreviewLut, setDefaultApplyPreviewLut,
+  }
+
+  const projectDefaultsProps = {
+    defaultTimestampDisplay, setDefaultTimestampDisplay,
+    autoApproveProject, setAutoApproveProject,
+    defaultUsePreviewForApprovedPlayback, setDefaultUsePreviewForApprovedPlayback,
+    defaultAllowClientAssetUpload, setDefaultAllowClientAssetUpload,
+    defaultAllowReverseShare, setDefaultAllowReverseShare,
+    defaultShowClientTutorial, setDefaultShowClientTutorial,
+    defaultAllowAssetDownload, setDefaultAllowAssetDownload,
+    defaultClientCanApprove, setDefaultClientCanApprove,
+    defaultWatermarkEnabled,
+  }
+
+  const securityProps = {
+    httpsEnabled, httpsManagedByEnvironment, setHttpsEnabled,
+    hotlinkProtection, setHotlinkProtection,
+    ipRateLimit, setIpRateLimit, sessionRateLimit, setSessionRateLimit,
+    shareSessionRateLimit, setShareSessionRateLimit,
+    shareTokenTtlSeconds, setShareTokenTtlSeconds,
+    passwordAttempts, setPasswordAttempts,
+    maxUploadSizeGB, setMaxUploadSizeGB, maxCommentAttachments, setMaxCommentAttachments,
+    maxReverseShareFiles, setMaxReverseShareFiles,
+    sessionTimeoutValue, setSessionTimeoutValue, sessionTimeoutUnit, setSessionTimeoutUnit,
+    adminSessionTimeoutValue, setAdminSessionTimeoutValue,
+    adminSessionTimeoutUnit, setAdminSessionTimeoutUnit,
+    trackAnalytics, setTrackAnalytics, trackSecurityLogs, setTrackSecurityLogs,
+    viewSecurityEvents, setViewSecurityEvents,
+  }
+
+  const blocklistProps = {
+    blockedIPs, blockedDomains,
+    newIP, setNewIP, newIPReason, setNewIPReason,
+    newDomain, setNewDomain, newDomainReason, setNewDomainReason,
+    onAddIP: handleAddIP, onRemoveIP: handleRemoveIP,
+    onAddDomain: handleAddDomain, onRemoveDomain: handleRemoveDomain,
+    blocklistsLoading,
+  }
+
+  return (
+    <div className="flex-1 min-h-0 bg-background">
+      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+        <div className="mb-4 sm:mb-6">
+          <div className="flex justify-between items-center gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
+                <SettingsIcon className="w-7 h-7 sm:w-8 sm:h-8" />
+                {t('title')}
+              </h1>
+              <p className="text-sm sm:text-base text-muted-foreground mt-1">
+                {t('description')}
+              </p>
+            </div>
+
+            <Button onClick={handleSave} variant="default" disabled={saving} size="default">
+              <Save className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
+            </Button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
+            <p className="text-xs sm:text-sm text-destructive font-medium">{error}</p>
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+            <p className="text-xs sm:text-sm text-success font-medium">{t('savedSuccessfully')}</p>
+          </div>
+        )}
+
+        {/* Mobile: stacked collapsible cards */}
+        <div className="lg:hidden space-y-4 sm:space-y-6">
+          <AppearanceSection {...appearanceProps} show={showAppearance} setShow={setShowAppearance} />
+          <BrandingSection {...brandingProps} show={showBranding} setShow={setShowBranding} />
+          <PrivacySection {...privacyProps} show={showPrivacy} setShow={setShowPrivacy} />
+          <NotificationsSection {...notificationsProps} show={showNotifications} setShow={setShowNotifications} />
+          <VideoProcessingSettingsSection {...videoProcessingProps} show={showVideoProcessing} setShow={setShowVideoProcessing} />
+          <ProjectDefaultsSection {...projectDefaultsProps} show={showProjectDefaults} setShow={setShowProjectDefaults} />
+          <SecuritySettingsSection
+            {...securityProps}
+            showSecuritySettings={showSecuritySettings}
+            setShowSecuritySettings={setShowSecuritySettings}
+          />
+          <BlocklistSection {...blocklistProps} show={showBlocklist} setShow={setShowBlocklist} />
+        </div>
+
+        {/* Desktop: sidebar nav + content panel */}
+        <div className="hidden lg:flex gap-6">
+          <div className="w-56 flex-shrink-0">
+            <nav className="space-y-1 sticky top-6">
+              {settingSections.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className={cn(
+                    'w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center gap-2.5 transition-colors',
+                    activeSection === section.id
+                      ? 'bg-accent text-accent-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                  )}
+                >
+                  <section.icon className="w-4 h-4 flex-shrink-0" />
+                  {section.label}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            {activeSection === 'appearance' && (
+              <AppearanceSection {...appearanceProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'branding' && (
+              <BrandingSection {...brandingProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'privacy' && (
+              <PrivacySection {...privacyProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'notifications' && (
+              <NotificationsSection {...notificationsProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'video-processing' && (
+              <VideoProcessingSettingsSection {...videoProcessingProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'project-defaults' && (
+              <ProjectDefaultsSection {...projectDefaultsProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'security' && (
+              <SecuritySettingsSection {...securityProps} showSecuritySettings={true} setShowSecuritySettings={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'blocklist' && (
+              <BlocklistSection {...blocklistProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+          </div>
+        </div>
+
+        {/* Bottom notifications + save */}
+        {error && (
+          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
+            <p className="text-xs sm:text-sm text-destructive font-medium">{error}</p>
+          </div>
+        )}
+
+        {success && (
+          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
+            <p className="text-xs sm:text-sm text-success font-medium">{t('savedSuccessfully')}</p>
+          </div>
+        )}
+
+        <div className="mt-6 sm:mt-8 pb-20 lg:pb-24 flex justify-end">
+          <Button onClick={handleSave} variant="default" disabled={saving} size="default">
+            <Save className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}

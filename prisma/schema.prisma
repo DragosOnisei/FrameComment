@@ -1,0 +1,692 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String?  @unique
+  password  String
+  name      String?
+  role      UserRole @default(ADMIN)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects          Project[]
+  comments          Comment[]
+  passkeys          PasskeyCredential[]
+  pushSubscriptions PushSubscription[]
+  calendarToken     CalendarToken?
+}
+
+enum UserRole {
+  ADMIN
+}
+
+model Project {
+  id              String  @id @default(cuid())
+  title           String
+  slug            String  @unique
+  description     String?
+  companyName     String? // Optional company/brand name (display priority: companyName → primary recipient → 'Client')
+  sharePassword   String?
+  authMode        String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
+  guestMode       Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
+  guestLatestOnly Boolean @default(true) // Guests can only view latest version of each video
+
+  // Revision tracking (optional)
+  enableRevisions Boolean @default(false)
+  maxRevisions    Int     @default(3)
+
+  status          ProjectStatus @default(IN_REVIEW)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  approvedAt      DateTime?
+  approvedVideoId String? // ID of the video that was approved (null if not approved)
+
+  // Comment restrictions
+  restrictCommentsToLatestVersion Boolean @default(false)
+  hideFeedback                    Boolean @default(false)
+
+  // Comment timestamp display for this project (stored at creation; editable per project)
+  // AUTO = MM:SS or HH:MM:SS based on video length, TIMECODE = HH:MM:SS:FF (or DF)
+  timestampDisplay String @default("TIMECODE")
+
+  // Video processing settings
+  previewResolution String  @default("720p") // "720p", "1080p", or "2160p" (originals can be any resolution including 2160p)
+  skipTranscoding   Boolean @default(false) // Skip transcoding entirely — serve original file directly
+  watermarkEnabled  Boolean @default(true) // Enable/disable watermarks for this project
+  watermarkText     String? // Custom watermark text (null = use default format)
+  watermarkPositions String  @default("center") // comma-separated: center, top-left, top-right, bottom-left, bottom-right
+  watermarkOpacity   Int     @default(30) // Opacity percentage (10-100)
+  watermarkFontSize  String  @default("medium") // small, medium, large
+  applyPreviewLut      Boolean @default(true) // Apply preview LUT during transcoding (for color-calibrated previews)
+
+  // Client share page settings
+  allowAssetDownload     Boolean @default(true) // Allow clients to download video assets when project is approved
+  allowClientAssetUpload Boolean @default(false) // Allow clients to upload file attachments on comments
+  clientCanApprove       Boolean @default(true) // Allow clients to approve videos (false = admin only)
+  allowReverseShare      Boolean @default(false) // Allow clients to upload files directly to the project (reverse share)
+
+  // Approved playback settings
+  usePreviewForApprovedPlayback Boolean @default(false) // Use browser-compatible preview instead of original after approval
+
+  // Client tutorial
+  showClientTutorial Boolean @default(true) // Show interactive tutorial overlay for first-time visitors
+
+  // Due date tracking
+  dueDate     DateTime? // Optional project deadline
+  dueReminder String?   // NONE, DAY_BEFORE, WEEK_BEFORE
+
+  // Client notification settings (per-project)
+  // Note: Approval emails are always IMMEDIATE regardless of this setting
+  clientNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, WEEKLY
+  clientNotificationTime     String? // "09:00" for daily, "Monday 09:00" for weekly
+  clientNotificationDay      Int? // 0-6 for weekly (0 = Sunday)
+  lastClientNotificationSent DateTime?
+
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdById String
+
+  // Client directory link (optional)
+  clientCompanyId String?
+  clientCompany   ClientCompany? @relation(fields: [clientCompanyId], references: [id], onDelete: SetNull)
+
+  videos            Video[]
+  comments          Comment[]
+  securityEvents    SecurityEvent[]
+  analytics         VideoAnalytics[]
+  recipients        ProjectRecipient[] // Multiple email recipients
+  notificationQueue NotificationQueue[] // Pending notifications
+  sharePageAccesses SharePageAccess[] // Share page authentication tracking
+  projectUploads    ProjectUpload[] // Client-submitted files via reverse share
+
+  @@index([clientCompanyId])
+}
+
+enum ProjectStatus {
+  IN_REVIEW
+  APPROVED
+  SHARE_ONLY
+  ARCHIVED
+}
+
+model ProjectRecipient {
+  id                   String   @id @default(cuid())
+  projectId            String
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  email                String?
+  name                 String?
+  isPrimary            Boolean  @default(false)
+  receiveNotifications Boolean  @default(true) // Per-recipient notification toggle
+  createdAt            DateTime @default(now())
+
+  @@index([projectId])
+  @@index([projectId, email])
+}
+
+model Video {
+  id           String @id @default(cuid())
+  projectId    String
+  name         String // Name to distinguish different videos in a project (required)
+  version      Int // 1, 2, 3 (for revisions)
+  versionLabel String // "v1", "v2", "v3" or custom
+
+  // Original file
+  originalFileName    String
+  originalFileSize    BigInt
+  originalStoragePath String
+
+  // Video metadata
+  duration Float // in seconds
+  width    Int
+  height   Int
+  fps      Float?
+  codec    String?
+
+  // Processing status
+  status             VideoStatus @default(UPLOADING)
+  uploadProgress     Int         @default(0) // 0-100 percentage
+  processingProgress Float       @default(0)
+  processingError    String?
+
+  // Preview versions (watermarked)
+  preview2160Path String?
+  preview1080Path String?
+  preview720Path  String?
+  thumbnailPath   String?
+
+  // Clean (non-watermarked) previews for approved playback
+  cleanPreview2160Path String?
+  cleanPreview1080Path String?
+  cleanPreview720Path  String?
+
+  // Per-video approval
+  approved   Boolean   @default(false)
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  analytics VideoAnalytics[]
+  assets    VideoAsset[]
+  comments  Comment[]
+
+  @@index([projectId, version])
+  @@index([projectId, name])
+}
+
+model VideoAsset {
+  id      String @id @default(cuid())
+  videoId String
+  video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  // File information
+  fileName    String // Original filename (e.g., "project.prproj", "music.mp3", "photo.jpg")
+  fileSize    BigInt
+  fileType    String // MIME type (e.g., "application/octet-stream", "image/jpeg", "audio/mpeg")
+  storagePath String // Path in storage system
+  category    String? // Optional category: "image", "audio", "project", "other"
+
+  // Upload metadata
+  uploadedBy     String? // User ID or "client" for client uploads
+  uploadedByName String? // Display name of uploader
+  uploadedBySessionId String? // Stable share/admin session identifier for pending asset ownership
+
+  uploadCompletedAt DateTime? // null until file transfer finishes; orphaned records stay null
+
+  // Comment attachment (optional link to comment)
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([videoId])
+  @@index([videoId, category])
+  @@index([videoId, uploadCompletedAt])
+  @@index([videoId, uploadedBySessionId])
+  @@index([commentId])
+}
+
+// Client-submitted files via the reverse share feature (project-level, not attached to a video)
+model ProjectUpload {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  fileName    String
+  fileSize    BigInt
+  fileType    String  @default("application/octet-stream")
+  storagePath String
+  category    String?
+
+  uploadedBySessionId String?
+  uploadedByName      String?
+  uploadedByEmail     String?
+
+  uploadCompletedAt DateTime? // null until file transfer finishes; orphaned records stay null
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([projectId, uploadCompletedAt])
+  @@index([uploadedBySessionId])
+}
+
+enum VideoStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  ERROR
+}
+
+model Comment {
+  id           String   @id @default(cuid())
+  projectId    String
+  videoId      String // All comments must be video-specific
+  videoVersion Int? // track which version this comment was for
+  timecode     String // HH:MM:SS:FF format (e.g., "00:00:32:15" for 32 seconds 15 frames at given FPS)
+  content      String
+  authorName   String? // made optional to allow anonymous comments
+  authorEmail  String?
+  isInternal   Boolean  @default(false) // true = from studio, false = from client
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Annotation support
+  timecodeEnd String? // Optional end timecode for time range comments
+  annotations Json?   // JSONB storing drawing annotation shapes
+
+  // Admin user tracking (for internal comments)
+  userId String? // Admin user who created this comment
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Admin reply functionality
+  parentId String? // if this is a reply to another comment
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  Comment[] @relation("CommentReplies")
+
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  video   Video        @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  assets  VideoAsset[]
+
+  @@index([projectId])
+  @@index([videoId])
+  @@index([parentId])
+  @@index([userId])
+}
+
+model NotificationQueue {
+  id        String @id @default(cuid())
+  projectId String
+  type      String // CLIENT_COMMENT, ADMIN_REPLY
+
+  // Dual tracking for admin vs client notifications
+  sentToClients Boolean   @default(false)
+  sentToAdmins  Boolean   @default(false)
+  clientSentAt  DateTime?
+  adminSentAt   DateTime?
+
+  // Retry and failure tracking
+  clientAttempts Int     @default(0) // Number of send attempts to clients
+  adminAttempts  Int     @default(0) // Number of send attempts to admins
+  clientFailed   Boolean @default(false) // Permanently failed to send to clients
+  adminFailed    Boolean @default(false) // Permanently failed to send to admins
+  lastError      String? // Last error message for debugging
+
+  data      Json // Stores: commentId, videoId, videoName, authorName, content, timestamp, isReply, etc.
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, sentToClients])
+  @@index([projectId, sentToAdmins])
+  @@index([sentToAdmins, createdAt])
+  @@index([clientFailed, adminFailed])
+}
+
+model Settings {
+  id String @id @default("default")
+
+  // Language / i18n
+  language String @default("en") // UI language code (en, nl, de, fr, etc.)
+
+  // Appearance
+  defaultTheme String @default("auto") // "light", "dark", or "auto" (system preference)
+  accentColor  String @default("blue") // Preset accent color name
+
+  // Company Branding
+  companyName String? @default("Studio") // Displayed in feedback/comments
+  brandingLogoPath String? // Path to uploaded custom SVG logo
+  emailHeaderStyle String @default("LOGO_AND_NAME") // NONE, LOGO_ONLY, NAME_ONLY, LOGO_AND_NAME
+
+  // SMTP Email Configuration
+  smtpServer      String?
+  smtpPort        Int?    @default(587)
+  smtpUsername    String?
+  smtpPassword    String?
+  smtpFromAddress String?
+  smtpSecure      String? @default("STARTTLS") // Options: "STARTTLS", "TLS", "NONE"
+
+  // Domain Configuration
+  appDomain String? // e.g., "https://yourdomain.com"
+
+  // Default Video Processing Settings
+  defaultPreviewResolution  String? @default("720p")
+  defaultSkipTranscoding   Boolean @default(false)
+  defaultWatermarkEnabled  Boolean @default(true)
+  defaultWatermarkText     String?
+  defaultWatermarkPositions String  @default("center") // comma-separated: center, top-left, top-right, bottom-left, bottom-right
+  defaultWatermarkOpacity   Int     @default(30) // Opacity percentage (10-100)
+  defaultWatermarkFontSize  String  @default("medium") // small, medium, large
+  defaultApplyPreviewLut      Boolean @default(true) // Apply preview LUT during transcoding by default
+  maxUploadSizeGB          Int      @default(1) // Maximum file size per upload in GB (1-1000)
+  maxCommentAttachments    Int      @default(10) // Maximum files per comment attachment batch (1-50)
+  maxReverseShareFiles     Int      @default(10) // Maximum files per reverse share upload session (1-500)
+
+  // Default Comment Timestamp Display
+  // TIMECODE = HH:MM:SS:FF (or DF), AUTO = MM:SS or HH:MM:SS based on video length
+  defaultTimestampDisplay String @default("TIMECODE")
+
+  // Default Approved Playback Setting
+  defaultUsePreviewForApprovedPlayback Boolean @default(false)
+
+  // Default Client Asset Upload Setting
+  defaultAllowClientAssetUpload Boolean @default(false)
+
+  // Default Client Access Defaults
+  defaultAllowReverseShare  Boolean @default(false) // Default: allow clients to submit files directly to project
+  defaultShowClientTutorial Boolean @default(true)  // Default: show interactive tutorial for first-time visitors
+  defaultAllowAssetDownload Boolean @default(true)  // Default: allow clients to download approved assets
+  defaultClientCanApprove   Boolean @default(true)  // Default: allow clients to approve videos
+
+  // Project Behavior
+  autoApproveProject Boolean @default(true) // Auto-approve project when all videos approved
+
+  // Admin notification settings (global)
+  // Note: Approval emails and manual admin notifications are always IMMEDIATE regardless of this setting
+  adminNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, WEEKLY
+  adminNotificationTime     String? // "09:00" for daily, "Monday 09:00" for weekly
+  adminNotificationDay      Int? // 0-6 for weekly (0 = Sunday)
+  lastAdminNotificationSent DateTime?
+
+  // Web Push VAPID Keys (auto-generated on first use)
+  vapidPublicKey  String? // Public key for browser subscription
+  vapidPrivateKey String? // Encrypted private key
+
+  // Privacy Disclosure (shown on client share page)
+  privacyDisclosureEnabled Boolean @default(false)
+  privacyDisclosureText    String? // Custom text; null = use default i18n text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model NotificationDestination {
+  id String @id @default(cuid())
+
+  name     String
+  enabled  Boolean @default(false)
+  provider String // GOTIFY, NTFY, PUSHOVER, TELEGRAM
+
+  // Non-secret provider configuration (e.g. baseUrl, topic, etc.)
+  config Json
+
+  // Encrypted JSON string containing secrets (e.g. tokens/keys). Use src/lib/encryption.ts.
+  secretsEncrypted String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions NotificationSubscription[]
+  deliveries    NotificationDeliveryLog[]
+
+  @@index([provider])
+  @@index([enabled])
+  @@index([createdAt])
+}
+
+model NotificationSubscription {
+  id String @id @default(cuid())
+
+  destinationId String
+  destination   NotificationDestination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+
+  eventType String // SHARE_ACCESS, ADMIN_ACCESS, CLIENT_COMMENT, VIDEO_APPROVAL, SECURITY_ALERT
+  enabled   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([destinationId, eventType])
+  @@index([eventType, enabled])
+}
+
+model NotificationDeliveryLog {
+  id String @id @default(cuid())
+
+  destinationId String
+  destination   NotificationDestination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+
+  eventType  String
+  success    Boolean @default(false)
+  statusCode Int?
+  error      String?
+
+  sentAt DateTime @default(now())
+
+  @@index([destinationId, sentAt])
+  @@index([eventType, sentAt])
+  @@index([success, sentAt])
+}
+
+model SecuritySettings {
+  id String @id @default("default")
+
+  // Hotlink Protection: DISABLED, LOG_ONLY, BLOCK_STRICT
+  hotlinkProtection String @default("LOG_ONLY")
+
+  // Rate Limiting (global only - per minute)
+  ipRateLimit           Int  @default(1000) // requests per minute per IP (video streaming requires high limit)
+  sessionRateLimit      Int  @default(600) // requests per minute per admin session (10/sec for seeking/buffering)
+  shareSessionRateLimit Int  @default(300) // requests per minute per share session (client access)
+  passwordAttempts      Int  @default(5) // password attempts before lockout
+  shareTokenTtlSeconds  Int? // optional override for share JWT expiry (60-86400 seconds, null = use session timeout)
+
+  // Session Timeout (for client share sessions, not admin JWT)
+  sessionTimeoutValue Int    @default(15) // Numeric value (15, 30, 1, 2, etc.)
+  sessionTimeoutUnit  String @default("MINUTES") // MINUTES, HOURS, DAYS, WEEKS
+
+  // Admin Session Timeout (admin UI inactivity logout)
+  adminSessionTimeoutValue Int    @default(15) // Numeric value (e.g., 15, 30, 1, 2, etc.)
+  adminSessionTimeoutUnit  String @default("MINUTES") // MINUTES, HOURS (max 24 hours)
+
+  // HTTPS Enforcement (HTTPS_ENABLED env var always takes precedence if set)
+  httpsEnabled Boolean @default(true) // Enable HSTS (default: true for production security)
+
+  // Logging toggles
+  trackAnalytics    Boolean @default(true)
+  trackSecurityLogs Boolean @default(true)
+
+  // Security Dashboard Access
+  viewSecurityEvents Boolean @default(false) // Show /admin/security page in navigation
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SecurityEvent {
+  id       String @id @default(cuid())
+  type     String // HOTLINK_DETECTED, HOTLINK_BLOCKED, RATE_LIMIT_HIT, TOKEN_SESSION_MISMATCH, SUSPICIOUS_ACTIVITY, BLOCKED_IP_ATTEMPT
+  severity String @default("INFO") // INFO, WARNING, CRITICAL
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  videoId   String?
+  sessionId String?
+  ipAddress String?
+  referer   String?
+
+  // Additional context as JSON
+  details Json?
+
+  // Was this event auto-blocked?
+  wasBlocked Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([type, createdAt])
+  @@index([severity])
+}
+
+model BlockedIP {
+  id        String   @id @default(cuid())
+  ipAddress String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+  createdBy String? // Admin user ID who blocked this IP
+
+  @@index([ipAddress])
+}
+
+model BlockedDomain {
+  id        String   @id @default(cuid())
+  domain    String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+  createdBy String? // Admin user ID who blocked this domain
+
+  @@index([domain])
+}
+
+model VideoAnalytics {
+  id String @id @default(cuid())
+
+  videoId String
+  video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Event types: PAGE_VISIT, DOWNLOAD_COMPLETE
+  eventType String
+
+  // Optional: Single asset ID for individual asset downloads
+  assetId String?
+
+  // Optional: Multiple asset IDs for ZIP downloads (JSON array)
+  assetIds String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([videoId, createdAt])
+  @@index([eventType])
+  @@index([assetId])
+}
+
+model SharePageAccess {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Authentication method used: OTP, PASSWORD, GUEST
+  accessMethod String
+
+  // Email address (only for OTP authentication)
+  email String?
+
+  // JWT session ID for unique session tracking
+  sessionId String
+
+  // Client metadata
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([projectId, accessMethod])
+  @@index([sessionId])
+}
+
+model PasskeyCredential {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // WebAuthn credential data (following SimpleWebAuthn patterns)
+  credentialID Bytes  @unique // Authenticator's credential ID
+  publicKey    Bytes // Public key for signature verification
+  counter      BigInt // Signature counter (prevents replay attacks)
+
+  // UX and security metadata
+  transports     String[] // ['internal', 'usb', 'nfc', 'ble', 'hybrid']
+  deviceType     String // 'singleDevice' | 'multiDevice' (cloud-synced passkey)
+  backedUp       Boolean  @default(false) // Indicates key material is backed up
+  aaguid         String? // Authenticator Attestation GUID (optional)
+  userAgent      String? // Browser/device info for admin reference
+  credentialName String? // User-friendly name: "MacBook Touch ID", "iPhone Passkey"
+
+  // Security tracking
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+  lastUsedIP String?
+
+  @@index([userId])
+  @@index([userId, lastUsedAt])
+}
+
+model PushSubscription {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint String @unique
+
+  // Web Push subscription keys
+  p256dh String
+  auth   String
+
+  // Device metadata for management UI
+  userAgent  String?
+  deviceName String?
+
+  // Event subscriptions (default: all events)
+  subscribedEvents String[] @default(["SHARE_ACCESS", "ADMIN_ACCESS", "CLIENT_COMMENT", "VIDEO_APPROVAL", "CLIENT_UPLOAD", "SECURITY_ALERT"])
+
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model EmailTemplate {
+  id          String  @id @default(cuid())
+  type        String  @unique // NEW_VERSION, PROJECT_APPROVED, COMMENT_NOTIFICATION, etc.
+  name        String // Human-readable name for the template
+  description String? // Description of when this template is used
+
+  // Template content
+  subject     String // Email subject line (supports placeholders)
+  bodyContent String // HTML body content (supports placeholders)
+
+  // Status flags
+  isCustom Boolean @default(true) // false = system default, true = user customized
+  enabled  Boolean @default(true) // Allow disabling specific templates
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type, enabled])
+}
+
+// Client Directory - Companies/Organizations
+model ClientCompany {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contacts ClientContact[]
+  projects Project[]
+}
+
+// Calendar Token - Per-user iCal feed authentication
+model CalendarToken {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  token     String   @unique
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Client Directory - Individual Contacts
+model ClientContact {
+  id        String   @id @default(cuid())
+  companyId String
+  company   ClientCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  email     String?
+  language  String?  // Preferred language for emails (null = use system default)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([email])
+}

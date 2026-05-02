@@ -1,0 +1,1406 @@
+# Upstream history (ViTransfer → FrameComment fork)
+
+> This file preserves the change history of the upstream project **ViTransfer** by
+> [MansiVisuals](https://github.com/MansiVisuals/ViTransfer), licensed AGPL-3.0,
+> which FrameComment was forked from at version **1.0.2** on **2026-05-02**.
+>
+> Throughout this archive, all occurrences of "ViTransfer" / "vitransfer" have been
+> replaced with "FrameComment" / "framecomment" so paths and image names match the
+> current fork. The original wording can be reconstructed by reversing the rename.
+>
+> For the **FrameComment** changelog (versions starting at 1.0.0), see
+> [`CHANGELOG.md`](./CHANGELOG.md).
+
+---
+
+# Changelog
+
+All notable changes to FrameComment will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+> IMPORTANT FOR DOCKER USERS: Starting with v1.0.0, the FrameComment Docker image moved from `dragosonisei/framecomment` to `dragosonisei/framecomment`. If you are upgrading an existing install, update your Docker Compose, Quadlet, and manual `docker pull` or `podman pull` commands to use the new repository.
+
+## [1.0.2] - 2026-04-16
+
+### Fixed
+- **Reverse share and comment attachment uploads failing** — uploads via the share page (reverse share file submissions and comment file attachments) returned 403 "Upload does not belong to your session". Root cause: `authMode: NONE` projects were generating a new random session ID on every request, so the ID stored at upload record creation never matched the ID presented at upload time. Fixed with a deterministic IP-based session ID.
+- **File picker silently doing nothing on plain HTTP installs** (e.g. `http://192.168.x.x`) — selecting a file in the reverse share or comment attachment modal had no effect and nothing appeared in the list. Root cause: `crypto.randomUUID()` is only available in secure contexts (HTTPS or `localhost`); the call threw silently on plain HTTP, crashing the file list update. Added a fallback that works in all contexts.
+- **Phantom upload entries in admin UI** — `ProjectUpload` and `VideoAsset` records are created before the file transfer begins; if a transfer was cancelled or failed, the record was left behind and appeared as a file with no content. Added `uploadCompletedAt` to both models, set only on successful transfer completion. Admin listings and downloads now filter to completed records only. Incomplete records older than 24 hours are deleted by the background cleanup job. In S3 mode, stale incomplete multipart uploads are also aborted.
+- **Existing files hidden after upgrade** — the `uploadCompletedAt` filter would have hidden all files uploaded before this version. A one-time migration (`20260416133000`) backfills the field for all existing records so no previously uploaded content disappears on upgrade.
+- **S3 large file uploads failing with HTTP 413** — worker-side S3 operations for files larger than the presign chunk limit were sent as a single PUT request, exceeding body size limits. The worker now uses S3 multipart upload for large files, matching the browser upload path.
+- **Project upload MIME type showing `application/octet-stream`** — client-submitted files were stored with a generic MIME type. The worker now runs magic-byte detection (via `file-type`) on completion and updates the stored MIME type, matching the existing behaviour for video assets.
+- **Share page and admin share page content not loading on first visit** — required a manual refresh in certain S3 configurations. Fixed token lifecycle, stale-cache prevention, in-flight deduplication, and bounded retry with backoff across both the public share page and the admin share page.
+- **Per-project preview resolution ignored** — the share page always used the global default resolution instead of the per-project override.
+- **File permission error (`EACCES` on `next.config.js`)** when running as a non-root UID (e.g. TrueNAS UID 568). Docker image now applies `chmod -R a+rX /app` to cover all files.
+
+### Added
+- **Optional 2160p (4K) preview support** — `2160p` is now available as a transcoding and preview resolution option in global defaults and per-project settings. `720p` remains the default.
+- **Client uploads UI** — the admin project page client uploads list now shows the filename inline with file details (size, type, uploader, date) accessible behind an info button, reducing visual clutter.
+
+### Security
+- next 16.2.2 → 16.2.3 (fixes DoS via Server Components — GHSA-q4gf-8mx6-v5v3).
+- next-intl 4.9.0 → 4.9.1 (fixes open redirect — GHSA-8f24-v5vv-gm5j).
+- nodemailer 8.0.4 → 8.0.5 (fixes SMTP command injection — GHSA-vvjj-xcjg-gr5g).
+
+### Updated
+- react/react-dom 19.2.4 → 19.2.5, bullmq 5.73.0 → 5.74.1, @aws-sdk 3.1024.0 → 3.1030.0, and other minor/patch dependency updates.
+
+## [1.0.1] - 2026-04-04
+
+### Fixed
+- Multipart upload fails on Cloudflare R2 with "Missing or invalid field: uploadId" due to R2's upload IDs exceeding the 256-character validation limit. Raised to 1024 characters to support R2 and other S3-compatible providers ([#59](https://github.com/DragosOnisei/FrameComment/issues/59)).
+
+## [1.0.0] - 2026-04-03
+
+FrameComment is production-ready and near feature-complete.
+
+**Thank you** to everyone who has contributed to getting FrameComment to v1.0 — whether you contributed code, joined a discussion, helped debug an issue, opened a bug report, or submitted a feature request. Every bit of involvement has helped shape this project.
+
+A special thanks to [@thinkvp](https://github.com/thinkvp) (Simon), who has been part of the journey since the very first 0.1.0 release. The countless conversations and feedback in those early months helped shape FrameComment massively. Simon has since created his own hard fork in which he has built a full CRM package around FrameComment's core.
+
+### Added
+- S3-compatible object storage. Set `STORAGE_PROVIDER=s3` to use any S3-compatible store. Uploads use browser-direct multipart presigned URLs; individual downloads redirect via presigned GET URLs; ZIP downloads stream through the server. Tested with MinIO AIStor (self-hosted Docker). Other providers (AWS S3, Cloudflare R2, Backblaze B2, etc.) should work but are untested — [open an issue](https://github.com/DragosOnisei/FrameComment/issues) if you run into problems. Local storage remains the default. Local and S3 cannot be mixed; switching backends does not migrate files.
+- Preview LUT support — a 3D LUT (`previewlut.cube`) is applied during transcoding for color-calibrated previews. Toggleable per-project and as a global default in settings. LUT crafted and provided for FrameComment by colorist Fred ([@fredflx](https://github.com/fredflx) — [yechandocolor.com](https://yechandocolor.com)).
+- "Download All" button in the download modal — downloads the video and all assets together as a single ZIP file.
+- "Download All Videos" button on the share page grid view — downloads all approved videos as a single ZIP file ([#56](https://github.com/DragosOnisei/FrameComment/issues/56)).
+- Reverse share — projects can now accept client file uploads via the share page. Enable per-project in settings. Uploaded files appear in a dedicated "Client Uploads" block on the admin project page ([#55](https://github.com/DragosOnisei/FrameComment/issues/55)).
+- Bulk select on the admin project page — video assets and client uploads now support multi-select with a bulk action bar for downloading or deleting multiple files at once.
+
+### Changed
+- Redesigned admin settings pages with sidebar navigation on desktop and collapsible cards on mobile. Global settings split from 4 into 8 focused sections (Appearance, Branding, Privacy, Notifications, Video Processing, Project Defaults, Security, Blocklist). Project settings follow the same pattern with 5 sidebar sections.
+- Replaced the admin header email display and standalone sign out button with a compact icon-only user button with dropdown menu showing name, email, role, and sign out option.
+- "Copy to Version" is now accessible via the bulk action bar after selecting assets — the standalone header button is removed. The target version picker is now scoped to other versions of the same video only, not all videos in the project.
+- Share page and admin share page grid view: replaced floating absolute-positioned buttons with a full-width sticky toolbar (menubar). Left side: Download All / Submit Files (share page) or Back to Project (admin). Right side: language, theme, and tutorial toggles.
+- Asset bulk action bar (Download, Copy to Version, Delete) shows icon-only on mobile to prevent overflow.
+- "Client Upload" badge in the asset list is hidden on mobile to reduce clutter.
+
+### Fixed
+- Version count label in the video group header now renders with correct spacing.
+- Toggling "Skip Transcoding" now correctly disables watermarks and preview LUT instead of leaving them enabled in the background.
+- Share page playback status now shows "Original Quality" when transcoding is skipped, instead of incorrectly displaying "Downscaled Preview with Watermark".
+- Uploading multiple videos or assets at once no longer fails with "Authentication failed". TUS uploads now automatically refresh expired tokens and retry.
+- Fixed Docker entrypoint not setting ownership of top-level app files (e.g. `package.json`) when remapping PUID/PGID, causing startup permission errors.
+- Keyboard shortcuts button in the comment panel no longer disappears after approving a video.
+- Redis lazy connect race condition causing 500 on first request.
+
+## [0.9.10] - 2026-03-28
+
+### Security
+- Downgraded `@tus/server` to 2.0.0 to eliminate a moderate middleware auth-bypass vulnerability (GHSA-p36q-q72m-gchr) introduced via `srvx` in 2.1.0+.
+
+### Dependencies
+- Upgraded `bcryptjs` to v3 (ESM). Updated lazy-loader in `encryption.ts` to use `await import()` instead of `require()`. Removed `@types/bcryptjs` (types now bundled).
+- Upgraded `nodemailer` to v8. Removed `@types/nodemailer` (types now bundled).
+- Upgraded `isomorphic-dompurify` to v3.
+- Upgraded `file-type` to v22.
+
+## [0.9.9] - 2026-03-26
+
+### Fixed
+- Video downloads now preserve the original file format (e.g. .mov files no longer get served as .mp4).
+- Correct Content-Type headers for all video formats (MP4, MOV, AVI, WebM, MKV) on both the share page and project page.
+
+### Changed
+- Increased maximum upload size limit from 100 GB to 1000 GB.
+- Improved Docker entrypoint to avoid unnecessary `chown` on node_modules during user setup.
+
+### Documentation
+- Added system requirements section to the Installation wiki (CPU, RAM, disk, SSD recommendation).
+- Added CPU thread allocation reference to the Configuration wiki.
+- Updated screenshots for v0.9.8.
+
+### Dependencies
+- Updated Next.js, BullMQ, ioredis, SimpleWebAuthn, file-type, isomorphic-dompurify, and eslint-config-next to latest minor versions.
+
+## [0.9.8] - 2026-03-22
+
+### Security
+- Upgraded Alpine packages (zlib, expat) to patch critical and medium CVEs.
+- Upgraded bundled npm to latest to fix 6 HIGH CVEs in minimatch and tar.
+
+### Dependencies
+- Updated `wheel` to `0.46.3`.
+- Updated `apprise` to `1.9.9`.
+- Updated `filelock` to `≥3.25.2`.
+- Updated `virtualenv` to `≥21.2.0`.
+
+## [0.9.7] - 2026-03-17
+
+### Added
+- German (Deutsch) language support — contributed by [@realjustinde](https://github.com/realjustinde).
+- Customizable watermark position, opacity, and font size — configurable per-project and as global defaults ([#47](https://github.com/DragosOnisei/FrameComment/issues/47)).
+- Skip transcoding option — serve the original file directly without watermark, resolution change, or codec conversion. Available in global defaults and per-project settings ([#48](https://github.com/DragosOnisei/FrameComment/issues/48)).
+
+### Security
+- Nonce-based Content Security Policy — replaced `unsafe-inline` in `script-src` with per-request cryptographic nonces via `proxy.ts`.
+- Moved CSP and all security headers from static `next.config.js` to dynamic `proxy.ts` for per-request nonce generation.
+- Removed `https:` wildcards from `style-src` and `font-src` CSP directives.
+- Added `https://static.cloudflareinsights.com` to `script-src` and `https://cloudflareinsights.com` to `connect-src` for Cloudflare analytics.
+- Stripped all comments and console.log statements from `sw.js` to prevent information leakage (CWE-615).
+- Replaced private IP `192.168.1.1` with RFC 5737 documentation IP `198.51.100.1` in locale placeholder strings to prevent private IP disclosure in responses.
+- Added `robots.txt` disallowing `/admin/` and `/api/` paths.
+- Removed comment edit (PATCH) endpoint — comments are now write-once (post only, admin can delete).
+- Replaced regex-based SVG sanitization with DOMPurify strict allowlist for logo uploads.
+- Store explicit `isAdmin` flag in video access tokens instead of relying on session ID prefix convention.
+- Randomized session IDs for projects with no authentication (previously embedded client IP).
+- Added Zod schema validation to user creation endpoint.
+- Atomic password reset token consumption via Redis `SETNX` (prevents race condition on concurrent requests).
+- Updated common password blocklist to NordPass Top 200 (2025).
+
+### Fixed
+- Fixed `process.stderr.write` crash in browser — logging functions now detect the runtime and fall back to `console.log`/`console.error` on the client.
+- Resolved multiple CodeQL alerts across logging, auth guards, and client-asset routes.
+- Always store OTP email in access log as audit data regardless of analytics setting.
+- Fix missing `analytics.password` locale key in project activity.
+- GDPR compliance: consent-gated analytics, cascade deletion, cleanup fixes.
+
+## [0.9.6] - 2026-03-14
+
+### Added
+- GDPR-compliant privacy disclosure banner for client share pages. Configurable toggle and custom text in Branding & Appearance settings. Visitors see a fixed bottom banner with accept/decline and expandable full disclosure text. Preference stored in localStorage (no cookies).
+- Page size selector (10/25/50/100) on the security events dashboard for adjustable pagination.
+- New customizable email template types: OTP verification, client activity summary, and admin activity summary.
+- Localized default content for the new email templates in both English and Dutch, including preview metadata and placeholder descriptions/examples.
+- Stronger server-side validation for global settings (preview resolution, SMTP port/security/from address, and app domain).
+
+### Changed
+- Tutorial video reel step now highlights the previous arrow, video selector, and next arrow individually instead of the entire reel bar.
+- Removed the "Click to browse all videos" tooltip hint from the thumbnail reel (replaced by tutorial steps).
+- Refactored summary and OTP email generation to use the centralized customizable template system.
+- Localized runtime summary wording (titles, subtitles, counters, and labels) for client/admin activity summaries.
+- Improved upload and download consistency with adaptive transfer tuning and better range-streaming behavior.
+- Simplified email template management in Settings so save/reset controls define template state more clearly.
+- Email settings updates now invalidate the cached SMTP/email settings immediately.
+- Replaced remaining direct console logging paths with centralized logging helpers across API and worker code.
+- Hardened security-settings handling with cache invalidation, stricter validation, split rate-limit handling, and HTTPS alignment behavior.
+
+### Fixed
+- Share session rate limiting no longer triggers 429 errors on video range requests (scrubbing/seeking).
+- Standardized placeholder sanitization for email rendering (escape-by-default with explicit allowlists for trusted HTML/URL placeholders).
+- Fixed email template preview rendering so placeholders, attachments, unsubscribe sections, and sample content display correctly in the editor.
+- Normalized unsubscribe placeholder support across client-facing email templates and kept backward compatibility for older custom templates.
+- Removed duplicate hardcoded default template source by deriving defaults from the localized template builder.
+- Removed unused email template helper code and resolved related typing/consistency issues.
+- Improved logging consistency in email/notification worker paths by using centralized `logError` handling.
+- Fixed client asset cleanup flow by binding client assets to sessions, filtering pending assets before deletion, and verifying asset ownership on delete operations.
+- Hardened notification retry behavior and improved auth-related logging/error paths.
+
+### Security
+- Prevented passkey user-enumeration paths and sanitized passkey credential names.
+- Applied broader API safety hardening in auth/session and notification-related flows.
+
+### Dependencies
+- Updated `file-type` to `21.3.2`.
+- Updated `flatted` to `3.4.1`.
+
+## [0.9.5] - 2026-03-11
+
+### Added
+- Due dates with calendar view, Gantt chart, and iCal feed for project deadline management.
+- Due date reminder notifications via email, push, and external providers (Apprise). Configurable reminder intervals in project settings.
+- Video version comparison mode with side-by-side and slider overlay. Synced playback controls, frame stepping, speed adjustment, and keyboard shortcuts.
+- Interactive client tutorial with Driver.js. Auto-starts on first visit, guiding clients through the review interface. Configurable per project in share settings.
+- Internationalization support (English and Dutch) with next-intl. Language toggle available on share pages. See [Translations](docs/wiki/Translations.md) to contribute or improve translations.
+- Z-A reverse alphabetical sorting option for the projects list.
+- Created date column in the project table view.
+- Apprise updated to 1.9.7.
+
+### Fixed
+- Large video processing crash caused by database connection pool exhaustion.
+- BullMQ notification repeat job history accumulating indefinitely in Redis (~1,440 keys/day with no TTL).
+- XSS vulnerability in dompurify (upgraded to 3.3.2, GHSA-v2wj-7wpq-c8vv).
+- 3 moderate Dependabot vulnerabilities.
+- Volume slider not rendering vertically on Firefox.
+
+### Security
+- Client and contact name sanitization to prevent stored XSS.
+- Input validation and SMTP credential masking improvements.
+
+### Upgrade Notes
+- **Redis cleanup (optional):** If your Redis instance has been running since before this update, you may have accumulated stale `bull:notification-processing:repeat:*` keys. To reclaim memory, run:
+  ```
+  docker exec -it <redis-container> sh -c "redis-cli -a '<password>' --no-auth-warning --scan --pattern 'bull:notification-processing:repeat:*' | xargs -n 100 redis-cli -a '<password>' --no-auth-warning DEL"
+  ```
+
+## [0.9.4] - 2026-02-27
+
+### Security
+- Fixed CodeQL sanitization alerts across API routes.
+- Added CodeQL workflow for automated security scanning on main and dev branches.
+- Secure temporary file creation with mkdtempSync.
+- Added service worker origin check.
+- Removed minimatch override and fixed audit vulnerabilities.
+- Added permissions to all GitHub Actions workflow files.
+
+## [0.9.3] - 2026-02-25
+
+### Fixed
+- Improved input validation and error handling across all API routes.
+- Improved request body parsing with consistent error responses for malformed input.
+- Improved file upload validation for comment attachments.
+- Improved redirect and URL handling in middleware.
+
+### Changed
+- "Change Password" in the admin panel is now only available for your own account. Passkey management remains available for all users.
+- Centralized IP address resolution with Cloudflare `CF-Connecting-IP` support for better accuracy behind proxies.
+- Device code endpoint returns 503 (instead of 500) when the application domain is not configured.
+- General security hardening and stability improvements.
+
+## [0.9.2] - 2026-02-23
+
+### Added
+- Freehand annotation drawing for video comments. Draw directly on the video with adjustable color, stroke width, and opacity. Annotations attach to comments with timecode ranges and display as overlays during playback with letterbox-aware coordinate mapping.
+- Hide/minimize toggle for the annotation toolbar so it doesn't obstruct drawing, especially on mobile.
+- Pending annotation preview: drawings now remain visible on the video between clicking "Done" and submitting the comment, and immediately after submission without needing a page reload.
+- Remove button for pending annotations: click the X on the "Drawing attached" indicator to discard a drawing before submitting.
+
+### Changed
+- Annotation toolbar color swatches no longer dim with the opacity setting; opacity only affects the drawn strokes.
+- Default stroke width and opacity are now set to 50% of their maximum values for a better starting point.
+- Annotation timecodes are now correctly synced to the comment timeline when completing a drawing.
+
+### Removed
+- Removed the Integrations tab and page from the admin panel. Premiere Pro and DaVinci Resolve integrations are no longer planned for v1.0. Development has been paused due to time constraints and technical difficulties with Premiere Pro. We can no longer adhere to the previously planned timeline. All pre-orders have been refunded.
+
+### Fixed
+- Fixed timecode round-trip precision for non-drop-frame (NDF) timecodes at non-integer frame rates (23.976fps, etc.). The NDF conversion now uses frame-count-based math consistent with the drop-frame path, preventing 1-frame offset on seek.
+- Fixed drop-frame (DF) timecode reconstruction at minute boundaries (e.g., `00:01:00;02` at 29.97fps). Replaced the adjustment algorithm with the standard SMPTE algorithm that correctly distinguishes actual frame counts from display frame numbers.
+- Fixed comment timestamp seek landing 1 frame early due to browser `currentTime` imprecision. Seeking now targets the center of the frame with a half-frame offset.
+- Fixed annotations at the same timecode sometimes not displaying due to a tight single-frame visibility window. Added half-frame tolerance to account for floating-point drift in timecode round-trips.
+- Fixed daily and weekly notification summaries being silently dropped due to Redis TTL expiring before the scheduled send time. Cancellation logic is now inverted: a `comment_cancelled` key is set on deletion instead of requiring a presence key that expired after 1 hour.
+- Fixed notification routing only notifying "the other side" (admin comment notified clients only, client comment notified admins only). Comments now route through both admin and client notification schedules independently, so other admins and other clients are also notified.
+- Fixed immediate email notifications being sent to the comment author. The author is now skipped by email match on immediate sends.
+- Fixed hourly notification summaries only firing if the worker check landed within the first 2 minutes of the hour. Removed the minute restriction; the `lastSent` comparison already prevents double-sends.
+- Fixed weekly notification summaries being skipped entirely if the worker missed the configured day. The worker now calculates the most recent occurrence of the configured day and catches up.
+
+## [0.9.1] - 2026-02-18
+
+### Added
+- Configurable maximum upload size in Global Settings (default: 1 GB).
+- Configurable maximum comment attachments per batch in Global Settings → Advanced Security Settings → Upload Security (1-50, default: 10). Server-side enforcement ensures the limit is respected regardless of client configuration.
+- Comment attachments now use TUS resumable uploads for reliable file transfers. Large files show real progress bars, and interrupted uploads can resume from where they left off instead of restarting.
+- Multiple file attachments can now be selected at once when adding comment attachments via a dedicated upload modal with drag & drop support, file list preview, per-file progress tracking, and a hard cap of 10 files per batch.
+- Comment attachment filenames are now included in all notification channels: email notifications (immediate and summary), Apprise, and browser push notifications. A new `{{ATTACHMENTS}}` placeholder is available in comment email templates.
+- Upload modal validates file types before uploading and shows accepted formats.
+- Attachment-only comments are now supported with auto-generated message text.
+
+### Changed
+- Increased maximum attachments per comment from 5 to 10.
+
+- Updated Advanced Security Settings layout for clearer organization.
+- Improved download/session security behavior.
+- Tightened default security headers.
+
+### Fixed
+- Fixed admin password change failing with 404 by correcting API endpoint and payload key mismatch ([#36](https://github.com/DragosOnisei/FrameComment/issues/36)) - thanks [@Talla](https://github.com/Talla)
+- Improved upload and download reliability.
+- Improved upload error messages shown in the UI.
+- Reduced exposure of internal server error details.
+
+### Security
+- Enforced share-token permission scopes for privileged routes (`comment`, `download`, `approve`) and blocked guest tokens from restricted actions.
+- Added strict comment ownership validation to ensure `videoId` belongs to the provided `projectId` before comment creation.
+- Hardened password reset link generation to use configured `appDomain` instead of request `Host` headers (prevents host-header poisoning).
+
+## [0.9.0] - 2026-02-07
+
+### Added
+- **Progressive Web App (PWA)**: FrameComment can now be installed as an app on desktop and mobile devices
+  - Add to home screen support for iOS and Android
+  - Full-screen app experience without browser UI
+- **Browser Push Notifications**: Real-time push notifications for admin users
+  - Unified event types shared with Apprise: Share Access, Admin Access, Client Comment, Video Approval, Security Alert
+  - Multi-device support with per-device preferences
+  - Test notification to verify setup
+  - Zero configuration required
+- **Client Directory**: Centralized management of client companies and contacts
+  - New "Clients" section in admin navigation
+  - Searchable company and contact autocomplete when creating projects or adding recipients
+  - Automatic sync: new recipients and company names are added to the directory automatically
+  - "Sync Existing" button for bulk import from existing projects
+- **Customizable Email Templates**: Full email template customization in Settings
+  - 8 template types covering all notification emails
+  - Placeholder system with template-specific variables
+  - Logo placeholder for inline logo placement
+  - Live email preview with sample data
+  - Button syntax support and CSS class shortcuts for styling
+  - Reset to default with one click
+- **Email Header Style Options**: Choose between "Logo + Company Name", "Logo Only", "Name Only", or "None"
+- **Custom Branding Logo**: Upload your own logo in Branding & Appearance, shown across all pages and emails
+- **Clickable Timecode Pills in Emails**: Comment notification emails now include timecode badges that link directly to the exact moment in the video
+- **Project Description in Emails**: Project descriptions are now included in email notifications
+
+### Changed
+- **New FrameComment Logo**: Redesigned logo and branding, dynamically colored with your chosen accent color
+- **"Videos" renamed to "Deliverables"**: Updated terminology across the share page and emails
+- **Admin UI Overhaul**: Standardized all admin page headers, modals, and buttons for a consistent experience
+  - User management and project creation now open as modals instead of separate pages
+  - Mobile-optimized modals with proper viewport handling
+- **Notification Schedule Flush**: Changing a notification schedule now immediately sends all pending queued notifications so nothing is lost
+
+### Fixed
+- Guest thumbnails now display correctly on public share pages
+- Approval emails now show the correct video name
+- Email timecodes now match the exact frame position shown on the share page
+- Rate limit clearing now properly unblocks users
+
+## [0.8.9] - 2026-02-01
+
+### Added
+- **Centralized CPU allocation** (`src/lib/cpu-config.ts`) for video processing
+  - Coordinates worker concurrency and FFmpeg threads to prevent CPU overload
+  - Conservative allocation targeting 30-50% thread utilization
+  - Leaves headroom for system and host processes
+  - Optional `CPU_THREADS` environment variable for Docker resource limit overrides
+- **Appearance settings** in Global Settings
+  - Default theme selection (Auto/Light/Dark)
+  - 10 accent color presets (Blue, Purple, Green, Orange, Red, Pink, Teal, Amber, Stone, Gold)
+- **Dynamic email branding** - email templates now use admin-configured accent color
+- **Improved approval emails** - now shows only the specific video approved instead of listing all approved videos
+
+### Fixed
+- Video player now correctly displays all aspect ratios (1:1, 4:3, 4:5, 9:16) without stretching
+- Preview transcoding preserves original aspect ratio instead of forcing 16:9
+- Rounded corners display consistently across all screen sizes
+- Project info positioned correctly below video player
+- Thumbnail reel hint now shows as tooltip overlay without resizing the reel bar
+- File name truncation in upload modal prevents layout issues
+- **Video processing no longer maxes out CPU** - fixed thread allocation that was causing 100% CPU usage
+
+### Changed
+- Video player uses letterbox approach with theme-aware blurred background
+- Responsive breakpoint changed to xl (1280px) for better vertical video support
+- Thumbnail reel hint only shows once per session
+- FFmpeg thread allocation now coordinated with worker concurrency
+- Worker logs now use correct terminology (threads vs cores)
+- **Settings reorganized**: Combined "Appearance", "Company Branding", and "Domain Configuration" into single "Branding & Appearance" section
+
+### Migration Note
+Existing 1:1 and 4:3 preview videos need reprocessing to fix stretched aspect ratios.
+
+## [0.8.8] - 2026-01-31
+
+### Changed
+- **Analytics page**: Replaced 4 stat cards with compact horizontal stats bar; added table header for Project Activity (Type, Details, Date); dynamic page size fills screen height
+- **Security Events page**: Added table header with aligned columns (Severity, Event Type, IP Address, Date, Block); expandable rows with single chevron; dynamic page size fills screen height
+- **Projects list**: Replaced list view with table view (Name, Client, Status, Videos, Comments, Updated columns)
+- **Admin share page**: Now matches client share page behavior - grid view first for all projects including single-video
+- **Video player**: Improved sizing and styling for all aspect ratios including vertical videos
+
+### Fixed
+- **Thumbnail generation**: Preserves original video aspect ratio (9:16, 4:3, 1:1, etc.) instead of forcing 16:9 with black padding
+
+### Migration Note
+Existing thumbnails with black bars need reprocessing. Go to Project Settings, change Preview Resolution, save without reprocessing, change back, then save with reprocessing.
+
+## [0.8.7] - 2026-01-31
+
+### Changed
+- Share page redesign with thumbnail grid view and project info header
+- Thumbnail reel navigation for browsing between videos
+- Video upload modal with TUS resumable upload support
+- Collapsible asset sections in video version cards
+- Analytics: compact expandable video stats, paginated activity (20 per page)
+- Security events reduced to 20 items per page
+- Video player controls auto-hide after 2 seconds
+
+## [0.8.6] - 2026-01-27
+
+### Fixed
+- Video thumbnails not displaying on share pages (both auto-generated and custom asset thumbnails)
+
+## [0.8.5] - 2026-01-27
+
+### Added
+- **Device code authentication (RFC 8628)**: OAuth 2.0 device authorization flow for workflow integrations (DaVinci Resolve and Premiere Pro)
+  - Device code endpoint for initiating authentication
+  - User authorization page for approving device requests
+  - Token endpoint for device polling
+  - Security event logging for device code authentication
+- **Per-project playback setting**: Configure approved video playback behavior per project
+
+### Fixed
+- Approved videos no longer incorrectly show 'with Watermark' in status
+- Client share page now shows client company and name instead of instance company name
+- Page now reloads after video approval to properly update status
+- Restored approval API call in client share page
+
+### Changed
+- Added ON DELETE CASCADE to Comment-Video relation for proper cleanup
+
+## [0.8.4] - 2026-01-20
+
+### Added
+- **Password reset flow**: Secure self-service password recovery for admin users
+  - Forgot password page with email/username lookup
+  - Encrypted, time-limited reset tokens (30 minutes)
+  - Single-use token enforcement via Redis
+  - Rate limiting (3 requests/15min for request, 5/15min for reset)
+  - Email enumeration prevention (always returns success)
+  - Automatic session invalidation after password change
+  - Comprehensive security event logging
+- **Passkey enforcement**: When passkeys are configured, password login is blocked
+  - Security event logged for blocked attempts
+- **Video player rewrite**: New custom video controls with enhanced functionality
+  - Timeline markers showing comment positions on the scrubber
+  - Improved playback controls with better mobile support
+  - Frame-accurate seeking with timecode display
+  - Comments toggle button to show/hide markers
+- **Project info panel**: Dedicated component for project metadata display
+  - Video technical details (resolution, codec, FPS, duration)
+  - Quick actions for common operations
+  - Keyboard shortcuts dialog
+- **Ko-fi support widget**: Optional donation widget for community support
+- **Recipient session management**: Session invalidation on recipient changes
+  - Sessions invalidated when recipient email changes
+  - Sessions invalidated when recipient is deleted
+
+### Changed
+- **Admin passkey management**: Admins can now manage other users' passkeys
+  - List passkeys for any user (for support purposes)
+  - Delete passkeys with proper audit logging
+  - Session invalidation when passkeys are deleted
+- **Share token includes recipient ID**: OTP-authenticated users tracked by recipient
+- **Validation schema centralized**: Single source of truth in `@/lib/validation.ts`
+  - All project update fields use `safeStringSchema` for XSS prevention
+  - Slug validation enforces lowercase alphanumeric with hyphens
+- **Comment section improvements**: Better thread display and interaction
+- **InitialsAvatar enhancements**: Improved color generation and display
+- **FilterDropdown refinements**: Better UX for status filtering
+
+### Fixed
+- **Database migration**: Aims to resolve migration issue reported in 0.8.3
+- Copy confirmation icon and text in ProjectActions component
+- Marker spacing now dynamic based on video length
+- Timecode validation logic improvements
+
+### Security
+- Rate limiting added to recipient PATCH/DELETE endpoints
+- Shell script permissions fixed (docker-entrypoint.sh, quadlet/*.sh)
+- Session invalidation on passkey deletion
+- Better JWT secret validation error messages
+- Centralized validation prevents schema drift
+
+### Infrastructure
+- **Redis updated to version 8-alpine**: Backward compatible upgrade for improved performance and features
+  - Applies to new installations only
+  - Existing installations continue to work without changes
+  - Fully backward compatible, seamless upgrade
+- **PostgreSQL updated to 18-alpine**: Latest PostgreSQL version for new installations
+  - Uses major version tag (18-alpine) for automatic patch updates
+  - Applies to new installations only
+  - Existing installations continue to work without changes
+  - Optional upgrade for existing users (requires manual backup and migration according to your infrastructure practices)
+  - Note: TrueNAS catalog version separately managed (currently uses PostgreSQL 17.7)
+
+## [0.8.3] - 2026-01-18
+
+### Added
+- **Push notifications via Apprise**: Send notifications to 100+ services (Slack, Discord, Telegram, Pushover, etc.)
+  - Configure multiple notification channels in Settings > Integrations
+  - Trigger notifications on admin login, OTP requests, project approvals, and new comments
+  - Test notifications before saving configuration
+  - Notification logs with delivery status tracking
+  - Python/Apprise runs in isolated venv within the container
+- **Email unsubscribe**: Recipients can opt out of email notifications
+  - One-click unsubscribe links in all email templates
+  - Dedicated unsubscribe page with confirmation
+  - Per-recipient unsubscribe tracking in database
+  - Unified email templates with consistent branding
+- **Project archiving**: Archive projects to hide them from active views
+  - New ARCHIVED status blocks share page access
+  - Archived projects can be restored anytime
+  - Filter dropdown to show/hide archived projects
+- **Client approval control**: Per-project toggle to restrict video approval to admins only
+  - When disabled, clients can comment and download but cannot approve
+  - Backend enforces restriction (not just UI)
+- **Custom 404 pages**: Branded error pages for root, admin, and share routes
+- **Filter system**: Reusable FilterDropdown component for status filtering across pages
+- **Configurable admin session timeout**: Set inactivity timeout in Settings (default 15 minutes)
+- **Comment timestamp display setting**: Choose between timecode (HH:MM:SS:FF) or simple time (MM:SS) per project
+- **Header about dialog**: Quick access to version info and website link (replaces footer)
+
+### Changed
+- **Analytics moved into projects**: Analytics now accessible at `/projects/[id]/analytics` with overview on dashboard
+- **Project settings reorganized**:
+  - Revision tracking merged into Project Details section
+  - New section order: Project Details → Client Information → Client Share Page → Video Processing → Security
+  - Client Share Page section consolidates approval, downloads, and feedback options
+- **User management refactored**: Password and passkey management now use modal dialogs
+- **Settings UI**: All sections use CollapsibleSection component for consistency
+- **Integrations page**: Icon-only display for cleaner layout
+- **Button styling standardized**: Consistent sizes and labels across all admin pages
+- **Comment UI refined**: Theme tokens, improved bubble styling, thread layout improvements
+- **Tagline updated**: Focus on "deliverables" messaging
+
+### Fixed
+- Share authentication hardened with proper 401 handling for expired/invalid tokens
+- Dialog close button highlight removed for cleaner appearance
+- Session timeout wording aligned across UI
+
+### Security
+- **Base image updated**: node:24.13.0-alpine3.23 (latest Node.js 24 LTS)
+- No vulnerabilities in project dependencies (npm audit clean)
+
+## [0.8.2] - 2025-12-24
+
+### Fixed
+- Share pages: video sidebar now fills the full visible height consistently (including admin share view)
+
+## [0.8.1] - 2025-12-24
+
+### Changed
+- Admin UI spacing tightened and made consistent across pages; grid view is now the default (with improved mobile layouts)
+- Analytics + security dashboards condensed overview metrics into single cards and reduced filter UI height
+- Share pages: removed footer, moved shortcuts button below the comment field, corrected shortcuts list, and added Ctrl+/ to reset speed to 1x
+
+## [0.8.0] - 2025-12-21
+
+### Added
+- Multiple asset upload queue with concurrent upload support
+  - Upload multiple assets at once with progress tracking
+  - Support for mixed file types (video/image/subtitle) in single selection
+  - Auto-detected categories for uploaded files
+  - Improved upload queue UI with auto-start functionality
+- Analytics improvements for share page tracking
+  - Track public share pages with authMode NONE
+  - Asset download tracking (individual assets and ZIP downloads)
+  - Unified activity feed showing authentication and download events
+  - Changed "Accesses" to "Visits" and "Unique Users" to "Unique Visitors"
+  - Expandable activity entries with click-to-expand details
+  - Display asset filenames in download analytics
+- Expanded keyboard shortcuts for video playback with speed control and frame stepping
+  - Ctrl+, / Ctrl+. to decrease/increase playback speed by 0.25x (range: 0.25x - 2.0x)
+  - Ctrl+J / Ctrl+L to step backward/forward one frame when paused (uses actual video FPS)
+  - Speed indicator overlay shows current playback rate when different from 1.0x
+  - Shortcuts help button with HelpCircle icon displays all available keyboard shortcuts
+- Allow image assets to be set as project thumbnails
+
+### Changed
+- Mobile video dropdown now starts collapsed by default and auto-collapses after video selection
+  - Added contextual labels: "Tap to select video" when collapsed, "Currently viewing" when expanded
+  - Improves mobile UX by prioritizing video player visibility
+- Share page authentication UI clarity improvements
+  - Added "This authentication is for project recipients only" message
+  - Guest button styled with orange (warning) color to stand out
+  - Separator text changed from "Or" to "Not a recipient?" for better context
+  - Password/OTP fields hidden when OTP code is being entered (BOTH mode)
+  - Changed "account" to "recipient" in OTP verification message
+- Default sorting set to alphabetical across all pages (projects, videos, versions)
+- Replace chevron emoji with Lucide icons throughout UI
+- Improved comment reply UI with extended bubble design
+- Analytics UI revamped with unified activity feed
+  - Removed Access Methods card (redundant with activity feed)
+  - Renamed "Recent Access Activity" to "Project Activity"
+  - Shows ALL activity with no pagination limit
+  - Download events show type (VIDEO/ASSET/ZIP) with appropriate icons
+  - Simplified color scheme: blue for visits, green for downloads
+  - Improved expanded details layout with clear labels
+
+### Fixed
+- TUS upload resume handling and fingerprint detection
+  - Fixed fingerprint format to match library exactly
+  - Use absolute URL for TUS endpoint to fix fingerprint matching
+  - Prevent TUS from resuming uploads to wrong video/project
+- Upload queue auto-start bug fixed
+- Double tracking for NONE projects with guest mode
+  - Only track as NONE when guest mode is disabled
+  - When guest mode enabled, let guest endpoint track as GUEST
+- TypeScript error: Added NONE to access method types
+
+### Security
+- Updated Next.js to fix security vulnerabilities
+- Session invalidation now triggered when security settings change
+  - Password changes invalidate all project sessions
+  - Auth mode changes (NONE/PASSWORD/OTP/BOTH) invalidate all project sessions
+  - Guest mode changes invalidate all project sessions
+  - Guest latest-only restriction changes invalidate all project sessions
+  - Uses Redis-based session revocation with 7-day TTL
+  - Deterministic sessionIds for NONE auth mode based on IP address
+  - Invalid tokens handled appropriately based on auth mode (reject for PASSWORD/OTP/BOTH, allow for NONE)
+  - Optimized database queries with single fetch for all security checks
+  - Comprehensive logging shows all changed security fields
+
+## [0.7.0] - 2025-12-07
+
+### Changed
+- IP and domain blocklists moved into Security Settings with dedicated management UI, inline add/remove, and loading states; Security Events page now focuses on event history and rate limits only
+- Rate limit controls refreshed automatically on load and lay out responsively alongside filters and actions
+
+### Fixed
+- Admin project view now updates comments immediately when new comments are posted, avoiding stale threads until the next full refresh
+- Hotlink blocklist forms stack cleanly on mobile and include clearer lock expiration messaging in rate limit details
+
+## [0.6.9] - 2025-12-07
+
+### Fixed
+- OTP-only projects now correctly display name selection dropdown in comment section
+- Recipients API now returns data for all authenticated modes (PASSWORD, OTP, BOTH, NONE), not just password-protected projects
+- Security dashboard blocklist forms no longer overflow on mobile devices
+- Blocklist item text (IP addresses and domains) now wraps properly on small screens
+
+### Changed
+- Removed admin session detection from public share page for cleaner code separation
+- Public share page now treats all users (including admins) as clients - admins should use dedicated admin share page
+- Made `adminUser` parameter optional in comment management hook for better backwards compatibility
+- Improved responsive layout for security blocklist UI (stacks vertically on mobile, horizontal on desktop)
+
+### Technical
+- Updated share API route to include recipients for all non-guest authenticated users
+- Added `flex-col sm:flex-row` responsive classes to blocklist forms
+- Added `min-w-0`, `break-all`, and `break-words` classes to prevent text overflow in blocklist items
+- Made `adminUser` optional with default `null` value in `useCommentManagement` hook
+
+## [0.6.8] - 2025-12-06
+
+### Fixed
+- Public share page comment system: real-time updates now work without manual refresh
+- Comment name selection: custom names and recipient selections now persist across comment submissions via sessionStorage
+- Comment display: removed version label (v1, v2, etc.) from comment header while preserving version filtering logic
+
+## [0.6.7] - 2025-12-06
+
+### Added
+- Security dashboard overhaul with event tracking, rate-limit visibility/unblock, and IP/domain blocklists (UI + APIs). Migration: `20251206000000_add_ip_domain_blocklists`.
+- Share auth logging: successful password and guest access now generate security events.
+- Keyboard shortcut: Ctrl+Space toggles play/pause even while typing comments.
+- FPS now shown in admin video metadata; video list displays custom version labels when available.
+
+### Changed
+- Standardized security event labels across admin/share auth (password, OTP, guest, passkey); clear existing security events after upgrading to avoid mixed legacy labels in the dashboard.
+- Timecode: full drop-frame support (29.97/59.94) with `HH:MM:SS;FF` parsing/formatting; format hints repositioned and aligned with timecode display; DF/NDF badge removed in favor of contextual hint; format hint sits above the timecode.
+- Comment UX: auto-pause video when typing comments; added format hint sizing tweaks; version label shown instead of raw version number in lists.
+- Admin share view: fixed optimistic comment persistence when switching videos.
+
+### Fixed
+- Comment system: improved optimistic updates/deduping, prevent anonymous comments when a recipient name is required, clear optimistic comments on server responses, and cancel pending notifications on deletion to avoid duplicate emails.
+
+### Security
+- Consistent naming for admin/share auth events (password/OTP/guest/passkey); blocklist APIs cached with Redis and invalidated on updates.
+
+## [0.6.6] - 2025-12-05
+
+### Fixed
+- **CRITICAL**: Re-fixed file-type ESM import issue in Docker worker
+  - Static imports were accidentally reintroduced, breaking the worker again
+  - Restored dynamic imports (`await import('file-type')`) for ESM compatibility
+  - Static imports cause ERR_PACKAGE_PATH_NOT_EXPORTED error with tsx in Docker
+  - Affects asset-processor.ts and video-processor-helpers.ts
+  - Worker now starts correctly in Docker environments
+
+## [0.6.5] - 2025-12-05
+
+### Fixed
+- **CRITICAL**: Fixed file-type ESM import issue in Docker worker (initial fix)
+  - Changed to dynamic imports (`await import('file-type')`) for ESM compatibility
+  - Note: This fix was accidentally reverted in working tree, necessitating v0.6.6
+
+## [0.6.4] - 2025-12-05
+
+### Added
+- **Share Page Video Sorting**: Sort toggle button for video sidebar (upload date ↔ alphabetical)
+  - Default to upload date (newest first)
+  - Sort applied within "For Review" and "Approved" sections
+  - Works on both public and admin share views
+  - Sort button only shows when multiple videos exist
+
+### Fixed
+- **Timecode Conversion**: Fix timecode conversion for non-even FPS values (23.98, 29.97)
+- **Automatic State Updates**: Approval changes now reflect immediately on share page without page refresh
+  - Clear token cache when refreshing project data after approval
+  - Video tokens are re-fetched with updated approval status
+- **Project Password Handling**: Simplified project password handling in settings
+  - Load decrypted password directly for admin users
+  - Password field now works like any other setting field
+  - Fixed issue where editing other settings required password to be revealed first
+
+### Changed
+- Updated Docker base image to node:24.11.1-alpine3.23
+
+### Removed
+- Unused `/api/projects/[id]/password` endpoint (functionality merged into main project API)
+
+## [0.6.3] - 2025-12-03
+
+### Added
+- **Admin Integrations Page**: New dedicated page announcing upcoming professional NLE integrations
+  - DaVinci Resolve Studio and Adobe Premiere Pro integrations coming beginning of 2026
+  - Direct timeline comment import, project management, and render/upload workflows
+  - Integrations offered as one-time purchase to support continued development
+  - Web app remains free and open-source
+- **Enhanced Asset Support**: Expanded project asset validation to support DaVinci Resolve formats
+  - Added support for .drp (DaVinci Resolve Project), .drt (DaVinci Resolve Template), and .dra (DaVinci Resolve Archive) files
+  - Updated file validation logic to recognize professional NLE project formats
+- **Timecode Format Migration**: Migrated comment timestamps to standardized timecode format (HH:MM:SS or MM:SS)
+  - Introduced comprehensive timecode utility library for parsing and formatting
+  - Updated comment display, input, and email notifications to use timecode format
+  - Improved readability and professional appearance across all comment interfaces
+
+### Changed
+- Navigation updated to include Integrations link in admin header
+- Comment sanitization enhanced to preserve timecode format in notifications
+- Email templates updated to display timestamps in human-readable timecode format
+
+## [0.6.2] - 2025-12-01
+
+### Fixed
+- Stop video player resets when switching videos and align the admin share layout with the public share view.
+- Bind fallback share tokens to the correct session and reduce token churn on share pages to avoid unexpected access denials.
+- Preserve custom thumbnail assets during reprocess and when deleting older versions so copied thumbnails stay valid; keep shared thumbnail files intact when deleting a video if other assets or videos still reference the same storage path.
+- Allow admins to download original files via the content endpoint even before approval; admin panel downloads avoid popups and stay responsive.
+- Exclude admin activity from analytics and tag admin download sessions to keep metrics clean.
+
+### Changed
+- Stream/download pipeline tuned for reliability and speed: streaming chunks capped at 4MB, download chunks capped at 50MB, full-file downloads when no Range header is sent, and downloads trigger without opening new tabs.
+- Admin/download UX and performance improvements: faster downloads, responsive UI, safer chunking, and admin download tagging.
+- Token revocation TTL handling tightened to avoid stale tokens.
+
+## [0.5.5] - 2025-11-22
+
+### Added
+- Consistent footer branding across application
+  - Admin layout footer with "Powered by FrameComment" branding
+  - Mobile footer on share page with version display
+  - Video sidebar footer for consistent branding
+  - Standardized version display format across all footers
+
+### Security
+- Fix timing attack in login by adding dummy bcrypt for non-existent users
+- Implement refresh token rotation to prevent replay attacks
+- Add protocol-aware origin validation respecting x-forwarded headers
+
+## [0.5.4] - 2025-11-22
+
+### Refactored
+- Email system with unified template engine
+  - Unified email template engine for easier maintenance
+  - Consolidated all email types into single reusable component
+  - Maintained clean, professional design aesthetic
+  - Reduced codebase complexity (135 fewer lines)
+
+## [0.5.3] - 2025-11-21
+
+### Fixed
+- Custom thumbnail fallback: when admin deletes an asset being used as a video thumbnail, the system now automatically reverts to the worker-generated thumbnail instead of leaving the video without a thumbnail
+
+### Improved
+- Share page performance: removed unnecessary 30-second polling interval that was repeatedly fetching project data
+- Content Security Policy now conditionally includes upgrade-insecure-requests only when HTTPS is enabled (fixes local development)
+- Thumbnail cache control headers now prevent caching (no-store) for immediate updates when thumbnails change
+
+### Security
+- Updated glob dependency from 11.0.4 to 11.1.0
+- Asset deletion now uses reference counting to prevent deletion of files shared between video versions
+
+## [0.5.2] - 2025-11-21
+
+### Added
+- Real-time password validation UI with inline feedback
+  - Shows requirements as you type (8+ chars, one letter, one number)
+  - Green checkmarks for met requirements, grey for pending
+  - Applied to both new project creation and settings pages
+
+### Security
+- Rate limiting on auth refresh endpoint (8 requests/minute per token)
+- Rate limiting across all API routes
+- Zod schema validation for request payloads
+- Standardized authentication using requireApiAdmin helper
+- Session timeout monitoring improvements
+
+### Fixed
+- Video player version switching now loads videos and thumbnails correctly
+  - Separated URL state update from reload logic
+  - Added key prop to force proper video element remount
+- Thumbnail selection indicator shows green for active, grey for inactive
+- Password generator guarantees letter + number requirements
+- Thumbnail category preserved when copying assets between versions
+- Share password validation with proper Zod schema and error messages
+
+### Removed
+- Unused `/api/cron/cleanup-uploads` endpoint
+
+## [0.5.1] - 2025-11-20
+
+### Fixed
+- Password visibility in project settings (broken after password API refactor)
+- Password field now loads on-demand when eye icon clicked
+- Uses secure /api/projects/[id]/password endpoint with rate limiting
+
+### Improved
+- Password field UI text clarity
+- Placeholder changed to "Enter password for share page"
+- Help text updated to "Clients will need this password to access"
+
+## [0.5.0] - 2025-11-20
+
+### Why 0.5.0?
+Major codebase refactoring with security hardening and architecture improvements. Total changes: 2,350 lines added, 1,353 lines removed across 41 files.
+
+### Added
+- Project password API endpoint for authenticated admins
+- Asset copy/move between video versions with batch operations
+- Asset thumbnail management (set any image as video thumbnail)
+- Comprehensive asset validation with category-based rules
+- Separate asset processor worker with magic byte validation
+
+### Fixed
+- Asset worker integration (assets now properly queued for processing)
+- File validation rejecting valid uploads (relaxed MIME validation at API level)
+- Missing security-events module import
+- TypeScript null to undefined type conversions
+
+### Refactored
+- **Video Processor**: 406 → 96 lines (76% reduction)
+  - Extracted 8 helper functions to video-processor-helpers.ts
+  - Eliminated magic numbers with named constants
+  - Reduced nesting depth from 5 to 2 levels
+- **Comments API**: 340 → 189 lines (44% reduction)
+  - Extracted 5 helper functions to comment-helpers.ts
+  - Separated validation, sanitization, and notification logic
+- Share/Content API consolidated with reduced duplication
+
+### Security
+- Enhanced FFmpeg watermark validation (strict whitelist, 100 char limit)
+- Two-layer asset validation (API extension check + worker magic bytes)
+- Defense-in-depth: lenient API validation + strict worker validation
+
+### Improved
+- Worker architecture (excluded from Next.js build, cleaner separation)
+- Asset management UX (redesigned components with better feedback)
+- Centralized project access control logic
+
+## [0.4.0] - 2025-11-19
+
+### Why 0.4.0?
+Previous releases (0.3.5-0.3.7) added major features using patch increments. Now that features are complete and stable, bumping to 0.4.0 reflects the accumulated feature additions. This release focuses on bug fixes and quality-of-life improvements to make the feature-complete 0.3.7 release production-ready.
+
+### Fixed
+- Guest mode settings now persist correctly when disabled
+- Guest mode properly enforces restricted access when enabled
+- Authentication logic refactored for reliability and maintainability
+- Global watermark settings now inherited by new projects
+- Password validation for PASSWORD/BOTH authentication modes
+- Mobile UI layout issues with video titles and action buttons
+- Video metadata display on mobile (duration/resolution/size)
+- Version label truncation on long names
+
+### Improved
+- Back buttons now left-aligned and more compact
+- Video list layout consistent across desktop and mobile
+- Info button hidden for guests
+- Security recommendation when disabling guest mode
+- Cleaner authentication flow following best practices
+
+## [0.3.7] - 2025-11-18
+
+### Added
+- **Video Asset Management System**
+  - Upload/download functionality for approved videos
+  - Asset management UI (upload modal, list view, download modal)
+  - Per-project allowAssetDownload setting
+  - Asset download restricted to approved videos only
+  - ZIP download support for multiple assets
+- **Guest Mode**
+  - Guest access for share pages with view-only permissions
+  - Guest entry button on authentication screen
+  - Auto-entry as guest when authMode is NONE and guestMode enabled
+  - Guest sessions persist across page refreshes
+  - Guest latest-only restriction (toggle to limit guests to latest video version)
+  - Database-level filtering for guest security
+  - Guest info hidden in API responses
+  - Rate limiting on guest endpoint (20 requests/minute)
+- **Global Video Processing Settings**
+  - Default watermark enabled toggle in global settings
+  - Watermark text input shows only when watermarks enabled
+  - Settings persist and apply to new projects
+- **Authentication Mode Support**
+  - Per-project authMode setting (PASSWORD/PASSKEY/BOTH)
+  - Flexible authentication options per project
+
+### Improved
+- Mobile VideoList layout now matches desktop appearance
+- Share page authentication and access control enhanced
+- Admin UI components refactored for consistency
+- Redis handling improved with static imports (no dynamic imports)
+- API response sanitization for guest sessions
+
+### Fixed
+- Redis sismember return type handling (returns number, not boolean)
+
+### Security
+- Guest sessions marked in Redis with guest_session key
+
+### Database Migration
+- Added guestMode and guestLatestOnly fields to Project schema
+- Added authMode field to Project schema
+- Added allowAssetDownload field to Project schema
+- Added defaultWatermarkEnabled to Settings table
+- Created VideoAsset model for asset management
+
+## [0.3.6] - 2025-11-17
+
+### Added
+- **Health Check Endpoint** (`/api/health`)
+  - Public endpoint for Docker health checks and monitoring systems
+  - Tests database and Redis connectivity
+  - Returns minimal information (no version or config exposure)
+  - No authentication required for health monitoring
+  - Replaces deprecated `/api/settings/public` endpoint
+- **Database Performance Improvements**
+  - Added indexes on Video table for status queries
+  - Migration: `20251117000000_add_video_status_indexes`
+
+### Improved
+- **Security Events UI Consistency**
+  - Replaced HTML disclosure triangle with Lucide ChevronRight icon
+  - Standardized font sizes across all admin sections
+  - Consistent text sizing with Analytics and Projects pages
+  - Better mobile experience with proper SVG icons
+  - Smooth rotation animation on details expand/collapse
+- **Admin Interface Typography**
+  - Unified font sizes: `text-sm` for titles and descriptions
+  - `text-xs` for timestamps and labels (consistent with Analytics)
+  - Improved readability across desktop and mobile
+
+### Removed
+- Deprecated `/api/settings/public` endpoint (replaced by `/api/health`)
+
+## [0.3.5] - 2025-11-16
+
+### Security
+- Upgraded esbuild from 0.25.12 to 0.27.0 via npm overrides
+- Updated Docker base image to node:25.2.0-alpine3.22
+
+### Improved
+- UI consistency across admin interface
+  - Standardized form styling and spacing
+  - Improved visual consistency in user management
+  - Better alignment of UI elements
+
+## [0.3.4] - 2025-11-16
+
+### Added
+- **OTP (One-Time Password) Authentication** - Alternative authentication method for share links
+  - Modern 6-box OTP input component with auto-focus and keyboard navigation
+  - Automatic paste support for codes from email or SMS
+  - Configurable via per-project authMode setting (password, OTP, or both)
+  - Requires SMTP configuration and at least one recipient
+  - Integrates with existing rate limiting and security event logging
+  - OTP codes are 6-digit, expire after 10 minutes, and are one-time use only
+  - Stored securely in Redis with automatic cleanup
+  - Email delivery with professional template including OTP code
+- Centralized Redis connection management (`src/lib/redis.ts`)
+  - Singleton pattern for consistent connection handling
+  - `getRedis()` and `getRedisConnection()` functions
+  - Replaces 6 duplicate Redis connection implementations
+- Centralized comment sanitization (`src/lib/comment-sanitization.ts`)
+  - `sanitizeComment()` function for consistent PII removal
+  - Used across all comment API routes
+  - Prevents email/name exposure to non-admins
+- OTPInput component for user-friendly code entry
+  - Individual boxes for each digit with auto-advance
+  - Paste support that distributes digits across boxes
+  - Backspace support with smart cursor movement
+  - Arrow key navigation between boxes
+
+### Changed
+- Authentication session storage now supports multiple projects simultaneously
+  - Changed from single project ID to Redis SET for auth sessions
+  - Changed from single project ID to Redis SET for video access sessions
+  - Add projects to session SET instead of overwriting single value
+  - Refresh TTL on each project access to maintain active sessions
+  - Update validation to use SISMEMBER instead of exact match
+  - Each project still requires authentication before being added to session
+- Comment section height increased from 50vh to 75vh (150% larger display area)
+- Authentication Attempts setting now applies to both password and OTP verification
+- Rate limiting now reads max attempts from Settings instead of hardcoded values
+- `verifyProjectAccess()` now supports authMode parameter for flexible authentication
+- Company Name validation now properly allows empty strings
+  - Changed minimum length from 1 to 0 characters
+  - Fixes validation mismatch where UI shows field as optional but validation required it
+  - Updated in createProjectSchema, updateProjectSchema, and updateSettingsSchema
+
+### Fixed
+- **CRITICAL**: Multi-project session conflicts resolved
+  - Opening a second project no longer breaks access to the first project
+  - Video playback and comments work correctly across all authenticated projects
+  - Session state properly maintained when switching between projects
+- Comment section auto-scroll behavior improved
+  - Now works correctly for both admin and client users
+  - Fixed page-level scroll issue by using scrollTop instead of scrollIntoView
+  - Auto-scroll only affects comments container, not entire page
+  - Prevents page jumping when switching video versions or when new comments appear
+- Recipient change callback keeps project settings page in sync with recipient updates
+
+### Improved
+- Code maintainability with major refactoring following DRY principles
+  - Removed 241 lines of dead/duplicate code
+  - Centralized Redis connection management
+  - Consolidated duplicate comment sanitization logic
+  - Flattened deep nesting in getPasskeyConfigStatus()
+- Authentication UI with more concise and helpful messages
+- Security event logging now tracks OTP attempts and rate limiting
+
+### Removed
+- Duplicate Redis connection implementations across 6 files
+- Duplicate sanitizeComment() functions from 3 API route files
+- `src/lib/api-responses.ts` (85 lines, unused)
+- `src/lib/error-handler.ts` (156 lines, unused)
+
+### Database Migration
+- Added authMode field to Project table (password, OTP, or both)
+
+## [0.3.3] - 2025-11-15
+
+### Added
+- **PassKey/WebAuthn Authentication** - Modern passwordless login for admin accounts
+  - Usernameless authentication support (no email required at login)
+  - Multi-device support with auto-generated device names (iPhone, Mac, Windows PC, etc.)
+  - Per-user PassKey management in admin user settings
+  - Built with SimpleWebAuthn following official security patterns
+  - Challenge stored in Redis with 5-minute TTL and one-time use
+  - Replay attack prevention via signature counter tracking
+  - Comprehensive security event logging for all PassKey operations
+  - Rate limiting on authentication endpoints
+  - Strict domain validation (production requires HTTPS, localhost allows HTTP)
+  - Configuration via Settings.appDomain (no environment variables needed)
+
+### Changed
+- Restore SMTP password reveal functionality (reverted to v0.3.0 behavior)
+  - Admin-authenticated GET /api/settings now returns decrypted SMTP password
+  - Eye icon in password field works normally to show/hide actual password
+  - Removed unnecessary placeholder logic for cleaner implementation
+- Smart password update logic prevents unnecessary database writes
+  - SMTP password only updates if value actually changes
+  - Project share password only updates if value actually changes
+  - Prevents unnecessary session invalidations when password unchanged
+
+### Fixed
+- SMTP password no longer lost when saving other settings
+- Project password updates now properly compare with current value before updating
+- Session invalidation only triggered when password actually changes
+
+### Security
+- PassKey authentication endpoints protected with rate limiting
+- Generic error messages prevent information disclosure
+  - Client sees: "PassKey authentication failed. Please try again."
+  - Server logs detailed error for debugging
+- All PassKey operations require admin authentication (except login)
+- Session invalidation on password change prevents race conditions
+
+### Database Migration
+- Added PasskeyCredential model for WebAuthn credential storage
+  - credentialID (unique identifier)
+  - publicKey (verification key)
+  - counter (replay attack prevention)
+  - transports (USB, NFC, BLE, internal)
+  - deviceType (single-device or multi-device)
+  - backedUp (synced credential indicator)
+  - aaguid (authenticator identifier)
+  - userAgent and credentialName (device tracking)
+  - lastUsedAt and lastUsedIP (security monitoring)
+
+## [0.3.2] - 2025-11-14
+
+### Added
+- Comment UI with color-coded message borders and improved visual contrast
+- HTTPS configuration support
+- Unapprove functionality
+- Build script: optional --no-cache flag support
+
+### Changed
+- Settings UX improvements
+- Project approval logic fixes
+- Security settings enhancements
+
+## [0.3.1] - 2025-01-13
+
+### Security
+- Add runtime JWT secret validation to prevent undefined secret usage
+- Fix fingerprint hash truncation (use full 256-bit SHA-256 instead of 96-bit)
+- Add CRLF injection protection for companyName field in email headers
+- Strengthen FFmpeg watermark escaping with defense-in-depth approach
+- Implement reusable Content-Disposition header sanitization for file downloads
+- Add rate limiting to admin endpoints (batch ops, approve/unapprove, users)
+- Add batch operation size limits (max 100 items)
+- Fix SMTP password exposure in API responses (return placeholder)
+
+### Added
+- Per-project companyName field in project creation and settings
+- Display priority: companyName → Primary Recipient → "Client"
+- Timezone-aware date/time formatting using Intl.DateTimeFormat
+  - Client-side: uses browser timezone for proper user localization
+  - Server-side: uses TZ environment variable for emails/logs/workers
+  - Format adapts based on region (MM-dd-yyyy, dd-MM-yyyy, yyyy-MM-dd)
+
+### Changed
+- Update all pages to show companyName with fallback logic
+- Update share API to use companyName in clientName field
+- Replace toLocaleString() with formatDateTime() for consistency
+- Hide recipient email when companyName is set for cleaner display
+- Improve comment name picker UX (starts at "Select a name..." instead of pre-selected)
+
+### Fixed
+- Correct product name from "VidTransfer" to "FrameComment" throughout codebase
+- Fix TypeScript build errors related to Buffer type annotations in streams
+- Revert incorrect project ownership validation (admins see all projects)
+
+## [0.3.0] - 2025-11-13
+
+**Why v0.3.0?** This release includes critical security hardening that warrants a minor version bump rather than a patch.
+
+### Security
+- Multiple critical and high severity security fixes applied
+- Enhanced input validation and sanitization across the application
+- Improved authentication and access control mechanisms
+- Strengthened file path handling and storage protections
+- Removed 51KB of duplicate component files
+
+### Added
+- **Complete Email Notification System** (originally planned for future release, delivered now!)
+  - Configurable notification schedules: Immediate, Hourly, Daily, Weekly
+  - Email notification summaries to reduce spam (batches updates by schedule)
+  - Separate admin and client notification settings per project
+  - Per-recipient notification preferences with opt-in/opt-out toggles
+  - Notification queue system with automatic retry logic (3 attempts, permanent failure tracking)
+  - BullMQ repeatable jobs for scheduled summary delivery (every minute check)
+  - Professional email templates with project context and direct share links
+  - Unified notification flow for all comment types (client comments, admin replies)
+- **Per-Video Revision Tracking**
+  - Track revision count per video (not just per project)
+  - Better control over individual video approval cycles
+  - Maintains project-wide revision limits while tracking per video
+- Sort toggle for projects dashboard (status/alphabetical sorting)
+- Sort toggle for project videos and versions (status/alphabetical sorting)
+- Section dividers in share page sidebar (For Review / Approved sections)
+- Green check mark icon for approved videos in sidebar (replaces play icon)
+- New `formatDate()` utility for consistent date formatting (11-Nov-2025 format)
+- **DEBUG_WORKER environment variable** for optional verbose logging
+
+### Changed
+- **BREAKING**: All comments must now be video-specific (general comments removed)
+- Email notifications now fully functional with flexible scheduling
+- Share page sorting now checks if ANY version is approved (not just latest)
+- Video groups in admin panel sorted by approval status (unapproved first)
+- Versions within groups sorted by approval status (approved first)
+- Projects list extracted to client component for better performance
+- README development warning now includes 3-2-1 backup principle
+- All recipient IDs migrated from UUID to CUID format for consistency
+- All dates now display in consistent "11-Nov-2025" format
+
+### Removed
+- General/system comments (all comments must be attached to a video)
+- System audit comments for approval/unapproval actions (status tracked in database)
+- Old per-comment email notification system (replaced with unified notification queue)
+- Duplicate component files (AdminVideoManager 2.tsx, LoginModal 2.tsx, VideoPlayer 2.tsx, VideoUpload 2.tsx)
+
+### Improved
+- Comment section approval updates now instant (optimistic UI updates)
+- Share page filtering refreshes immediately on approval state changes
+- Comment/reply updates appear instantly without page refresh
+- Optimistic updates for comment replies (no loading delays)
+- Admin comment version filtering on share page more accurate
+- Feedback & Discussion section updates immediately on approval changes
+- Approved badge spacing in admin panel
+- "All Versions" section spacing from content above
+- Analytics projects card spacing to prevent overlap
+- Version labels padding to prevent hover animation cutoff
+- Mobile inline editing no longer overflows with action buttons
+- Simplified comment filtering logic (no more null videoId checks)
+
+### Fixed
+- **CRITICAL**: Thumbnail generation failing for videos shorter than 10 seconds
+  - Previously hardcoded to seek to 10s, causing EOF for short videos
+  - Now calculates safe timestamp: 10% of duration (min 0.5s, max 10s)
+- Comment section not updating when approval status changes
+- Share page filtering not refreshing after approval/unapproval
+- Instant comment/reply updates not working correctly
+- Optimistic updates for comment replies failing
+- Feedback & Discussion section not updating on approval changes
+- Admin comment version filtering on share page
+- Projects dashboard now loads correctly after refactoring
+- Mobile overflow when editing video/group names
+- Version label hover animation cutoff at top of container
+
+### Database Migration
+- Added notification schedule fields to Settings table (admin-wide defaults)
+- Added notification schedule fields to Project table (per-project overrides)
+- Added notification day field for weekly schedules
+- Added lastAdminNotificationSent and lastClientNotificationSent timestamps
+- Created NotificationQueue table for batched email delivery with retry tracking
+- Added ProjectRecipient.receiveNotifications boolean field
+- Added per-video revision tracking fields
+- **IRREVERSIBLE**: Deleted all existing general comments (where videoId IS NULL)
+- Made Comment.videoId field required (NOT NULL constraint)
+- **IRREVERSIBLE**: Migrated all UUID format recipient IDs to CUID format
+
+## [0.2.5] - 2025-11-12
+
+### Added
+- **DEBUG_WORKER environment variable**
+  - Optional verbose logging for FFmpeg and worker operations
+  - Logs command execution, process IDs, exit codes, timing breakdowns
+  - Shows download/upload speeds, file sizes, processing time breakdown
+  - Controllable without rebuilding Docker image (set env var and restart)
+  - Helps diagnose video processing issues in production
+
+### Fixed
+- **CRITICAL**: Thumbnail generation failing for videos shorter than 10 seconds
+  - Previously hardcoded to seek to 10 seconds, causing EOF for short videos
+  - Now calculates safe timestamp: 10% of duration (min 0.5s, max 10s)
+  - FFmpeg properly reports when no frames available for extraction
+
+## [0.2.4] - 2025-11-10
+
+### Added
+- Auto-approve project setting with toggle in global settings
+
+### Changed
+- "Final Version" renamed to "Approved Version"
+- Admin footer solid background, fixed at bottom on desktop
+- Video information dialog clarifies it shows original video metadata
+- Videos sorted by approval status (unapproved first)
+- Mobile video selector now starts collapsed
+
+### Improved
+- Settings pages show save/error notifications at bottom for better mobile/long page UX
+- Simplified video preview note text
+- Comment section height and scrolling behavior
+
+### Fixed
+- Recipient name selector jumping to first option
+- Mobile sidebar collapsing when selecting videos
+- Share page auto-scrolling issues
+
+## [0.2.3] - 2025-11-09
+
+### Fixed
+- Recipient name selector jumping back to first option when selecting another recipient
+
+## [0.2.2] - 2025-11-09
+
+### Fixed
+- Validation error when creating projects without password protection
+- Validation error when creating projects without recipient email
+
+## [0.2.1] - 2025-11-09
+
+### Fixed
+- Docker entrypoint usermod timeout removed - allows natural completion on all platforms
+- Clean startup output without false warning messages
+
+### Added
+- Version number now displays in admin footer
+- Build script passes version to Docker image at build time
+
+## [0.2.0] - 2025-11-09
+
+### Added
+- Multiple recipient support for projects (ProjectRecipient model)
+- Recipient management UI in project settings (add, edit, remove)
+- Primary recipient designation for each project
+- Projects sorted by status on admin dashboard (In Review → Share Only → Approved)
+
+### Changed
+- Migrated from single clientEmail/clientName to multi-recipient system
+- All notifications sent to all recipients
+- Improved notification messages with recipient names
+
+### Removed
+- Legacy clientEmail and clientName fields from Project model
+
+### Improvements
+- Code refactoring for better maintainability and reusability
+- Security enhancements
+
+### Note
+Future v0.2.x releases will include notification system changes (configurable email schedules and summary notifications)
+
+## [0.1.9] - 2025-11-07
+
+### Added
+- Configurable session timeout for client share sessions (Security Settings)
+- Password visibility toggle in project settings (show/hide share password)
+- Configurable APP_HOST environment variable for Docker deployments
+- Right-click download prevention on video player for non-admin users
+
+### Fixed
+- Project deletion now properly removes all folders and files
+- Client names now persist correctly after page refresh
+- Docker health check endpoint for K8s/TrueNAS compatibility
+- TypeScript null handling for client names in comment routes
+- Password field UI consistency across the application
+
+### Improved
+- Password input fields now use consistent PasswordInput component with eye icon
+- Share page password field layout matches SMTP password field
+- Security settings with real-time feedback for timeout values
+
+## [0.1.6] - 2025-11-01
+
+### Added
+- Video reprocessing when project settings change
+- Drag and drop for video uploads
+- Resizable sidebar on share page
+
+### Fixed
+- Mobile video playback performance
+- Upload cancellation deletes video records
+- Share page viewport layout and scaling
+
+### Improved
+- Progress bar animations with visual feedback
+- Sidebar sizing (reduced to 30% max width)
+
+## [0.1.0] - 2025-10-28
+
+### Initial Release
+
+#### Features
+- 📹 **Video Upload & Processing** - Automatic transcoding to multiple resolutions (720p/1080p)
+- 💧 **Watermarking** - Customizable watermarks for preview videos
+- 💬 **Timestamped Comments** - Collect feedback with precise video timestamps
+- ✅ **Approval Workflow** - Client approval system with revision tracking
+- 🔒 **Password Protection** - Secure projects with client passwords
+- 📧 **Email Notifications** - Automated notifications for new videos and replies
+- 🎨 **Dark Mode** - Beautiful dark/light theme support
+- 📱 **Fully Responsive** - Works perfectly on all devices
+- 👥 **Multi-User Support** - Create multiple admin accounts
+- 📊 **Analytics Dashboard** - Track page visits, downloads, and engagement
+- 🔐 **Security Logging** - Monitor access attempts and suspicious activity
+- 🎯 **Version Management** - Hide/show specific video versions
+- 🔄 **Revision Tracking** - Limit and track project revisions
+- ⚙️ **Flexible Settings** - Per-project and global configuration options
+
+#### Security
+- 🔐 **JWT Authentication** - Secure admin sessions with 15-minute inactivity timeout
+- 🔑 **AES-256 Encryption** - Encrypted password storage for share links
+- 🛡️ **Rate Limiting** - Protection against brute force attacks
+- 📝 **Security Event Logging** - Track all access attempts
+- 🚫 **Hotlink Protection** - Prevent unauthorized embedding
+- 🌐 **HTTPS Support** - SSL/TLS for secure connections
+- ⏱️ **Session Monitoring** - Inactivity warnings with auto-logout
+
+#### Technical
+- 🐳 **Docker-First** - Easy deployment with Docker Compose
+- 🚀 **Next.js 15 + React 19** - High performance modern stack
+- 📦 **Redis Queue** - Background video processing with BullMQ
+- 🎬 **FFmpeg Processing** - Industry-standard video transcoding
+- 🗄️ **PostgreSQL Database** - Reliable data storage
+- 🌐 **TUS Protocol** - Resumable uploads for large files
+- 🏗️ **Multi-Architecture** - Support for amd64 and arm64
+
+---
+
+## Release Notes
+
+### Version Tagging
+Starting with v0.1.0, Docker images were tagged with both version numbers and `latest` in the original Docker Hub repository:
+- `dragosonisei/framecomment:0.1.0` - Specific version
+- `dragosonisei/framecomment:latest` - Latest stable release for the pre-v1.0 repository
+
+Starting with v1.0.0, Docker images moved to the new Docker Hub repository:
+- `dragosonisei/framecomment:1.0.0` - Specific version
+- `dragosonisei/framecomment:latest` - Latest stable release for v1.0.0 and newer

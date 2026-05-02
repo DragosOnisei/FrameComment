@@ -1,0 +1,328 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light Mode Theme */
+  :root {
+    /* Base colors - light theme (soft grey instead of white) */
+    --background: 220 14% 92%;
+    --foreground: 0 0% 13%;
+
+    /* Card colors - elevated surfaces (slightly lighter than background) */
+    --card: 220 14% 96%;
+    --card-foreground: 0 0% 13%;
+
+    /* Popover colors */
+    --popover: 220 14% 96%;
+    --popover-foreground: 0 0% 13%;
+
+    /* Primary - Blue (#007AFF) */
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --primary-visible: 211 100% 95%;
+
+    /* Secondary - Gray */
+    --secondary: 220 14% 89%;
+    --secondary-foreground: 0 0% 13%;
+
+    /* Muted - subtle backgrounds */
+    --muted: 220 14% 89%;
+    --muted-foreground: 0 0% 45%;
+
+    /* Accent - tint color */
+    --accent: 220 14% 89%;
+    --accent-foreground: 211 100% 50%;
+
+    /* Success - Green (#34C759) */
+    --success: 145 63% 49%;
+    --success-foreground: 0 0% 100%;
+    --success-visible: 145 63% 95%;
+
+    /* Warning - Orange (#FF9500) */
+    --warning: 33 100% 50%;
+    --warning-foreground: 0 0% 13%;
+    --warning-visible: 33 100% 95%;
+
+    /* Destructive - Red (#FF3B30) */
+    --destructive: 4 90% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-visible: 4 90% 95%;
+
+    /* Info - Light Blue */
+    --info: 200 100% 50%;
+    --info-foreground: 0 0% 100%;
+    --info-visible: 200 100% 95%;
+
+    /* Border and input */
+    --border: 220 14% 85%;
+    --input: 220 14% 85%;
+    --ring: 211 100% 50%;
+
+    /* Border radius values */
+    --radius: 0.75rem;
+    --radius-sm: 0.5rem;
+    --radius-lg: 1rem;
+    --radius-full: 9999px;
+
+    /* Logo color tokens (used by LogoMark) - light mode */
+    --logo-bg: #000000;
+    --logo-panel: #000000; /* slit matches background */
+    --logo-wedge: #ffffff;
+
+    /* Shadow definitions */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+
+    /* Layout helpers */
+    --admin-header-height: 0px;
+  }
+
+  /* Dark Mode Theme */
+  .dark {
+    /* Base colors - dark theme */
+    --background: 0 0% 7%;
+    --foreground: 0 0% 98%;
+
+    /* Card colors - elevated dark surfaces */
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 98%;
+
+    /* Popover colors */
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Primary - Bright Blue (#0A84FF) */
+    --primary: 209 100% 60%;
+    --primary-foreground: 0 0% 100%;
+    --primary-visible: 209 100% 20%;
+
+    /* Secondary - Dark gray */
+    --secondary: 240 4% 20%;
+    --secondary-foreground: 0 0% 98%;
+
+    /* Muted - subtle dark backgrounds */
+    --muted: 240 4% 20%;
+    --muted-foreground: 0 0% 65%;
+
+    /* Accent - elevated surface */
+    --accent: 240 4% 20%;
+    --accent-foreground: 209 100% 60%;
+
+    /* Success - Bright Green (#30D158) */
+    --success: 145 73% 52%;
+    --success-foreground: 0 0% 100%;
+    --success-visible: 145 73% 20%;
+
+    /* Warning - Bright Orange (#FF9F0A) */
+    --warning: 37 100% 52%;
+    --warning-foreground: 0 0% 13%;
+    --warning-visible: 37 100% 20%;
+
+    /* Destructive - Bright Red (#FF453A) */
+    --destructive: 3 100% 61%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-visible: 3 100% 20%;
+
+    /* Info - Bright Light Blue */
+    --info: 200 100% 60%;
+    --info-foreground: 0 0% 100%;
+    --info-visible: 200 100% 20%;
+
+    /* Border and input - more visible in dark mode */
+    --border: 240 4% 25%;
+    --input: 240 4% 25%;
+    --ring: 209 100% 60%;
+
+    /* Shadows - adapted for dark mode */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7);
+
+    /* Logo color tokens (dark mode) */
+    --logo-bg: #f5f7fb;
+    --logo-panel: #f5f7fb; /* slit matches background */
+    --logo-wedge: #0b1220;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  /* Button variants */
+  .btn-primary {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  .btn-success {
+    @apply bg-success text-success-foreground;
+  }
+
+  .btn-destructive {
+    @apply bg-destructive text-destructive-foreground;
+  }
+
+  .btn-warning {
+    @apply bg-warning text-warning-foreground;
+  }
+
+  .btn-info {
+    @apply bg-info text-info-foreground;
+  }
+
+  /* Glass effect with blur */
+  .glass {
+    @apply backdrop-blur-xl bg-opacity-80;
+  }
+
+  /* Elevated card style */
+  .card-elevated {
+    @apply bg-card rounded-xl shadow-md border border-border/50;
+  }
+
+  /* Focus ring style */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background;
+  }
+
+  /* Normalize date inputs to match other inputs on mobile */
+  input[type="date"] {
+    @apply appearance-none;
+    min-height: 2.5rem;
+    line-height: 1.25rem;
+  }
+
+  input[type="date"]::-webkit-date-and-time-value {
+    text-align: left;
+  }
+
+  /* Driver.js tutorial overlay theming — uses theme CSS variables for accent/dark mode support */
+  div.driver-popover {
+    background-color: hsl(var(--card));
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.75rem;
+    box-shadow: 0 20px 40px hsl(var(--foreground) / 0.15);
+  }
+
+  .driver-popover .driver-popover-title {
+    color: hsl(var(--foreground));
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .driver-popover .driver-popover-description {
+    color: hsl(var(--muted-foreground));
+    font-size: 0.875rem;
+    line-height: 1.625;
+  }
+
+  .driver-popover .driver-popover-progress-text {
+    color: hsl(var(--muted-foreground));
+    font-size: 0.75rem;
+  }
+
+  .driver-popover-footer button {
+    font-size: 0.875rem;
+    border-radius: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+  }
+
+  .driver-popover-footer .driver-popover-next-btn {
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+
+  .driver-popover-footer .driver-popover-next-btn:hover {
+    opacity: 0.9;
+  }
+
+  .driver-popover-footer .driver-popover-prev-btn {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--foreground));
+  }
+
+  .driver-popover .driver-popover-close-btn {
+    color: hsl(var(--muted-foreground));
+  }
+
+  .driver-popover .driver-popover-close-btn:hover {
+    color: hsl(var(--foreground));
+  }
+
+  .driver-popover-arrow-side-left .driver-popover-arrow,
+  .driver-popover-arrow-side-right .driver-popover-arrow,
+  .driver-popover-arrow-side-top .driver-popover-arrow,
+  .driver-popover-arrow-side-bottom .driver-popover-arrow {
+    border-color: hsl(var(--card));
+  }
+}
+
+@layer utilities {
+  /* Elevation shadow utilities */
+  .shadow-elevation-sm {
+    box-shadow: var(--shadow-sm);
+  }
+
+  .shadow-elevation {
+    box-shadow: var(--shadow);
+  }
+
+  .shadow-elevation-md {
+    box-shadow: var(--shadow-md);
+  }
+
+  .shadow-elevation-lg {
+    box-shadow: var(--shadow-lg);
+  }
+
+  .shadow-elevation-xl {
+    box-shadow: var(--shadow-xl);
+  }
+
+  /* Animated stripes for progress bars */
+  @keyframes move-stripes {
+    0% {
+      background-position: 0 0;
+    }
+    100% {
+      background-position: 28px 0;
+    }
+  }
+
+  /* Slow blink animation for attention */
+  @keyframes blink {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(1.1);
+    }
+  }
+}

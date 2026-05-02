@@ -1,0 +1,421 @@
+import { prisma } from '@/lib/db'
+import { getPrimaryRecipient } from '@/lib/recipients'
+import { isSmtpConfigured } from '@/lib/settings'
+import { getRedis } from '@/lib/redis'
+import { validateCommentLength, containsSuspiciousPatterns, sanitizeCommentHtml } from '@/lib/security/html-sanitization'
+import { sendImmediateNotification, queueNotification } from '@/lib/notifications'
+import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
+import { getAppDomain } from '@/lib/url'
+import { formatTimecodeDisplay, timecodeToSeekSeconds } from '@/lib/timecode'
+import { htmlToText } from 'html-to-text'
+import { logError, logMessage } from '@/lib/logging'
+
+/**
+ * Validate comment permissions
+ * Checks if user can create comments based on project settings
+ */
+export async function validateCommentPermissions(params: {
+  projectId: string
+  isInternal: boolean
+  currentUser: any
+}): Promise<{ valid: boolean; error?: string; errorStatus?: number }> {
+  const { projectId, isInternal, currentUser } = params
+
+  // SECURITY: If isInternal flag is set, verify admin session
+  if (isInternal) {
+    if (!currentUser || currentUser.role !== 'ADMIN') {
+      return { valid: false, error: 'Unauthorized', errorStatus: 401 }
+    }
+  }
+
+  // Fetch the project to check permissions
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      sharePassword: true,
+      authMode: true,
+      hideFeedback: true,
+      guestMode: true,
+    }
+  })
+
+  if (!project) {
+    return { valid: false, error: 'Access denied', errorStatus: 403 }
+  }
+
+  // SECURITY: If feedback is hidden, reject comment creation
+  if (project.hideFeedback) {
+    return { valid: false, error: 'Comments are disabled for this project', errorStatus: 403 }
+  }
+
+  return { valid: true }
+}
+
+/**
+ * Resolve comment author information
+ * Determines author email and fallback name based on user type
+ */
+export async function resolveCommentAuthor(params: {
+  projectId: string
+  authorEmail?: string | null | undefined
+  recipientId?: string | null | undefined
+}): Promise<{ authorEmail: string | null; fallbackName: string }> {
+  const { projectId, authorEmail, recipientId } = params
+
+  // Get primary recipient for author name fallback
+  const primaryRecipient = await getPrimaryRecipient(projectId)
+
+  // Get project company name
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { companyName: true }
+  })
+
+  // Priority: companyName → primary recipient → 'Client'
+  const fallbackName = project?.companyName || primaryRecipient?.name || 'Client'
+
+  // If recipientId provided, use that recipient's email
+  let finalAuthorEmail = authorEmail || null
+
+  if (recipientId) {
+    const recipient = await prisma.projectRecipient.findUnique({
+      where: { id: recipientId },
+      select: { email: true, projectId: true }
+    })
+
+    if (recipient && recipient.projectId === projectId) {
+      finalAuthorEmail = recipient.email
+    }
+  }
+
+  return { authorEmail: finalAuthorEmail, fallbackName }
+}
+
+/**
+ * Sanitize and validate comment content and author name
+ */
+export async function sanitizeAndValidateContent(params: {
+  content: string
+  authorName?: string | null | undefined
+}): Promise<{
+  valid: boolean
+  sanitizedContent?: string
+  sanitizedAuthorName?: string | null
+  error?: string
+  errorStatus?: number
+}> {
+  const { content, authorName } = params
+
+  // Validate content length
+  if (!validateCommentLength(content)) {
+    return {
+      valid: false,
+      error: 'Comment is too long (max 10,000 characters)',
+      errorStatus: 400
+    }
+  }
+
+  // Check for suspicious patterns
+  if (containsSuspiciousPatterns(content)) {
+    return {
+      valid: false,
+      error: 'Comment contains potentially malicious content',
+      errorStatus: 400
+    }
+  }
+
+  // Sanitize HTML content
+  const sanitizedContent = sanitizeCommentHtml(content)
+
+  // Sanitize authorName (same rules as watermark text)
+  let sanitizedAuthorName = authorName || null
+  if (sanitizedAuthorName) {
+    // Remove invalid characters
+    const invalidChars = sanitizedAuthorName.match(/[^a-zA-Z0-9\s\-_.()]/g)
+    if (invalidChars) {
+      return {
+        valid: false,
+        error: 'Invalid characters in name',
+        errorStatus: 400
+      }
+    }
+
+    // Length check
+    if (sanitizedAuthorName.length > 50) {
+      return {
+        valid: false,
+        error: 'Name is too long (max 50 characters)',
+        errorStatus: 400
+      }
+    }
+
+    // Trim whitespace
+    sanitizedAuthorName = sanitizedAuthorName.trim()
+  }
+
+  return {
+    valid: true,
+    sanitizedContent,
+    sanitizedAuthorName
+  }
+}
+
+/**
+ * Handle comment notifications
+ * Sends notifications immediately or queues them based on schedule
+ * Also tracks pending notifications in Redis for cancellation support
+ */
+export async function handleCommentNotifications(params: {
+  comment: any
+  projectId: string
+  videoId?: string
+  parentId?: string
+  attachmentNames?: string[]
+}): Promise<void> {
+  const { comment, projectId, videoId, parentId, attachmentNames } = params
+
+  try {
+    const isAdminComment = comment.isInternal
+
+    // Get project info (used by both email and external notifications)
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        clientNotificationSchedule: true,
+      }
+    })
+
+    if (!project) {
+      logMessage('[COMMENT-NOTIFICATION] Project not found')
+      return
+    }
+
+    // Get video info
+    const video = videoId
+      ? await prisma.video.findUnique({
+          where: { id: videoId },
+          select: { name: true, versionLabel: true, version: true, fps: true },
+        })
+      : null
+
+    logMessage('[COMMENT-NOTIFICATION] Video:', video?.name || 'None')
+
+    // External notifications (Apprise) - client comments only
+    if (!isAdminComment) {
+      const appDomain = await getAppDomain()
+      const adminShareUrl = (() => {
+        if (!appDomain) return ''
+        let baseUrl = appDomain
+        try {
+          baseUrl = new URL(appDomain).origin
+        } catch {
+          // use configured value as-is
+        }
+
+        const params = new URLSearchParams()
+        if (video?.name) params.set('video', video.name)
+        const version = comment?.videoVersion ?? video?.version
+        if (typeof version === 'number') params.set('version', String(version))
+
+        try {
+          const fps = typeof video?.fps === 'number' && isFinite(video.fps) && video.fps > 0 ? video.fps : 24
+          const seconds = parseFloat(timecodeToSeekSeconds(String(comment?.timecode || ''), fps).toFixed(2))
+          if (isFinite(seconds) && seconds >= 0) params.set('t', String(seconds))
+        } catch {
+          // Ignore invalid timecode
+        }
+
+        if (comment?.id) params.set('comment', String(comment.id))
+
+        const qs = params.toString()
+        const returnUrl = `/admin/projects/${project.id}/share${qs ? `?${qs}` : ''}`
+        return `${baseUrl}/login?returnUrl=${encodeURIComponent(returnUrl)}`
+      })()
+      const authorName = (comment?.authorName || comment?.name || '').toString().trim() || 'Client'
+      const authorEmail = (comment?.authorEmail || comment?.email || '').toString().trim()
+      const clientDisplay = authorEmail ? `${authorName} (${authorEmail})` : authorName
+      const rawContentHtml = sanitizeCommentHtml((comment?.content || '').toString())
+      const rawContent = htmlToText(rawContentHtml, { wordwrap: false }).trim()
+      const commentPreview = rawContent.length > 400 ? `${rawContent.slice(0, 400)}...` : rawContent
+      const timecode = comment?.timecode ? formatTimecodeDisplay(String(comment.timecode)) : ''
+      const videoLabel = video?.versionLabel ? ` ${video.versionLabel}` : ''
+
+      await enqueueExternalNotification({
+        eventType: 'CLIENT_COMMENT',
+        title: `New Comment on ${project.title}`,
+        body: [
+          `From: ${clientDisplay}`,
+          video?.name ? `Video: ${video.name}${videoLabel}` : null,
+          timecode ? `Timecode: ${timecode}` : null,
+          commentPreview ? `Comment: ${commentPreview}` : null,
+          attachmentNames && attachmentNames.length > 0
+            ? `Attachments: ${attachmentNames.join(', ')}`
+            : null,
+          adminShareUrl ? `Go to comment: ${adminShareUrl}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        notifyType: 'info',
+        pushData: {
+          projectTitle: project.title,
+          projectId: project.id,
+          videoName: video?.name || undefined,
+          authorName,
+          content: rawContent,
+          email: authorEmail || undefined,
+          url: adminShareUrl || undefined,
+        },
+      }).catch((notificationError) => {
+        logError('[COMMENT-NOTIFICATION] Failed to enqueue external notification', notificationError)
+      })
+    }
+
+    // Check if SMTP is configured (email notifications)
+    const smtpConfigured = await isSmtpConfigured()
+    logMessage('[COMMENT-NOTIFICATION] SMTP configured:', smtpConfigured)
+
+    if (!smtpConfigured) {
+      logMessage('[COMMENT-NOTIFICATION] Email notifications skipped - SMTP not configured')
+      return
+    }
+
+    // Get settings for admin schedule
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { adminNotificationSchedule: true }
+    })
+
+    const adminSchedule = settings?.adminNotificationSchedule || 'IMMEDIATE'
+    const clientSchedule = project.clientNotificationSchedule
+
+    logMessage(`[COMMENT-NOTIFICATION] Comment type: ${isAdminComment ? 'ADMIN' : 'CLIENT'}, Admin schedule: ${adminSchedule}, Client schedule: ${clientSchedule}`)
+
+    const context = {
+      comment,
+      project: { id: project.id, title: project.title, slug: project.slug },
+      video,
+      isReply: !!parentId,
+      attachmentNames,
+    }
+
+    // Dual-path: route through BOTH admin and client schedules
+    // Each side uses its own schedule independently.
+    // A single queue entry has both sentToAdmins/sentToClients flags,
+    // so we only queue once when either (or both) sides are non-IMMEDIATE.
+
+    const clientImmediate = clientSchedule === 'IMMEDIATE'
+    const adminImmediate = adminSchedule === 'IMMEDIATE'
+
+    // Send immediate emails for sides that use IMMEDIATE
+    if (clientImmediate) {
+      logMessage('[COMMENT-NOTIFICATION] Client path: sending immediately...')
+      await sendImmediateNotification(context, 'client')
+    }
+    if (adminImmediate) {
+      logMessage('[COMMENT-NOTIFICATION] Admin path: sending immediately...')
+      await sendImmediateNotification(context, 'admin')
+    }
+
+    // Queue once if either side needs batched delivery.
+    // Pre-mark sides that were already sent immediately so workers don't re-process them.
+    if (!clientImmediate || !adminImmediate) {
+      logMessage(`[COMMENT-NOTIFICATION] Queuing for batched delivery (admin: ${adminSchedule}, client: ${clientSchedule})...`)
+      await queueNotification(context, {
+        admins: adminImmediate,
+        clients: clientImmediate,
+      })
+    }
+  } catch (emailError) {
+    // Don't fail the request if notification processing fails
+    logError('[COMMENT-NOTIFICATION] Error processing notification:', emailError)
+  }
+}
+
+/**
+ * Cancel pending notification for a deleted comment
+ * Removes from notification queue and marks as cancelled in Redis
+ */
+export async function cancelCommentNotification(commentId: string): Promise<void> {
+  try {
+    const redis = getRedis()
+
+    logMessage(`[CANCEL-NOTIFICATION] Cancelling notification for comment ${commentId}`)
+
+    // Mark as cancelled in Redis (8-day TTL covers weekly schedules)
+    await redis.set(
+      `comment_cancelled:${commentId}`,
+      '1',
+      'EX',
+      691200 // 8 days
+    )
+
+    // Delete from notification queue if it exists
+    await prisma.notificationQueue.deleteMany({
+      where: {
+        data: {
+          path: ['commentId'],
+          equals: commentId
+        }
+      }
+    })
+
+    logMessage(`[CANCEL-NOTIFICATION] Successfully cancelled notification for comment ${commentId}`)
+  } catch (error) {
+    logError('[CANCEL-NOTIFICATION] Error cancelling notification:', error)
+    // Don't throw - deletion should succeed even if notification cancellation fails
+  }
+}
+
+/**
+ * Fetch all comments for a project
+ * Returns top-level comments with nested replies
+ */
+export async function fetchProjectComments(projectId: string) {
+  const assetSelect = {
+    select: {
+      id: true,
+      fileName: true,
+      fileSize: true,
+      fileType: true,
+      category: true,
+      createdAt: true,
+    },
+  }
+
+  return prisma.comment.findMany({
+    where: {
+      projectId,
+      parentId: null, // Only get top-level comments
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          username: true,
+          email: true,
+        }
+      },
+      assets: assetSelect,
+      replies: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              username: true,
+              email: true,
+            }
+          },
+          assets: assetSelect,
+        },
+        orderBy: { createdAt: 'asc' }
+      }
+    },
+    orderBy: { createdAt: 'asc' }
+  })
+}

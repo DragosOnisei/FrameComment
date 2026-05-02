@@ -1,0 +1,143 @@
+# FrameComment for TrueNAS Scale
+# See README.md for deployment instructions
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: framecomment-postgres
+    restart: unless-stopped
+    user: "999:999"
+    environment:
+      POSTGRES_USER: framecomment
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: framecomment
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - /mnt/tank/apps/framecomment/postgres:/var/lib/postgresql/data
+    networks:
+      - framecomment-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U framecomment"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:8-alpine
+    container_name: framecomment-redis
+    restart: unless-stopped
+    user: "568:568"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - /mnt/tank/apps/framecomment/redis:/data
+    networks:
+      - framecomment-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    image: dragosonisei/framecomment:latest
+    container_name: framecomment-app
+    restart: unless-stopped
+    user: "568:568"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+      DATABASE_URL: postgresql://framecomment:${POSTGRES_PASSWORD}@framecomment-postgres:5432/framecomment?schema=public
+      REDIS_HOST: framecomment-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      STORAGE_ROOT: /app/uploads
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL is required in .env file}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env file}
+      ADMIN_NAME: ${ADMIN_NAME:-Admin}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      SHARE_TOKEN_SECRET: ${SHARE_TOKEN_SECRET:?SHARE_TOKEN_SECRET is required}
+      HTTPS_ENABLED: ${HTTPS_ENABLED:-false}
+      # S3-compatible storage (optional, default: local)
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+    ports:
+      - "4321:4321"
+    volumes:
+      - /mnt/tank/apps/framecomment/uploads:/app/uploads
+    networks:
+      - framecomment-internal
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:4321/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+
+  worker:
+    image: dragosonisei/framecomment:latest
+    container_name: framecomment-worker
+    restart: unless-stopped
+    user: "568:568"
+    command: npm run worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+      # DEBUG_WORKER: "true"  # Uncomment for verbose FFmpeg and worker debug logs
+      DATABASE_URL: postgresql://framecomment:${POSTGRES_PASSWORD}@framecomment-postgres:5432/framecomment?schema=public
+      REDIS_HOST: framecomment-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      STORAGE_ROOT: /app/uploads
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      SHARE_TOKEN_SECRET: ${SHARE_TOKEN_SECRET}
+      # S3-compatible storage (must match app service)
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+    volumes:
+      - /mnt/tank/apps/framecomment/uploads:/app/uploads
+    networks:
+      - framecomment-internal
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q 'npm run worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 6m
+
+networks:
+  framecomment-internal:
+    driver: bridge

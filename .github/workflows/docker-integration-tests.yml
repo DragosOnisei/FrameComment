@@ -1,0 +1,58 @@
+name: Docker Integration Tests
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - 'prisma/**'
+      - 'src/**'
+      - 'package*.json'
+      - '.github/workflows/docker-*.yml'
+      - '.github/workflows/test-dev-*.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - 'prisma/**'
+      - 'src/**'
+      - 'package*.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-install:
+    name: Dev Clean Install Test
+    uses: ./.github/workflows/test-dev-clean-install.yml
+
+  upgrade-test:
+    name: Dev Upgrade Test
+    needs: clean-install
+    uses: ./.github/workflows/test-dev-upgrade.yml
+
+  summary:
+    name: Test Summary
+    needs: [clean-install, upgrade-test]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          echo "=== Docker Integration Test Results ==="
+          echo ""
+          echo "Clean Install: ${{ needs.clean-install.result }}"
+          echo "Upgrade Test:  ${{ needs.upgrade-test.result }}"
+          echo ""
+
+          if [[ "${{ needs.clean-install.result }}" == "success" ]] && \
+             [[ "${{ needs.upgrade-test.result }}" == "success" ]]; then
+            echo "[OK] All tests passed!"
+          else
+            echo "[ERROR] Some tests failed"
+            exit 1
+          fi

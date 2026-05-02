@@ -1,0 +1,617 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+import { deleteFile, deleteDirectory } from '@/lib/storage'
+import { requireApiAdmin } from '@/lib/auth'
+import { encrypt, decrypt } from '@/lib/encryption'
+import { isSmtpConfigured } from '@/lib/settings'
+import { flushPendingClientNotifications } from '@/lib/notifications'
+import { invalidateShareTokensByProject } from '@/lib/session-invalidation'
+import { rateLimit } from '@/lib/rate-limit'
+import { sanitizeComment } from '@/lib/comment-sanitization'
+import { updateProjectSchema } from '@/lib/validation'
+import { syncCompanyToDirectory } from '@/lib/client-directory-sync'
+import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { logError, logMessage } from '@/lib/logging'
+
+export const runtime = 'nodejs'
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const projectMessages = messages?.projects || {}
+
+  // Check authentication
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) {
+    return authResult
+  }
+
+  // Rate limiting: 60 requests per minute
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 60 * 1000,
+    maxRequests: 60,
+    message: projectMessages.tooManyRequestsGeneric || 'Too many requests. Please slow down.'
+  }, 'project-read')
+
+  if (rateLimitResult) {
+    return rateLimitResult
+  }
+
+  try {
+    const { id } = await params
+
+    const project = await prisma.project.findUnique({
+      where: { id },
+      include: {
+        videos: {
+          orderBy: { version: 'desc' },
+        },
+        comments: {
+          where: { parentId: null },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+              }
+            },
+            replies: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    username: true,
+                    email: true,
+                  }
+                }
+              },
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        recipients: {
+          orderBy: [
+            { isPrimary: 'desc' },
+            { createdAt: 'asc' },
+          ],
+        },
+      },
+    })
+
+    if (!project) {
+      return NextResponse.json({ error: projectMessages.projectNotFoundApi || 'Project not found' }, { status: 404 })
+    }
+
+    // Check SMTP configuration status
+    const smtpConfigured = await isSmtpConfigured()
+
+    // Determine fallback name for sanitization
+    const primaryRecipient = project.recipients?.find((r: any) => r.isPrimary) || project.recipients?.[0]
+    const fallbackName = project.companyName || primaryRecipient?.name || 'Client'
+
+    // Sanitize/normalize comments to ensure timecodes are consistent
+    const sanitizedComments = project.comments.map((comment: any) =>
+      sanitizeComment(comment, true, true, fallbackName)
+    )
+
+    // Decrypt password for admin users (needed for settings form)
+    const decryptedPassword = project.sharePassword ? decrypt(project.sharePassword) : null
+
+    // Convert BigInt fields to strings for JSON serialization
+    const projectData = {
+      ...project,
+      videos: project.videos.map((video: any) => ({
+        ...video,
+        originalFileSize: video.originalFileSize.toString(),
+      })),
+      comments: sanitizedComments,
+      sharePassword: decryptedPassword,
+      smtpConfigured,
+    }
+
+    return NextResponse.json(projectData)
+  } catch (error) {
+    return NextResponse.json(
+      { error: projectMessages.unableToProcessRequest || 'Unable to process request' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const projectMessages = messages?.projects || {}
+
+  // Check authentication
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) {
+    return authResult
+  }
+
+  // Rate limiting: mutation throttle
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 60 * 1000,
+    maxRequests: 30,
+    message: projectMessages.tooManyProjectUpdateRequests || 'Too many project update requests. Please slow down.',
+  }, 'project-update')
+  if (rateLimitResult) return rateLimitResult
+
+  try {
+    const { id } = await params
+    const body = await request.json()
+    const parsed = updateProjectSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
+    }
+    const validatedBody = parsed.data
+
+    // Build update data object
+    const updateData: any = {}
+
+    // Handle basic project details
+    if (validatedBody.title !== undefined) {
+      updateData.title = validatedBody.title
+    }
+    if (validatedBody.slug !== undefined) {
+      // Check if slug is unique (excluding current project)
+      const existingProject = await prisma.project.findFirst({
+        where: {
+          slug: validatedBody.slug,
+          NOT: { id }
+        }
+      })
+      
+      if (existingProject) {
+        return NextResponse.json(
+          { error: projectMessages.shareLinkAlreadyInUse || 'This share link is already in use. Please choose a different one.' },
+          { status: 409 }
+        )
+      }
+      
+      updateData.slug = validatedBody.slug
+    }
+    if (validatedBody.description !== undefined) {
+      updateData.description = validatedBody.description || null
+    }
+    if (validatedBody.companyName !== undefined) {
+      // Validate companyName (CRLF protection)
+      if (validatedBody.companyName && /[\r\n]/.test(validatedBody.companyName)) {
+        return NextResponse.json(
+          { error: projectMessages.companyNameCannotContainLineBreaks || 'Company name cannot contain line breaks' },
+          { status: 400 }
+        )
+      }
+      updateData.companyName = validatedBody.companyName || null
+    }
+
+    // Handle client directory link
+    if (validatedBody.clientCompanyId !== undefined) {
+      updateData.clientCompanyId = validatedBody.clientCompanyId || null
+    }
+
+    // Handle status update (for approval)
+    if (validatedBody.status !== undefined) {
+      updateData.status = validatedBody.status
+
+      // When approving project, just set the status and timestamp
+      // Video approvals are handled separately by the admin
+      if (validatedBody.status === 'APPROVED') {
+        updateData.approvedAt = new Date()
+      }
+
+      // When changing status away from APPROVED, clear approval metadata
+      if (validatedBody.status !== 'APPROVED') {
+        updateData.approvedAt = null
+      }
+    }
+
+    // Handle revision settings
+    if (validatedBody.enableRevisions !== undefined) {
+      updateData.enableRevisions = validatedBody.enableRevisions
+    }
+    if (validatedBody.maxRevisions !== undefined) {
+      updateData.maxRevisions = validatedBody.maxRevisions
+    }
+
+    // Handle comment restrictions
+    if (validatedBody.restrictCommentsToLatestVersion !== undefined) {
+      updateData.restrictCommentsToLatestVersion = validatedBody.restrictCommentsToLatestVersion
+    }
+    if (validatedBody.hideFeedback !== undefined) {
+      updateData.hideFeedback = validatedBody.hideFeedback
+    }
+    if (validatedBody.timestampDisplay !== undefined) {
+      updateData.timestampDisplay = validatedBody.timestampDisplay
+    }
+
+    // Handle video processing settings
+    if (validatedBody.previewResolution !== undefined) {
+      updateData.previewResolution = validatedBody.previewResolution
+    }
+
+    if (validatedBody.skipTranscoding !== undefined) {
+      updateData.skipTranscoding = validatedBody.skipTranscoding
+    }
+
+    if (validatedBody.watermarkEnabled !== undefined) {
+      updateData.watermarkEnabled = validatedBody.watermarkEnabled
+    }
+
+    if (validatedBody.watermarkText !== undefined) {
+      // SECURITY: Validate watermark text (same rules as FFmpeg sanitization)
+      // Only allow alphanumeric, spaces, and safe punctuation: - _ . ( )
+      if (validatedBody.watermarkText) {
+        const invalidChars = validatedBody.watermarkText.match(/[^a-zA-Z0-9\s\-_.()]/g)
+        if (invalidChars) {
+          const uniqueInvalid = [...new Set(invalidChars)].join(', ')
+          return NextResponse.json(
+            {
+              error: projectMessages.invalidWatermarkCharacters || 'Invalid characters in watermark text',
+              details: (projectMessages.invalidWatermarkCharactersDetails || 'Watermark text contains invalid characters: {chars}. Only letters, numbers, spaces, and these characters are allowed: - _ . ( )').replace('{chars}', uniqueInvalid)
+            },
+            { status: 400 }
+          )
+        }
+
+        // Additional length check (prevent excessively long watermarks)
+        if (validatedBody.watermarkText.length > 100) {
+          return NextResponse.json(
+            {
+              error: projectMessages.watermarkTextTooLong || 'Watermark text too long',
+              details: projectMessages.watermarkTextTooLongDetails || 'Watermark text must be 100 characters or less'
+            },
+            { status: 400 }
+          )
+        }
+      }
+
+      updateData.watermarkText = validatedBody.watermarkText || null
+    }
+
+    if (validatedBody.watermarkPositions !== undefined) {
+      updateData.watermarkPositions = validatedBody.watermarkPositions
+    }
+
+    if (validatedBody.watermarkOpacity !== undefined) {
+      updateData.watermarkOpacity = validatedBody.watermarkOpacity
+    }
+
+    if (validatedBody.watermarkFontSize !== undefined) {
+      updateData.watermarkFontSize = validatedBody.watermarkFontSize
+    }
+
+    if (validatedBody.applyPreviewLut !== undefined) {
+      updateData.applyPreviewLut = validatedBody.applyPreviewLut
+    }
+
+    if (validatedBody.allowAssetDownload !== undefined) {
+      updateData.allowAssetDownload = validatedBody.allowAssetDownload
+    }
+
+    if (validatedBody.allowClientAssetUpload !== undefined) {
+      updateData.allowClientAssetUpload = validatedBody.allowClientAssetUpload
+    }
+
+    if (validatedBody.allowReverseShare !== undefined) {
+      updateData.allowReverseShare = validatedBody.allowReverseShare
+    }
+
+    if (validatedBody.clientCanApprove !== undefined) {
+      updateData.clientCanApprove = validatedBody.clientCanApprove
+    }
+
+    // Handle approved playback setting
+    if (validatedBody.usePreviewForApprovedPlayback !== undefined) {
+      updateData.usePreviewForApprovedPlayback = validatedBody.usePreviewForApprovedPlayback
+    }
+
+    // Handle client tutorial setting
+    if (validatedBody.showClientTutorial !== undefined) {
+      updateData.showClientTutorial = validatedBody.showClientTutorial
+    }
+
+    // Handle password, authMode, and guest settings updates
+    // Fetch current project once if any security field is being updated
+    let passwordWasChanged = false
+    let authModeWasChanged = false
+    let guestModeWasChanged = false
+    let guestLatestOnlyWasChanged = false
+
+    if (validatedBody.sharePassword !== undefined || validatedBody.authMode !== undefined || validatedBody.guestMode !== undefined || validatedBody.guestLatestOnly !== undefined) {
+      // Get current project state (single query for all security checks)
+      const currentProject = await prisma.project.findUnique({
+        where: { id },
+        select: { authMode: true, sharePassword: true, guestMode: true, guestLatestOnly: true }
+      })
+
+      if (!currentProject) {
+        return NextResponse.json({ error: projectMessages.projectNotFoundApi || 'Project not found' }, { status: 404 })
+      }
+
+      // Handle password update - only update if actually changed
+      if (validatedBody.sharePassword !== undefined) {
+        // Decrypt current password for comparison
+        const currentPassword = currentProject.sharePassword ? decrypt(currentProject.sharePassword) : null
+
+        // Only update if password actually changed
+        if (validatedBody.sharePassword === null || validatedBody.sharePassword === '') {
+          // Clearing password
+          if (currentPassword !== null) {
+            updateData.sharePassword = null
+            passwordWasChanged = true
+          }
+        } else {
+          // Setting/updating password - only if different from current
+          if (validatedBody.sharePassword !== currentPassword) {
+            updateData.sharePassword = encrypt(validatedBody.sharePassword)
+            passwordWasChanged = true
+          }
+        }
+      }
+
+      // Handle authentication mode
+      if (validatedBody.authMode !== undefined) {
+        // Detect if authMode actually changed
+        if (currentProject.authMode !== validatedBody.authMode) {
+          authModeWasChanged = true
+        }
+
+        // Validate that password modes have a password when being set
+        const newAuthMode = validatedBody.authMode
+        const newPassword = validatedBody.sharePassword !== undefined ? validatedBody.sharePassword : undefined
+
+        // Get current password if not being changed
+        if (newPassword === undefined && (newAuthMode === 'PASSWORD' || newAuthMode === 'BOTH')) {
+          const currentPassword = currentProject?.sharePassword ? decrypt(currentProject.sharePassword) : null
+
+          if (!currentPassword) {
+            return NextResponse.json(
+                { error: projectMessages.passwordAuthRequiresPassword || 'Password authentication mode requires a password' },
+              { status: 400 }
+            )
+          }
+        } else if ((newAuthMode === 'PASSWORD' || newAuthMode === 'BOTH') && (!newPassword || newPassword === '')) {
+          return NextResponse.json(
+              { error: projectMessages.passwordAuthRequiresPassword || 'Password authentication mode requires a password' },
+            { status: 400 }
+          )
+        }
+
+        updateData.authMode = validatedBody.authMode
+      }
+
+      // Handle guest mode
+      if (validatedBody.guestMode !== undefined) {
+        // Detect if guestMode actually changed
+        if (currentProject.guestMode !== validatedBody.guestMode) {
+          guestModeWasChanged = true
+        }
+        updateData.guestMode = validatedBody.guestMode
+      }
+
+      // Handle guest latest only restriction
+      if (validatedBody.guestLatestOnly !== undefined) {
+        // Detect if guestLatestOnly actually changed
+        if (currentProject.guestLatestOnly !== validatedBody.guestLatestOnly) {
+          guestLatestOnlyWasChanged = true
+        }
+        updateData.guestLatestOnly = validatedBody.guestLatestOnly
+      }
+    }
+
+    // Separate validation when only password is being cleared without authMode change
+    if (validatedBody.sharePassword !== undefined && validatedBody.authMode === undefined) {
+      const currentProject = await prisma.project.findUnique({
+        where: { id },
+        select: { authMode: true }
+      })
+
+      if ((currentProject?.authMode === 'PASSWORD' || currentProject?.authMode === 'BOTH') &&
+          (validatedBody.sharePassword === null || validatedBody.sharePassword === '')) {
+        return NextResponse.json(
+          { error: projectMessages.cannotRemovePasswordWhilePasswordAuth || 'Cannot remove password when using password authentication mode. Switch to "No Authentication" first.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Handle due date
+    if (validatedBody.dueDate !== undefined) {
+      updateData.dueDate = validatedBody.dueDate ? new Date(validatedBody.dueDate) : null
+    }
+    if (validatedBody.dueReminder !== undefined) {
+      updateData.dueReminder = validatedBody.dueReminder
+    }
+
+    // Handle client notification schedule
+    let previousClientSchedule: string | null = null
+    if (validatedBody.clientNotificationSchedule !== undefined) {
+      const current = await prisma.project.findUnique({
+        where: { id },
+        select: { clientNotificationSchedule: true }
+      })
+      previousClientSchedule = current?.clientNotificationSchedule || null
+      updateData.clientNotificationSchedule = validatedBody.clientNotificationSchedule
+    }
+    if (validatedBody.clientNotificationTime !== undefined) {
+      updateData.clientNotificationTime = validatedBody.clientNotificationTime
+    }
+    if (validatedBody.clientNotificationDay !== undefined) {
+      updateData.clientNotificationDay = validatedBody.clientNotificationDay
+    }
+
+    // Update the project in database FIRST (before invalidating sessions)
+    const project = await prisma.project.update({
+      where: { id },
+      data: updateData,
+    })
+
+    // Flush pending client notifications when schedule changes
+    if (previousClientSchedule !== null && validatedBody.clientNotificationSchedule !== previousClientSchedule) {
+      logMessage(`[PROJECT] Client notification schedule changed for "${project.title}": ${previousClientSchedule} → ${validatedBody.clientNotificationSchedule}`)
+      // Fire-and-forget: don't block the response
+      void flushPendingClientNotifications(id).catch((error) => {
+        logError('[PROJECT] Failed to flush pending client notifications after schedule change:', error)
+      })
+    }
+
+    // SECURITY: After password, authMode, guestMode, or guestLatestOnly is updated in DB, invalidate ALL sessions for this project
+    // This prevents clients from using old authentication/authorization even though security rules changed
+    if (passwordWasChanged || authModeWasChanged || guestModeWasChanged || guestLatestOnlyWasChanged) {
+      try {
+        // Invalidate JWT-based share sessions
+        const shareSessionsInvalidated = await invalidateShareTokensByProject(id)
+
+        // Log the security action
+        const changes: string[] = []
+        if (passwordWasChanged) changes.push('password')
+        if (authModeWasChanged) changes.push('auth mode')
+        if (guestModeWasChanged) changes.push('guest mode')
+        if (guestLatestOnlyWasChanged) changes.push('guest latest only')
+        const changeReason = changes.join(' and ') + ' changed'
+
+        logMessage(
+          `[SECURITY] Project ${changeReason} - invalidated ${shareSessionsInvalidated} share sessions for project ${id}`
+        )
+      } catch (error) {
+        logError('[SECURITY] Failed to invalidate project sessions after security change:', error)
+        // Don't fail the request if session invalidation fails - security change is more important
+      }
+
+    }
+
+    // Auto-sync company name to client directory (fire and forget)
+    if (validatedBody.companyName && updateData.companyName) {
+      syncCompanyToDirectory(id, updateData.companyName).catch(err => {
+        logError('Failed to sync company to client directory:', err)
+      })
+    }
+
+    return NextResponse.json(project)
+  } catch (error) {
+    return NextResponse.json(
+      { error: projectMessages.operationFailed || 'Operation failed' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const projectMessages = messages?.projects || {}
+
+  // SECURITY: Require admin authentication
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) {
+    return authResult
+  }
+
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 60 * 1000,
+    maxRequests: 20,
+    message: projectMessages.tooManyProjectDeleteRequests || 'Too many project delete requests. Please slow down.',
+  }, 'project-delete')
+  if (rateLimitResult) return rateLimitResult
+
+  try {
+    const { id } = await params
+    // Get project with all videos
+    const project = await prisma.project.findUnique({
+      where: { id },
+      include: {
+        videos: true,
+      },
+    })
+
+    if (!project) {
+      return NextResponse.json({ error: projectMessages.projectNotFoundApi || 'Project not found' }, { status: 404 })
+    }
+
+    // Delete all video files from storage
+    for (const video of project.videos) {
+      try {
+        // Delete original file
+        if (video.originalStoragePath) {
+          await deleteFile(video.originalStoragePath)
+        }
+
+        // Delete preview files (watermarked)
+        if ((video as any).preview2160Path) {
+          await deleteFile((video as any).preview2160Path)
+        }
+        if (video.preview1080Path) {
+          await deleteFile(video.preview1080Path)
+        }
+        if (video.preview720Path) {
+          await deleteFile(video.preview720Path)
+        }
+
+        // Delete clean preview files (non-watermarked, created after approval)
+        if ((video as any).cleanPreview2160Path) {
+          await deleteFile((video as any).cleanPreview2160Path)
+        }
+        if (video.cleanPreview1080Path) {
+          await deleteFile(video.cleanPreview1080Path)
+        }
+        if (video.cleanPreview720Path) {
+          await deleteFile(video.cleanPreview720Path)
+        }
+
+        // Delete thumbnail
+        if (video.thumbnailPath) {
+          await deleteFile(video.thumbnailPath)
+        }
+      } catch (error) {
+        logError(`Failed to delete files for video ${video.id}:`, error)
+        // Continue deleting other files even if one fails
+      }
+    }
+
+    // Delete the entire project directory after all files are removed
+    try {
+      await deleteDirectory(`projects/${id}`)
+    } catch (error) {
+      logError(`Failed to delete project directory for ${id}:`, error)
+      // Continue even if directory deletion fails
+    }
+
+    // SECURITY: Invalidate all share sessions for this project before deletion
+    try {
+      const invalidatedCount = await invalidateShareTokensByProject(id)
+      logMessage(`[SECURITY] Project deleted - invalidated ${invalidatedCount} share sessions`)
+    } catch (error) {
+      logError('[SECURITY] Failed to invalidate sessions during project deletion:', error)
+      // Continue with deletion even if session invalidation fails
+    }
+
+    // Delete project and all related data (cascade will handle videos, comments, shares)
+    await prisma.project.delete({
+      where: { id: id },
+    })
+
+    return NextResponse.json({
+      success: true,
+      message: projectMessages.projectDeletedSuccessfully || 'Project and all related files deleted successfully'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: projectMessages.operationFailed || 'Operation failed' },
+      { status: 500 }
+    )
+  }
+}

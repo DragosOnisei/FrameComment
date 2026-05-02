@@ -1,0 +1,370 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+import { requireApiAdmin } from '@/lib/auth'
+import { invalidateAllShareSessions, clearAllRateLimits } from '@/lib/session-invalidation'
+import { rateLimit } from '@/lib/rate-limit'
+import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { invalidateSecuritySettingsCache, isHttpsManagedByEnvironment } from '@/lib/settings'
+import { logError, logMessage } from '@/lib/logging'
+import { invalidateSecuritySettingsCache as invalidateVideoAccessSecurityCache } from '@/lib/video-access'
+
+export const runtime = 'nodejs'
+
+function adminTimeoutSeconds(value: number, unit: string): number | null {
+  if (!Number.isFinite(value) || value <= 0) return null
+  if (unit === 'MINUTES') return value * 60
+  if (unit === 'HOURS') return value * 60 * 60
+  return null
+}
+
+function parsePositiveInteger(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : parseInt(String(value), 10)
+  if (!Number.isInteger(parsed) || parsed <= 0) return null
+  return parsed
+}
+
+function isHotlinkProtectionValue(value: unknown): value is 'DISABLED' | 'LOG_ONLY' | 'BLOCK_STRICT' {
+  return value === 'DISABLED' || value === 'LOG_ONLY' || value === 'BLOCK_STRICT'
+}
+
+function isClientSessionTimeoutUnit(value: unknown): value is 'MINUTES' | 'HOURS' | 'DAYS' | 'WEEKS' {
+  return value === 'MINUTES' || value === 'HOURS' || value === 'DAYS' || value === 'WEEKS'
+}
+
+
+
+
+// Helper functions for change detection
+function hasSessionTimeoutChanged(
+  current: any,
+  newValue?: string,
+  newUnit?: string
+): boolean {
+  if (!current || (newValue === undefined && newUnit === undefined)) return false
+
+  const value = newValue !== undefined ? parseInt(newValue, 10) : current.sessionTimeoutValue
+  const unit = newUnit !== undefined ? newUnit : current.sessionTimeoutUnit
+
+  return current.sessionTimeoutValue !== value || current.sessionTimeoutUnit !== unit
+}
+
+function hasHotlinkProtectionChanged(current: any, newProtection?: string): boolean {
+  if (!current || newProtection === undefined) return false
+
+  const levels: Record<string, number> = { 'DISABLED': 0, 'LOG_ONLY': 1, 'BLOCK_STRICT': 2 }
+  const currentLevel = levels[current.hotlinkProtection] || 0
+  const newLevel = levels[newProtection] || 0
+
+  return newLevel > currentLevel
+}
+
+function hasPasswordAttemptsChanged(current: any, newAttempts?: string): boolean {
+  if (!current || newAttempts === undefined) return false
+  return current.passwordAttempts !== parseInt(newAttempts, 10)
+}
+
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest) {
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const settingsSecurityMessages = messages?.settings?.security || {}
+
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) {
+    return authResult
+  }
+
+  // Rate limiting: 60 requests per minute
+  const rateLimitResult = await rateLimit(request, {
+    windowMs: 60 * 1000,
+    maxRequests: 60,
+    message: settingsSecurityMessages.tooManyRequestsSlowDown || 'Too many requests. Please slow down.'
+  }, 'security-settings-read')
+
+  if (rateLimitResult) {
+    return rateLimitResult
+  }
+
+  try {
+    let settings = await prisma.securitySettings.findUnique({
+      where: { id: 'default' },
+    })
+
+    if (!settings) {
+      settings = await prisma.securitySettings.create({
+        data: {
+          id: 'default',
+        },
+      })
+    }
+
+    return NextResponse.json({
+      ...settings,
+      httpsManagedByEnvironment: isHttpsManagedByEnvironment(),
+    })
+  } catch (error) {
+    logError('Error fetching security settings:', error)
+    return NextResponse.json(
+      { error: settingsSecurityMessages.failedToFetchSecuritySettings || 'Failed to fetch security settings' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  const locale = await getConfiguredLocale().catch(() => 'en')
+  const messages = await loadLocaleMessages(locale).catch(() => null)
+  const settingsSecurityMessages = messages?.settings?.security || {}
+
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) {
+    return authResult
+  }
+
+  try {
+    const body = await request.json()
+
+    const {
+      httpsEnabled,
+      hotlinkProtection,
+      ipRateLimit,
+      sessionRateLimit,
+      shareSessionRateLimit,
+      shareTokenTtlSeconds,
+      passwordAttempts,
+      sessionTimeoutValue,
+      sessionTimeoutUnit,
+      adminSessionTimeoutValue,
+      adminSessionTimeoutUnit,
+      trackAnalytics,
+      trackSecurityLogs,
+      viewSecurityEvents,
+    } = body
+
+    // Validate required security fields
+    if (sessionTimeoutValue !== undefined && sessionTimeoutValue !== null) {
+      const timeoutVal = parseInt(sessionTimeoutValue, 10)
+      if (isNaN(timeoutVal) || timeoutVal <= 0) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.sessionTimeoutValueMustBePositive || 'Session timeout value must be a positive number' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (adminSessionTimeoutValue !== undefined && adminSessionTimeoutValue !== null) {
+      const timeoutVal = parseInt(adminSessionTimeoutValue, 10)
+      if (isNaN(timeoutVal) || timeoutVal <= 0) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.adminSessionTimeoutValueMustBePositive || 'Admin session timeout value must be a positive number' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (adminSessionTimeoutUnit !== undefined && adminSessionTimeoutUnit !== null) {
+      if (adminSessionTimeoutUnit !== 'MINUTES' && adminSessionTimeoutUnit !== 'HOURS') {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.adminSessionTimeoutUnitMustBeMinutesOrHours || 'Admin session timeout unit must be MINUTES or HOURS' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (hotlinkProtection !== undefined && hotlinkProtection !== null && !isHotlinkProtectionValue(hotlinkProtection)) {
+      return NextResponse.json(
+        { error: settingsSecurityMessages.invalidHotlinkProtection || 'Hotlink protection must be DISABLED, LOG_ONLY, or BLOCK_STRICT' },
+        { status: 400 }
+      )
+    }
+
+    if (sessionTimeoutUnit !== undefined && sessionTimeoutUnit !== null && !isClientSessionTimeoutUnit(sessionTimeoutUnit)) {
+      return NextResponse.json(
+        { error: settingsSecurityMessages.sessionTimeoutUnitInvalid || 'Client session timeout unit must be MINUTES, HOURS, DAYS, or WEEKS' },
+        { status: 400 }
+      )
+    }
+
+    if (ipRateLimit !== undefined && ipRateLimit !== null) {
+      const val = parsePositiveInteger(ipRateLimit)
+      if (!val || val > 10000) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.ipRateLimitMustBeBetween1And10000 || 'IP rate limit must be between 1 and 10000 requests per window' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (sessionRateLimit !== undefined && sessionRateLimit !== null) {
+      const val = parsePositiveInteger(sessionRateLimit)
+      if (!val || val > 5000) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.sessionRateLimitMustBeBetween1And5000 || 'Session rate limit must be between 1 and 5000 requests per window' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (passwordAttempts !== undefined && passwordAttempts !== null) {
+      const attemptsVal = parseInt(passwordAttempts, 10)
+      if (isNaN(attemptsVal) || attemptsVal <= 0 || attemptsVal > 100) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.passwordAttemptsMustBeBetween1And100 || 'Password attempts must be between 1 and 100' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (shareSessionRateLimit !== undefined && shareSessionRateLimit !== null) {
+      const val = parseInt(shareSessionRateLimit, 10)
+      if (isNaN(val) || val <= 0 || val > 2000) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.shareSessionRateLimitMustBeBetween1And2000 || 'Share session rate limit must be between 1 and 2000 requests per window' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (shareTokenTtlSeconds !== undefined && shareTokenTtlSeconds !== null) {
+      const val = parseInt(shareTokenTtlSeconds, 10)
+      if (isNaN(val) || val <= 60 || val > 24 * 60 * 60) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.shareTokenTtlMustBeBetween60And86400 || 'Share token TTL must be between 60 seconds and 86400 seconds' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Get current settings to detect changes and validate merged values
+    const currentSettings = await prisma.securitySettings.findUnique({
+      where: { id: 'default' },
+    })
+
+    if (adminSessionTimeoutValue !== undefined || adminSessionTimeoutUnit !== undefined) {
+      const mergedValue =
+        adminSessionTimeoutValue !== undefined && adminSessionTimeoutValue !== null
+          ? parseInt(adminSessionTimeoutValue, 10)
+          : (currentSettings?.adminSessionTimeoutValue ?? 15)
+      const mergedUnit =
+        adminSessionTimeoutUnit !== undefined && adminSessionTimeoutUnit !== null
+          ? String(adminSessionTimeoutUnit)
+          : (currentSettings?.adminSessionTimeoutUnit ?? 'MINUTES')
+
+      const seconds = adminTimeoutSeconds(mergedValue, mergedUnit)
+      if (!seconds) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.adminSessionTimeoutMustBePositiveMinutesOrHours || 'Admin session timeout must be a positive number in minutes or hours' },
+          { status: 400 }
+        )
+      }
+      if (seconds > 24 * 60 * 60) {
+        return NextResponse.json(
+          { error: settingsSecurityMessages.adminSessionTimeoutMustBe24HoursOrLess || 'Admin session timeout must be 24 hours or less' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Detect security-sensitive changes
+    const sessionTimeoutChanged = hasSessionTimeoutChanged(currentSettings, sessionTimeoutValue, sessionTimeoutUnit)
+    const hotlinkProtectionChanged = hasHotlinkProtectionChanged(currentSettings, hotlinkProtection)
+    const passwordAttemptsChanged = hasPasswordAttemptsChanged(currentSettings, passwordAttempts)
+    const effectiveHttpsEnabled = isHttpsManagedByEnvironment()
+      ? process.env.HTTPS_ENABLED === 'true' || process.env.HTTPS_ENABLED === '1'
+      : (httpsEnabled ?? false)
+
+    const settings = await prisma.securitySettings.upsert({
+      where: { id: 'default' },
+      update: {
+        httpsEnabled: effectiveHttpsEnabled,
+        hotlinkProtection: hotlinkProtection ?? 'LOG_ONLY',
+        ipRateLimit: ipRateLimit ? parseInt(ipRateLimit, 10) : 1000,
+        sessionRateLimit: sessionRateLimit ? parseInt(sessionRateLimit, 10) : 600,
+        shareSessionRateLimit: shareSessionRateLimit ? parseInt(shareSessionRateLimit, 10) : 300,
+        shareTokenTtlSeconds: shareTokenTtlSeconds ? parseInt(shareTokenTtlSeconds, 10) : null,
+        passwordAttempts: passwordAttempts ? parseInt(passwordAttempts, 10) : 5,
+        sessionTimeoutValue: sessionTimeoutValue ? parseInt(sessionTimeoutValue, 10) : 15,
+        sessionTimeoutUnit: sessionTimeoutUnit || 'MINUTES',
+        adminSessionTimeoutValue: adminSessionTimeoutValue ? parseInt(adminSessionTimeoutValue, 10) : 15,
+        adminSessionTimeoutUnit: adminSessionTimeoutUnit || 'MINUTES',
+        trackAnalytics: trackAnalytics ?? true,
+        trackSecurityLogs: trackSecurityLogs ?? true,
+        viewSecurityEvents: viewSecurityEvents ?? false,
+      },
+      create: {
+        id: 'default',
+        httpsEnabled: effectiveHttpsEnabled,
+        hotlinkProtection: hotlinkProtection ?? 'LOG_ONLY',
+        ipRateLimit: ipRateLimit ? parseInt(ipRateLimit, 10) : 1000,
+        sessionRateLimit: sessionRateLimit ? parseInt(sessionRateLimit, 10) : 600,
+        shareSessionRateLimit: shareSessionRateLimit ? parseInt(shareSessionRateLimit, 10) : 300,
+        shareTokenTtlSeconds: shareTokenTtlSeconds ? parseInt(shareTokenTtlSeconds, 10) : null,
+        passwordAttempts: passwordAttempts ? parseInt(passwordAttempts, 10) : 5,
+        sessionTimeoutValue: sessionTimeoutValue ? parseInt(sessionTimeoutValue, 10) : 15,
+        sessionTimeoutUnit: sessionTimeoutUnit || 'MINUTES',
+        adminSessionTimeoutValue: adminSessionTimeoutValue ? parseInt(adminSessionTimeoutValue, 10) : 15,
+        adminSessionTimeoutUnit: adminSessionTimeoutUnit || 'MINUTES',
+        trackAnalytics: trackAnalytics ?? true,
+        trackSecurityLogs: trackSecurityLogs ?? true,
+        viewSecurityEvents: viewSecurityEvents ?? false,
+      },
+    })
+
+    await invalidateSecuritySettingsCache()
+    await invalidateVideoAccessSecurityCache()
+
+    // SECURITY: Invalidate sessions when security settings change
+    let invalidationLog: string[] = []
+
+    // 1. Session timeout changed → Invalidate ALL share sessions globally
+    //    Reason: Existing sessions may exceed new timeout
+    if (sessionTimeoutChanged) {
+      try {
+        const count = await invalidateAllShareSessions()
+        invalidationLog.push(`Invalidated ${count} share sessions (timeout changed)`)
+        logMessage(`[SECURITY] Session timeout changed - invalidated ${count} share sessions`)
+      } catch (error) {
+        logError('[SECURITY] Failed to invalidate sessions after timeout change:', error)
+        // Don't fail the request if session invalidation fails
+      }
+    }
+
+    // 2. Hotlink protection became more restrictive → Invalidate ALL share sessions
+    //    Reason: New security policy should apply immediately
+    if (hotlinkProtectionChanged) {
+      try {
+        const count = await invalidateAllShareSessions()
+        invalidationLog.push(`Invalidated ${count} share sessions (hotlink protection strengthened)`)
+        logMessage(`[SECURITY] Hotlink protection strengthened - invalidated ${count} share sessions`)
+      } catch (error) {
+        logError('[SECURITY] Failed to invalidate sessions after hotlink change:', error)
+      }
+    }
+
+    // 3. Password attempts changed → Clear all rate limit counters
+    //    Reason: New limit should apply to fresh attempts
+    if (passwordAttemptsChanged) {
+      try {
+        const count = await clearAllRateLimits()
+        invalidationLog.push(`Cleared ${count} rate limit counters (password attempts changed)`)
+        logMessage(`[SECURITY] Password attempts changed - cleared ${count} rate limit entries`)
+      } catch (error) {
+        logError('[SECURITY] Failed to clear rate limits:', error)
+      }
+    }
+
+    // Return settings with invalidation summary
+    return NextResponse.json({
+      ...settings,
+      httpsManagedByEnvironment: isHttpsManagedByEnvironment(),
+      _invalidation: invalidationLog.length > 0 ? invalidationLog : undefined
+    })
+  } catch (error) {
+    logError('Error updating security settings:', error)
+    return NextResponse.json(
+      { error: settingsSecurityMessages.failedToUpdateSecuritySettings || 'Failed to update security settings' },
+      { status: 500 }
+    )
+  }
+}
