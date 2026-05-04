@@ -85,11 +85,15 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
-      - name: Build & push multi-arch image
+      # NOTE: linux/arm64 was removed in v1.0.1 because QEMU on the
+      # GitHub-hosted x86 runners crashes during Next.js webpack compile
+      # ("Illegal instruction"). v1.0.2 will reintroduce arm64 using
+      # GitHub's free native ARM runners with a matrix strategy.
+      - name: Build & push image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
