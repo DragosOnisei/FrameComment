@@ -47,6 +47,7 @@ SECURITY_BUGS_*.md
 
 # Local storage
 /uploads/
+/uploads-dev/
 minio-data/
 postgres-data/
 redis-data/
@@ -70,3 +71,7 @@ docs/screenshots/capture.mjs
 
 # Temp scratch files
 _*.tmp
+
+# Local deployment files with real secrets - NEVER commit
+_local-deploy/
+*-SECRETS.txt

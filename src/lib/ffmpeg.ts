@@ -308,7 +308,11 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
   // Then apply the LUT to those normalised values as the very last step.
   if (options.applyLut !== false) {
     filters.push('format=yuv420p')
-    filters.push('lut3d=/usr/share/ffmpeg/previewlut.cube')
+    // Path to the preview LUT. In Docker we copy it to /usr/share/ffmpeg.
+    // For local dev, override via PREVIEW_LUT_PATH env var (e.g. set to the
+    // file at the repo root: PREVIEW_LUT_PATH=$(pwd)/previewlut.cube).
+    const lutPath = process.env.PREVIEW_LUT_PATH || '/usr/share/ffmpeg/previewlut.cube'
+    filters.push(`lut3d=${lutPath}`)
   }
 
   const filterComplex = filters.join(',')

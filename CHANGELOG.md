@@ -17,6 +17,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.1] - 2026-05-04
+
+### Removed
+
+- **Client-facing onboarding tutorial.** New share links no longer trigger a
+  `driver.js`-based "Welcome / This page lets you watch videos…" walkthrough
+  for clients. The `<ShareTutorial>` component is no longer rendered on the
+  public share page, and the per-project default for `showClientTutorial` has
+  been flipped from `true` to `false` for newly created projects.
+
+### Fixed
+
+- **Postgres 18 fresh-install failure.** Postgres 18 changed its default data
+  directory layout (`PGDATA` now points at `/var/lib/postgresql/<major>/docker`
+  instead of `/var/lib/postgresql/data`), which made fresh installs against an
+  empty `/var/lib/postgresql/data` mount fail with *"unused mount/volume"*. We
+  now pin `PGDATA` to the legacy path in `docker-compose.yml`,
+  `docker-compose.truenas.yml`, `docker-compose.unraid.yml`, and the TrueNAS
+  catalog template. Existing 1.0.0 installs are unaffected.
+
+### Improved (developer experience only — no production impact)
+
+- **`npm run worker:dev`** new script that loads `.env` (or `.env.local`) before
+  starting the worker, so local-dev runs of the worker pick up `STORAGE_ROOT`,
+  `DATABASE_URL`, etc. without manual env exports.
+- **CSP relaxed in development mode** — `'unsafe-eval'` and `'unsafe-inline'`
+  are added in dev so React Refresh / Turbopack work without console errors.
+  Production CSP is unchanged (strict nonce-based policy).
+- **`PREVIEW_LUT_PATH` env var** — overrides the hard-coded `/usr/share/ffmpeg/previewlut.cube`
+  so the worker can find the LUT file when running natively on a developer's
+  machine. Default unchanged in Docker.
+- **`docs/DEV-LOCAL.md`** added with a step-by-step local-development guide.
+
 ## [1.0.0] - 2026-05-02
 
 ### Initial release
@@ -71,5 +104,6 @@ re-packaged for independent distribution and a new release cycle.
   names) have been renamed; review `docker-compose.yml` and your `.env`
   before upgrading. Detailed migration notes will be added in 1.0.1.
 
-[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/DragosOnisei/FrameComment/releases/tag/v1.0.0

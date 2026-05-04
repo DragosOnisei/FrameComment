@@ -225,7 +225,7 @@ export async function POST(request: NextRequest) {
           usePreviewForApprovedPlayback: settings?.defaultUsePreviewForApprovedPlayback ?? false,
           allowClientAssetUpload: settings?.defaultAllowClientAssetUpload ?? false,
           allowReverseShare: settings?.defaultAllowReverseShare ?? false,
-          showClientTutorial: settings?.defaultShowClientTutorial ?? true,
+          showClientTutorial: settings?.defaultShowClientTutorial ?? false,
           allowAssetDownload: settings?.defaultAllowAssetDownload ?? true,
           clientCanApprove: settings?.defaultClientCanApprove ?? true,
           applyPreviewLut: settings?.defaultApplyPreviewLut ?? true,

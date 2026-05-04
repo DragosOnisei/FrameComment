@@ -17,7 +17,6 @@ import BrandLogo from '@/components/BrandLogo'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import ThemeToggle from '@/components/ThemeToggle'
 import LanguageToggle from '@/components/LanguageToggle'
-import { ShareTutorial } from '@/components/ShareTutorial'
 import PrivacyBanner, { PRIVACY_STORAGE_KEY } from '@/components/PrivacyBanner'
 import ReverseShareUploadPanel from '@/components/ReverseShareUploadPanel'
 
@@ -1065,19 +1064,6 @@ export default function SharePageClient({ token }: SharePageClientProps) {
           <div className="flex items-center gap-2 ml-auto">
             <LanguageToggle />
             <ThemeToggle />
-            {project.showClientTutorial && (
-              <ShareTutorial
-                projectId={project.id || token}
-                showTutorial={project.showClientTutorial}
-                watermarkEnabled={project.watermarkEnabled}
-                hideFeedback={project.hideFeedback}
-                clientCanApprove={project.clientCanApprove}
-                allowAssetDownload={project.allowAssetDownload}
-                allowReverseShare={project.allowReverseShare}
-                isGuest={isGuest}
-                inPlayerView={false}
-              />
-            )}
           </div>
         </div>
 
@@ -1131,21 +1117,7 @@ export default function SharePageClient({ token }: SharePageClientProps) {
           showCommentToggle={!project.hideFeedback && !isGuest}
           isCommentPanelVisible={!hideComments}
           onToggleCommentPanel={() => setHideComments(!hideComments)}
-          trailingAction={
-            project.showClientTutorial ? (
-              <ShareTutorial
-                projectId={project.id || token}
-                showTutorial={project.showClientTutorial}
-                watermarkEnabled={project.watermarkEnabled}
-                hideFeedback={project.hideFeedback}
-                clientCanApprove={project.clientCanApprove}
-                allowAssetDownload={project.allowAssetDownload}
-                allowReverseShare={project.allowReverseShare}
-                isGuest={isGuest}
-                inPlayerView={true}
-              />
-            ) : undefined
-          }
+          trailingAction={undefined}
         />
 
       {/* Main Content Area - scrollable on mobile, fixed on desktop (xl breakpoint for better vertical video support) */}

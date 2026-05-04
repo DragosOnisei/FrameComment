@@ -38,16 +38,27 @@ export async function proxy(request: NextRequest) {
     try { s3Origin = new URL(process.env.S3_ENDPOINT).origin } catch {}
   }
 
+  const isDev = process.env.NODE_ENV !== 'production'
+
   const connectSrc = [
     "'self'",
     'blob:',
     s3Origin,
     'https://cloudflareinsights.com',
+    // Next.js dev tooling needs websocket connections for HMR
+    isDev ? 'ws:' : '',
+    isDev ? 'wss:' : '',
   ].filter(Boolean).join(' ')
+
+  // In dev, Turbopack/React DevTools require unsafe-eval and unsafe-inline.
+  // Production keeps the strict nonce-based policy.
+  const scriptSrc = isDev
+    ? "'self' 'unsafe-eval' 'unsafe-inline' https://static.cloudflareinsights.com"
+    : `'self' 'nonce-${nonce}' https://static.cloudflareinsights.com`
 
   const cspDirectives = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' https://static.cloudflareinsights.com`,
+    `script-src ${scriptSrc}`,
     "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob:${s3Origin ? ` ${s3Origin}` : ''}`,
@@ -66,7 +77,13 @@ export async function proxy(request: NextRequest) {
   }
 
   const requestHeaders = new Headers(request.headers)
-  requestHeaders.set('x-nonce', nonce)
+  // In dev we use 'unsafe-inline' instead of nonce-based CSP, so don't expose
+  // a nonce — otherwise SSR puts a unique nonce on inline scripts and the
+  // client hydration mismatches because the server- and client-rendered
+  // markup differ on every request.
+  if (!isDev) {
+    requestHeaders.set('x-nonce', nonce)
+  }
 
   const response = NextResponse.next({ request: { headers: requestHeaders } })
 

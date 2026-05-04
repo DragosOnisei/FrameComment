@@ -1,0 +1,53 @@
+# docker-compose.dev.yml — local development helpers
+#
+# Starts ONLY postgres + redis on your Mac, exposed on localhost.
+# The Next.js app itself runs natively with `npm run dev` for hot reload.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d        # start
+#   docker compose -f docker-compose.dev.yml logs -f      # tail logs
+#   docker compose -f docker-compose.dev.yml down         # stop
+#   docker compose -f docker-compose.dev.yml down -v      # stop + wipe DB
+#
+# Credentials are intentionally simple — this stack only listens on
+# 127.0.0.1, so it's not reachable from your LAN or the internet.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: framecomment-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: framecomment
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: framecomment
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - framecomment-dev-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U framecomment"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8-alpine
+    container_name: framecomment-dev-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass devpassword
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - framecomment-dev-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "devpassword", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  framecomment-dev-postgres:
+  framecomment-dev-redis:
