@@ -423,6 +423,7 @@ export function useCommentManagement({
       updatedAt: new Date(),
       parentId: replyingToCommentId,
       userId: null,
+      editorSessionId: null,
       replies: [],
     }
 
