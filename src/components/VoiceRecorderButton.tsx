@@ -83,7 +83,7 @@ export default function VoiceRecorderButton({
   onAttachmentAdded,
   disabled = false,
 }: VoiceRecorderButtonProps) {
-  const { provider: storageProvider } = useStorageProvider()
+  const storageProvider = useStorageProvider()
   const { startUpload: startS3Upload } = useS3MultipartUpload()
 
   const [isRecording, setIsRecording] = useState(false)
