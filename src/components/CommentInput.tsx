@@ -6,10 +6,13 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { Clock, Send, X, Keyboard, Paperclip, Pencil, ArrowRight } from 'lucide-react'
+import { Clock, Send, X, Keyboard, Paperclip, Pencil, ArrowRight, PenTool } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachmentButton from './CommentAttachmentButton'
+import VoiceRecorderButton from './VoiceRecorderButton'
+import AnnotationToolbarInline from './AnnotationToolbarInline'
+import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 
 interface CommentInputProps {
   newComment: string
@@ -113,6 +116,9 @@ export default function CommentInput({
   onShowShortcuts,
 }: CommentInputProps) {
   const t = useTranslations('comments')
+  // Optional — provider may not be present in every host page (e.g. preview
+  // contexts). Falls back to null and we render the legacy icon row.
+  const annotationCtx = useOptionalAnnotation()
   const tCommon = useTranslations('common')
 
   if (commentsDisabled) {
@@ -159,6 +165,26 @@ export default function CommentInput({
       })
     : null
 
+  /**
+   * Submit the comment, auto-committing any in-progress drawing first. Used
+   * by both the Send button click and the Enter keyboard shortcut so they
+   * stay in sync.
+   */
+  const submitWithAutoFinish = () => {
+    if (annotationCtx?.isDrawingMode) {
+      if (annotationCtx.drawing.hasShapes) {
+        annotationCtx.finishDrawingMode()
+      } else {
+        annotationCtx.cancelDrawingMode()
+      }
+      // Defer one tick so the synchronous annotationComplete listener
+      // can populate the comment-management hook's ref before submit reads it.
+      setTimeout(() => onSubmit(), 0)
+      return
+    }
+    onSubmit()
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Allow Ctrl+Space and other Ctrl shortcuts to pass through to VideoPlayer
     if (e.ctrlKey) {
@@ -169,8 +195,8 @@ export default function CommentInput({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       // Prevent multiple submissions while loading
-      if (canSubmit) {
-        onSubmit()
+      if (canSubmit || annotationCtx?.isDrawingMode) {
+        submitWithAutoFinish()
       }
     }
   }
@@ -381,6 +407,10 @@ export default function CommentInput({
               rows={2}
             />
             <div className="flex items-center justify-between">
+              {annotationCtx?.isDrawingMode ? (
+                // Drawing mode: replace the icon row with the inline toolbar.
+                <AnnotationToolbarInline />
+              ) : (
               <div className="flex items-center gap-1.5">
                 {onStartDrawing && (
                   <Button
@@ -392,7 +422,7 @@ export default function CommentInput({
                     title={t('drawOnVideo')}
                     disabled={loading}
                   >
-                    <Pencil className="w-4 h-4" />
+                    <PenTool className="w-4 h-4" />
                   </Button>
                 )}
                 {allowClientAssetUpload && selectedVideoIdProp && onAttachmentAdded && (
@@ -405,11 +435,20 @@ export default function CommentInput({
                     maxFiles={maxCommentAttachments}
                   />
                 )}
+                {allowClientAssetUpload && selectedVideoIdProp && onAttachmentAdded && (
+                  <VoiceRecorderButton
+                    videoId={selectedVideoIdProp}
+                    shareToken={shareToken || null}
+                    onAttachmentAdded={onAttachmentAdded}
+                    disabled={loading}
+                  />
+                )}
               </div>
+              )}
               <Button
-                onClick={onSubmit}
+                onClick={submitWithAutoFinish}
                 variant="default"
-                disabled={!canSubmit}
+                disabled={!canSubmit && !annotationCtx?.isDrawingMode}
                 size="icon"
                 className="h-8 w-8"
               >

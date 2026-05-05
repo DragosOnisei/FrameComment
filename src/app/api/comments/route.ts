@@ -323,6 +323,10 @@ export async function POST(request: NextRequest) {
         parentId: parentId || null,
         userId: authContext.user?.id || null,
         annotations: annotations || undefined,
+        // Track the share-token session id of the author so they can
+        // edit their own comment from the same browser session later.
+        // Admin-authored comments rely on userId for edit authorization.
+        editorSessionId: authContext.user ? null : uploaderSessionId,
       },
       include: {
         user: {

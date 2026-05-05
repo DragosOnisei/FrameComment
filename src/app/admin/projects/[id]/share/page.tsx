@@ -5,6 +5,7 @@ import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigat
 import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
+import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
 import { Card, CardContent } from '@/components/ui/card'
@@ -21,6 +22,14 @@ const TOKEN_FETCH_RETRY_MAX_MS = 400
 type TokenFetchTelemetryEvent = 'first-attempt-failure' | 'retry-success' | 'retry-failure'
 
 export default function AdminSharePage() {
+  return (
+    <AnnotationProvider>
+      <AdminSharePageInner />
+    </AnnotationProvider>
+  )
+}
+
+function AdminSharePageInner() {
   const t = useTranslations('projects')
   const tc = useTranslations('common')
   const params = useParams()

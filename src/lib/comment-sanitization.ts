@@ -63,6 +63,11 @@ export function sanitizeComment(
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     parentId: comment.parentId,
+    // Expose the editor session id so the share-page client can compare
+    // against its own session and decide whether to show the Edit button.
+    // The session id is not personal data; it's a per-tab identifier the
+    // client already holds. Admin client gets it too for completeness.
+    editorSessionId: comment.editorSessionId || null,
   }
 
   // NEVER expose real names or emails to non-admins

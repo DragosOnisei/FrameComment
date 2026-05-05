@@ -10,9 +10,7 @@ import VideoComparison from './VideoComparison'
 import ProjectInfo from './ProjectInfo'
 import AnnotationOverlay from './AnnotationOverlay'
 import AnnotationCanvas from './AnnotationCanvas'
-import AnnotationToolbar from './AnnotationToolbar'
-import { useAnnotationDrawing } from '@/hooks/useAnnotationDrawing'
-import { AnnotationData } from '@/types/annotations'
+import { useAnnotation } from '@/contexts/AnnotationContext'
 import { secondsToTimecode } from '@/lib/timecode'
 import { logError } from '@/lib/logging'
 
@@ -125,29 +123,23 @@ export default function VideoPlayer({
   const [showComparison, setShowComparison] = useState(false)
 
   // Drawing mode state
-  const [isDrawingMode, setIsDrawingMode] = useState(false)
-  const [drawingTimecodeStart, setDrawingTimecodeStart] = useState<string>('00:00:00:00')
-  const [drawingTimecodeEnd, setDrawingTimecodeEnd] = useState<string | null>(null)
-  const [pendingAnnotation, setPendingAnnotation] = useState<{
-    annotations: AnnotationData
-    timecode: string
-    timecodeEnd?: string | null
-  } | null>(null)
-
-  const annotationDrawing = useAnnotationDrawing()
+  // Drawing/annotation state lives in a shared Context so the toolbar can
+  // be rendered inside CommentInput while the canvas stays here on the video.
+  const {
+    drawing: annotationDrawing,
+    isDrawingMode,
+    pendingAnnotation,
+    startDrawingMode,
+    finishDrawingMode,
+    cancelDrawingMode,
+  } = useAnnotation()
 
   // Listen for enterDrawingMode event from CommentInput
   useEffect(() => {
     const handleEnterDrawing = (e: CustomEvent) => {
       const fps = selectedVideo?.fps || 24
       const timecodeStart = secondsToTimecode(currentTimeRef.current, fps)
-      setDrawingTimecodeStart(timecodeStart)
-      setDrawingTimecodeEnd(e.detail?.timecodeEnd || null)
-      setIsDrawingMode(true)
-      setPendingAnnotation(null)
-
-      // Reset drawing state so we start with a fresh canvas each time
-      annotationDrawing.reset()
+      startDrawingMode(timecodeStart, e.detail?.timecodeEnd || null)
 
       // Pause video when entering drawing mode
       if (videoRef.current && !videoRef.current.paused) {
@@ -159,48 +151,15 @@ export default function VideoPlayer({
     return () => {
       window.removeEventListener('enterDrawingMode' as any, handleEnterDrawing as EventListener)
     }
-  }, [selectedVideo?.fps, annotationDrawing])
+  }, [selectedVideo?.fps, startDrawingMode])
 
   const handleDrawingDone = useCallback(() => {
-    const data = annotationDrawing.getAnnotationData()
-    setIsDrawingMode(false)
-
-    if (data) {
-      // Store as pending so the overlay keeps showing the drawing
-      setPendingAnnotation({
-        annotations: data,
-        timecode: drawingTimecodeStart,
-        timecodeEnd: drawingTimecodeEnd,
-      })
-
-      window.dispatchEvent(
-        new CustomEvent('annotationComplete', {
-          detail: {
-            annotations: data,
-            timecodeStart: drawingTimecodeStart,
-            timecodeEnd: drawingTimecodeEnd,
-            videoId: selectedVideo?.id,
-          },
-        })
-      )
-    }
-  }, [annotationDrawing, drawingTimecodeStart, drawingTimecodeEnd, selectedVideo?.id])
+    finishDrawingMode(selectedVideo?.id)
+  }, [finishDrawingMode, selectedVideo?.id])
 
   const handleDrawingCancel = useCallback(() => {
-    setIsDrawingMode(false)
-    setPendingAnnotation(null)
-  }, [])
-
-  // Clear pending annotation preview when comment is posted or annotation is removed
-  useEffect(() => {
-    const clear = () => setPendingAnnotation(null)
-    window.addEventListener('commentPosted', clear)
-    window.addEventListener('annotationCleared', clear)
-    return () => {
-      window.removeEventListener('commentPosted', clear)
-      window.removeEventListener('annotationCleared', clear)
-    }
-  }, [])
+    cancelDrawingMode()
+  }, [cancelDrawingMode])
 
   // Dispatch event when selected video changes (for immediate comment section update)
   useEffect(() => {
@@ -895,32 +854,20 @@ export default function VideoPlayer({
                   pendingAnnotation={pendingAnnotation}
                 />
 
-                {/* Drawing Mode: Interactive Canvas + Toolbar + Keyframe Bar */}
+                {/* Drawing Mode: just the interactive canvas. The toolbar is
+                    rendered inline inside CommentInput via the shared
+                    AnnotationContext, so the user can pick tools and colours
+                    without leaving the comment area. */}
                 {isDrawingMode && (
-                  <>
-                    <AnnotationCanvas
-                      containerRef={videoWrapperRef}
-                      videoRef={videoRef}
-                      shapes={annotationDrawing.shapes}
-                      activeShape={annotationDrawing.activeShape}
-                      onStartShape={annotationDrawing.startShape}
-                      onUpdateShape={annotationDrawing.updateShape}
-                      onFinishShape={annotationDrawing.finishShape}
-                    />
-                    <AnnotationToolbar
-                      activeColor={annotationDrawing.activeColor}
-                      strokeWidth={annotationDrawing.strokeWidth}
-                      opacity={annotationDrawing.opacity}
-                      canUndo={annotationDrawing.undoStack.length > 0}
-                      hasShapes={annotationDrawing.hasShapes}
-                      onColorChange={annotationDrawing.setActiveColor}
-                      onStrokeWidthChange={annotationDrawing.setStrokeWidth}
-                      onOpacityChange={annotationDrawing.setOpacity}
-                      onUndo={annotationDrawing.undo}
-                      onDone={handleDrawingDone}
-                      onCancel={handleDrawingCancel}
-                    />
-                  </>
+                  <AnnotationCanvas
+                    containerRef={videoWrapperRef}
+                    videoRef={videoRef}
+                    shapes={annotationDrawing.shapes}
+                    activeShape={annotationDrawing.activeShape}
+                    onStartShape={annotationDrawing.startShape}
+                    onUpdateShape={annotationDrawing.updateShape}
+                    onFinishShape={annotationDrawing.finishShape}
+                  />
                 )}
 
                 {/* Custom Video Controls with Integrated Timeline */}

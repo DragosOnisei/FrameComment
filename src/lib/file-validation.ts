@@ -32,8 +32,8 @@ export const ALLOWED_ASSET_TYPES = {
     mimeTypes: ['image/jpeg', 'image/png']
   },
   audio: {
-    extensions: ['.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a', '.wma'],
-    mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/flac', 'audio/ogg', 'audio/mp4', 'audio/x-ms-wma']
+    extensions: ['.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a', '.wma', '.webm'],
+    mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/flac', 'audio/ogg', 'audio/mp4', 'audio/x-ms-wma', 'audio/webm', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus']
   },
   video: {
     extensions: ['.mp4', '.mov', '.avi', '.mkv', '.mxf', '.prores'],

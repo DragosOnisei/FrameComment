@@ -92,7 +92,9 @@ export async function proxy(request: NextRequest) {
   response.headers.set('X-Frame-Options', 'DENY')
   response.headers.set('X-Content-Type-Options', 'nosniff')
   response.headers.set('Referrer-Policy', 'same-origin')
-  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()')
+  // microphone=(self) is required for the comment voice-recorder. Camera and
+  // geolocation are not used by the app, so they remain disabled.
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), interest-cohort=()')
 
   if (isHttpsEnabled) {
     response.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')

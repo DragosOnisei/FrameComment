@@ -17,6 +17,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.2] - 2026-05-04
+
+### Added
+
+- **Edit your own comments and replies.** A pencil "Edit" button now appears
+  next to each comment for the original author and for admins. The new
+  endpoint is `PATCH /api/comments/[id]`. Authorization is enforced via a
+  per-share-session id (admins can override).
+- **Voice messages on comments.** A new microphone icon next to the
+  attachment paperclip records audio (up to 5 minutes) and attaches it to
+  the comment. Includes a live waveform during recording, an inline audio
+  player on saved comments, and a microphone-device picker for users with
+  multiple inputs.
+- **New annotation shapes — arrow, line, rectangle.** The comment drawing
+  tools used to be freehand-only; you can now drop arrows, straight lines,
+  and rectangles on top of any frame. Arrows scale with drag length so a
+  short arrow stays delicate and a long arrow gets visibly thicker.
+- **Inline annotation toolbar.** The drawing toolbar is now rendered inside
+  the comment input row (Frame.io-style), so picking a tool/colour and
+  reviewing your sketch happens without leaving the comment area. The video
+  is no longer dimmed while drawing.
+- **Single back arrow replaces the old Cancel/Done pair.** Pressing back
+  commits the drawing if any shapes exist, otherwise cancels. Pressing
+  Send (or Enter) while drawing now auto-commits the drawing first, so you
+  can post in one click without a separate finish step.
+- **Click-to-pin annotation.** Clicking a comment in the sidebar surfaces
+  its drawing on the video and seeks to its timecode. Drawings stay strictly
+  bound to their comment's timecode — they appear when the playhead reaches
+  the frame and disappear once it moves on.
+- **Image attachments render as previews + click-to-zoom lightbox.** Image
+  files attached to comments now show as a small grid of thumbnails inline.
+  Clicking a thumbnail opens a full-screen lightbox; Esc / outside-click
+  closes it. Non-image attachments keep the existing download row.
+- **Submit without text.** Comments containing only an attachment, voice
+  message, or annotation can now be posted with an empty text body. We no
+  longer auto-fill placeholder text such as `Attachments uploaded #1` or
+  `Drawing annotation`.
+- **Annotation colour palette restricted to 3.** The toolbar now offers
+  red / orange / green only, mapped to a clearer shared meaning across
+  reviewers (problem / note / approved). Existing annotations with other
+  colours continue to render correctly.
+- **Cmd+Z / Cmd+Shift+Z redo support.** The drawing surface now keeps both
+  an undo and a redo stack, with the standard keyboard shortcuts.
+
+### Changed
+
+- **Localisation reduced to English.** Dutch (`nl`) and German (`de`)
+  translation bundles have been removed. The single-language language
+  switcher is hidden automatically when only one locale is available.
+- **`Permissions-Policy` allows microphone for the comment recorder.**
+  Camera and geolocation remain disabled.
+- **Stricter annotation render gating.** Drawings on saved comments only
+  render while the playhead is inside the comment's timecode window.
+  Pending (just-drawn) drawings render on a slightly more generous window
+  while the user is still composing their comment.
+
+### Fixed
+
+- **Annotations were silently dropped server-side.** The validation schema
+  for `Comment.annotations` only accepted the legacy `freehand` shape; the
+  new `arrow`, `line` and `rectangle` shapes were stripped during request
+  parsing and never persisted. Schema is now a discriminated union over
+  all four shape types.
+- **`audio/webm` was rejected by the asset uploader.** Browser voice
+  recordings produce `audio/webm` (Chrome/Firefox) or `audio/mp4` (Safari);
+  both are now allowed extensions and MIME types.
+- **PostgreSQL 18 fresh-install error revisited.** Already pinned in 1.0.1
+  for the project compose files; the TrueNAS catalog template now also
+  pins `PGDATA` to `/var/lib/postgresql/data`.
+
+### Improved (developer experience only — no production impact)
+
+- New `npm run worker:dev` is registered as a script alias.
+- Added a configurable preview-LUT path via `PREVIEW_LUT_PATH` for local
+  development outside Docker.
+- Inline TUS auth header added to the voice recorder upload path so it
+  authenticates the same way attachment uploads do.
+
+### Internal
+
+- New `editorSessionId` column on `Comment` (Prisma migration
+  `20260504184125_add_comment_editor_session_id`). Stores the share-token
+  session id of the original author so they can edit their own comment
+  later from the same browser.
+- New `AnnotationProvider` React context wraps the share and admin share
+  pages. Drawing state, mode, and pending-annotation lifecycle are now
+  shared between `VideoPlayer` and `CommentInput` via context instead of
+  window events alone.
+
 ## [1.0.1] - 2026-05-04
 
 ### Removed
@@ -104,6 +193,7 @@ re-packaged for independent distribution and a new release cycle.
   names) have been renamed; review `docker-compose.yml` and your `.env`
   before upgrading. Detailed migration notes will be added in 1.0.1.
 
-[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/DragosOnisei/FrameComment/releases/tag/v1.0.0

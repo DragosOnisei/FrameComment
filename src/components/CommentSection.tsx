@@ -44,6 +44,8 @@ interface CommentSectionProps {
   onToggleVisibility?: () => void
   showToggleButton?: boolean
   onMobileExpandedChange?: (expanded: boolean) => void
+  /** Per-client session id used to authorise self-edit on the share page. */
+  clientSessionId?: string | null
 }
 
 export default function CommentSection({
@@ -72,6 +74,7 @@ export default function CommentSection({
   onToggleVisibility,
   showToggleButton = false,
   onMobileExpandedChange,
+  clientSessionId = null,
 }: CommentSectionProps) {
   const t = useTranslations('comments')
   const tCommon = useTranslations('common')
@@ -150,6 +153,36 @@ export default function CommentSection({
       // Silent fail - keep showing existing comments
     }
   }, [isAdminView, projectId, shareToken])
+
+  /**
+   * Edit a comment. Sends PATCH /api/comments/[id] using either the admin
+   * cookie auth (admin view) or the share token (client view). On success,
+   * dispatches a `commentDeleted` event — its name is generic enough to
+   * cover any state-changing comment update; both `CommentSection` and
+   * `SharePageClient` listen to it and refetch comments, which propagates
+   * the new content into the comment-management hook.
+   */
+  const handleEditComment = useCallback(async (commentId: string, newContent: string) => {
+    const url = `/api/comments/${commentId}`
+    const body = JSON.stringify({ content: newContent })
+    const response = isAdminView
+      ? await apiFetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
+      : await fetch(url, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}),
+          },
+          body,
+        })
+    if (!response.ok) {
+      throw new Error(`Failed to edit comment (HTTP ${response.status})`)
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('commentDeleted'))
+    }
+    await fetchComments()
+  }, [isAdminView, shareToken, fetchComments])
 
   // Initialize localComments only (no polling - hook handles optimistic updates)
   useEffect(() => {
@@ -501,6 +534,16 @@ export default function CommentSection({
                       onReply={() => handleReply(comment.id, comment.videoId)}
                       onSeekToTimecode={handleSeekToTimecode}
                       onDelete={isAdminView ? () => handleDeleteComment(comment.id) : undefined}
+                      onEdit={(newContent) => handleEditComment(comment.id, newContent)}
+                      onEditReply={(replyId, newContent) => handleEditComment(replyId, newContent)}
+                      canEdit={
+                        isAdminView ||
+                        (!!clientSessionId && (comment as any).editorSessionId === clientSessionId)
+                      }
+                      canEditReply={(reply) =>
+                        isAdminView ||
+                        (!!clientSessionId && (reply as any).editorSessionId === clientSessionId)
+                      }
                       formatMessageTime={formatMessageTime}
                       commentsDisabled={commentsDisabled}
                       sequenceNumber={sequenceNumber}

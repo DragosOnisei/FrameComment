@@ -21,7 +21,7 @@ sources:
   - https://hub.docker.com/r/dragosonisei/framecomment
 icon: icon.png
 screenshots: []
-latest_version: 1.0.1
-latest_app_version: 1.0.1
-latest_human_version: 1.0.1
+latest_version: 1.0.2
+latest_app_version: 1.0.2
+latest_human_version: 1.0.2
 recommended: false

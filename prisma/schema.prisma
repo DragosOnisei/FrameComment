@@ -273,6 +273,12 @@ model Comment {
   userId String? // Admin user who created this comment
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  // Editor identity for self-edit authorization on the share page.
+  // Stores the share-token session id of the original author. On edit,
+  // the request must come from the same session to be authorized.
+  // Null for admin-authored comments (they edit via admin auth).
+  editorSessionId String?
+
   // Admin reply functionality
   parentId String? // if this is a reply to another comment
   parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)

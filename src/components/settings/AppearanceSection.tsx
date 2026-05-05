@@ -6,8 +6,6 @@ import { useTranslations } from 'next-intl'
 
 const SUPPORTED_LANGUAGES = [
   { code: 'en' },
-  { code: 'nl' },
-  { code: 'de' },
 ] as const
 
 // Accent color presets with HSL values for light and dark modes

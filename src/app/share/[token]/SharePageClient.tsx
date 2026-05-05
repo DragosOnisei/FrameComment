@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { useSearchParams, usePathname, useRouter } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
+import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
 import { OTPInput } from '@/components/OTPInput'
@@ -30,7 +31,15 @@ const TOKEN_FETCH_RETRY_MAX_MS = 400
 
 type TokenFetchTelemetryEvent = 'first-attempt-failure' | 'retry-success' | 'retry-failure'
 
-export default function SharePageClient({ token }: SharePageClientProps) {
+export default function SharePageClient(props: SharePageClientProps) {
+  return (
+    <AnnotationProvider>
+      <SharePageClientInner {...props} />
+    </AnnotationProvider>
+  )
+}
+
+function SharePageClientInner({ token }: SharePageClientProps) {
   const t = useTranslations('share')
   const tc = useTranslations('common')
   const searchParams = useSearchParams()
@@ -1191,6 +1200,7 @@ export default function SharePageClient({ token }: SharePageClientProps) {
                   maxCommentAttachments={project.settings?.maxCommentAttachments ?? 10}
                   onToggleVisibility={() => setHideComments(!hideComments)}
                   showToggleButton={false}
+                  clientSessionId={(project as any).clientSessionId || null}
                 />
               </div>
             )}

@@ -50,10 +50,14 @@ export const safeStringSchema = (minLength = 1, maxLength = 255) =>
       message: 'Invalid characters detected'
     })
 
-// Content field (allows more characters, sanitized)
+// Content field (allows more characters, sanitized).
+// Empty strings are accepted at this layer so that comments containing only
+// an attachment or annotation can be posted without text. Routes that need
+// to require non-empty content should enforce that themselves (createCommentSchema
+// uses a refinement that allows empty content only when assetIds or
+// annotations are present).
 export const contentSchema = z
   .string()
-  .min(1, 'Content cannot be empty')
   .max(10000, 'Content must not exceed 10,000 characters')
   .trim()
   .transform(content => {
@@ -358,32 +362,82 @@ const freehandShapeSchema = z.object({
   points: z.array(pointSchema).min(1).max(5000),
 })
 
-const shapeSchema = freehandShapeSchema
+// Drag-out shapes (added in 1.0.2): start + end point, no point list.
+const lineShapeSchema = z.object({
+  id: z.string().min(1).max(50),
+  type: z.literal('line'),
+  color: hexColorSchema,
+  strokeWidth: strokeWidthSchema,
+  opacity: z.number().min(0).max(1).optional(),
+  start: pointSchema,
+  end: pointSchema,
+})
+
+const arrowShapeSchema = z.object({
+  id: z.string().min(1).max(50),
+  type: z.literal('arrow'),
+  color: hexColorSchema,
+  strokeWidth: strokeWidthSchema,
+  opacity: z.number().min(0).max(1).optional(),
+  start: pointSchema,
+  end: pointSchema,
+})
+
+const rectangleShapeSchema = z.object({
+  id: z.string().min(1).max(50),
+  type: z.literal('rectangle'),
+  color: hexColorSchema,
+  strokeWidth: strokeWidthSchema,
+  opacity: z.number().min(0).max(1).optional(),
+  start: pointSchema,
+  end: pointSchema,
+})
+
+const shapeSchema = z.discriminatedUnion('type', [
+  freehandShapeSchema,
+  lineShapeSchema,
+  arrowShapeSchema,
+  rectangleShapeSchema,
+])
 
 const annotationDataSchema = z.object({
   version: z.literal(1),
   shapes: z.array(shapeSchema).min(1).max(200),
 })
 
-export const createCommentSchema = z.object({
-  projectId: cuidSchema,
-  videoId: cuidSchema, // Required - all comments must be video-specific
-  videoVersion: z.number().int().positive().optional(),
-  timecode: z.string().refine(isValidTimecode, {
-    message: 'Invalid timecode format. Expected HH:MM:SS:FF'
-  }),
-  timecodeEnd: z.string().refine(isValidTimecode, {
-    message: 'Invalid end timecode format. Expected HH:MM:SS:FF'
-  }).optional().nullable(),
-  content: contentSchema,
-  authorName: safeStringSchema(1, 255).optional().nullable(),
-  authorEmail: emailSchema.optional().nullable(),
-  recipientId: cuidSchema.optional().nullable(),
-  parentId: cuidSchema.optional(),
-  isInternal: z.boolean().optional(),
-  assetIds: z.array(z.string()).max(50).optional(),
-  annotations: annotationDataSchema.optional().nullable(),
-})
+export const createCommentSchema = z
+  .object({
+    projectId: cuidSchema,
+    videoId: cuidSchema, // Required - all comments must be video-specific
+    videoVersion: z.number().int().positive().optional(),
+    timecode: z.string().refine(isValidTimecode, {
+      message: 'Invalid timecode format. Expected HH:MM:SS:FF'
+    }),
+    timecodeEnd: z.string().refine(isValidTimecode, {
+      message: 'Invalid end timecode format. Expected HH:MM:SS:FF'
+    }).optional().nullable(),
+    content: contentSchema,
+    authorName: safeStringSchema(1, 255).optional().nullable(),
+    authorEmail: emailSchema.optional().nullable(),
+    recipientId: cuidSchema.optional().nullable(),
+    parentId: cuidSchema.optional(),
+    isInternal: z.boolean().optional(),
+    assetIds: z.array(z.string()).max(50).optional(),
+    annotations: annotationDataSchema.optional().nullable(),
+  })
+  // A comment must have *something* — text, an attachment (e.g. voice
+  // message), or an annotation. Empty-on-all-fronts comments would render
+  // as nothing in the feed.
+  .refine(
+    (data) =>
+      (data.content && data.content.trim().length > 0) ||
+      (data.assetIds && data.assetIds.length > 0) ||
+      (data.annotations && data.annotations.shapes && data.annotations.shapes.length > 0),
+    {
+      message: 'Comment must contain text, an attachment, or an annotation.',
+      path: ['content'],
+    }
+  )
 
 export const updateCommentSchema = z.object({
   content: contentSchema.optional(),

@@ -64,6 +64,11 @@ export function useCommentManagement({
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null)
   const [pendingAnnotation, setPendingAnnotation] = useState<AnnotationData | null>(null)
+  // Mirror of `pendingAnnotation` kept in a ref so synchronous flows (e.g.
+  // "click Send while still in drawing mode → finish drawing → submit
+  // immediately") can read the current annotation without waiting for a
+  // React re-render.
+  const pendingAnnotationRef = useRef<AnnotationData | null>(null)
   const [selectedTimecodeEnd, setSelectedTimecodeEnd] = useState<string | null>(null)
   const attachmentUploadCountRef = useRef(0)
   const previousVideoIdRef = useRef<string | null>(null)
@@ -288,6 +293,7 @@ export function useCommentManagement({
     const handleAnnotationComplete = (e: CustomEvent) => {
       const { annotations, timecodeStart, timecodeEnd, videoId } = e.detail
       if (annotations) {
+        pendingAnnotationRef.current = annotations
         setPendingAnnotation(annotations)
       }
       if (timecodeEnd) {
@@ -385,14 +391,12 @@ export function useCommentManagement({
 
     setLoading(true)
 
-    // Auto-fill comment text when empty but has attachments or annotations
-    let commentContent = newComment
-    if (!commentContent.trim() && hasAttachments) {
-      attachmentUploadCountRef.current += 1
-      commentContent = `Attachments uploaded #${attachmentUploadCountRef.current}`
-    } else if (!commentContent.trim() && hasAnnotations) {
-      commentContent = 'Drawing annotation'
-    }
+    // The server now accepts an empty `content` when the comment carries an
+    // attachment or annotation, so we no longer fabricate placeholder text
+    // like "Attachments uploaded #1" or "Drawing annotation". An empty
+    // string is sent through and the bubble renders just the attachment(s)
+    // or drawing.
+    const commentContent = newComment
 
     // OPTIMISTIC UPDATE
     const isInternalComment = useAdminAuth || !!adminUser
@@ -433,6 +437,11 @@ export function useCommentManagement({
     // Keep selectedVideoId so user can post multiple comments
     setHasAutoFilledTimestamp(false)
     setReplyingToCommentId(null)
+    // Snapshot the annotation BEFORE clearing — handleSubmit runs the API
+    // call below and we need to read the value the user just drew, not the
+    // freshly-cleared state.
+    const annotationForSubmit = pendingAnnotationRef.current
+    pendingAnnotationRef.current = null
     setPendingAnnotation(null)
     setSelectedTimecodeEnd(null)
     const attachmentsForComment = pendingAttachments.filter(a => a.videoId === validatedVideoId)
@@ -454,9 +463,10 @@ export function useCommentManagement({
         isInternal: isInternalComment,
       }
 
-      // Include annotation data if present
-      if (pendingAnnotation) {
-        requestBody.annotations = pendingAnnotation
+      // Include annotation data if present (using the ref snapshot — see
+      // pendingAnnotationRef declaration for why).
+      if (annotationForSubmit) {
+        requestBody.annotations = annotationForSubmit
       }
       if (selectedTimecodeEnd) {
         requestBody.timecodeEnd = selectedTimecodeEnd
@@ -683,6 +693,7 @@ export function useCommentManagement({
   }
 
   const handleClearAnnotation = () => {
+    pendingAnnotationRef.current = null
     setPendingAnnotation(null)
     // Tell VideoPlayer to clear its pending annotation preview
     window.dispatchEvent(new CustomEvent('annotationCleared'))

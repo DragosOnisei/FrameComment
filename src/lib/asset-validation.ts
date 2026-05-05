@@ -1,7 +1,7 @@
 export const ALLOWED_ASSET_EXTENSIONS = {
   thumbnail: ['.jpg', '.jpeg', '.png'],
   image: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.psd', '.ai', '.eps'],
-  audio: ['.wav', '.mp3', '.aac', '.flac', '.m4a', '.ogg', '.wma'],
+  audio: ['.wav', '.mp3', '.aac', '.flac', '.m4a', '.ogg', '.wma', '.webm'],
   video: ['.mp4', '.mov', '.avi', '.mkv', '.mxf', '.prores'],
   subtitle: ['.srt', '.vtt', '.ass', '.ssa', '.sub'],
   project: ['.prproj', '.aep', '.fcp', '.drp', '.drt', '.dra', '.fcpbundle', '.fcpxml'],

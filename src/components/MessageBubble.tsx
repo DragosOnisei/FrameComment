@@ -1,11 +1,13 @@
 'use client'
 
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
-import { Clock, Trash2, Brush } from 'lucide-react'
+import { Clock, Trash2, Brush, Pencil } from 'lucide-react'
 import DOMPurify from 'isomorphic-dompurify'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachments from './CommentAttachments'
+import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -17,6 +19,14 @@ interface MessageBubbleProps {
   onReply?: () => void
   onSeekToTimecode?: (timecode: string, videoId: string, videoVersion: number | null) => void
   onDelete?: () => void
+  /** Called when the user saves an edited version of this comment */
+  onEdit?: (newContent: string) => Promise<void> | void
+  /** Called when the user saves an edited reply (only used in main bubble) */
+  onEditReply?: (replyId: string, newContent: string) => Promise<void> | void
+  /** Whether the current viewer is allowed to edit this comment */
+  canEdit?: boolean
+  /** Per-reply edit permission (mirrors `canEdit` for the main comment) */
+  canEditReply?: (reply: Comment) => boolean
   formatMessageTime: (date: Date) => string
   commentsDisabled: boolean
   sequenceNumber?: number
@@ -50,6 +60,10 @@ export default function MessageBubble({
   onReply,
   onSeekToTimecode,
   onDelete,
+  onEdit,
+  onEditReply,
+  canEdit,
+  canEditReply,
   formatMessageTime,
   commentsDisabled,
   sequenceNumber,
@@ -62,6 +76,72 @@ export default function MessageBubble({
 }: MessageBubbleProps) {
   const t = useTranslations('comments')
 
+  // Local edit state for the main comment
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Local edit state for replies (keyed by reply id)
+  const [editingReplyId, setEditingReplyId] = useState<string | null>(null)
+  const [replyEditValue, setReplyEditValue] = useState('')
+  const [isSavingReply, setIsSavingReply] = useState(false)
+
+  /** Strip HTML tags so the textarea shows plain text the user can edit. */
+  const htmlToPlainText = (html: string): string => {
+    if (typeof document === 'undefined') return html
+    const tmp = document.createElement('div')
+    tmp.innerHTML = html
+    return (tmp.textContent || tmp.innerText || '').trim()
+  }
+
+  const handleStartEdit = () => {
+    setEditValue(htmlToPlainText(comment.content))
+    setIsEditing(true)
+  }
+
+  const handleCancelEdit = () => {
+    setIsEditing(false)
+    setEditValue('')
+  }
+
+  const handleSaveEdit = async () => {
+    if (!onEdit) return
+    const trimmed = editValue.trim()
+    if (!trimmed) return
+    try {
+      setIsSaving(true)
+      await onEdit(trimmed)
+      setIsEditing(false)
+      setEditValue('')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleStartEditReply = (reply: Comment) => {
+    setEditingReplyId(reply.id)
+    setReplyEditValue(htmlToPlainText(reply.content))
+  }
+
+  const handleCancelEditReply = () => {
+    setEditingReplyId(null)
+    setReplyEditValue('')
+  }
+
+  const handleSaveEditReply = async (replyId: string) => {
+    if (!onEditReply) return
+    const trimmed = replyEditValue.trim()
+    if (!trimmed) return
+    try {
+      setIsSavingReply(true)
+      await onEditReply(replyId, trimmed)
+      setEditingReplyId(null)
+      setReplyEditValue('')
+    } finally {
+      setIsSavingReply(false)
+    }
+  }
+
   // Get effective author name for color generation
   // For internal comments without authorName, fall back to user.name or user.email
   const effectiveAuthorName = comment.authorName ||
@@ -69,10 +149,27 @@ export default function MessageBubble({
       ((comment as any).user.name || (comment as any).user.email) :
       null)
 
+  // Drawing-annotation focus: click anywhere on the bubble to surface this
+  // comment's drawing on the video. Toggles off when clicking the same
+  // comment again. Falls back to no-op when no provider is mounted.
+  const annotationCtx = useOptionalAnnotation()
+  const isAnnotationFocused = annotationCtx?.activeCommentId === comment.id
+  const handleBubbleClick = (e: React.MouseEvent) => {
+    // Don't toggle while interacting with form fields, buttons or links
+    // inside the bubble — those have their own click semantics.
+    const target = e.target as HTMLElement
+    if (target.closest('button, a, input, textarea, select')) return
+    if (annotationCtx) {
+      annotationCtx.setActiveCommentId(isAnnotationFocused ? null : comment.id)
+    }
+  }
+
   const handleTimestampClick = () => {
     if (comment.timecode && onSeekToTimecode) {
       onSeekToTimecode(comment.timecode, comment.videoId, comment.videoVersion)
     }
+    // Also surface this comment's drawing.
+    annotationCtx?.setActiveCommentId(comment.id)
   }
 
   const threadReplies = !isReply && replies && replies.length > 0 ? replies : []
@@ -80,7 +177,14 @@ export default function MessageBubble({
 
   return (
     <div className="w-full" id={`comment-${comment.id}`}>
-      <div className="bg-card border border-border/50 rounded-lg p-4 shadow-elevation-sm relative">
+      <div
+        onClick={handleBubbleClick}
+        className={`bg-card border rounded-lg p-4 shadow-elevation-sm relative cursor-pointer transition-colors ${
+          isAnnotationFocused
+            ? 'border-primary/60 ring-1 ring-primary/40'
+            : 'border-border/50 hover:border-border'
+        }`}
+      >
         {hasReplies && (
           <div className="absolute left-9 top-12 bottom-10 w-px bg-border/50" aria-hidden="true" />
         )}
@@ -120,14 +224,44 @@ export default function MessageBubble({
               </div>
             )}
 
-            <div className="text-base text-foreground whitespace-pre-wrap break-words leading-relaxed">
-              <div
-                className="[&>p]:m-0"
-                dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
-              />
-            </div>
+            {isEditing ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  rows={Math.min(8, Math.max(2, editValue.split('\n').length))}
+                  autoFocus
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveEdit}
+                    disabled={isSaving || !editValue.trim()}
+                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                  >
+                    {isSaving ? t('saving') : t('save')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    disabled={isSaving}
+                    className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {t('cancel')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-base text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                <div
+                  className="[&>p]:m-0"
+                  dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
+                />
+              </div>
+            )}
 
-            {(comment as any).assets && (comment as any).assets.length > 0 && (
+            {!isEditing && (comment as any).assets && (comment as any).assets.length > 0 && (
               <CommentAttachments
                 assets={(comment as any).assets}
                 videoId={comment.videoId}
@@ -135,6 +269,7 @@ export default function MessageBubble({
               />
             )}
 
+            {!isEditing && (
             <div className="mt-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 {!isReply && !commentsDisabled && onReply && (
@@ -143,6 +278,16 @@ export default function MessageBubble({
                     className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
                   >
                     {t('reply')}
+                  </button>
+                )}
+                {canEdit && onEdit && (
+                  <button
+                    onClick={handleStartEdit}
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium flex items-center gap-1"
+                    title={t('editComment')}
+                  >
+                    <Pencil className="w-4 h-4" />
+                    {t('editComment')}
                   </button>
                 )}
                 {onDelete && (
@@ -162,6 +307,7 @@ export default function MessageBubble({
                 </span>
               )}
             </div>
+            )}
           </div>
 
           {threadReplies.map((reply) => {
@@ -183,26 +329,69 @@ export default function MessageBubble({
                     <span className="text-sm text-muted-foreground flex-shrink-0">
                       {formatMessageTime(reply.createdAt)}
                     </span>
-                    {onDeleteReply && (
-                      <button
-                        onClick={() => onDeleteReply(reply.id)}
-                        className="ml-auto text-muted-foreground hover:text-destructive transition-colors"
-                        title={t('deleteReply')}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+                    <div className="ml-auto flex items-center gap-1">
+                      {canEditReply && canEditReply(reply) && onEditReply && editingReplyId !== reply.id && (
+                        <button
+                          onClick={() => handleStartEditReply(reply)}
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          title={t('editComment')}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {onDeleteReply && editingReplyId !== reply.id && (
+                        <button
+                          onClick={() => onDeleteReply(reply.id)}
+                          className="text-muted-foreground hover:text-destructive transition-colors"
+                          title={t('deleteReply')}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div
-                    className="text-base text-foreground whitespace-pre-wrap break-words leading-relaxed [&>p]:m-0"
-                    dangerouslySetInnerHTML={{ __html: sanitizeContent(reply.content) }}
-                  />
-                  {(reply as any).assets && (reply as any).assets.length > 0 && (
-                    <CommentAttachments
-                      assets={(reply as any).assets}
-                      videoId={reply.videoId}
-                      shareToken={shareToken}
-                    />
+                  {editingReplyId === reply.id ? (
+                    <div className="flex flex-col gap-2">
+                      <textarea
+                        value={replyEditValue}
+                        onChange={(e) => setReplyEditValue(e.target.value)}
+                        rows={Math.min(8, Math.max(2, replyEditValue.split('\n').length))}
+                        autoFocus
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEditReply(reply.id)}
+                          disabled={isSavingReply || !replyEditValue.trim()}
+                          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                        >
+                          {isSavingReply ? t('saving') : t('save')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelEditReply}
+                          disabled={isSavingReply}
+                          className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {t('cancel')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div
+                        className="text-base text-foreground whitespace-pre-wrap break-words leading-relaxed [&>p]:m-0"
+                        dangerouslySetInnerHTML={{ __html: sanitizeContent(reply.content) }}
+                      />
+                      {(reply as any).assets && (reply as any).assets.length > 0 && (
+                        <CommentAttachments
+                          assets={(reply as any).assets}
+                          videoId={reply.videoId}
+                          shareToken={shareToken}
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               </div>

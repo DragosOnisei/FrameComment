@@ -4,12 +4,16 @@ import { useState, useCallback, useRef } from 'react'
 import {
   Shape,
   FreehandShape,
+  LineShape,
+  ArrowShape,
+  RectangleShape,
   AnnotationData,
   AnnotationColor,
   ANNOTATION_COLORS,
   DEFAULT_STROKE_WIDTH,
   DEFAULT_OPACITY,
   Point,
+  DrawingTool,
 } from '@/types/annotations'
 
 /**
@@ -59,33 +63,92 @@ function simplifyPath(points: Point[], epsilon: number): Point[] {
 }
 
 export function useAnnotationDrawing() {
-  const [activeColor, setActiveColor] = useState<AnnotationColor>(ANNOTATION_COLORS[2]) // Red default
+  // FrameComment palette: red is the first colour and the sensible default
+  // ("call out a problem"). Order in ANNOTATION_COLORS is red, orange, green.
+  const [activeColor, setActiveColor] = useState<AnnotationColor>(ANNOTATION_COLORS[0])
+  const [activeTool, setActiveTool] = useState<DrawingTool>('arrow')
   const [strokeWidth, setStrokeWidth] = useState(DEFAULT_STROKE_WIDTH)
   const [opacity, setOpacity] = useState(DEFAULT_OPACITY)
   const [shapes, setShapes] = useState<Shape[]>([])
+  // History entries are full snapshots of `shapes`. Undo pops to undoStack
+  // (push current → restore), redo pops back from redoStack.
   const [undoStack, setUndoStack] = useState<Shape[][]>([])
+  const [redoStack, setRedoStack] = useState<Shape[][]>([])
   const [activeShape, setActiveShape] = useState<Shape | null>(null)
   const shapeIdCounter = useRef(0)
 
   // Refs to avoid stale closures in pointer event handlers
   const activeShapeRef = useRef<Shape | null>(null)
   const shapesRef = useRef<Shape[]>([])
+  const activeToolRef = useRef<DrawingTool>('arrow')
 
   const generateShapeId = useCallback(() => {
     shapeIdCounter.current += 1
     return `s${shapeIdCounter.current}`
   }, [])
 
+  const updateActiveTool = useCallback((tool: DrawingTool) => {
+    activeToolRef.current = tool
+    setActiveTool(tool)
+  }, [])
+
   const startShape = useCallback(
     (point: Point) => {
       const id = generateShapeId()
-      const newShape: FreehandShape = {
-        id,
-        type: 'freehand',
-        color: activeColor,
-        strokeWidth,
-        opacity,
-        points: [point],
+      const tool = activeToolRef.current
+      let newShape: Shape
+
+      // For drag-out shapes (arrow / line / rectangle) we start with a
+      // very thin stroke and let `updateShape` thicken it as the user
+      // drags. This avoids the "huge arrow on first click" effect.
+      const initialStrokeWidth =
+        tool === 'arrow' || tool === 'line' || tool === 'rectangle'
+          ? 0.003
+          : strokeWidth
+
+      if (tool === 'freehand') {
+        const fh: FreehandShape = {
+          id,
+          type: 'freehand',
+          color: activeColor,
+          strokeWidth,
+          opacity,
+          points: [point],
+        }
+        newShape = fh
+      } else if (tool === 'line') {
+        const ls: LineShape = {
+          id,
+          type: 'line',
+          color: activeColor,
+          strokeWidth: initialStrokeWidth,
+          opacity,
+          start: point,
+          end: point,
+        }
+        newShape = ls
+      } else if (tool === 'arrow') {
+        const ar: ArrowShape = {
+          id,
+          type: 'arrow',
+          color: activeColor,
+          strokeWidth: initialStrokeWidth,
+          opacity,
+          start: point,
+          end: point,
+        }
+        newShape = ar
+      } else {
+        const rc: RectangleShape = {
+          id,
+          type: 'rectangle',
+          color: activeColor,
+          strokeWidth: initialStrokeWidth,
+          opacity,
+          start: point,
+          end: point,
+        }
+        newShape = rc
       }
 
       activeShapeRef.current = newShape
@@ -97,18 +160,35 @@ export function useAnnotationDrawing() {
   const updateShape = useCallback(
     (point: Point) => {
       const prev = activeShapeRef.current
-      if (!prev || prev.type !== 'freehand') return
+      if (!prev) return
 
-      const updated: FreehandShape = { ...prev, points: [...prev.points, point] }
-      activeShapeRef.current = updated
-      setActiveShape(updated)
+      let updated: Shape | null = null
+
+      if (prev.type === 'freehand') {
+        updated = { ...prev, points: [...prev.points, point] }
+      } else if (prev.type === 'line' || prev.type === 'arrow' || prev.type === 'rectangle') {
+        // Grow the stroke as the user drags further out, so a tiny
+        // arrow stays delicate and a long arrow gets visibly thicker.
+        // Diagonal length in normalized [0..√2] space.
+        const dx = point.x - prev.start.x
+        const dy = point.y - prev.start.y
+        const length = Math.sqrt(dx * dx + dy * dy)
+        // Map length 0..0.5 → strokeWidth 0.003..0.012, then clamp.
+        const dynamicWidth = Math.min(0.012, Math.max(0.003, 0.003 + length * 0.018))
+        updated = { ...prev, end: point, strokeWidth: dynamicWidth }
+      }
+
+      if (updated) {
+        activeShapeRef.current = updated
+        setActiveShape(updated)
+      }
     },
     []
   )
 
   const finishShape = useCallback(() => {
     const current = activeShapeRef.current
-    if (!current || current.type !== 'freehand') {
+    if (!current) {
       activeShapeRef.current = null
       setActiveShape(null)
       return
@@ -117,11 +197,20 @@ export function useAnnotationDrawing() {
     let isValid = true
     let finalShape: Shape = current
 
-    if (current.points.length < 2) {
-      isValid = false
-    } else {
-      const simplified = simplifyPath(current.points, 0.002)
-      finalShape = { ...current, points: simplified }
+    if (current.type === 'freehand') {
+      if (current.points.length < 2) {
+        isValid = false
+      } else {
+        const simplified = simplifyPath(current.points, 0.002)
+        finalShape = { ...current, points: simplified }
+      }
+    } else if (current.type === 'line' || current.type === 'arrow' || current.type === 'rectangle') {
+      // Reject zero-size shapes (single-click without drag)
+      const dx = current.end.x - current.start.x
+      const dy = current.end.y - current.start.y
+      if (Math.abs(dx) < 0.005 && Math.abs(dy) < 0.005) {
+        isValid = false
+      }
     }
 
     if (isValid) {
@@ -134,6 +223,8 @@ export function useAnnotationDrawing() {
 
       // Batch state updates
       setUndoStack((prev) => [...prev.slice(-49), snapshotForUndo])
+      // A new edit invalidates the redo stack
+      setRedoStack([])
       setShapes(newShapes)
     }
 
@@ -145,6 +236,19 @@ export function useAnnotationDrawing() {
     setUndoStack((prev) => {
       if (prev.length === 0) return prev
       const lastEntry = prev[prev.length - 1]
+      // Push current shapes onto redo stack so we can return to them
+      setRedoStack((rs) => [...rs.slice(-49), [...shapesRef.current]])
+      shapesRef.current = lastEntry
+      setShapes(lastEntry)
+      return prev.slice(0, -1)
+    })
+  }, [])
+
+  const redo = useCallback(() => {
+    setRedoStack((prev) => {
+      if (prev.length === 0) return prev
+      const lastEntry = prev[prev.length - 1]
+      setUndoStack((us) => [...us.slice(-49), [...shapesRef.current]])
       shapesRef.current = lastEntry
       setShapes(lastEntry)
       return prev.slice(0, -1)
@@ -154,6 +258,7 @@ export function useAnnotationDrawing() {
   const reset = useCallback(() => {
     setShapes([])
     setUndoStack([])
+    setRedoStack([])
     setActiveShape(null)
     activeShapeRef.current = null
     shapesRef.current = []
@@ -174,6 +279,8 @@ export function useAnnotationDrawing() {
   return {
     activeColor,
     setActiveColor,
+    activeTool,
+    setActiveTool: updateActiveTool,
     strokeWidth,
     setStrokeWidth,
     opacity,
@@ -182,10 +289,12 @@ export function useAnnotationDrawing() {
     activeShape,
     hasShapes,
     undoStack,
+    redoStack,
     startShape,
     updateShape,
     finishShape,
     undo,
+    redo,
     reset,
     getAnnotationData,
   }

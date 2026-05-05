@@ -341,6 +341,12 @@ export async function GET(
         ttlSeconds: shareTtlSeconds,
       })
       responseBody.shareToken = shareToken
+      // Expose the per-client session id so the share UI can compare it
+      // against Comment.editorSessionId and decide whether to show the
+      // Edit button for the viewer's own comments.
+      responseBody.clientSessionId = sessionId
+    } else if (accessCheck.shareTokenSessionId) {
+      responseBody.clientSessionId = accessCheck.shareTokenSessionId
     }
 
     return NextResponse.json(responseBody)

@@ -36,6 +36,99 @@ function renderShape(shape: Shape, renderWidth: number, renderHeight: number, ke
     )
   }
 
+  if (shape.type === 'line') {
+    return (
+      <line
+        key={key}
+        x1={shape.start.x * renderWidth}
+        y1={shape.start.y * renderHeight}
+        x2={shape.end.x * renderWidth}
+        y2={shape.end.y * renderHeight}
+        stroke={shape.color}
+        strokeWidth={sw}
+        strokeLinecap="round"
+        opacity={shapeOpacity}
+      />
+    )
+  }
+
+  if (shape.type === 'arrow') {
+    const x1 = shape.start.x * renderWidth
+    const y1 = shape.start.y * renderHeight
+    const x2 = shape.end.x * renderWidth
+    const y2 = shape.end.y * renderHeight
+    const dx = x2 - x1
+    const dy = y2 - y1
+    const len = Math.sqrt(dx * dx + dy * dy)
+
+    if (len < 0.5) {
+      return (
+        <line
+          key={key}
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          stroke={shape.color}
+          strokeWidth={sw}
+          strokeLinecap="round"
+          opacity={shapeOpacity}
+        />
+      )
+    }
+
+    const ux = dx / len
+    const uy = dy / len
+    const px = -uy
+    const py = ux
+    const headLen = Math.min(len * 0.5, Math.max(sw * 6, 8))
+    const headHalfWidth = headLen * 0.4
+    const baseX = x2 - headLen * ux
+    const baseY = y2 - headLen * uy
+    const leftX = baseX + headHalfWidth * px
+    const leftY = baseY + headHalfWidth * py
+    const rightX = baseX - headHalfWidth * px
+    const rightY = baseY - headHalfWidth * py
+
+    return (
+      <g key={key} opacity={shapeOpacity}>
+        <line
+          x1={x1}
+          y1={y1}
+          x2={baseX}
+          y2={baseY}
+          stroke={shape.color}
+          strokeWidth={sw}
+          strokeLinecap="round"
+        />
+        <polygon
+          points={`${leftX},${leftY} ${x2},${y2} ${rightX},${rightY}`}
+          fill={shape.color}
+        />
+      </g>
+    )
+  }
+
+  if (shape.type === 'rectangle') {
+    const x = Math.min(shape.start.x, shape.end.x) * renderWidth
+    const y = Math.min(shape.start.y, shape.end.y) * renderHeight
+    const w = Math.abs(shape.end.x - shape.start.x) * renderWidth
+    const h = Math.abs(shape.end.y - shape.start.y) * renderHeight
+    return (
+      <rect
+        key={key}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        fill="none"
+        stroke={shape.color}
+        strokeWidth={sw}
+        opacity={shapeOpacity}
+      />
+    )
+  }
+
   return null
 }
 
@@ -207,7 +300,9 @@ export default function AnnotationCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
-        <rect width={w} height={h} fill="rgba(0,0,0,0.05)" />
+        {/* Transparent capture rect — keeps the SVG hit-testable without
+          dimming the video underneath. */}
+      <rect width={w} height={h} fill="transparent" />
         {shapes.map((shape, i) =>
           renderShape(shape, w, h, `existing-${shape.id}-${i}`)
         )}
@@ -232,8 +327,9 @@ export default function AnnotationCanvas({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
-      {/* Subtle scrim to show drawing area is active */}
-      <rect width={renderWidth} height={renderHeight} fill="rgba(0,0,0,0.05)" />
+      {/* Transparent capture rect — keeps the SVG hit-testable without
+          dimming the video underneath. */}
+      <rect width={renderWidth} height={renderHeight} fill="transparent" />
 
       {/* Existing shapes */}
       {shapes.map((shape, i) =>
