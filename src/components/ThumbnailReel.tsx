@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { CheckCircle2, ChevronLeft, ChevronRight, Film, Layers, Grid3X3, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Film, Layers, Grid3X3, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -24,6 +24,10 @@ interface ThumbnailReelProps {
   showLanguageToggle?: boolean
   // Optional slot rendered after ThemeToggle (e.g. tutorial help button)
   trailingAction?: React.ReactNode
+  /** Currently-playing video id (one of videosByName[activeVideoName]).
+   *  Used to highlight the active version in the dropdown. Optional —
+   *  when missing, the first (latest) version is treated as active. */
+  activeVideoId?: string
 }
 
 export default function ThumbnailReel({
@@ -38,6 +42,7 @@ export default function ThumbnailReel({
   onToggleCommentPanel,
   showLanguageToggle = true,
   trailingAction,
+  activeVideoId,
 }: ThumbnailReelProps) {
   const tShare = useTranslations('share')
   const tComments = useTranslations('comments')
@@ -45,6 +50,29 @@ export default function ThumbnailReel({
   // Start collapsed on first load
   const [isExpanded, setIsExpanded] = useState(false)
   const hasScrolledRef = useRef(false)
+  // Version dropdown
+  const [versionMenuOpen, setVersionMenuOpen] = useState(false)
+  const versionMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!versionMenuOpen) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (!versionMenuRef.current) return
+      if (!versionMenuRef.current.contains(e.target as Node)) {
+        setVersionMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setVersionMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown, { passive: true })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [versionMenuOpen])
 
   const handleToggleExpanded = () => {
     setIsExpanded(!isExpanded)
@@ -76,21 +104,11 @@ export default function ThumbnailReel({
     return [...forReview, ...approved]
   }, [videosByName])
 
+  // Used by the expanded thumbnail grid below the bar to highlight the
+  // active row. The previous "1/N" counter + prev/next arrows have been
+  // dropped from the centre of the bar in favour of the breadcrumb-style
+  // filename + version dropdown — see the JSX below.
   const activeIndex = videoNames.indexOf(activeVideoName)
-  const totalVideos = videoNames.length
-
-  // Navigation
-  const handlePrevVideo = () => {
-    if (activeIndex > 0) {
-      onVideoSelect(videoNames[activeIndex - 1])
-    }
-  }
-
-  const handleNextVideo = () => {
-    if (activeIndex < totalVideos - 1) {
-      onVideoSelect(videoNames[activeIndex + 1])
-    }
-  }
 
   // Scroll to active thumbnail when expanded
   useEffect(() => {
@@ -129,6 +147,26 @@ export default function ThumbnailReel({
   const currentVideos = activeVideoName ? videosByName[activeVideoName] : []
   const hasApprovedCurrent = currentVideos.some((v: any) => v.approved === true)
 
+  // Versions of the active video (already in `videosByName[activeVideoName]`),
+  // sorted newest-first so the dropdown reads like a release history.
+  const currentVersions = useMemo(() => {
+    return [...currentVideos].sort(
+      (a: any, b: any) => (b.version ?? 0) - (a.version ?? 0)
+    )
+  }, [currentVideos])
+
+  // Derive the active version's label for the chip. We try (in order):
+  //   1) activeVideoId match → that video's versionLabel
+  //   2) latest version's versionLabel (newest first)
+  //   3) `v{n}` fallback
+  const activeVideo =
+    (activeVideoId
+      ? currentVersions.find((v: any) => v.id === activeVideoId)
+      : null) || currentVersions[0]
+  const activeVersionLabel: string =
+    activeVideo?.versionLabel ||
+    (typeof activeVideo?.version === 'number' ? `v${activeVideo.version}` : 'v1')
+
   return (
     <div className="relative shrink-0 z-20 p-2 sm:p-3">
       {/* Compact Control Bar - Always visible */}
@@ -150,53 +188,130 @@ export default function ThumbnailReel({
             )}
           </div>
 
-          {/* Center: Video selector */}
-          <div className="flex-1 flex items-center justify-center">
-            <div className="flex items-center gap-1">
-              <Button
-                data-tutorial="video-reel-prev"
-                variant="ghost"
-                size="icon"
-                onClick={handlePrevVideo}
-                disabled={activeIndex <= 0}
-                className="h-7 w-7 sm:h-8 sm:w-8"
-                title={tShare('previousVideo')}
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-
+          {/* Center: filename + version chip with dropdown (Frame.io-style).
+              Replaces the older prev/next + "1/N" counter — that paradigm
+              didn't communicate WHAT video the user was on, only its
+              ordinal. The breadcrumb-style filename is much clearer; for
+              switching videos the user goes back to the grid. */}
+          <div className="flex-1 flex items-center justify-center min-w-0">
+            <div ref={versionMenuRef} className="relative flex items-center gap-2 min-w-0">
               <button
                 data-tutorial="video-reel-center"
                 onClick={handleToggleExpanded}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 rounded-lg transition-all",
+                  "flex items-center gap-2 min-w-0 px-2 py-1 rounded-md transition-all max-w-[40vw] sm:max-w-[50vw]",
                   "hover:bg-muted/80 active:scale-95",
                   isExpanded && "bg-muted/50"
                 )}
-                title={isExpanded ? "Hide video thumbnails" : "Show video thumbnails"}
+                title={isExpanded ? 'Hide video thumbnails' : 'Show video thumbnails'}
               >
                 <CheckCircle2
                   className={cn(
-                    "w-4 h-4",
-                    hasApprovedCurrent ? "text-success" : "text-muted-foreground/50"
+                    'w-4 h-4 shrink-0',
+                    hasApprovedCurrent ? 'text-success' : 'text-muted-foreground/50'
                   )}
                 />
-                <span className="text-sm text-muted-foreground tabular-nums">
-                  {activeIndex + 1}/{totalVideos}
+                <span
+                  className="text-sm text-foreground/90 truncate"
+                  title={activeVideoName}
+                >
+                  {activeVideoName || '—'}
                 </span>
               </button>
 
-              <Button
-                data-tutorial="video-reel-next"
-                variant="ghost"
-                size="icon"
-                onClick={handleNextVideo}
-                disabled={activeIndex >= totalVideos - 1}
-                className="h-7 w-7 sm:h-8 sm:w-8"
-                title={tShare('nextVideo')}
-              >
-                <ChevronRight className="w-4 h-4" />
-              </Button>
+              {/* Version chip — clickable when there's more than one version */}
+              {currentVersions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentVersions.length > 1) {
+                      setVersionMenuOpen((v) => !v)
+                    }
+                  }}
+                  disabled={currentVersions.length < 2}
+                  aria-haspopup={currentVersions.length > 1 ? 'menu' : undefined}
+                  aria-expanded={versionMenuOpen}
+                  className={cn(
+                    'inline-flex items-center gap-0.5 shrink-0 h-6 pl-2 pr-1 rounded-full',
+                    'text-[11px] font-mono font-medium tabular-nums',
+                    'bg-muted/60 text-foreground/80',
+                    'transition-colors',
+                    currentVersions.length > 1 && 'hover:bg-muted active:scale-95 cursor-pointer',
+                    currentVersions.length < 2 && 'cursor-default opacity-70'
+                  )}
+                  title={
+                    currentVersions.length > 1
+                      ? 'Switch version'
+                      : 'This video has only one version'
+                  }
+                >
+                  <span>{activeVersionLabel}</span>
+                  {currentVersions.length > 1 && <ChevronDown className="w-3 h-3" />}
+                </button>
+              )}
+
+              {versionMenuOpen && currentVersions.length > 1 && (
+                <div
+                  role="menu"
+                  className={cn(
+                    'absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50',
+                    'min-w-[280px] max-w-[90vw]',
+                    'bg-popover text-popover-foreground',
+                    'ring-1 ring-border shadow-2xl',
+                    'rounded-lg p-1.5',
+                    'animate-in fade-in-0 slide-in-from-top-1 duration-150'
+                  )}
+                >
+                  <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Versions
+                  </div>
+                  {currentVersions.map((video) => {
+                    const isActive = activeVideoId
+                      ? video.id === activeVideoId
+                      : video === currentVersions[0]
+                    const isApproved = video.approved === true
+                    return (
+                      <button
+                        key={video.id}
+                        role="menuitemradio"
+                        aria-checked={isActive}
+                        type="button"
+                        onClick={() => {
+                          window.dispatchEvent(
+                            new CustomEvent('selectVideoVersion', {
+                              detail: { videoId: video.id },
+                            })
+                          )
+                          setVersionMenuOpen(false)
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left',
+                          'transition-colors',
+                          isActive ? 'bg-primary/15' : 'hover:bg-muted'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'inline-flex items-center justify-center min-w-[28px] h-5 px-1.5',
+                            'text-[10px] font-mono font-bold rounded-full',
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {video.versionLabel || `v${video.version}`}
+                        </span>
+                        <span className="flex-1 text-sm truncate" title={video.originalFileName || video.name}>
+                          {video.originalFileName || video.name}
+                        </span>
+                        {isApproved && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
 

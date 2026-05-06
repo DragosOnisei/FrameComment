@@ -27,6 +27,11 @@ interface VoiceRecorderButtonProps {
   shareToken: string | null
   onAttachmentAdded: (attachment: PendingAttachment) => void
   disabled?: boolean
+  /** Fires whenever the recorder enters or leaves an active state
+   *  (recording in progress, or showing the post-recording preview).
+   *  The parent (CommentInput) uses this to hide sibling icons so the
+   *  recorder UI gets the whole input row to itself. */
+  onActiveChange?: (active: boolean) => void
 }
 
 const MAX_DURATION_SECONDS = 300 // 5 minutes
@@ -82,6 +87,7 @@ export default function VoiceRecorderButton({
   shareToken,
   onAttachmentAdded,
   disabled = false,
+  onActiveChange,
 }: VoiceRecorderButtonProps) {
   const storageProvider = useStorageProvider()
   const { startUpload: startS3Upload } = useS3MultipartUpload()
@@ -89,6 +95,12 @@ export default function VoiceRecorderButton({
   const [isRecording, setIsRecording] = useState(false)
   const [duration, setDuration] = useState(0)
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
+
+  // Notify the parent whenever we enter/leave an active state so it can
+  // hide sibling icons (draw, paperclip) and let us take the whole row.
+  useEffect(() => {
+    onActiveChange?.(isRecording || !!recordedBlob)
+  }, [isRecording, recordedBlob, onActiveChange])
   const [recordedExt, setRecordedExt] = useState<string>('webm')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -452,11 +464,16 @@ export default function VoiceRecorderButton({
           >
             <Mic className="w-4 h-4" />
           </button>
-          {audioDevices.length > 1 && (
+          {/* Inline device picker hidden by default — it dwarfs the
+              comment input on a 280-300px sidebar. Modern review tools
+              (Frame.io, Slack) put the mic switch in OS / settings,
+              not on the comment row. The selected device is still set
+              via system audio defaults. */}
+          {false && audioDevices.length > 1 && (
             <select
               value={selectedDeviceId}
               onChange={(e) => setSelectedDeviceId(e.target.value)}
-              className="text-xs bg-background border border-border rounded-md px-2 py-1 min-w-[180px] max-w-[260px] truncate"
+              className="text-xs bg-background border border-border rounded-md px-2 py-1 min-w-0 max-w-[140px] sm:max-w-[180px] xl:max-w-[220px] truncate"
               title={
                 cleanDeviceLabel(
                   audioDevices.find((d) => d.deviceId === selectedDeviceId)?.label
@@ -486,30 +503,34 @@ export default function VoiceRecorderButton({
   if (isRecording) {
     const remaining = Math.max(0, MAX_DURATION_SECONDS - duration)
     return (
-      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/40">
-        <span className="relative flex h-2 w-2">
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/40 min-w-0 flex-1">
+        <span className="relative flex h-2 w-2 shrink-0">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
         </span>
-        <span className="text-xs font-mono text-foreground tabular-nums">
+        <span className="text-xs font-mono text-foreground tabular-nums shrink-0">
           {formatDuration(duration)}
         </span>
-        <div className="flex items-end gap-[2px] h-5 w-24">
+        {/* Waveform fills the available width — at narrow widths it
+            simply renders fewer/thinner bars, never overflows. */}
+        <div className="flex items-end gap-[2px] h-5 flex-1 min-w-0 overflow-hidden">
           {waveSamples.map((v, i) => (
             <div
               key={i}
-              className="flex-1 bg-red-400 rounded-sm transition-all duration-75"
+              className="flex-1 bg-red-400 rounded-sm transition-all duration-75 min-w-0"
               style={{ height: `${Math.max(8, Math.min(100, v * 220))}%` }}
             />
           ))}
         </div>
-        <span className="text-[10px] text-muted-foreground">
-          {remaining < 30 ? `${Math.floor(remaining)}s left` : ''}
-        </span>
+        {remaining < 30 && (
+          <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
+            {Math.floor(remaining)}s left
+          </span>
+        )}
         <button
           type="button"
           onClick={stopRecording}
-          className="p-1.5 rounded-md bg-red-500 text-white hover:bg-red-600 transition-colors"
+          className="p-1.5 rounded-md bg-red-500 text-white hover:bg-red-600 transition-colors shrink-0"
           title="Stop recording"
           aria-label="Stop recording"
         >
@@ -519,23 +540,25 @@ export default function VoiceRecorderButton({
     )
   }
 
-  // Preview / confirm state
+  // Preview / confirm state — fills the available width of the input
+  // row so the controls never clip out of the sidebar. The audio
+  // element is the flexible part; the surrounding mic + cancel + send
+  // icons keep their natural size.
   return (
-    <div className="inline-flex items-center gap-2 px-2 py-1.5 rounded-lg bg-muted border border-border">
-      <Mic className="w-4 h-4 text-muted-foreground" />
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-muted border border-border min-w-0 flex-1">
+      <Mic className="w-4 h-4 text-muted-foreground shrink-0" />
       {previewUrl && (
         <audio
           src={previewUrl}
           controls
-          className="h-8"
-          style={{ maxWidth: 220 }}
+          className="h-8 flex-1 min-w-0 max-w-full"
         />
       )}
       <button
         type="button"
         onClick={cancel}
         disabled={isUploading}
-        className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-accent transition-colors disabled:opacity-50"
+        className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-accent transition-colors disabled:opacity-50 shrink-0"
         title="Discard recording"
         aria-label="Discard recording"
       >
@@ -545,7 +568,7 @@ export default function VoiceRecorderButton({
         type="button"
         onClick={uploadRecording}
         disabled={isUploading}
-        className="p-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1"
+        className="p-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1 shrink-0"
         title="Attach voice message"
         aria-label="Attach voice message"
       >

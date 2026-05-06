@@ -377,11 +377,11 @@ export default function CommentSection({
   return (
     <Card className="bg-card border-0 flex flex-col h-full lg:max-h-full rounded-none lg:rounded-lg overflow-hidden" data-comment-section>
       {/* Desktop: Show header at top, Mobile: Hide header (will show below input) */}
-      <CardHeader className={cn("flex-shrink-0", mobileCollapsible && "hidden lg:block")}>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" />
-            {t('feedbackAndDiscussion')}
+      <CardHeader className={cn("flex-shrink-0 px-3 py-3 sm:px-4 sm:py-4", mobileCollapsible && "hidden lg:block")}>
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <CardTitle className="text-foreground flex items-center gap-2 text-base sm:text-lg min-w-0">
+            <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+            <span className="truncate">{t('feedbackAndDiscussion')}</span>
           </CardTitle>
           {showToggleButton && onToggleVisibility && (
             <Button

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
 import { Button } from './ui/button'
@@ -121,6 +122,11 @@ export default function CommentInput({
   const annotationCtx = useOptionalAnnotation()
   const tCommon = useTranslations('common')
 
+  // True while the voice recorder is recording or showing its post-record
+  // preview. While active, we hide the sibling icon buttons (draw,
+  // paperclip) so the recorder UI gets the whole input row to itself.
+  const [isVoiceActive, setIsVoiceActive] = useState(false)
+
   if (commentsDisabled) {
     // Still show the shortcuts button when comments are disabled (e.g. after approval)
     if (showShortcutsButton && onShowShortcuts) {
@@ -202,7 +208,7 @@ export default function CommentInput({
   }
 
   return (
-    <div className="border-t border-border p-4 bg-card flex-shrink-0">
+    <div className="border-t border-border p-3 sm:p-4 bg-card flex-shrink-0 min-w-0">
       {/* Restriction Warning */}
       {currentVideoRestricted && restrictionMessage && (
         <div className="mb-3 p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
@@ -406,13 +412,18 @@ export default function CommentInput({
               className="resize-none"
               rows={2}
             />
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 min-w-0">
               {annotationCtx?.isDrawingMode ? (
                 // Drawing mode: replace the icon row with the inline toolbar.
                 <AnnotationToolbarInline />
               ) : (
-              <div className="flex items-center gap-1.5">
-                {onStartDrawing && (
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                {/* Sibling icons fade out while the voice recorder is
+                    active so the recorder UI gets the whole row. We
+                    keep them mounted (just hidden) so their state isn't
+                    lost — restoring them feels instant when the user
+                    cancels the recording. */}
+                {onStartDrawing && !isVoiceActive && (
                   <Button
                     type="button"
                     onClick={onStartDrawing}
@@ -425,7 +436,7 @@ export default function CommentInput({
                     <PenTool className="w-4 h-4" />
                   </Button>
                 )}
-                {allowClientAssetUpload && selectedVideoIdProp && onAttachmentAdded && (
+                {allowClientAssetUpload && selectedVideoIdProp && onAttachmentAdded && !isVoiceActive && (
                   <CommentAttachmentButton
                     videoId={selectedVideoIdProp}
                     shareToken={shareToken}
@@ -441,6 +452,7 @@ export default function CommentInput({
                     shareToken={shareToken || null}
                     onAttachmentAdded={onAttachmentAdded}
                     disabled={loading}
+                    onActiveChange={setIsVoiceActive}
                   />
                 )}
               </div>
@@ -450,7 +462,7 @@ export default function CommentInput({
                 variant="default"
                 disabled={!canSubmit && !annotationCtx?.isDrawingMode}
                 size="icon"
-                className="h-8 w-8"
+                className="h-8 w-8 shrink-0"
               >
                 <Send className="w-4 h-4" />
               </Button>
@@ -467,8 +479,11 @@ export default function CommentInput({
               {t('selectNameFirst')}
             </p>
           ) : (
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted-foreground">
+            <div className="mt-2 flex flex-row items-center justify-between gap-2 min-w-0">
+              {/* Hide the verbose keyboard hint on narrow sidebars (the
+                  Shortcuts button covers the same ground). It comes back
+                  at 2xl where there's room for both. */}
+              <p className="text-xs text-muted-foreground hidden 2xl:block truncate">
                 {t('enterToSend')}
               </p>
               {showShortcutsButton && onShowShortcuts && (
@@ -477,7 +492,7 @@ export default function CommentInput({
                   variant="outline"
                   size="sm"
                   onClick={onShowShortcuts}
-                  className="self-start sm:self-auto hidden lg:inline-flex"
+                  className="ml-auto hidden lg:inline-flex shrink-0"
                 >
                   <Keyboard className="w-4 h-4 lg:mr-2" />
                   <span className="hidden lg:inline">{t('shortcuts')}</span>

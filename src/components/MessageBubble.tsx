@@ -299,39 +299,44 @@ export default function MessageBubble({
             )}
 
             {!isEditing && (
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-x-3 min-w-0">
                 {!isReply && !commentsDisabled && onReply && (
                   <button
                     onClick={onReply}
-                    className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
+                    className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors font-medium whitespace-nowrap"
                   >
                     {t('reply')}
                   </button>
                 )}
+                {/* Edit + Delete are icon-only at narrow sidebar widths.
+                    The hover tooltip surfaces the full label, and the
+                    text comes back at xl+ where there's room for it. */}
                 {canEdit && onEdit && (
                   <button
                     onClick={handleStartEdit}
-                    className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium flex items-center gap-1"
+                    className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors font-medium inline-flex items-center gap-1 whitespace-nowrap"
                     title={t('editComment')}
+                    aria-label={t('editComment')}
                   >
-                    <Pencil className="w-4 h-4" />
-                    {t('editComment')}
+                    <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span className="hidden xl:inline">{t('editComment')}</span>
                   </button>
                 )}
                 {onDelete && (
                   <button
                     onClick={onDelete}
-                    className="text-sm text-muted-foreground hover:text-destructive transition-colors font-medium flex items-center gap-1"
+                    className="text-xs sm:text-sm text-muted-foreground hover:text-destructive transition-colors font-medium inline-flex items-center gap-1 whitespace-nowrap"
                     title={t('deleteComment')}
+                    aria-label={t('deleteComment')}
                   >
-                    <Trash2 className="w-4 h-4" />
-                    {t('deleteComment')}
+                    <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span className="hidden xl:inline">{t('deleteComment')}</span>
                   </button>
                 )}
               </div>
               {typeof sequenceNumber === 'number' && sequenceNumber > 0 && (
-                <span className="text-sm text-muted-foreground">
+                <span className="text-xs sm:text-sm text-muted-foreground shrink-0">
                   #{sequenceNumber}
                 </span>
               )}

@@ -6,6 +6,7 @@ import { Comment } from '@prisma/client'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward } from 'lucide-react'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
+import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -31,6 +32,14 @@ interface CustomVideoControlsProps {
   isAdmin?: boolean
   timestampDisplayMode?: 'TIMECODE' | 'AUTO'
   onMarkerClick?: (commentId: string) => void // Callback when a timeline marker is clicked
+  /** Current playback speed (1.0 = normal). Driven from VideoPlayer so the
+   *  same value can also feed the keyboard shortcuts. */
+  playbackSpeed?: number
+  /** Setter for playback speed; when omitted, the speed button is hidden. */
+  onPlaybackSpeedChange?: (speed: number) => void
+  /** Resolved quality for the current stream — used as a small read-only
+   *  badge on the right-hand side of the bar (e.g. HD/4K). */
+  resolvedPlaybackQuality?: '720p' | '1080p' | '2160p'
 }
 
 // Color map for marker backgrounds - IDENTICAL to InitialsAvatar component
@@ -320,6 +329,9 @@ export default function CustomVideoControls({
   isAdmin: _isAdmin = false,
   timestampDisplayMode = 'TIMECODE',
   onMarkerClick,
+  playbackSpeed = 1,
+  onPlaybackSpeedChange,
+  resolvedPlaybackQuality,
 }: CustomVideoControlsProps) {
   const t = useTranslations('controls')
   const tComments = useTranslations('comments')
@@ -567,9 +579,9 @@ export default function CustomVideoControls({
   }
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 sm:p-3 rounded-b-xl">
+    <div className="bg-black px-2 sm:px-3 py-2">
       {/* Timeline Container */}
-      <div className="mb-2 sm:mb-3 px-1">
+      <div className="mb-1.5 sm:mb-2 px-1">
         <div
           ref={timelineRef}
           className="relative h-10 sm:h-12 group cursor-pointer touch-none"
@@ -775,102 +787,124 @@ export default function CustomVideoControls({
         </div>
       )}
 
-      {/* Control Buttons */}
-      <div className="flex items-center justify-between gap-2 sm:gap-3 px-1">
-        {/* Left Controls */}
-        <div className="flex items-center gap-1 sm:gap-2">
-          {/* Frame Back */}
-          <button
-            onClick={() => onFrameStep('backward')}
-            className="p-2 sm:p-2.5 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors touch-manipulation"
-            aria-label={t('previousFrame')}
-            title={`${t('previousFrame')} (Ctrl+J)`}
-          >
-            <SkipBack className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-          </button>
-
-          {/* Play/Pause */}
+      {/* Frame.io-style three-section control bar:
+           LEFT  : transport (frame back, play/pause, frame forward),
+                   speed selector, volume.
+           CENTER: current/total time.
+           RIGHT : quality badge, fullscreen.
+          The whole bar lives BELOW the video (not as an overlay) and
+          stays permanently visible. */}
+      <div className="flex items-center gap-1 sm:gap-2 px-1">
+        {/* LEFT GROUP */}
+        <div className="flex items-center gap-0.5 sm:gap-1 flex-1 min-w-0">
           <button
             onClick={onPlayPause}
-            className="p-2.5 sm:p-3 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors touch-manipulation"
+            className="p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
             aria-label={isPlaying ? t('pauseVideo') : t('playVideo')}
             title={isPlaying ? `${t('pauseVideo')} (Ctrl+Space)` : `${t('playVideo')} (Ctrl+Space)`}
           >
             {isPlaying ? (
-              <Pause className="w-5 h-5 sm:w-6 sm:h-6 text-white fill-white" />
+              <Pause className="w-5 h-5 text-white fill-white" />
             ) : (
-              <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white fill-white" />
+              <Play className="w-5 h-5 text-white fill-white" />
             )}
           </button>
 
-          {/* Frame Forward */}
+          <button
+            onClick={() => onFrameStep('backward')}
+            className="hidden sm:inline-flex p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
+            aria-label={t('previousFrame')}
+            title={`${t('previousFrame')} (Ctrl+J)`}
+          >
+            <SkipBack className="w-4 h-4 text-white" />
+          </button>
+
           <button
             onClick={() => onFrameStep('forward')}
-            className="p-2 sm:p-2.5 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors touch-manipulation"
+            className="hidden sm:inline-flex p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
             aria-label={t('nextFrame')}
             title={`${t('nextFrame')} (Ctrl+L)`}
           >
-            <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+            <SkipForward className="w-4 h-4 text-white" />
           </button>
 
-          {/* Time Display */}
-          <div className="text-white text-xs sm:text-sm font-mono ml-1 sm:ml-2 whitespace-nowrap">
-            {formatTimeWithMode(currentTime, videoFps, videoDuration, timestampDisplayMode)} / {formatTimeWithMode(videoDuration, videoFps, videoDuration, timestampDisplayMode)}
-          </div>
-        </div>
+          {/* Playback speed selector — hidden when the parent doesn't pass a
+              setter (e.g. comparison view) */}
+          {onPlaybackSpeedChange && (
+            <PlaybackSpeedMenu
+              value={playbackSpeed ?? 1}
+              onChange={onPlaybackSpeedChange}
+              className="ml-0.5 sm:ml-1"
+            />
+          )}
 
-        {/* Right Controls */}
-        <div className="flex items-center gap-1 sm:gap-2">
-          {/* Volume */}
+          {/* Volume: button always; slider expands on hover (or stays open
+              while interacted with via keyboard). On mobile the slider is
+              hidden — tap the icon to mute/unmute. */}
           <div
-            className="relative"
+            className="relative flex items-center"
             onMouseEnter={handleVolumeMouseEnter}
             onMouseLeave={handleVolumeMouseLeave}
           >
             <button
               onClick={onToggleMute}
-              className="p-2 sm:p-2.5 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors touch-manipulation"
+              className="p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
               aria-label={isMuted ? t('unmute') : t('mute')}
               title={isMuted ? t('unmute') : t('mute')}
             >
               {isMuted || volume === 0 ? (
-                <VolumeX className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                <VolumeX className="w-4 h-4 text-white" />
               ) : (
-                <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                <Volume2 className="w-4 h-4 text-white" />
               )}
             </button>
-
-            {/* Volume Slider */}
             {showVolume && (
-              <div className="absolute bottom-full right-0 mb-2 bg-black/90 p-3 rounded-lg shadow-xl border border-white/20 flex items-center justify-center backdrop-blur-sm">
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-                  className="h-20 sm:h-24 w-2 cursor-pointer accent-primary"
-                  style={{
-                    writingMode: 'vertical-lr',
-                    direction: 'rtl',
-                  }}
-                />
-              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={isMuted ? 0 : volume}
+                onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
+                className="hidden sm:block h-1 w-20 cursor-pointer accent-primary"
+                aria-label="Volume"
+              />
             )}
           </div>
+        </div>
 
-          {/* Fullscreen */}
+        {/* CENTER: time */}
+        <div className="text-white/85 text-xs sm:text-sm font-mono tabular-nums whitespace-nowrap shrink-0">
+          {formatTimeWithMode(currentTime, videoFps, videoDuration, timestampDisplayMode)}
+          <span className="text-white/40"> / </span>
+          {formatTimeWithMode(videoDuration, videoFps, videoDuration, timestampDisplayMode)}
+        </div>
+
+        {/* RIGHT GROUP */}
+        <div className="flex items-center gap-0.5 sm:gap-1 flex-1 justify-end min-w-0">
+          {/* Quality badge — read-only for now; v1.0.4 ships without a
+              quality switcher. Value comes from the resolved stream URL
+              (720p / 1080p / 2160p). */}
+          {resolvedPlaybackQuality && (
+            <span
+              className="hidden sm:inline-flex items-center px-1.5 h-5 rounded text-[10px] font-bold tracking-wide bg-white/10 text-white/80 ring-1 ring-white/15"
+              title={`Streaming ${resolvedPlaybackQuality}`}
+            >
+              {resolvedPlaybackQuality === '2160p' ? '4K' :
+               resolvedPlaybackQuality === '1080p' ? 'HD' : 'SD'}
+            </span>
+          )}
+
           <button
             onClick={onToggleFullscreen}
-            className="p-2 sm:p-2.5 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors touch-manipulation"
+            className="p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
             aria-label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
             title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
           >
             {isFullscreen ? (
-              <Minimize className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <Minimize className="w-4 h-4 text-white" />
             ) : (
-              <Maximize className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <Maximize className="w-4 h-4 text-white" />
             )}
           </button>
         </div>

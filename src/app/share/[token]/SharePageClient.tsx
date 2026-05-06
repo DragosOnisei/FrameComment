@@ -73,6 +73,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const [_companyName, setCompanyName] = useState('Studio')
   const [defaultQuality, setDefaultQuality] = useState<'720p' | '1080p' | '2160p'>('720p')
   const [activeVideoName, setActiveVideoName] = useState<string>('')
+  // Currently-playing video id, surfaced from VideoPlayer via
+  // onVideoStateChange. Used by ThumbnailReel to highlight the active row
+  // in the version dropdown.
+  const [activeVideoId, setActiveVideoId] = useState<string | undefined>(undefined)
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
@@ -1120,6 +1124,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           videosByName={project.videosByName}
           thumbnailsByName={thumbnailsByName}
           activeVideoName={activeVideoName}
+          activeVideoId={activeVideoId}
           onVideoSelect={handleVideoSelect}
           onBackToGrid={handleBackToGrid}
           showBackButton={true}
@@ -1129,8 +1134,13 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           trailingAction={undefined}
         />
 
-      {/* Main Content Area - scrollable on mobile, fixed on desktop (xl breakpoint for better vertical video support) */}
-      <div className="xl:flex-1 xl:min-h-0 flex flex-col xl:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
+      {/* Main Content Area — fills the remaining viewport from lg+. We
+          also lay it out side-by-side (player left, comments right) from
+          lg+ rather than stacking vertically until xl+: at landscape
+          viewports like Nest Hub (1024×600) the stacked layout left the
+          comments eating most of the height and the player squeezed to
+          ~70px. On mobile the page falls back to a natural-scroll column. */}
+      <div className="lg:flex-1 lg:min-h-0 flex flex-col lg:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
         {readyVideos.length === 0 ? (
           <div className="flex-1 flex items-center justify-center p-4">
             <Card className="bg-card border-border">
@@ -1143,8 +1153,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           </div>
         ) : (
           <>
-            {/* Video Player - natural height on mobile, fills space on desktop */}
-            <div data-tutorial="video-player" className={`xl:h-full xl:min-h-0 xl:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
+            {/* Video Player — natural height on mobile, fills space from
+                lg+. We use lg: thresholds (not xl:) so a typical laptop
+                window also locks the player to the visible area. */}
+            <div data-tutorial="video-player" className={`lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
               <VideoPlayer
                 videos={readyVideos}
                 projectId={project.id}
@@ -1171,12 +1183,17 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 onCommentFocus={(commentId) => setFocusCommentId(commentId)}
                 usePreviewForApprovedPlayback={project.usePreviewForApprovedPlayback}
                 fillContainer={true}
+                onVideoStateChange={(state) => {
+                  // Surface the currently-playing video id so the title-bar
+                  // version dropdown (ThumbnailReel) can highlight the row.
+                  setActiveVideoId(state.selectedVideo?.id)
+                }}
               />
             </div>
 
             {/* Comments Section - max one screen height on mobile, side panel on desktop */}
             {showCommentPanel && (
-              <div data-tutorial="comments" className="max-h-[100vh] xl:shrink xl:flex-1 xl:max-w-[30%] 2xl:max-w-[25%] xl:min-w-[280px] flex flex-col xl:max-h-full xl:h-full overflow-hidden rounded-xl bg-card">
+              <div data-tutorial="comments" className="max-h-[100vh] lg:shrink lg:flex-1 lg:max-w-[30%] xl:max-w-[22%] 2xl:max-w-[18%] lg:min-w-[280px] flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-xl bg-card">
                 <CommentSection
                   projectId={project.id}
                   comments={filteredComments}
@@ -1194,7 +1211,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                   showShortcutsButton={true}
                   timestampDisplayMode={project.timestampDisplay || 'TIMECODE'}
                   mobileCollapsible={true}
-                  initialMobileCollapsed={true}
+                  initialMobileCollapsed={false}
                   authenticatedEmail={authenticatedEmail}
                   allowClientAssetUpload={project.allowClientAssetUpload || false}
                   maxCommentAttachments={project.settings?.maxCommentAttachments ?? 10}

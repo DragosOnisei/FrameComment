@@ -184,6 +184,26 @@ export default function VideoPlayer({
     previousVideoNameRef.current = activeVideoName
   }, [activeVideoName])
 
+  // Listen for the version dropdown in the top bar (ThumbnailReel) — when
+  // the user picks a version, locate it in displayVideos by id and jump to
+  // that index. We use a window event rather than prop drilling because
+  // the dropdown lives several layers above this component (page → reel →
+  // event), and the share/admin pages already use the same pattern for
+  // other cross-component messages (commentPosted, seekToTime, etc).
+  useEffect(() => {
+    const handleSelectVersion = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const targetId: string | undefined = detail.videoId
+      if (!targetId) return
+      const idx = displayVideos.findIndex((v: any) => v.id === targetId)
+      if (idx >= 0) setSelectedVideoIndex(idx)
+    }
+    window.addEventListener('selectVideoVersion', handleSelectVersion as EventListener)
+    return () => {
+      window.removeEventListener('selectVideoVersion', handleSelectVersion as EventListener)
+    }
+  }, [displayVideos])
+
   // Safety check: ensure selectedVideo exists before accessing properties
   const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
 
@@ -805,11 +825,15 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Video Player Container */}
+      {/* Video Player Container.
+          fillContainer=true is the standard player layout (share + admin
+          share). flex-1 + min-h-0 makes this the box that absorbs all
+          spare vertical space, so the inner video+controls stack always
+          fits the viewport and the control bar never gets clipped. */}
       <div
         ref={containerRef}
-        className={`relative w-full ${
-          fillContainer ? 'xl:flex-1 xl:min-h-0' : 'flex-shrink min-h-0 lg:order-1'
+        className={`relative w-full flex flex-col ${
+          fillContainer ? 'flex-1 min-h-0' : 'flex-shrink min-h-0 lg:order-1'
         } ${isPlaying && !showControls ? 'cursor-none' : ''}`}
       >
         {videoUrl ? (
@@ -820,28 +844,64 @@ export default function VideoPlayer({
               - Video uses object-contain to maintain its true aspect ratio
               - Background color matches theme for clean letterboxing
             */}
-            <div
-              ref={videoWrapperRef}
-              className={`relative group w-full overflow-hidden rounded-xl bg-muted/50 backdrop-blur-sm ${fillContainer ? 'max-h-[60vh] xl:max-h-full' : 'max-h-[70vh]'}`}
-              style={{ aspectRatio: '16 / 9' }}
-            >
-              <video
-                key={selectedVideo?.id}
-                ref={videoRef}
-                src={videoUrl}
-                poster={(selectedVideo as any).thumbnailUrl || undefined}
-                className={`w-full h-full object-contain ${isDrawingMode ? 'pointer-events-none' : 'cursor-pointer'}`}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleLoadedMetadata}
-                onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
-                onClick={isDrawingMode ? undefined : handlePlayPause}
-                crossOrigin="anonymous"
-                playsInline
-                preload="metadata"
-                // @ts-ignore - webkit attributes for iOS
-                webkit-playsinline="true"
-                x-webkit-airplay="allow"
-              />
+            {/*
+              Fully responsive Frame.io-style stack:
+              ┌────────────────────────────────────────────┐
+              │  flex-1 min-h-0  → video wrapper           │
+              │  (the <video> uses object-contain so it    │
+              │   scales while keeping its own aspect      │
+              │   ratio; vertical clips letterbox left/    │
+              │   right, horizontal clips letterbox top/   │
+              │   bottom)                                  │
+              ├────────────────────────────────────────────┤
+              │  flex-shrink-0   → control bar (timeline,  │
+              │                    transport, time, etc.) │
+              └────────────────────────────────────────────┘
+              The outer container fills its parent. Resizing the
+              window (or showing/hiding the comment sidebar)
+              shrinks the video proportionally; the control bar
+              stays at its natural size and never gets clipped.
+            */}
+            <div className="rounded-xl overflow-hidden bg-black flex flex-col w-full h-full min-h-0">
+              <div
+                ref={videoWrapperRef}
+                className={`relative group w-full bg-black flex items-center justify-center
+                  aspect-[var(--video-ar)] max-h-[70vh]
+                  lg:aspect-auto lg:max-h-none lg:flex-1 lg:min-h-0
+                  ${isDrawingMode ? '' : ''}`}
+                style={{
+                  // Mobile-only: lock the wrapper to the video's NATURAL
+                  // aspect ratio (e.g. 9/16 for portrait clips). With
+                  // object-contain on the inner <video>, this means no
+                  // letterboxing and no crop — the player frame matches
+                  // the content exactly. `max-h-[70vh]` keeps a tall
+                  // vertical clip from monopolising the whole viewport
+                  // on small phones, leaving room for the controls and
+                  // a peek at the comments below the fold. On lg+ this
+                  // CSS variable is overridden by `lg:aspect-auto`.
+                  ['--video-ar' as any]:
+                    selectedVideo?.width && selectedVideo?.height
+                      ? `${selectedVideo.width} / ${selectedVideo.height}`
+                      : '16 / 9',
+                }}
+              >
+                <video
+                  key={selectedVideo?.id}
+                  ref={videoRef}
+                  src={videoUrl}
+                  poster={(selectedVideo as any).thumbnailUrl || undefined}
+                  className={`w-full h-full object-contain ${isDrawingMode ? 'pointer-events-none' : 'cursor-pointer'}`}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
+                  onClick={isDrawingMode ? undefined : handlePlayPause}
+                  crossOrigin="anonymous"
+                  playsInline
+                  preload="metadata"
+                  // @ts-ignore - webkit attributes for iOS
+                  webkit-playsinline="true"
+                  x-webkit-airplay="allow"
+                />
 
                 {/* Annotation Overlay (read-only, renders saved drawing annotations during playback) */}
                 <AnnotationOverlay
@@ -869,46 +929,42 @@ export default function VideoPlayer({
                     onFinishShape={annotationDrawing.finishShape}
                   />
                 )}
+              </div>
 
-                {/* Custom Video Controls with Integrated Timeline */}
-                <div
-                  className={`relative z-20 transition-opacity duration-300 ${
-                    showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
-                  }`}
-                >
-                  <CustomVideoControls
-                    videoRef={videoRef as React.RefObject<HTMLVideoElement>}
-                    videoDuration={videoDuration}
-                    currentTime={currentTimeState}
-                    isPlaying={isPlaying}
-                    volume={volume}
-                    isMuted={isMuted}
-                    isFullscreen={isFullscreen}
-                    onPlayPause={handlePlayPause}
-                    onSeek={handleTimelineSeek}
-                    onVolumeChange={handleVolumeChange}
-                    onToggleMute={handleToggleMute}
-                    onToggleFullscreen={handleToggleFullscreen}
-                    onFrameStep={handleFrameStep}
-                    comments={comments}
-                    videoFps={selectedVideo?.fps || 24}
-                    videoId={selectedVideo?.id}
-                    isAdmin={isAdmin}
-                    timestampDisplayMode={timestampDisplayMode}
-                    onMarkerClick={onCommentFocus}
-                  />
-                </div>
-
-                {/* Playback Speed Indicator - positioned inside video wrapper */}
-                {playbackSpeed !== 1.0 && (
-                  <div className="absolute top-4 right-4 bg-black/80 text-white px-3 py-1.5 rounded-md text-sm font-medium pointer-events-none z-20">
-                    {playbackSpeed.toFixed(2)}x
-                  </div>
-                )}
+              {/* Frame.io-style control bar — rendered below the video,
+                  not as an overlay. flex-shrink-0 means it keeps its
+                  natural size as the viewport shrinks; the video on
+                  top absorbs the difference via object-contain. */}
+              <div className="bg-black border-t border-white/10 flex-shrink-0">
+                <CustomVideoControls
+                  videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+                  videoDuration={videoDuration}
+                  currentTime={currentTimeState}
+                  isPlaying={isPlaying}
+                  volume={volume}
+                  isMuted={isMuted}
+                  isFullscreen={isFullscreen}
+                  onPlayPause={handlePlayPause}
+                  onSeek={handleTimelineSeek}
+                  onVolumeChange={handleVolumeChange}
+                  onToggleMute={handleToggleMute}
+                  onToggleFullscreen={handleToggleFullscreen}
+                  onFrameStep={handleFrameStep}
+                  comments={comments}
+                  videoFps={selectedVideo?.fps || 24}
+                  videoId={selectedVideo?.id}
+                  isAdmin={isAdmin}
+                  timestampDisplayMode={timestampDisplayMode}
+                  onMarkerClick={onCommentFocus}
+                  playbackSpeed={playbackSpeed}
+                  onPlaybackSpeedChange={setPlaybackSpeed}
+                  resolvedPlaybackQuality={resolvedPlaybackQuality}
+                />
+              </div>
             </div>
           </>
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-card-foreground">
+          <div className="w-full h-full aspect-video lg:aspect-auto max-h-[70vh] lg:max-h-none flex items-center justify-center text-card-foreground bg-black rounded-xl">
             Loading video...
           </div>
         )}
@@ -924,32 +980,40 @@ export default function VideoPlayer({
         />
       )}
 
-      {/* Video & Project Information */}
-      <ProjectInfo
-        selectedVideo={selectedVideo}
-        displayLabel={displayLabel}
-        isVideoApproved={isVideoApproved}
-        projectId={projectId}
-        projectTitle={projectTitle}
-        projectDescription={projectDescription}
-        clientName={clientName}
-        isPasswordProtected={isPasswordProtected}
-        watermarkEnabled={watermarkEnabled}
-        defaultQuality={defaultQuality}
-        onApprove={onApprove ? handleApprove : undefined}
-        isAdmin={isAdmin}
-        clientCanApprove={clientCanApprove}
-        isGuest={isGuest}
-        hideDownloadButton={hideDownloadButton}
-        allowAssetDownload={allowAssetDownload}
-        shareToken={shareToken}
-        activeVideoName={activeVideoName}
-        authenticatedEmail={authenticatedEmail}
-        authenticatedName={authenticatedName}
-        className="mt-3 lg:order-3"
-        usePreviewForApprovedPlayback={usePreviewForApprovedPlayback}
-        playbackQuality={resolvedPlaybackQuality}
-      />
+      {/*
+        Bottom info bar (filename + Approve + Info + Download) was hidden
+        in the v1.0.4 redesign — the filename now lives in the top bar
+        and Approve/Info will move into the top bar's right-hand section
+        in a follow-up. Kept the prop wiring intact so it's a one-liner
+        to bring back if needed.
+      */}
+      {false && (
+        <ProjectInfo
+          selectedVideo={selectedVideo}
+          displayLabel={displayLabel}
+          isVideoApproved={isVideoApproved}
+          projectId={projectId}
+          projectTitle={projectTitle}
+          projectDescription={projectDescription}
+          clientName={clientName}
+          isPasswordProtected={isPasswordProtected}
+          watermarkEnabled={watermarkEnabled}
+          defaultQuality={defaultQuality}
+          onApprove={onApprove ? handleApprove : undefined}
+          isAdmin={isAdmin}
+          clientCanApprove={clientCanApprove}
+          isGuest={isGuest}
+          hideDownloadButton={hideDownloadButton}
+          allowAssetDownload={allowAssetDownload}
+          shareToken={shareToken}
+          activeVideoName={activeVideoName}
+          authenticatedEmail={authenticatedEmail}
+          authenticatedName={authenticatedName}
+          className="mt-3 lg:order-3"
+          usePreviewForApprovedPlayback={usePreviewForApprovedPlayback}
+          playbackQuality={resolvedPlaybackQuality}
+        />
+      )}
     </div>
   )
 }

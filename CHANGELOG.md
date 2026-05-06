@@ -17,6 +17,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.4] - 2026-05-06
+
+### Changed
+
+- **Frame.io-style player layout.** The control bar and timeline now sit
+  *below* the video in normal flow, on a black background that visually
+  extends the video frame. The bar is permanently visible — the
+  previous mouse-activity-based auto-fade is gone, and the video itself
+  no longer has chrome painted on top of frames during playback.
+- **Reorganised control bar.** Three sections, left → right: *transport*
+  (play/pause, frame-by-frame on desktop, **playback speed selector**,
+  volume) │ *time* (current / total) │ *quality badge* (HD/SD/4K,
+  read-only) and *fullscreen*.
+- **Top bar shows the filename and a version chip.** Replaces the older
+  prev/next + "1/N" counter — that was just an ordinal and didn't tell
+  you which file you were on. Clicking the chip opens a dropdown
+  listing every version of the active video (newest first, with
+  approval ticks). Selecting a version dispatches a
+  `selectVideoVersion` window event that VideoPlayer picks up to swap
+  streams in place. To switch to a *different* video, the user goes
+  back to the All-Videos grid.
+- **Bottom info strip is hidden.** The legacy filename + Approve + Info
+  + Download row that sat under the player has been hidden — the
+  filename now lives in the top bar, and Approve/Info will move into
+  the top-right of the title bar in a follow-up.
+- **Comments sidebar narrowed.** Width caps moved from 30% / 25% to
+  **30% / 22% / 18%** across lg / xl / 2xl, with a 280px floor. Closer
+  to Frame.io's proportions and gives the player more room.
+- **Side-by-side layout from `lg`** (was `xl`). On a 1200px laptop or
+  Nest Hub-style 1024×600, the comments no longer stack below the
+  player and squeeze the video to ~70px tall.
+
+### Added
+
+- **Playback speed popup** (`PlaybackSpeedMenu`) with discrete steps
+  **0.5 / 0.75 / 1 / 1.25 / 1.5 / 2 / 4 / 8**. Triggered by the small
+  `1.0x` button in the control bar. Active step is highlighted; click
+  sets `HTMLVideoElement.playbackRate`. Closes on outside click or
+  Escape.
+- **Mobile player matches the video's natural aspect ratio.** On
+  phones, the wrapper now uses a CSS variable
+  (`--video-ar = ${width}/${height}`) so a 9:16 portrait clip renders
+  tall and a 16:9 landscape clip renders short. `max-h-[70vh]` keeps
+  very tall portraits from monopolising the viewport, leaving room
+  for controls and a peek at the comments.
+
+### Fixed
+
+- **Voice recorder UI overflowed the comments sidebar at narrow
+  widths.** Both the recording-in-progress state (live waveform +
+  duration + stop) and the post-record preview (audio + cancel +
+  confirm) used `inline-flex` with fixed widths and pushed the Send
+  button off the edge. They now use `flex flex-1 min-w-0` and the
+  waveform / native audio control fluidly resize.
+- **Voice recorder takes the full input row while active.** Sibling
+  icon buttons (draw, paperclip) hide while recording or previewing
+  via a new `onActiveChange` callback, so the recorder UI is no longer
+  cramped.
+- **Inline microphone-device picker removed from the comment row.**
+  The row was overflowing on narrow sidebars; matches the Frame.io /
+  Slack pattern of "use the OS default; switch in Settings".
+- **Saved voice attachments now show a play button.** Chrome was
+  collapsing the native &lt;audio&gt; element to just a 3-dot menu
+  when squeezed below ~150px. The audio attachment row is now stacked
+  (player on top, file size underneath) so the player gets the full
+  width.
+- **Comment action row no longer wraps awkwardly.** Edit and Delete
+  collapse to icon-only with hover tooltips below `xl`, so
+  `Reply [pencil] [trash]  #1` fits on a single tidy line at typical
+  sidebar widths. Labels return at `xl+`.
+- **"Feedback & Discussion" title** truncates with ellipsis instead
+  of wrapping onto two lines on narrow sidebars.
+- **"Press Enter to send & Shift+Enter for new line" hint** is hidden
+  below `2xl` (the Shortcuts button covers the same ground; the hint
+  was wrapping awkwardly at narrow widths).
+- **Comments expanded by default on mobile.** Was hidden behind a tap
+  on the section header; the user explicitly wanted Frame.io-style
+  "video centred, comments below, no extra step".
+- **Player layout no longer clips the control bar** at smaller
+  windows. Switched to a fully-responsive `flex` column where the
+  video wrapper uses `flex-1 min-h-0` (and `object-contain` on the
+  &lt;video&gt; tag) and the control bar is `flex-shrink-0`. Total
+  stack always fits the viewport from `lg+`.
+
+### Internal
+
+- New `playbackSpeed` / `onPlaybackSpeedChange` /
+  `resolvedPlaybackQuality` props on `CustomVideoControls`.
+- New `activeVideoId` prop on `ThumbnailReel`, plumbed through both the
+  public share page and the admin share page via `onVideoStateChange`.
+- New `selectVideoVersion` window event consumed by `VideoPlayer`.
+- New `onActiveChange` callback on `VoiceRecorderButton`.
+- Several layout breakpoint thresholds bumped from `xl:` to `lg:` so
+  the desktop layout activates at 1024px instead of 1280px.
+
 ## [1.0.3] - 2026-05-06
 
 ### Added
@@ -257,7 +352,8 @@ re-packaged for independent distribution and a new release cycle.
   names) have been renamed; review `docker-compose.yml` and your `.env`
   before upgrading. Detailed migration notes will be added in 1.0.1.
 
-[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.0...v1.0.1
