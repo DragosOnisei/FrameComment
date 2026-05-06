@@ -416,6 +416,12 @@ export const createCommentSchema = z
     timecodeEnd: z.string().refine(isValidTimecode, {
       message: 'Invalid end timecode format. Expected HH:MM:SS:FF'
     }).optional().nullable(),
+    // Sub-second precision moment (Math.round(currentTime * 1000)). The
+    // server uses this as the source of truth for click-to-seek so the
+    // playhead lands exactly where the comment was made instead of snapping
+    // to the nearest frame boundary derived from `timecode`. Optional —
+    // older clients (<1.0.3) won't send it.
+    timestampMs: z.number().int().min(0).max(86_400_000).optional().nullable(),
     content: contentSchema,
     authorName: safeStringSchema(1, 255).optional().nullable(),
     authorEmail: emailSchema.optional().nullable(),

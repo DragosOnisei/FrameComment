@@ -159,8 +159,24 @@ export async function verifyShareToken(token: string): Promise<SharePayload | nu
     if (decoded.type !== 'share') return null
     if (await isTokenRevoked(token)) return null
 
-    // Check if session is revoked (auth mode changes, etc.)
-    if (decoded.sessionId && await isShareSessionRevoked(decoded.sessionId)) {
+    // Check if session is revoked (auth mode changes, etc.).
+    //
+    // Special case: projects with `authMode === 'NONE'` use a
+    // deterministic sessionId of the form `none:<projectId>:<ip>`. There
+    // is no "log in again" for those projects — every page reload from
+    // the same IP rebuilds the same sessionId — so a stale revocation
+    // entry permanently locks the project from that IP, even after the
+    // share endpoint hands the browser a freshly-signed JWT. Since
+    // session invalidation can't meaningfully kick out a NONE-mode
+    // viewer (they're back the moment they hit refresh), we skip the
+    // check entirely for NONE rather than booby-trapping every future
+    // token. Token-level revocation via `isTokenRevoked` above still
+    // applies, so an individual JWT can still be killed.
+    if (
+      decoded.authMode !== 'NONE' &&
+      decoded.sessionId &&
+      (await isShareSessionRevoked(decoded.sessionId))
+    ) {
       return null
     }
 

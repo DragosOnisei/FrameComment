@@ -90,15 +90,21 @@ export function sanitizeText(text: string): string {
 /**
  * Validate comment content length
  *
+ * Empty content is valid at this layer — the "must have content OR an
+ * attachment/annotation" rule is enforced by the route's zod schema
+ * (createCommentSchema.refine). Returning false for empty content here
+ * surfaces as a misleading "too long" error when posting voice/attachment-
+ * only comments.
+ *
  * @param content - Comment content
  * @param maxLength - Maximum allowed length (default 10000)
- * @returns True if valid, false if too long
+ * @returns True if length is within bounds, false only if too long
  */
 export function validateCommentLength(
   content: string,
   maxLength: number = 10000
 ): boolean {
-  if (!content) return false
+  if (!content) return true
   return content.length <= maxLength
 }
 

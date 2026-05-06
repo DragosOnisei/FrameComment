@@ -20,7 +20,11 @@ const editCommentSchema = z.object({
   content: z.string().min(1).max(10000),
 })
 
-// DELETE /api/comments/[id] - Delete a comment (admin only)
+// DELETE /api/comments/[id]
+// Authorization rules (mirrors PATCH):
+//   - Admin (any logged-in user) can delete any comment.
+//   - A client can delete their own comment if their share-token session id
+//     matches the comment's stored editorSessionId.
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -29,12 +33,6 @@ export async function DELETE(
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const commentsMessages = messages?.comments || {}
   const shareMessages = messages?.share || {}
-
-  // Authentication - admin only
-  const authResult = await requireApiAdmin(request)
-  if (authResult instanceof Response) {
-    return authResult
-  }
 
   // Rate limiting to prevent abuse
   const rateLimitResult = await rateLimit(request, {
@@ -50,21 +48,18 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    // Get the comment to find its project
+    // Look up the comment plus the fields we need for authorization.
     const existingComment = await prisma.comment.findUnique({
       where: { id },
       select: {
+        id: true,
         projectId: true,
+        editorSessionId: true,
         project: {
           select: {
             id: true,
-            recipients: {
-              where: { isPrimary: true },
-              take: 1,
-              select: {
-                name: true,
-              }
-            }
+            sharePassword: true,
+            authMode: true,
           }
         }
       }
@@ -77,6 +72,36 @@ export async function DELETE(
       )
     }
 
+    // Authorization: admin OR matching share-token session id.
+    const authContext = await getAuthContext(request)
+    const isAdmin = !!authContext.user
+
+    let authorized = false
+    if (isAdmin) {
+      authorized = true
+    } else if (existingComment.editorSessionId) {
+      const accessCheck = await verifyProjectAccess(
+        request,
+        existingComment.projectId,
+        existingComment.project.sharePassword,
+        existingComment.project.authMode,
+        { allowGuest: false, requiredPermission: 'comment' }
+      )
+      if (
+        accessCheck.authorized &&
+        accessCheck.shareTokenSessionId === existingComment.editorSessionId
+      ) {
+        authorized = true
+      }
+    }
+
+    if (!authorized) {
+      return NextResponse.json(
+        { error: shareMessages.accessDenied || 'Access denied' },
+        { status: 403 }
+      )
+    }
+
     // Cancel any pending notifications for this comment
     await cancelCommentNotification(id)
 
@@ -85,7 +110,6 @@ export async function DELETE(
       where: { id },
     })
 
-    // Return success - client will refresh to get updated comments
     return NextResponse.json({ success: true })
   } catch (error) {
     return NextResponse.json({ error: commentsMessages.failedToDeleteComment || 'Failed to delete comment' }, { status: 500 })

@@ -219,14 +219,19 @@ function AdminSharePageInner() {
           let streamToken2160p = token2160
           let downloadToken = null
 
-          if (video.approved) {
-            const originalToken = await fetchAdminVideoTokenWithRetry(video.id, 'original', sessionId)
-            if (originalToken) {
-              downloadToken = originalToken
-              streamToken720p = streamToken720p || originalToken
-              streamToken1080p = streamToken1080p || originalToken
-              streamToken2160p = streamToken2160p || originalToken
-            }
+          // Always fetch the original as a fallback for admin preview.
+          // Without this, videos uploaded with "Skip transcoding" (which
+          // never produce 720p/1080p/2160p variants) couldn't be played
+          // in the admin share page until they were approved — making it
+          // impossible to actually review them before approval. The
+          // /api/admin/video-token endpoint enforces admin auth, so the
+          // original isn't exposed beyond the studio.
+          const originalToken = await fetchAdminVideoTokenWithRetry(video.id, 'original', sessionId)
+          if (originalToken) {
+            downloadToken = originalToken
+            streamToken720p = streamToken720p || originalToken
+            streamToken1080p = streamToken1080p || originalToken
+            streamToken2160p = streamToken2160p || originalToken
           }
 
           let thumbnailUrl = null

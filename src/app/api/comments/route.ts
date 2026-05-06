@@ -148,6 +148,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(sanitizedComments)
   } catch (error) {
+    console.error('[/api/comments] failed:', error)
     return NextResponse.json({ error: commentsMessages.operationFailed || 'Operation failed' }, { status: 500 })
   }
 }
@@ -194,6 +195,7 @@ export async function POST(request: NextRequest) {
       videoVersion,
       timecode,
       timecodeEnd,
+      timestampMs,
       content,
       authorName,
       authorEmail,
@@ -316,6 +318,7 @@ export async function POST(request: NextRequest) {
         videoVersion: finalVideoVersion || null,
         timecode,
         timecodeEnd: timecodeEnd || null,
+        timestampMs: typeof timestampMs === 'number' ? timestampMs : null,
         content: contentValidation.sanitizedContent!,
         authorName: contentValidation.sanitizedAuthorName,
         authorEmail: finalAuthorEmail,
@@ -408,6 +411,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(sanitizedComments)
   } catch (error) {
+    console.error('[/api/comments] failed:', error)
     return NextResponse.json({ error: commentsMessages.operationFailed || 'Operation failed' }, { status: 500 })
   }
 }

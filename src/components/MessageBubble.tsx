@@ -17,7 +17,14 @@ interface MessageBubbleProps {
   comment: CommentWithReplies
   isReply: boolean
   onReply?: () => void
-  onSeekToTimecode?: (timecode: string, videoId: string, videoVersion: number | null) => void
+  onSeekToTimecode?: (
+    timecode: string,
+    videoId: string,
+    videoVersion: number | null,
+    /** Sub-second precision capture moment in milliseconds. Takes priority
+     *  over `timecode` for the actual seek when provided (1.0.3+). */
+    timestampMs?: number | null
+  ) => void
   onDelete?: () => void
   /** Called when the user saves an edited version of this comment */
   onEdit?: (newContent: string) => Promise<void> | void
@@ -159,6 +166,23 @@ export default function MessageBubble({
     // inside the bubble — those have their own click semantics.
     const target = e.target as HTMLElement
     if (target.closest('button, a, input, textarea, select')) return
+
+    // Seek the playhead to this comment's timecode whenever the bubble is
+    // clicked, so the user can jump to the moment the comment was left
+    // without having to hit the small timestamp badge. We forward the
+    // precise `timestampMs` (1.0.3+) so the parent can land on the exact
+    // capture moment instead of the frame-quantized timecode.
+    if (comment.timecode && onSeekToTimecode) {
+      onSeekToTimecode(
+        comment.timecode,
+        comment.videoId,
+        comment.videoVersion,
+        (comment as any).timestampMs ?? null
+      )
+    }
+
+    // Toggle annotation focus (highlights the bubble + surfaces drawing on
+    // the video). Only relevant inside an AnnotationProvider.
     if (annotationCtx) {
       annotationCtx.setActiveCommentId(isAnnotationFocused ? null : comment.id)
     }
@@ -166,7 +190,12 @@ export default function MessageBubble({
 
   const handleTimestampClick = () => {
     if (comment.timecode && onSeekToTimecode) {
-      onSeekToTimecode(comment.timecode, comment.videoId, comment.videoVersion)
+      onSeekToTimecode(
+        comment.timecode,
+        comment.videoId,
+        comment.videoVersion,
+        (comment as any).timestampMs ?? null
+      )
     }
     // Also surface this comment's drawing.
     annotationCtx?.setActiveCommentId(comment.id)

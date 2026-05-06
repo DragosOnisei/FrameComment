@@ -826,6 +826,7 @@
     "saving": "Saving...",
     "deleteComment": "Delete Comment",
     "deleteReply": "Delete Reply",
+    "confirmDeleteComment": "Delete this comment? This cannot be undone.",
     "hasAnnotation": "Has Drawing Annotation",
     "attachFiles": "Attach Files",
     "attachFilesTitle": "Attach Files",

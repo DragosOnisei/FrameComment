@@ -17,6 +17,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.3] - 2026-05-06
+
+### Added
+
+- **Delete your own comments and replies.** A trash-can button now appears
+  next to each comment for both admins and the original author. Authors
+  are matched server-side via the per-share-session id stored at comment
+  creation, so the same browser that wrote a comment can delete it later.
+  `DELETE /api/comments/[id]` was extended to accept author session match
+  in addition to admin auth.
+- **Click a comment to jump the playhead.** Clicking anywhere on a
+  comment bubble in the sidebar now seeks the video to that comment's
+  exact moment, not just clicking the small clock badge.
+- **Sub-second seek precision (`timestampMs` column).** Comments now
+  store the millisecond-accurate moment they were left at, in addition
+  to the frame-quantised `timecode` string used for display. Click-to-
+  seek lands the playhead exactly where the user paused, instead of on
+  the nearest frame boundary (which lost up to ~21ms at 24fps). Legacy
+  comments without `timestampMs` fall back gracefully to the timecode-
+  derived seconds. Migration: `20260505172906_add_comment_timestamp_ms`.
+- **Frame.io-style timeline markers.** Comment markers on the player
+  timeline are now small fully-opaque coloured notches sitting on the
+  track itself, with a separate row of identity chips (initials avatars)
+  rendered immediately below. Click + hover behave like before — seek,
+  scroll-to-comment, tooltip — but the markers no longer fight visually
+  with the playhead.
+
+### Fixed
+
+- **Voice-only comments rejected with a misleading "too long" error.**
+  `validateCommentLength` treated empty content as "too long" and
+  surfaced a 10,000-character ceiling error when posting an audio-only
+  comment. Empty content is now valid at the helper layer; the upstream
+  zod refinement still requires *something* (text, attachment, or
+  annotation) before the request is accepted.
+- **"Only admins can delete comments" alert blocked authors from using
+  Delete.** A leftover client-side guard in `useCommentManagement` was
+  tripping before the request reached the server. Removed; authorisation
+  is now exclusively server-side. Also removed a duplicate `confirm()`
+  prompt — the dialog now fires once.
+- **Share session revocation could permanently lock `authMode=NONE`
+  projects.** For NONE-mode projects the share `sessionId` is
+  deterministic (`none:<projectId>:<ip>`); a stale `revoked:share_session:*`
+  Redis entry would reject every freshly-issued JWT, leaving the player
+  stuck on "Loading video…" with no way to recover via reload.
+  `verifyShareToken` now skips session revocation for NONE-mode tokens
+  (token-level revocation still works for surgical kills).
+- **Admin couldn't preview unapproved videos when transcoding was
+  skipped.** The admin share page only requested an `original` token as
+  a fallback if `video.approved === true`, which combined with
+  `skipTranscoding=true` (no 720p/1080p/2160p variants) left every
+  stream URL empty until approval. The fallback is now unconditional —
+  the admin endpoint already enforces admin auth, so the original is
+  never exposed past the studio.
+
+### Internal
+
+- New `Comment.timestampMs Int?` column (nullable, backward-compatible).
+- `verifyShareToken` no longer consults `isShareSessionRevoked` for
+  `authMode=NONE` JWTs.
+- Diagnostic scripts in `scripts/` (`debug-video-state.ts`,
+  `debug-share-token.ts`, `clear-share-session-revocation.ts`,
+  `redis-inspect.ts`) for reproducing the share/Redis lockout offline.
+
 ## [1.0.2] - 2026-05-04
 
 ### Added
@@ -193,7 +257,8 @@ re-packaged for independent distribution and a new release cycle.
   names) have been renamed; review `docker-compose.yml` and your `.env`
   before upgrading. Detailed migration notes will be added in 1.0.1.
 
-[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/DragosOnisei/FrameComment/releases/tag/v1.0.0

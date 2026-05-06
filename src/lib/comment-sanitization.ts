@@ -57,6 +57,10 @@ export function sanitizeComment(
     videoVersion: comment.videoVersion,
     timecode: normalizedTimecode,
     timecodeEnd: comment.timecodeEnd || null,
+    // Sub-second precision capture moment (1.0.3+). Used as the source of
+    // truth for click-to-seek. Null on legacy comments — clients fall back
+    // to deriving seconds from `timecode` when this is missing.
+    timestampMs: typeof comment.timestampMs === 'number' ? comment.timestampMs : null,
     annotations: comment.annotations || null,
     content: comment.content,
     isInternal: comment.isInternal,

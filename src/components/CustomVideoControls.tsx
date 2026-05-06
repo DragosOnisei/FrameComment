@@ -346,7 +346,15 @@ export default function CustomVideoControls({
         return true
       })
       .map((comment) => {
-        const timestamp = timecodeToSeekSeconds(comment.timecode!, videoFps)
+        // Prefer the precise sub-second capture moment (1.0.3+) so the
+        // chip lines up exactly with the playhead after seek. Legacy
+        // comments without `timestampMs` fall back to the frame-quantized
+        // timecode-derived seconds.
+        const preciseMs = (comment as any).timestampMs
+        const timestamp =
+          typeof preciseMs === 'number' && Number.isFinite(preciseMs) && preciseMs >= 0
+            ? preciseMs / 1000
+            : timecodeToSeekSeconds(comment.timecode!, videoFps)
         const effectiveAuthorName = comment.authorName ||
           ((comment as any).user?.name || (comment as any).user?.email || null)
         // Use isInternal from comment, default to false if not present (client comment)
@@ -362,7 +370,11 @@ export default function CustomVideoControls({
           initials: initialsFromName(effectiveAuthorName),
           colorKey,
           content: normalizedContent.slice(0, 100),
-          position: Math.min(98, Math.max(2, (timestamp / videoDuration) * 100)),
+          // Don't clamp the position — playhead isn't clamped either, so
+          // clamping the chip would visibly desync them. We accept that
+          // chips at the very edges might be half-cropped; the click
+          // target on the visible half remains hover-able.
+          position: Math.min(100, Math.max(0, (timestamp / videoDuration) * 100)),
         }
       })
       .sort((a, b) => a.timestamp - b.timestamp)
@@ -598,7 +610,71 @@ export default function CustomVideoControls({
             )
           })}
 
-          {/* Comment Markers */}
+          {/* Inline comment dots on the timeline (Frame.io-style):
+              tiny solid notches in the user's colour, fully opaque. The
+              full author + content tooltip lives on the avatar row below;
+              clicking a dot still seeks for users who land on it. */}
+          {groupedMarkers.map((group) => {
+            const primaryMarker = group[0]
+            const colors = COLOR_MAP[primaryMarker.colorKey] || COLOR_MAP['border-gray-500']
+            const isHovered = group.some((m) => m.id === hoveredMarkerId)
+            return (
+              <button
+                key={`dot-${primaryMarker.id}`}
+                type="button"
+                onClick={(e) => handleMarkerClick(primaryMarker, e)}
+                onTouchEnd={(e) => handleMarkerTouchEnd(primaryMarker, e)}
+                onMouseEnter={() => handleMarkerMouseEnter(primaryMarker.id)}
+                onMouseLeave={handleMarkerMouseLeave}
+                className={`
+                  absolute top-1/2 pointer-events-auto
+                  w-1 h-3 sm:h-3.5 rounded-full
+                  ${colors.bg} ${colors.ring} ring-1 ring-inset
+                  shadow-sm
+                  transition-transform duration-150 ease-out
+                  hover:scale-y-125
+                  ${isHovered ? 'scale-y-125 z-30' : 'z-10'}
+                `}
+                style={{
+                  left: `${primaryMarker.position}%`,
+                  transform: 'translateX(-50%) translateY(-50%)',
+                }}
+                aria-label={`Comment by ${primaryMarker.authorName || tComments('anonymous')} at ${formatTime(primaryMarker.timestamp)}`}
+              />
+            )
+          })}
+
+          {/* Playhead */}
+          <div
+            className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-20"
+            style={{ left: `${progress}%` }}
+          >
+            <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 border-primary -translate-x-1/2 group-hover:scale-110 transition-transform" />
+          </div>
+
+          {/* Hover Time Indicator */}
+          {hoveredTime !== null && !isDragging && (
+            <div
+              className="absolute bottom-full mb-2 px-2 py-1 bg-black/90 text-white text-xs font-mono rounded border border-white/20 shadow-lg whitespace-nowrap pointer-events-none"
+              style={{
+                left: `${(hoveredTime / videoDuration) * 100}%`,
+                transform: 'translateX(-50%)',
+              }}
+            >
+              {formatTime(hoveredTime)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Avatar Row (Frame.io-style):
+          Identity chips for each comment, rendered BELOW the timeline so
+          they don't visually fight with the playhead. Each avatar is
+          positioned at the same horizontal % as its dot above. Click +
+          hover behave like the old in-track chip — seek, scroll to
+          comment, and surface the tooltip. */}
+      {groupedMarkers.length > 0 && (
+        <div className="relative h-6 sm:h-7 mb-1 sm:mb-2 px-1">
           {groupedMarkers.map((group) => {
             const primaryMarker = group[0]
             const colors = COLOR_MAP[primaryMarker.colorKey] || COLOR_MAP['border-gray-500']
@@ -607,11 +683,11 @@ export default function CustomVideoControls({
 
             return (
               <div
-                key={primaryMarker.id}
-                className="absolute top-1/2 -translate-y-1/2 pointer-events-auto"
+                key={`avatar-${primaryMarker.id}`}
+                className="absolute top-0 pointer-events-auto"
                 style={{
                   left: `${primaryMarker.position}%`,
-                  transform: 'translateX(-50%) translateY(-50%)',
+                  transform: 'translateX(-50%)',
                 }}
               >
                 <button
@@ -623,24 +699,24 @@ export default function CustomVideoControls({
                   onTouchStart={(e) => handleMarkerTouchStart(primaryMarker.id, e)}
                   className={`
                     relative flex items-center justify-center
-                    w-7 h-7 sm:w-8 sm:h-8
+                    w-5 h-5 sm:w-6 sm:h-6
                     rounded-full ring-1 ring-inset
                     font-semibold select-none
                     transition-all duration-150 ease-out
-                    hover:scale-125
-                    active:scale-110
+                    hover:scale-110
+                    active:scale-95
                     focus:outline-none focus-visible:ring-2 focus-visible:ring-white
                     ${colors.bg} ${colors.ring} ${colors.text}
-                    ${isHovered ? 'scale-125 shadow-xl z-30' : 'z-10'}
+                    ${isHovered ? 'scale-110 shadow-xl z-30' : 'z-10'}
                   `}
                   aria-label={`Comment by ${primaryMarker.authorName || tComments('anonymous')} at ${formatTime(primaryMarker.timestamp)}`}
                 >
-                  <span className="text-[11px] sm:text-xs font-semibold leading-none">
+                  <span className="text-[9px] sm:text-[10px] font-semibold leading-none">
                     {primaryMarker.initials}
                   </span>
 
                   {isStacked && (
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-0.5 bg-foreground text-background text-[8px] font-bold rounded-full flex items-center justify-center shadow-md">
+                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 bg-foreground text-background text-[8px] font-bold rounded-full flex items-center justify-center shadow-md">
                       {group.length}
                     </span>
                   )}
@@ -696,29 +772,8 @@ export default function CustomVideoControls({
               </div>
             )
           })}
-
-          {/* Playhead */}
-          <div
-            className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-20"
-            style={{ left: `${progress}%` }}
-          >
-            <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 border-primary -translate-x-1/2 group-hover:scale-110 transition-transform" />
-          </div>
-
-          {/* Hover Time Indicator */}
-          {hoveredTime !== null && !isDragging && (
-            <div
-              className="absolute bottom-full mb-2 px-2 py-1 bg-black/90 text-white text-xs font-mono rounded border border-white/20 shadow-lg whitespace-nowrap pointer-events-none"
-              style={{
-                left: `${(hoveredTime / videoDuration) * 100}%`,
-                transform: 'translateX(-50%)',
-              }}
-            >
-              {formatTime(hoveredTime)}
-            </div>
-          )}
         </div>
-      </div>
+      )}
 
       {/* Control Buttons */}
       <div className="flex items-center justify-between gap-2 sm:gap-3 px-1">

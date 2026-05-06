@@ -350,7 +350,21 @@ export default function CommentSection({
     }
   }
 
-  const handleSeekToTimecode = (timecode: string, videoId: string, videoVersion: number | null) => {
+  const handleSeekToTimecode = (
+    timecode: string,
+    videoId: string,
+    videoVersion: number | null,
+    timestampMs?: number | null
+  ) => {
+    // Prefer the precise `timestampMs` captured at comment creation
+    // (1.0.3+) so the playhead lands exactly where the user paused —
+    // `timecode` is frame-quantized and round-tripping loses up to ~21ms
+    // at 24fps. Fall back to the timecode-derived seconds for legacy
+    // comments that don't carry a timestampMs.
+    if (typeof timestampMs === 'number' && Number.isFinite(timestampMs) && timestampMs >= 0) {
+      handleSeekToTimestamp(timestampMs / 1000, videoId, videoVersion)
+      return
+    }
     const fps = videos.find(v => v.id === videoId)?.fps || 24
     const seconds = timecodeToSeekSeconds(timecode, fps)
     handleSeekToTimestamp(seconds, videoId, videoVersion)
@@ -533,7 +547,21 @@ export default function CommentSection({
                       isReply={false}
                       onReply={() => handleReply(comment.id, comment.videoId)}
                       onSeekToTimecode={handleSeekToTimecode}
-                      onDelete={isAdminView ? () => handleDeleteComment(comment.id) : undefined}
+                      onDelete={
+                        // Show Delete on the bubble for admins (always) and
+                        // for the original author (matched via the share-
+                        // token session id stored when the comment was
+                        // created). Authorisation is also enforced server-
+                        // side in DELETE /api/comments/[id].
+                        isAdminView ||
+                        (!!clientSessionId && (comment as any).editorSessionId === clientSessionId)
+                          ? () => {
+                              if (window.confirm(t('confirmDeleteComment') || 'Delete this comment?')) {
+                                handleDeleteComment(comment.id)
+                              }
+                            }
+                          : undefined
+                      }
                       onEdit={(newContent) => handleEditComment(comment.id, newContent)}
                       onEditReply={(replyId, newContent) => handleEditComment(replyId, newContent)}
                       canEdit={
@@ -548,7 +576,18 @@ export default function CommentSection({
                       commentsDisabled={commentsDisabled}
                       sequenceNumber={sequenceNumber}
                       replies={replies}
-                      onDeleteReply={isAdminView ? handleDeleteComment : undefined}
+                      onDeleteReply={(replyId) => {
+                        const reply = (replies || []).find((r: any) => r.id === replyId)
+                        const canDeleteReply =
+                          isAdminView ||
+                          (!!clientSessionId &&
+                            !!reply &&
+                            (reply as any).editorSessionId === clientSessionId)
+                        if (!canDeleteReply) return
+                        if (window.confirm(t('confirmDeleteComment') || 'Delete this comment?')) {
+                          handleDeleteComment(replyId)
+                        }
+                      }}
                       timestampLabel={timestampLabel}
                       timecodeEndLabel={timecodeEndLabel}
                       hasAnnotation={hasAnnotation}

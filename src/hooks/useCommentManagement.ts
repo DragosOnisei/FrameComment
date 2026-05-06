@@ -411,6 +411,11 @@ export function useCommentManagement({
       videoId: validatedVideoId,
       videoVersion: videos.find(v => v.id === validatedVideoId)?.version || null,
       timecode,
+      // Sub-second precision moment for click-to-seek (1.0.3+).
+      timestampMs:
+        typeof selectedTimestamp === 'number' && Number.isFinite(selectedTimestamp)
+          ? Math.max(0, Math.round(selectedTimestamp * 1000))
+          : null,
       timecodeEnd: selectedTimecodeEnd || null,
       annotations: (pendingAnnotation as Prisma.JsonValue) || null,
       content: commentContent,
@@ -462,6 +467,14 @@ export function useCommentManagement({
         timecode: commentTimecode,
         content: commentContent,
         isInternal: isInternalComment,
+      }
+
+      // Sub-second precision capture moment so the server-side
+      // `timestampMs` field can be the source of truth for click-to-seek.
+      // The timecode field is frame-quantized; without this, round-tripping
+      // through HH:MM:SS:FF loses up to ~21ms at 24fps.
+      if (typeof commentTimestamp === 'number' && Number.isFinite(commentTimestamp)) {
+        requestBody.timestampMs = Math.max(0, Math.round(commentTimestamp * 1000))
       }
 
       // Include annotation data if present (using the ref snapshot — see
@@ -609,15 +622,12 @@ export function useCommentManagement({
   }
 
   const handleDeleteComment = async (commentId: string) => {
-    if (!(useAdminAuth || adminUser)) {
-      alert('Only admins can delete comments')
-      return
-    }
-
-    if (!confirm('Are you sure you want to delete this comment? This action cannot be undone.')) {
-      return
-    }
-
+    // Authorisation is enforced server-side in DELETE /api/comments/[id]:
+    //   - Admins can delete any comment.
+    //   - The original author can delete their own comment when their share-
+    //     token session id matches the comment's editorSessionId.
+    // The caller (CommentSection) is responsible for showing a confirm()
+    // dialog; we don't double-prompt here.
     try {
       if (shareToken) {
         const response = await fetch(`/api/comments/${commentId}`, {
