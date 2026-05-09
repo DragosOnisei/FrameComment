@@ -8,6 +8,7 @@ import CommentSection from '@/components/CommentSection'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
+import ResizableSidebar from '@/components/ResizableSidebar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
@@ -667,7 +668,13 @@ function AdminSharePageInner() {
 
             {/* Comments Section - max one screen height on mobile, side panel on desktop */}
             {showCommentPanel && (
-              <div className="max-h-[100vh] lg:shrink lg:flex-1 lg:max-w-[30%] xl:max-w-[22%] 2xl:max-w-[18%] lg:min-w-[280px] flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-xl bg-card">
+              <ResizableSidebar
+                storageKey={`framecomment:sidebar-width:${project.id}`}
+                defaultWidth={360}
+                minWidth={280}
+                maxFraction={0.55}
+                className="max-h-[100vh] flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-xl bg-card"
+              >
                 <CommentSection
                   projectId={project.id}
                   projectSlug={project.slug}
@@ -691,7 +698,7 @@ function AdminSharePageInner() {
                   onToggleVisibility={() => setHideComments(!hideComments)}
                   showToggleButton={false}
                 />
-              </div>
+              </ResizableSidebar>
             )}
           </>
         )}

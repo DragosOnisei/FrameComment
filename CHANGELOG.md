@@ -17,6 +17,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.5] - 2026-05-08
+
+### Added
+
+- **Range comments via the timeline.** Clicking the comment input
+  captures the current playhead as the comment's IN point and paints
+  a yellow bracket on the timeline plus a draggable handle above it.
+  Pull the handle to the right (or click later on the track) to set
+  the OUT point — the range is shown as a yellow bar and as an inline
+  chip in the input (`[clock 02:19 → 02:24 ×]`). Drags snap to whole
+  frames so it's easy to land on clean cuts. The video scrubs along
+  with the drag so the user sees the exact frame the OUT lands on.
+  Submitting the comment posts a comment with `timecodeEnd` set; the
+  X on the chip clears the whole range.
+- **Edit a comment's range.** Clicking Edit on a saved comment
+  re-paints its IN/OUT range on the timeline with the same draggable
+  handle. Adjusting the handle changes the comment's duration; the
+  new `timecodeEnd` is sent in the `PATCH /api/comments/[id]` body
+  alongside the new content. The PATCH schema now accepts optional
+  `timecode` and `timecodeEnd`.
+- **Copy / paste comments between versions.** Three-dot menu in the
+  top-right of the comments sidebar (Frame.io-style) with two
+  actions: **Copy comments** stores the active video's comments in a
+  per-project localStorage clipboard; **Paste comments** POSTs each
+  one against the currently-selected video, so a v1 → v2 review can
+  re-use the same notes without typing them again. Copies text + IN/OUT
+  range. Attachments and annotations are skipped in this MVP.
+- **Resizable comments sidebar.** A thin drag handle on the left edge
+  of the sidebar lets the user widen or narrow it on demand. Width
+  persists in localStorage per project, clamped to 280px..55vw.
+  Double-click the handle to reset to the default. Active only from
+  the `lg` breakpoint up — on mobile the sidebar still stacks below
+  the player.
+
+### Changed
+
+- **Frame.io-style flat-list comments.** The boxed card wrapper
+  around each comment (border, shadow, large padding) is gone — the
+  sidebar now reads as a flat conversation feed: small avatar, bold
+  name + small timestamp + sequence number on a single header row, a
+  compact yellow timecode chip, body text, and a minimal action row
+  (Reply / pencil / trash). Replies inherit the same compact
+  treatment.
+- **Input placeholder reads "Leave your comment…".** Replaces the
+  generic "Type your message…" so the call-to-action matches the
+  product domain.
+
+### Fixed
+
+- **Horizontal scrollbar in the comments sidebar at xl widths.** The
+  per-comment action row used to wrap when the sidebar narrowed
+  below ~300px, producing a horizontal scrollbar at typical laptop
+  resolutions. Edit / Delete labels now collapse to icons below `2xl`
+  with hover tooltips, the gap is tighter, and the messages
+  container uses `overflow-x-hidden` as a backstop.
+
+### Internal
+
+- New `PATCH /api/comments/[id]` schema accepts optional
+  `timecode` / `timecodeEnd` (validated as proper SMPTE-style strings)
+  so range edits land in the same request as the content edit.
+- New `commentRangeStateChanged` window event broadcasts the pending
+  IN/OUT range to whichever component owns the timeline; new
+  `setCommentOutPoint` event flows the other direction (timeline drag
+  → state holder).
+- New `commentEditStart` / `commentEditCancel` window events
+  coordinate edit-mode range editing between MessageBubble and
+  CommentSection without prop drilling.
+- New components: `CommentsKebabMenu`, `ResizableSidebar`. New
+  utility: `src/lib/comments-clipboard.ts`.
+
 ## [1.0.4] - 2026-05-06
 
 ### Changed
@@ -352,7 +423,8 @@ re-packaged for independent distribution and a new release cycle.
   names) have been renamed; review `docker-compose.yml` and your `.env`
   before upgrading. Detailed migration notes will be added in 1.0.1.
 
-[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/DragosOnisei/FrameComment/compare/v1.0.1...v1.0.2

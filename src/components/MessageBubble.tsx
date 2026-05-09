@@ -104,11 +104,32 @@ export default function MessageBubble({
   const handleStartEdit = () => {
     setEditValue(htmlToPlainText(comment.content))
     setIsEditing(true)
+    // Tell the timeline (via CommentSection) about the comment we're
+    // editing so it can paint the existing in/out range with the
+    // draggable handle. The user can then adjust the range as part of
+    // the edit.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('commentEditStart', {
+          detail: {
+            commentId: comment.id,
+            videoId: comment.videoId,
+            timecode: comment.timecode,
+            timecodeEnd: (comment as any).timecodeEnd ?? null,
+          },
+        })
+      )
+    }
   }
 
   const handleCancelEdit = () => {
     setIsEditing(false)
     setEditValue('')
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('commentEditCancel', { detail: { commentId: comment.id } })
+      )
+    }
   }
 
   const handleSaveEdit = async () => {
@@ -120,6 +141,11 @@ export default function MessageBubble({
       await onEdit(trimmed)
       setIsEditing(false)
       setEditValue('')
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('commentEditCancel', { detail: { commentId: comment.id } })
+        )
+      }
     } finally {
       setIsSaving(false)
     }
@@ -205,69 +231,80 @@ export default function MessageBubble({
   const hasReplies = threadReplies.length > 0
 
   return (
+    // Frame.io-style flat list item \u2014 no card wrapper, no border
+    // around the whole comment, no shadow. Just a small avatar +
+    // metadata row + content + actions, separated from siblings by
+    // a thin divider. The active comment (annotation focused) gets
+    // a subtle ring on the LEFT margin instead of around the whole
+    // box, so the visual emphasis is light.
     <div className="w-full" id={`comment-${comment.id}`}>
       <div
         onClick={handleBubbleClick}
-        className={`bg-card border rounded-lg p-4 shadow-elevation-sm relative cursor-pointer transition-colors ${
+        className={`relative cursor-pointer transition-colors py-2 pl-3 pr-1 -mx-2 rounded-md ${
           isAnnotationFocused
-            ? 'border-primary/60 ring-1 ring-primary/40'
-            : 'border-border/50 hover:border-border'
+            ? 'bg-primary/5 ring-1 ring-primary/30'
+            : 'hover:bg-muted/30'
         }`}
       >
         {hasReplies && (
-          <div className="absolute left-9 top-12 bottom-10 w-px bg-border/50" aria-hidden="true" />
+          <div className="absolute left-[18px] top-9 bottom-9 w-px bg-border/50" aria-hidden="true" />
         )}
 
-        <div className="grid grid-cols-[40px_1fr] gap-x-3 gap-y-6 items-start">
-          <div className="flex justify-center">
-            <InitialsAvatar name={effectiveAuthorName} size="md" isInternal={comment.isInternal ?? false} />
+        <div className="grid grid-cols-[28px_1fr] gap-x-2.5 gap-y-3 items-start">
+          <div className="flex justify-center pt-0.5">
+            <InitialsAvatar name={effectiveAuthorName} size="sm" isInternal={comment.isInternal ?? false} />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1 min-w-0">
-              <span className="text-base font-semibold text-foreground truncate">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm font-semibold text-foreground truncate">
                 {effectiveAuthorName || t('anonymous')}
               </span>
-              <span className="ml-auto text-sm text-muted-foreground flex-shrink-0">
+              <span className="text-[11px] text-muted-foreground flex-shrink-0">
                 {formatMessageTime(comment.createdAt)}
               </span>
+              {typeof sequenceNumber === 'number' && sequenceNumber > 0 && (
+                <span className="ml-auto text-[11px] text-muted-foreground/70 shrink-0 tabular-nums">
+                  #{sequenceNumber}
+                </span>
+              )}
             </div>
 
             {!isReply && timestampLabel && (
-              <div className="flex items-center gap-1.5 mb-1.5">
+              <div className="flex items-center gap-1.5 mt-1 mb-0.5 flex-wrap">
                 <button
                   type="button"
                   onClick={handleTimestampClick}
-                  className="inline-flex items-center gap-1 rounded-md bg-warning-visible px-2 py-0.5 text-xs font-semibold text-warning hover:opacity-90 transition-opacity"
+                  className="inline-flex items-center gap-1 rounded-md bg-warning-visible px-1.5 py-0.5 text-[11px] font-semibold text-warning hover:opacity-90 transition-opacity"
                   title={t('seekToTimecode')}
                 >
                   <Clock className="w-3 h-3" />
-                  <span className="font-mono">
+                  <span className="font-mono tabular-nums">
                     {timestampLabel}{timecodeEndLabel ? ` \u2192 ${timecodeEndLabel}` : ''}
                   </span>
                 </button>
                 {hasAnnotation && (
                   <span className="inline-flex items-center rounded-md bg-blue-500/10 px-1.5 py-0.5 text-blue-600 dark:text-blue-400" title={t('hasAnnotation')}>
-                    <Brush className="w-3.5 h-3.5" />
+                    <Brush className="w-3 h-3" />
                   </span>
                 )}
               </div>
             )}
 
             {isEditing ? (
-              <div className="flex flex-col gap-2">
+              <div className="mt-1 flex flex-col gap-2">
                 <textarea
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
                   rows={Math.min(8, Math.max(2, editValue.split('\n').length))}
                   autoFocus
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handleSaveEdit}
                     disabled={isSaving || !editValue.trim()}
-                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                    className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                   >
                     {isSaving ? t('saving') : t('save')}
                   </button>
@@ -275,14 +312,14 @@ export default function MessageBubble({
                     type="button"
                     onClick={handleCancelEdit}
                     disabled={isSaving}
-                    className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    className="rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                   >
                     {t('cancel')}
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="text-base text-foreground whitespace-pre-wrap break-words leading-relaxed">
+              <div className="mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words leading-snug">
                 <div
                   className="[&>p]:m-0"
                   dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
@@ -291,56 +328,46 @@ export default function MessageBubble({
             )}
 
             {!isEditing && (comment as any).assets && (comment as any).assets.length > 0 && (
-              <CommentAttachments
-                assets={(comment as any).assets}
-                videoId={comment.videoId}
-                shareToken={shareToken}
-              />
+              <div className="mt-1.5">
+                <CommentAttachments
+                  assets={(comment as any).assets}
+                  videoId={comment.videoId}
+                  shareToken={shareToken}
+                />
+              </div>
             )}
 
             {!isEditing && (
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-x-3 min-w-0">
+              <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground/80 min-w-0">
                 {!isReply && !commentsDisabled && onReply && (
                   <button
                     onClick={onReply}
-                    className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors font-medium whitespace-nowrap"
+                    className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
                   >
                     {t('reply')}
                   </button>
                 )}
-                {/* Edit + Delete are icon-only at narrow sidebar widths.
-                    The hover tooltip surfaces the full label, and the
-                    text comes back at xl+ where there's room for it. */}
                 {canEdit && onEdit && (
                   <button
                     onClick={handleStartEdit}
-                    className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors font-medium inline-flex items-center gap-1 whitespace-nowrap"
+                    className="inline-flex items-center hover:text-foreground transition-colors"
                     title={t('editComment')}
                     aria-label={t('editComment')}
                   >
-                    <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    <span className="hidden xl:inline">{t('editComment')}</span>
+                    <Pencil className="w-3.5 h-3.5" />
                   </button>
                 )}
                 {onDelete && (
                   <button
                     onClick={onDelete}
-                    className="text-xs sm:text-sm text-muted-foreground hover:text-destructive transition-colors font-medium inline-flex items-center gap-1 whitespace-nowrap"
+                    className="inline-flex items-center hover:text-destructive transition-colors"
                     title={t('deleteComment')}
                     aria-label={t('deleteComment')}
                   >
-                    <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    <span className="hidden xl:inline">{t('deleteComment')}</span>
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
-              {typeof sequenceNumber === 'number' && sequenceNumber > 0 && (
-                <span className="text-xs sm:text-sm text-muted-foreground shrink-0">
-                  #{sequenceNumber}
-                </span>
-              )}
-            </div>
             )}
           </div>
 
@@ -352,53 +379,53 @@ export default function MessageBubble({
 
             return (
               <div key={reply.id} className="contents">
-                <div className="flex justify-center">
-                  <InitialsAvatar name={replyEffectiveName} size="md" isInternal={reply.isInternal ?? false} />
+                <div className="flex justify-center pt-0.5">
+                  <InitialsAvatar name={replyEffectiveName} size="sm" isInternal={reply.isInternal ?? false} />
                 </div>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-2 min-w-0">
-                    <span className="text-base font-semibold text-foreground truncate">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-semibold text-foreground truncate">
                       {replyEffectiveName || t('anonymous')}
                     </span>
-                    <span className="text-sm text-muted-foreground flex-shrink-0">
+                    <span className="text-[11px] text-muted-foreground flex-shrink-0">
                       {formatMessageTime(reply.createdAt)}
                     </span>
-                    <div className="ml-auto flex items-center gap-1">
+                    <div className="ml-auto flex items-center gap-1.5 text-muted-foreground/80">
                       {canEditReply && canEditReply(reply) && onEditReply && editingReplyId !== reply.id && (
                         <button
                           onClick={() => handleStartEditReply(reply)}
-                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          className="hover:text-foreground transition-colors"
                           title={t('editComment')}
                         >
-                          <Pencil className="w-4 h-4" />
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
                       )}
                       {onDeleteReply && editingReplyId !== reply.id && (
                         <button
                           onClick={() => onDeleteReply(reply.id)}
-                          className="text-muted-foreground hover:text-destructive transition-colors"
+                          className="hover:text-destructive transition-colors"
                           title={t('deleteReply')}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
                   </div>
                   {editingReplyId === reply.id ? (
-                    <div className="flex flex-col gap-2">
+                    <div className="mt-1 flex flex-col gap-2">
                       <textarea
                         value={replyEditValue}
                         onChange={(e) => setReplyEditValue(e.target.value)}
                         rows={Math.min(8, Math.max(2, replyEditValue.split('\n').length))}
                         autoFocus
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                       />
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => handleSaveEditReply(reply.id)}
                           disabled={isSavingReply || !replyEditValue.trim()}
-                          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                          className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                         >
                           {isSavingReply ? t('saving') : t('save')}
                         </button>
@@ -406,7 +433,7 @@ export default function MessageBubble({
                           type="button"
                           onClick={handleCancelEditReply}
                           disabled={isSavingReply}
-                          className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                          className="rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                         >
                           {t('cancel')}
                         </button>
@@ -415,15 +442,17 @@ export default function MessageBubble({
                   ) : (
                     <>
                       <div
-                        className="text-base text-foreground whitespace-pre-wrap break-words leading-relaxed [&>p]:m-0"
+                        className="mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words leading-snug [&>p]:m-0"
                         dangerouslySetInnerHTML={{ __html: sanitizeContent(reply.content) }}
                       />
                       {(reply as any).assets && (reply as any).assets.length > 0 && (
-                        <CommentAttachments
-                          assets={(reply as any).assets}
-                          videoId={reply.videoId}
-                          shareToken={shareToken}
-                        />
+                        <div className="mt-1.5">
+                          <CommentAttachments
+                            assets={(reply as any).assets}
+                            videoId={reply.videoId}
+                            shareToken={shareToken}
+                          />
+                        </div>
                       )}
                     </>
                   )}

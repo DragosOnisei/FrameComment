@@ -7,7 +7,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { Clock, Send, X, Keyboard, Paperclip, Pencil, ArrowRight, PenTool } from 'lucide-react'
+import { Clock, Send, X, Keyboard, Paperclip, Pencil, PenTool } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachmentButton from './CommentAttachmentButton'
@@ -18,6 +18,9 @@ import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 interface CommentInputProps {
   newComment: string
   onCommentChange: (value: string) => void
+  /** Fires when the textarea receives focus. The host hook captures the
+   *  current playhead and stores it as the comment's "in" point. */
+  onInputFocus?: () => void
   onSubmit: () => void
   loading: boolean
 
@@ -77,6 +80,7 @@ interface CommentInputProps {
 export default function CommentInput({
   newComment,
   onCommentChange,
+  onInputFocus,
   onSubmit,
   loading,
   selectedTimestamp,
@@ -308,53 +312,10 @@ export default function CommentInput({
         </div>
       )}
 
-      {/* Timestamp indicator with optional range */}
-      {timestampLabel && !currentVideoRestricted && (
-        <div className="mb-3 flex items-center gap-2 flex-wrap">
-          <div className="inline-flex items-center gap-1.5 rounded-md bg-warning-visible px-2 py-1 text-sm font-semibold text-warning">
-            <Clock className="w-3.5 h-3.5" />
-            <span className="font-mono">{timestampLabel}</span>
-            {timecodeEndLabel && (
-              <>
-                <ArrowRight className="w-3 h-3 mx-0.5" />
-                <span className="font-mono">{timecodeEndLabel}</span>
-                {onClearTimecodeEnd && (
-                  <button
-                    type="button"
-                    onClick={onClearTimecodeEnd}
-                    className="ml-0.5 hover:opacity-70 transition-opacity"
-                    title={t('clearEndTimecode')}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-          {!timecodeEndLabel && onSetTimecodeEnd && (
-            <Button
-              type="button"
-              onClick={onSetTimecodeEnd}
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs px-2"
-              title={t('setOutPoint')}
-            >
-              {t('setOutPoint')}
-            </Button>
-          )}
-          <Button
-            type="button"
-            onClick={onClearTimestamp}
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            title={t('clearTimestamp')}
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-      )}
+      {/* Timestamp / range chip moved INSIDE the textarea wrapper —
+          see below. The old standalone row above the textarea has been
+          retired in favour of a Frame.io-style inline chip; that's why
+          this slot is now empty. */}
 
       {/* Message Input */}
       {!currentVideoRestricted && (
@@ -404,11 +365,34 @@ export default function CommentInput({
           )}
 
           <div className="flex flex-col gap-2">
+            {/* Frame.io-style inline range chip. Sits just above the
+                textarea; clicking the X clears both in and out so the
+                comment becomes project-level. The chip itself is not
+                clickable beyond that — it's purely a status indicator. */}
+            {timestampLabel && !currentVideoRestricted && (
+              <div className="self-start inline-flex items-center gap-1 rounded-md bg-warning-visible px-1.5 py-0.5 text-[11px] font-mono font-semibold text-warning">
+                <Clock className="w-3 h-3 shrink-0" />
+                <span className="tabular-nums">
+                  {timestampLabel}
+                  {timecodeEndLabel ? ` - ${timecodeEndLabel}` : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={onClearTimestamp}
+                  className="ml-0.5 -mr-0.5 p-0.5 rounded hover:bg-warning/20 opacity-70 hover:opacity-100 transition-opacity"
+                  title={t('clearTimestamp')}
+                  aria-label={t('clearTimestamp')}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
             <Textarea
               placeholder={t('typeMessage')}
               value={newComment}
               onChange={(e) => onCommentChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onFocus={onInputFocus}
               className="resize-none"
               rows={2}
             />

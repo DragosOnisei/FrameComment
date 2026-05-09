@@ -9,10 +9,16 @@ import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
+import CommentsKebabMenu from './CommentsKebabMenu'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
-import { formatCommentTimestamp, timecodeToSeekSeconds } from '@/lib/timecode'
+import { formatCommentTimestamp, secondsToTimecode, timecodeToSeconds, timecodeToSeekSeconds } from '@/lib/timecode'
+import {
+  getClippedComments,
+  hasClippedComments,
+  setClippedComments,
+} from '@/lib/comments-clipboard'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -98,6 +104,7 @@ export default function CommentSection({
     pendingAnnotation,
     selectedTimecodeEnd,
     handleCommentChange,
+    handleCommentInputFocus,
     handleSubmitComment,
     handleReply,
     handleCancelReply,
@@ -132,6 +139,106 @@ export default function CommentSection({
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
 
+  // ─────────────── Edit-mode range tracking ───────────────
+  // When the user clicks Edit on a saved comment, MessageBubble fires
+  // `commentEditStart`. We mirror the comment's existing in/out range
+  // onto the timeline (via the same `commentRangeStateChanged` event the
+  // composer uses) so the user can drag the OUT handle to adjust the
+  // duration as part of the edit. Drags arrive as `setCommentOutPoint`
+  // events; while edit-mode is active we pipe them into a ref instead
+  // of the composer's selectedTimecodeEnd, and on save we PATCH the
+  // ref's current timecodeEnd alongside the new content.
+  const editingCommentRef = useRef<{
+    id: string
+    inSeconds: number
+    outSeconds: number | null
+    fps: number
+    videoId: string
+  } | null>(null)
+  const editingCommentEndTimecodeRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const onEditStart = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const tc: string | undefined = detail.timecode
+      const tcEnd: string | null = detail.timecodeEnd ?? null
+      const vid: string | undefined = detail.videoId
+      if (!tc || !vid) return
+      const video = videos.find((v: any) => v.id === vid)
+      const fps = video?.fps || 24
+      let inSec = 0
+      let outSec: number | null = null
+      try {
+        inSec = timecodeToSeconds(tc, fps)
+        outSec = tcEnd ? timecodeToSeconds(tcEnd, fps) : null
+      } catch {
+        return
+      }
+      editingCommentRef.current = {
+        id: detail.commentId,
+        inSeconds: inSec,
+        outSeconds: outSec,
+        fps,
+        videoId: vid,
+      }
+      editingCommentEndTimecodeRef.current = tcEnd
+      // Paint the comment's range on the timeline. Same event the
+      // composer uses, so CustomVideoControls picks it up automatically.
+      window.dispatchEvent(
+        new CustomEvent('commentRangeStateChanged', {
+          detail: { inTime: inSec, outTime: outSec, videoId: vid },
+        })
+      )
+    }
+    const onEditEnd = () => {
+      editingCommentRef.current = null
+      editingCommentEndTimecodeRef.current = null
+      // Clear the timeline range. The hook's own commentRangeStateChanged
+      // emitter will repaint the composer range (if any) on its next tick.
+      window.dispatchEvent(
+        new CustomEvent('commentRangeStateChanged', {
+          detail: { inTime: null, outTime: null },
+        })
+      )
+    }
+    const onSetOut = (e: Event) => {
+      // While we're editing a comment, intercept timeline drags and
+      // route them to the edit ref instead of letting the composer
+      // hook handle them. We also re-emit commentRangeStateChanged so
+      // the timeline keeps the OUT handle in sync.
+      if (!editingCommentRef.current) return
+      const detail = (e as CustomEvent).detail || {}
+      const time = detail.time
+      if (typeof time !== 'number' || !Number.isFinite(time)) return
+      const cur = editingCommentRef.current
+      const safeOut = Math.max(time, cur.inSeconds + 0.05)
+      cur.outSeconds = safeOut
+      editingCommentEndTimecodeRef.current = secondsToTimecode(safeOut, cur.fps)
+      window.dispatchEvent(
+        new CustomEvent('commentRangeStateChanged', {
+          detail: {
+            inTime: cur.inSeconds,
+            outTime: safeOut,
+            videoId: cur.videoId,
+          },
+        })
+      )
+      // Stop the event from also reaching the composer hook (which
+      // would otherwise mutate its own selectedTimecodeEnd state).
+      e.stopImmediatePropagation()
+    }
+    // Use capture phase so we run BEFORE the hook's own setCommentOutPoint
+    // listener (registered on `window`, default bubble phase).
+    window.addEventListener('commentEditStart', onEditStart as EventListener)
+    window.addEventListener('commentEditCancel', onEditEnd as EventListener)
+    window.addEventListener('setCommentOutPoint', onSetOut as EventListener, true)
+    return () => {
+      window.removeEventListener('commentEditStart', onEditStart as EventListener)
+      window.removeEventListener('commentEditCancel', onEditEnd as EventListener)
+      window.removeEventListener('setCommentOutPoint', onSetOut as EventListener, true)
+    }
+  }, [videos])
+
   // Fetch comments function (only used for event-triggered updates)
   const fetchComments = useCallback(async () => {
     try {
@@ -164,7 +271,18 @@ export default function CommentSection({
    */
   const handleEditComment = useCallback(async (commentId: string, newContent: string) => {
     const url = `/api/comments/${commentId}`
-    const body = JSON.stringify({ content: newContent })
+    // Include the (possibly updated) timecodeEnd from edit-mode range
+    // tracking — when the user dragged the OUT handle while editing,
+    // editingCommentEndTimecodeRef holds the new value. We only attach
+    // it to the PATCH body when this comment is the one being edited
+    // (otherwise the ref is stale or null).
+    const editingForThis =
+      editingCommentRef.current && editingCommentRef.current.id === commentId
+    const payload: Record<string, unknown> = { content: newContent }
+    if (editingForThis) {
+      payload.timecodeEnd = editingCommentEndTimecodeRef.current
+    }
+    const body = JSON.stringify(payload)
     const response = isAdminView
       ? await apiFetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
       : await fetch(url, {
@@ -374,6 +492,87 @@ export default function CommentSection({
     window.dispatchEvent(new CustomEvent('openShortcutsDialog'))
   }
 
+  // ───────────── Copy / paste comments between versions ─────────────
+  // Frame.io-style workflow: a kebab menu in the top-right of the
+  // sidebar lets the user clone all comments from the current video
+  // onto a different version of the same project. The clipboard is
+  // localStorage-backed and scoped per project.
+  const [hasClipboardForProject, setHasClipboardForProject] = useState(false)
+  useEffect(() => {
+    setHasClipboardForProject(hasClippedComments(projectId))
+    // React to other tabs (or our own clear() call) flipping the
+    // localStorage entry.
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || !e.key.startsWith('framecomment:clipboard:comments')) return
+      setHasClipboardForProject(hasClippedComments(projectId))
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [projectId])
+
+  const handleCopyComments = useCallback(() => {
+    // Snapshot what's currently visible in the sidebar (already
+    // filtered to the active video by `displayComments`). Includes
+    // replies as standalone entries on paste — a reasonable
+    // simplification for a single-pass version-bump review.
+    const flat = displayComments.map((c: any) => ({
+      content: c.content,
+      timecode: c.timecode,
+      timecodeEnd: c.timecodeEnd ?? null,
+      timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
+      authorName: c.authorName ?? null,
+    }))
+    setClippedComments(projectId, flat)
+    setHasClipboardForProject(flat.length > 0)
+    return { count: flat.length }
+  }, [displayComments, projectId])
+
+  const handlePasteComments = useCallback(async () => {
+    const items = getClippedComments(projectId)
+    if (!items || items.length === 0) {
+      throw new Error('Nothing to paste')
+    }
+    if (!selectedVideoId) {
+      throw new Error('No video selected')
+    }
+    // Sequential POSTs so the backend rate-limiter doesn't reject
+    // half of them and so the order is preserved in the timeline.
+    let created = 0
+    for (const item of items) {
+      const body: Record<string, unknown> = {
+        projectId,
+        videoId: selectedVideoId,
+        timecode: item.timecode,
+        content: item.content,
+        isInternal: !!isAdminView,
+      }
+      if (item.timecodeEnd) body.timecodeEnd = item.timecodeEnd
+      if (typeof item.timestampMs === 'number') body.timestampMs = item.timestampMs
+      if (item.authorName) body.authorName = item.authorName
+      const res = isAdminView
+        ? await apiFetch('/api/comments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        : await fetch('/api/comments', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}),
+            },
+            body: JSON.stringify(body),
+          })
+      if (res.ok) created += 1
+    }
+    // Refresh the sidebar so the pasted comments show up.
+    await fetchComments()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('commentDeleted'))
+    }
+    return { count: created }
+  }, [projectId, selectedVideoId, isAdminView, shareToken, fetchComments])
+
   return (
     <Card className="bg-card border-0 flex flex-col h-full lg:max-h-full rounded-none lg:rounded-lg overflow-hidden" data-comment-section>
       {/* Desktop: Show header at top, Mobile: Hide header (will show below input) */}
@@ -383,17 +582,25 @@ export default function CommentSection({
             <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
             <span className="truncate">{t('feedbackAndDiscussion')}</span>
           </CardTitle>
-          {showToggleButton && onToggleVisibility && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onToggleVisibility}
-              className="hidden lg:flex h-8 px-2"
-              title={t('hideFeedback')}
-            >
-              <PanelRightClose className="w-4 h-4" />
-            </Button>
-          )}
+          <div className="flex items-center gap-0.5 shrink-0">
+            <CommentsKebabMenu
+              commentCount={displayComments.length}
+              hasClipboard={hasClipboardForProject}
+              onCopy={handleCopyComments}
+              onPaste={handlePasteComments}
+            />
+            {showToggleButton && onToggleVisibility && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onToggleVisibility}
+                className="hidden lg:flex h-8 px-2"
+                title={t('hideFeedback')}
+              >
+                <PanelRightClose className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
         </div>
         {selectedVideoId && currentVideo && !isAdminView && (
           <p className="text-xs text-muted-foreground mt-1">
@@ -432,6 +639,7 @@ export default function CommentSection({
             <CommentInput
               newComment={newComment}
               onCommentChange={handleCommentChange}
+              onInputFocus={handleCommentInputFocus}
               onSubmit={handleSubmitComment}
               loading={loading}
               selectedTimestamp={selectedTimestamp}
@@ -501,7 +709,7 @@ export default function CommentSection({
         <div
           ref={messagesContainerRef}
           className={cn(
-            "flex-1 overflow-y-auto p-4 space-y-6 min-h-0 bg-muted/20",
+            "flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 min-h-0 bg-muted/20",
             mobileCollapsible && "order-3 lg:order-1",
             mobileCollapsible && isMobileCollapsed && "hidden lg:block"
           )}
@@ -607,6 +815,7 @@ export default function CommentSection({
           <CommentInput
           newComment={newComment}
           onCommentChange={handleCommentChange}
+          onInputFocus={handleCommentInputFocus}
           onSubmit={handleSubmitComment}
           loading={loading}
           selectedTimestamp={selectedTimestamp}

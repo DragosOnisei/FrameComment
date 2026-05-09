@@ -360,37 +360,24 @@ function AudioAttachment({
   }, [asset.id, videoId, shareToken])
 
   return (
-    // Inline voice/audio attachment. Layout is two stacked rows:
-    //   ┌─ row 1 ──────────────────────────────────────────┐
-    //   │  [♪]  ▶  ──●──────  0:03                          │
-    //   └───────────────────────────────────────────────────┘
-    //   ┌─ row 2 (small, muted) ─────────────────────────────┐
-    //   │                                            41 KB   │
-    //   └───────────────────────────────────────────────────┘
-    // We tried to keep everything on one line, but on a 280px sidebar
-    // Chrome's native <audio> element drops the play button and the
-    // scrubber when its container narrows below ~150px — leaving the
-    // user with just a 3-dot menu and nothing to press. Stacking the
-    // file size underneath gives the player the full width it needs.
-    <div className="flex flex-col gap-1 px-2.5 py-1.5 bg-muted/40 border border-border/50 rounded-md">
-      <div className="flex items-center gap-2 min-w-0">
-        <Music className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-        {loading && (
-          <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin" />
-        )}
-        {error && <span className="text-xs text-destructive">{error}</span>}
-        {audioUrl && (
-          <audio
-            src={audioUrl}
-            controls
-            preload="metadata"
-            className="h-8 flex-1 min-w-0 max-w-full"
-          />
-        )}
-      </div>
-      <div className="text-[11px] text-muted-foreground/80 text-right">
-        {formatFileSize(Number(asset.fileSize))}
-      </div>
+    // Inline voice/audio attachment — just the native player. The music
+    // icon and file-size label were removed (they were noise once the
+    // player itself made the medium obvious). The player gets the full
+    // width of the bubble so Chrome doesn't collapse the play button
+    // on narrow sidebars.
+    <div className="px-1 py-0.5">
+      {loading && (
+        <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin" />
+      )}
+      {error && <span className="text-xs text-destructive">{error}</span>}
+      {audioUrl && (
+        <audio
+          src={audioUrl}
+          controls
+          preload="metadata"
+          className="h-9 w-full"
+        />
+      )}
     </div>
   )
 }

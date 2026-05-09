@@ -9,15 +9,32 @@ import { sanitizeComment } from '@/lib/comment-sanitization'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { safeParseBody } from '@/lib/validation'
 import { z } from 'zod'
+import { isValidTimecode } from '@/lib/timecode'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 export const runtime = 'nodejs'
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
 
-// Schema for PATCH body
+// Schema for PATCH body. `timecode` / `timecodeEnd` are optional — only
+// sent when the user adjusts the range while editing the comment. We
+// validate them as proper SMPTE-style timecode strings; null is allowed
+// for `timecodeEnd` so the user can shrink a range back to a point.
 const editCommentSchema = z.object({
   content: z.string().min(1).max(10000),
+  timecode: z
+    .string()
+    .refine(isValidTimecode, {
+      message: 'Invalid timecode format. Expected HH:MM:SS:FF',
+    })
+    .optional(),
+  timecodeEnd: z
+    .string()
+    .refine(isValidTimecode, {
+      message: 'Invalid end timecode format. Expected HH:MM:SS:FF',
+    })
+    .nullable()
+    .optional(),
 })
 
 // DELETE /api/comments/[id]
@@ -151,7 +168,7 @@ export async function PATCH(
         { status: 400 }
       )
     }
-    const { content } = validation.data
+    const { content, timecode, timecodeEnd } = validation.data
 
     // Look up the existing comment
     const existingComment = await prisma.comment.findUnique({
@@ -223,10 +240,22 @@ export async function PATCH(
       )
     }
 
-    // Update
+    // Update — content is always overwritten; timecode / timecodeEnd
+    // are only included when the client passed them, so a plain text
+    // edit doesn't accidentally clobber the comment's range.
+    const updateData: any = {
+      content: contentValidation.sanitizedContent!,
+    }
+    if (typeof timecode === 'string') {
+      updateData.timecode = timecode
+    }
+    if (timecodeEnd !== undefined) {
+      // null clears the end (range → single point); a string sets it.
+      updateData.timecodeEnd = timecodeEnd
+    }
     const updated = await prisma.comment.update({
       where: { id },
-      data: { content: contentValidation.sanitizedContent! },
+      data: updateData,
       include: {
         user: { select: { id: true, name: true, username: true, email: true } },
         assets: {

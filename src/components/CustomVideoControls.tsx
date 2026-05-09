@@ -343,6 +343,89 @@ export default function CustomVideoControls({
   const volumeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const touchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Pending in/out range for the comment composer. Driven by the
+  // useCommentManagement hook via the commentRangeStateChanged window
+  // event. When `pendingInTime` is non-null the timeline paints an IN
+  // bracket; if a click on the timeline lands AFTER that time, we
+  // treat it as setting the OUT point instead of seeking. Plain clicks
+  // before/at the in-point still seek as normal.
+  const [pendingInTime, setPendingInTime] = useState<number | null>(null)
+  const [pendingOutTime, setPendingOutTime] = useState<number | null>(null)
+  // True while the user is actively dragging the OUT handle above the
+  // timeline. Document-level mousemove/up listeners take over so the
+  // drag continues smoothly even if the cursor leaves the timeline rect.
+  const [isDraggingOutHandle, setIsDraggingOutHandle] = useState(false)
+  useEffect(() => {
+    if (!isDraggingOutHandle) return
+    const computeTime = (clientX: number) => {
+      const rect = timelineRef.current?.getBoundingClientRect()
+      if (!rect || !videoDuration) return null
+      const x = clientX - rect.left
+      const pct = Math.max(0, Math.min(1, x / rect.width))
+      return pct * videoDuration
+    }
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const clientX = (e as TouchEvent).touches?.[0]?.clientX ?? (e as MouseEvent).clientX
+      if (typeof clientX !== 'number') return
+      const time = computeTime(clientX)
+      if (time === null) return
+      const inT = pendingInRef.current
+      // Snap drag to whole frames — quantize to multiples of 1/fps —
+      // so you can land on clean cuts as you drag instead of picking
+      // some arbitrary millisecond between frames.
+      const fps = videoFps && videoFps > 0 ? videoFps : 24
+      const quantized = Math.round(time * fps) / fps
+      // The out point must stay strictly past in. We use one frame
+      // (1/fps) as the floor so the smallest valid range is one frame
+      // long — matching the "single-frame selection" semantics the
+      // user expects right after clicking the input.
+      const minGap = 1 / fps
+      const safeOut =
+        inT !== null ? Math.max(quantized, inT + minGap) : quantized
+      window.dispatchEvent(
+        new CustomEvent('setCommentOutPoint', { detail: { time: safeOut } })
+      )
+      // Scrub the video to the current drag position too, so the user
+      // sees the exact frame the OUT will land on as they drag.
+      onSeek(safeOut)
+    }
+    const onUp = () => setIsDraggingOutHandle(false)
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.addEventListener('touchmove', onMove, { passive: false })
+    document.addEventListener('touchend', onUp)
+    document.addEventListener('touchcancel', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('touchmove', onMove)
+      document.removeEventListener('touchend', onUp)
+      document.removeEventListener('touchcancel', onUp)
+    }
+  }, [isDraggingOutHandle, videoDuration, onSeek, videoFps])
+  // Refs so the timeline-click handler doesn't have to re-create on
+  // every range update.
+  const pendingInRef = useRef<number | null>(null)
+  const pendingOutRef = useRef<number | null>(null)
+  useEffect(() => {
+    pendingInRef.current = pendingInTime
+    pendingOutRef.current = pendingOutTime
+  }, [pendingInTime, pendingOutTime])
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      // Filter by videoId when provided so a stale event for a
+      // different clip doesn't paint the wrong range.
+      if (detail.videoId && videoId && detail.videoId !== videoId) return
+      setPendingInTime(typeof detail.inTime === 'number' ? detail.inTime : null)
+      setPendingOutTime(typeof detail.outTime === 'number' ? detail.outTime : null)
+    }
+    window.addEventListener('commentRangeStateChanged', onChange as EventListener)
+    return () => {
+      window.removeEventListener('commentRangeStateChanged', onChange as EventListener)
+    }
+  }, [videoId])
+
   // Process comments into markers
   const markers = useMemo((): MarkerData[] => {
     if (!videoDuration || videoDuration <= 0 || !comments.length) return []
@@ -445,12 +528,26 @@ export default function CustomVideoControls({
 
   const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
-    
+
     const rect = timelineRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
-    
+
+    // Range-selection mode: when the user has focused the comment
+    // composer (so an "in" point is set) and clicks a position AFTER
+    // the in time, treat that click as setting the OUT point of the
+    // range AND seek there so they see the exact frame the OUT will
+    // land on. Clicking before/at the in time still seeks normally.
+    const inT = pendingInRef.current
+    if (inT !== null && time > inT + 0.05) {
+      window.dispatchEvent(
+        new CustomEvent('setCommentOutPoint', { detail: { time } })
+      )
+      onSeek(time)
+      return
+    }
+
     onSeek(time)
   }, [videoDuration, onSeek])
 
@@ -462,25 +559,43 @@ export default function CustomVideoControls({
   const handleTimelineTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
     setIsDragging(true)
-    
+
     const touch = e.touches[0]
     const rect = timelineRef.current.getBoundingClientRect()
     const x = touch.clientX - rect.left
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
-    
+
+    // Mirror the click handler's range-selection branch on touch.
+    const inT = pendingInRef.current
+    if (inT !== null && time > inT + 0.05) {
+      window.dispatchEvent(
+        new CustomEvent('setCommentOutPoint', { detail: { time } })
+      )
+      onSeek(time)
+      return
+    }
     onSeek(time)
   }, [videoDuration, onSeek])
 
   const handleTimelineTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration || !isDragging) return
-    
+
     const touch = e.touches[0]
     const rect = timelineRef.current.getBoundingClientRect()
     const x = touch.clientX - rect.left
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
-    
+
+    // Same range-selection swipe-out logic as the mouse path.
+    const inT = pendingInRef.current
+    if (inT !== null && time > inT + 0.05) {
+      window.dispatchEvent(
+        new CustomEvent('setCommentOutPoint', { detail: { time } })
+      )
+      onSeek(time)
+      return
+    }
     onSeek(time)
   }, [isDragging, videoDuration, onSeek])
 
@@ -490,15 +605,27 @@ export default function CustomVideoControls({
 
   const handleTimelineMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
-    
+
     const rect = timelineRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
-    
+
     setHoveredTime(time)
 
     if (isDragging) {
+      // Range-selection drag: while the comment composer has an "in"
+      // point set and the user is dragging past it, every mouse move
+      // updates the OUT point continuously AND seeks there, so the
+      // user sees the exact frame as they drag.
+      const inT = pendingInRef.current
+      if (inT !== null && time > inT + 0.05) {
+        window.dispatchEvent(
+          new CustomEvent('setCommentOutPoint', { detail: { time } })
+        )
+        onSeek(time)
+        return
+      }
       onSeek(time)
     }
   }, [isDragging, videoDuration, onSeek])
@@ -655,6 +782,86 @@ export default function CustomVideoControls({
               />
             )
           })}
+
+          {/* Pending in/out range for the comment composer
+              (Frame.io-style). Painted only while the user has focused
+              the comment input. With OUT unset (single-frame selection)
+              we still render a draggable handle at the IN position so
+              the user can pull a range when they want one. */}
+          {pendingInTime !== null && videoDuration > 0 && (() => {
+            const inPct = Math.min(100, Math.max(0, (pendingInTime / videoDuration) * 100))
+            const outPct =
+              pendingOutTime !== null
+                ? Math.min(100, Math.max(0, (pendingOutTime / videoDuration) * 100))
+                : null
+            // Handle sits at OUT when set, otherwise sits AT IN so the
+            // user has something to grab even on a fresh click.
+            const handlePct = outPct !== null ? outPct : inPct
+            return (
+              <>
+                {/* Range fill (only when out is set) */}
+                {outPct !== null && outPct > inPct && (
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 h-1.5 sm:h-2 bg-warning/70 rounded-full pointer-events-none z-15"
+                    style={{
+                      left: `${inPct}%`,
+                      width: `${Math.max(outPct - inPct, 0.5)}%`,
+                    }}
+                  />
+                )}
+                {/* IN bracket */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-25"
+                  style={{ left: `${inPct}%` }}
+                  aria-hidden
+                >
+                  <div className="w-0.5 h-5 sm:h-6 bg-warning shadow-[0_0_4px_rgba(0,0,0,0.5)] -translate-x-1/2" />
+                </div>
+                {/* OUT bracket */}
+                {outPct !== null && (
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-25"
+                    style={{ left: `${outPct}%` }}
+                    aria-hidden
+                  >
+                    <div className="w-0.5 h-5 sm:h-6 bg-warning shadow-[0_0_4px_rgba(0,0,0,0.5)] -translate-x-1/2" />
+                  </div>
+                )}
+                {/* Draggable handle above the timeline. Always rendered
+                    when there's a pending IN, even with no OUT yet — it
+                    sits on the IN point and the user pulls it right to
+                    open up a range. Drags snap to whole frames so you
+                    can hit a clean cut. */}
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setIsDraggingOutHandle(true)
+                  }}
+                  onTouchStart={(e) => {
+                    e.stopPropagation()
+                    setIsDraggingOutHandle(true)
+                  }}
+                  className={`
+                    absolute -top-1 sm:-top-1.5 z-30
+                    w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full
+                    bg-warning ring-2 ring-black/40
+                    shadow-md cursor-ew-resize
+                    hover:scale-110 active:scale-100
+                    transition-transform
+                    ${isDraggingOutHandle ? 'scale-125 shadow-lg' : ''}
+                  `}
+                  style={{
+                    left: `${handlePct}%`,
+                    transform: 'translateX(-50%)',
+                  }}
+                  title="Drag right to extend the comment range"
+                  aria-label="Drag to set comment out point"
+                />
+              </>
+            )
+          })()}
 
           {/* Playhead */}
           <div

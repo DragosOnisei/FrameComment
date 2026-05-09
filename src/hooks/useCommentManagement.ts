@@ -286,6 +286,10 @@ export function useCommentManagement({
     setSelectedTimestamp(time)
     setSelectedVideoId(videoId)
     setHasAutoFilledTimestamp(true)
+    // Single-frame selection by default — no auto-seeded out range.
+    // The drag handle on the timeline still appears (at the IN
+    // position when there's no OUT yet) so the user can grab it and
+    // pull a range when they actually want one.
   }, [])
 
   // Listen for annotationComplete event from drawing mode
@@ -331,6 +335,47 @@ export function useCommentManagement({
     }
   }, [hasAutoFilledTimestamp, selectedTimestamp, selectedVideoId])
 
+  // Broadcast the current pending in/out range so the timeline (which
+  // lives several components away) can paint the IN bracket and the
+  // range bar without prop drilling. Fires on every change so the
+  // timeline always reflects the latest state.
+  useEffect(() => {
+    const fps =
+      videos.find((v: any) => v.id === selectedVideoId)?.fps || 24
+    const outTime = selectedTimecodeEnd
+      ? timecodeToSeconds(selectedTimecodeEnd, fps)
+      : null
+    window.dispatchEvent(
+      new CustomEvent('commentRangeStateChanged', {
+        detail: {
+          inTime: selectedTimestamp,
+          outTime,
+          videoId: selectedVideoId,
+        },
+      })
+    )
+  }, [selectedTimestamp, selectedTimecodeEnd, selectedVideoId, videos])
+
+  // The timeline tells us when the user clicks past the in marker —
+  // we treat that click as setting the OUT point rather than a seek,
+  // so they can pick a range with a single click after focusing the
+  // input.
+  useEffect(() => {
+    const handleSetOut = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const time = detail.time
+      if (typeof time !== 'number' || !Number.isFinite(time)) return
+      if (selectedTimestamp === null || time <= selectedTimestamp) return
+      const fps =
+        videos.find((v: any) => v.id === selectedVideoId)?.fps || 24
+      setSelectedTimecodeEnd(secondsToTimecode(time, fps))
+    }
+    window.addEventListener('setCommentOutPoint', handleSetOut as EventListener)
+    return () => {
+      window.removeEventListener('setCommentOutPoint', handleSetOut as EventListener)
+    }
+  }, [selectedTimestamp, selectedVideoId, videos])
+
   // Auto-fill timestamp when user starts typing
   const handleCommentChange = (value: string) => {
     setNewComment(value)
@@ -347,6 +392,22 @@ export function useCommentManagement({
       )
     }
   }
+
+  // Frame.io-style "click on the input → in marker at playhead". Same
+  // pause-and-capture flow as typing, but fires on focus instead of on
+  // first keystroke. Only runs when there's no timestamp yet, so an
+  // explicitly-set timestamp (or an existing in/out range) isn't
+  // clobbered.
+  const handleCommentInputFocus = useCallback(() => {
+    if (hasAutoFilledTimestamp) return
+    if (selectedTimestamp !== null) return
+    window.dispatchEvent(new CustomEvent('pauseVideoForComment'))
+    window.dispatchEvent(
+      new CustomEvent('getCurrentTime', {
+        detail: { callback: captureTimestamp },
+      })
+    )
+  }, [hasAutoFilledTimestamp, selectedTimestamp, captureTimestamp])
 
   // Submit comment
   const handleSubmitComment = async () => {
@@ -756,6 +817,7 @@ export function useCommentManagement({
     attachmentNotice,
     pendingAnnotation: !!pendingAnnotation,
     handleCommentChange,
+    handleCommentInputFocus,
     handleSubmitComment,
     handleReply,
     handleCancelReply,
