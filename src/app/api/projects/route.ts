@@ -77,6 +77,9 @@ export async function GET(request: NextRequest) {
           select: {
             videos: true,
             comments: true,
+            // Total folders in the project (any depth) — shown in the
+            // dashboard tile in place of the old video count (1.0.6+).
+            folders: true,
           },
         },
       },
@@ -85,10 +88,31 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    // Sum total bytes (originalFileSize) per project in a single
+    // grouped query. BigInt → number conversion happens client-side
+    // by serialising via .toString(); we expose the value as a number
+    // string in JSON so it survives JSON.stringify.
+    const sizeRows = await prisma.video.groupBy({
+      by: ['projectId'],
+      where: { projectId: { in: projects.map((p) => p.id) } },
+      _sum: { originalFileSize: true },
+    })
+    const sizeByProject = new Map<string, string>()
+    for (const row of sizeRows) {
+      sizeByProject.set(
+        row.projectId,
+        (row._sum.originalFileSize ?? BigInt(0)).toString(),
+      )
+    }
+
     const sanitizedProjects = projects.map(({ sharePassword, recipients, ...project }) => ({
       ...project,
       sharePassword: Boolean(sharePassword),
       recipients,
+      // Serialise BigInt as a string so it survives JSON; the client
+      // parses it back to a Number (file sizes fit comfortably in
+      // Number.MAX_SAFE_INTEGER even for multi-TB libraries).
+      totalSize: sizeByProject.get(project.id) ?? '0',
     }))
 
     return NextResponse.json({ projects: sanitizedProjects })

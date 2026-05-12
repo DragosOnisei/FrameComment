@@ -517,3 +517,71 @@ export async function generateThumbnail(
     })
   })
 }
+
+/**
+ * Generate a storyboard sprite-sheet — one JPEG packing
+ * `cols × rows` evenly-spaced frames at a tiny resolution. Used by
+ * the Frame.io-style folder grid for instant hover-scrub: the client
+ * just shifts `background-position`, no video element needed.
+ *
+ * The sprite has fixed dimensions (default 10×10 grid of 192×108
+ * cells = 1920×1080 total). Total payload is typically 40–120 KB at
+ * `-q:v 5`, so scrub is "lightning-instant" even on slow networks.
+ */
+export async function generateStoryboard(
+  inputPath: string,
+  outputPath: string,
+  duration: number,
+  cols: number = 10,
+  rows: number = 10,
+  cellWidth: number = 192,
+  cellHeight: number = 108,
+): Promise<void> {
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error(`Invalid duration for storyboard: ${duration}`)
+  }
+  const totalFrames = cols * rows
+  // fps = total_frames / duration → produces exactly `totalFrames`
+  // evenly-spaced frames across the video.
+  const fps = totalFrames / duration
+
+  // scale → preserve aspect with letterbox padding so vertical /
+  // portrait videos don't get squished. tile → pack into a grid.
+  const vf = [
+    `fps=${fps}`,
+    `scale=${cellWidth}:${cellHeight}:force_original_aspect_ratio=decrease`,
+    `pad=${cellWidth}:${cellHeight}:(ow-iw)/2:(oh-ih)/2:black`,
+    `tile=${cols}x${rows}`,
+  ].join(',')
+
+  const args = [
+    '-v', 'error',
+    '-i', inputPath,
+    '-vf', vf,
+    '-frames:v', '1',
+    '-q:v', '5', // small JPEG; sprite cells are tiny so 5 looks fine
+    '-y',
+    outputPath,
+  ]
+
+  if (DEBUG) {
+    logMessage('[FFMPEG DEBUG] Storyboard command:', 'nice -n 10', ffmpegPath, args.join(' '))
+  }
+
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stderr = ''
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+    ffmpeg.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`FFmpeg storyboard generation failed: ${stderr}`))
+    })
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`Failed to start FFmpeg for storyboard: ${err.message}`))
+    })
+  })
+}

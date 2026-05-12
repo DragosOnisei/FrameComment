@@ -3,50 +3,23 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { FolderKanban, Plus, Video, Eye, Download, EyeOff, RefreshCw, Copy, Check, Mail, AlertCircle } from 'lucide-react'
+import { FolderKanban, Plus, Eye, EyeOff, RefreshCw, Copy, Check, AlertCircle } from 'lucide-react'
 import ProjectsList from '@/components/ProjectsList'
 import { apiFetch, apiPost } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 import { useTranslations } from 'next-intl'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
-import { ClientSelector } from '@/components/ClientSelector'
 import { generateSecurePassword } from '@/lib/password-utils'
-
-interface AnalyticsOverview {
-  totalProjects: number
-  totalVideos: number
-  totalVisits: number
-  totalDownloads: number
-}
 
 export default function AdminPage() {
   const t = useTranslations('projects')
   const tc = useTranslations('common')
   const router = useRouter()
   const [projects, setProjects] = useState<any[] | null>(null)
-  const [analyticsData, setAnalyticsData] = useState<any[] | null>(null)
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<Set<string>>(() => {
-    // Load filter from localStorage or use default (all except ARCHIVED)
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('admin_projects_status_filter')
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored)
-          return new Set(parsed)
-        } catch {
-          // If parsing fails, use default
-        }
-      }
-    }
-    return new Set(['IN_REVIEW', 'APPROVED', 'SHARE_ONLY'])
-  })
 
   // New Project Modal state
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
@@ -66,11 +39,6 @@ export default function AdminPage() {
   const [recipientEmail, setRecipientEmail] = useState('')
   const [formError, setFormError] = useState('')
 
-  // Save filter to localStorage whenever it changes
-  useEffect(() => {
-    localStorage.setItem('admin_projects_status_filter', JSON.stringify(Array.from(statusFilter)))
-  }, [statusFilter])
-
   // Check if SMTP is configured
   async function checkSmtpConfiguration() {
     try {
@@ -86,23 +54,12 @@ export default function AdminPage() {
 
   const loadProjects = async () => {
     try {
-      // Fetch projects and analytics in parallel
-      const [projectsRes, analyticsRes] = await Promise.all([
-        apiFetch('/api/projects'),
-        apiFetch('/api/analytics')
-      ])
-
+      const projectsRes = await apiFetch('/api/projects')
       if (projectsRes.ok) {
         const data = await projectsRes.json()
         setProjects(data.projects || data || [])
       } else {
         setProjects([])
-      }
-
-      if (analyticsRes.ok) {
-        const analyticsData = await analyticsRes.json()
-        const projectsList = analyticsData.projects || []
-        setAnalyticsData(projectsList)
       }
     } catch (error) {
       setProjects([])
@@ -137,7 +94,9 @@ export default function AdminPage() {
     setRecipientName('')
     setRecipientEmail('')
     setIsShareOnly(false)
-    setPasswordProtected(true)
+    // Auth is OFF by default — most users want a quick public project.
+    // They can flip the checkbox if they need a password / OTP.
+    setPasswordProtected(false)
     setSharePassword(generateSecurePassword())
     setShowPassword(true)
     setCopied(false)
@@ -196,8 +155,9 @@ export default function AdminPage() {
     }
   }
 
-  const canUseOTP = smtpConfigured && recipientEmail
-  const showOTPRecommendation = recipientEmail && smtpConfigured && authMode === 'PASSWORD'
+  // Create modal is intentionally minimal in 1.0.6+: auth is always
+  // password-based when enabled, so the dropdown is gone. Switch to
+  // OTP / Both later from Project Settings if needed.
   const needsPassword = authMode === 'PASSWORD' || authMode === 'BOTH'
 
   // Render new project modal
@@ -237,32 +197,6 @@ export default function AdminPage() {
               />
             </div>
 
-            {/* Description */}
-            <div className="space-y-2">
-              <Label htmlFor="projectDescription">{t('descriptionOptional')}</Label>
-              <Textarea
-                id="projectDescription"
-                placeholder={t('descriptionPlaceholder')}
-                value={projectDescription}
-                onChange={(e) => setProjectDescription(e.target.value)}
-                rows={2}
-              />
-            </div>
-
-            {/* Client Selection */}
-            <ClientSelector
-              companyName={companyName}
-              onCompanyChange={(name, id) => {
-                setCompanyName(name)
-                setClientCompanyId(id)
-              }}
-              recipientName={recipientName}
-              onRecipientNameChange={setRecipientName}
-              recipientEmail={recipientEmail}
-              onRecipientEmailChange={setRecipientEmail}
-              disabled={creating}
-            />
-
             {/* Authentication Section */}
             <div className="space-y-4 border rounded-lg p-4 bg-primary-visible border-2 border-primary-visible">
               <div className="flex items-start justify-between">
@@ -285,73 +219,7 @@ export default function AdminPage() {
 
               {passwordProtected && (
                 <div className="space-y-3 pt-2 border-t">
-                  {/* Authentication Method */}
-                  <div className="space-y-2">
-                    <Label>{t('authMethod')}</Label>
-                    <Select value={authMode} onValueChange={(v) => setAuthMode(v as 'PASSWORD' | 'OTP' | 'BOTH')}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="PASSWORD">{t('passwordOnly')}</SelectItem>
-                        <SelectItem value="OTP" disabled={!canUseOTP}>
-                          {t('otpOnly')} {!canUseOTP ? t('requiresSMTP') : ''}
-                        </SelectItem>
-                        <SelectItem value="BOTH" disabled={!canUseOTP}>
-                          {t('bothAuth')} {!canUseOTP ? t('requiresSMTP') : ''}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {authMode === 'PASSWORD' && t('passwordDescription')}
-                      {authMode === 'OTP' && t('otpDescription')}
-                      {authMode === 'BOTH' && t('bothDescription')}
-                    </p>
-
-                    {/* Smart Recommendation */}
-                    {showOTPRecommendation && (
-                      <div className="flex items-start gap-2 p-2 bg-muted border border-border rounded-md">
-                        <Mail className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium">{t('considerOtp')}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {t('considerOtpDescription')}
-                          </p>
-                          <div className="flex flex-wrap gap-2 mt-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-6 text-xs px-2"
-                              onClick={() => setAuthMode('OTP')}
-                            >
-                              {t('otpOnlyShort')}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-6 text-xs px-2"
-                              onClick={() => setAuthMode('BOTH')}
-                            >
-                              {t('bothShort')}
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {!smtpConfigured && (
-                      <div className="flex items-start gap-2 p-2 bg-warning-visible border border-warning-visible rounded-md">
-                        <AlertCircle className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-warning">
-                          {t('configureSMTP')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Password Field */}
+                  {/* Password Field — always Password auth (1.0.6+) */}
                   {needsPassword && (
                     <div className="space-y-2">
                       <Label htmlFor="sharePassword">{t('sharePassword')}</Label>
@@ -414,28 +282,6 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* Share Only */}
-            <div className="space-y-2 border-t pt-4">
-              <div className="flex items-center space-x-2">
-                <input
-                  id="isShareOnly"
-                  type="checkbox"
-                  checked={isShareOnly}
-                  onChange={(e) => setIsShareOnly(e.target.checked)}
-                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                />
-                <Label htmlFor="isShareOnly" className="font-normal cursor-pointer">
-                  {t('shareOnly')}
-                </Label>
-              </div>
-              <p className="text-xs text-muted-foreground ml-6">
-                {t('shareOnlyDescription')}
-              </p>
-            </div>
-
-            <p className="text-xs text-muted-foreground border-t pt-3">
-              {t('additionalOptions')}
-            </p>
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -450,22 +296,6 @@ export default function AdminPage() {
       </Dialog>
     )
   }
-
-  // Calculate analytics based on current filter
-  const analytics: AnalyticsOverview | null = analyticsData
-    ? (() => {
-        const filteredAnalytics = analyticsData.filter((p: any) => statusFilter.has(p.status))
-        return {
-          totalProjects: filteredAnalytics.length,
-          totalVideos: filteredAnalytics.reduce((sum: number, p: any) => sum + (p.videoCount || 0), 0),
-          totalVisits: filteredAnalytics.reduce((sum: number, p: any) => sum + (p.totalVisits || 0), 0),
-          totalDownloads: filteredAnalytics.reduce((sum: number, p: any) => sum + (p.totalDownloads || 0), 0),
-        }
-      })()
-    : null
-
-  const metricIconWrapperClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
-  const metricIconClassName = 'w-4 h-4 text-primary'
 
   if (loading) {
     return (
@@ -516,55 +346,7 @@ export default function AdminPage() {
           </Button>
         </div>
 
-        {/* Analytics Overview */}
-        {analytics && (
-          <Card className="p-3 mb-4">
-            <div className="flex flex-wrap items-center gap-6">
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <FolderKanban className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{t('projectsCount')}</p>
-                  <p className="text-base font-semibold tabular-nums">{analytics.totalProjects.toLocaleString()}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <Video className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{t('videos')}</p>
-                  <p className="text-base font-semibold tabular-nums">{analytics.totalVideos.toLocaleString()}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <Eye className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{t('visits')}</p>
-                  <p className="text-base font-semibold tabular-nums">{analytics.totalVisits.toLocaleString()}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={metricIconWrapperClassName}>
-                  <Download className={metricIconClassName} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{t('downloads')}</p>
-                  <p className="text-base font-semibold tabular-nums">{analytics.totalDownloads.toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        <ProjectsList 
-          projects={projects} 
-          statusFilter={statusFilter}
-          onStatusFilterChange={setStatusFilter}
-        />
+        <ProjectsList projects={projects} onProjectMutated={loadProjects} />
       </div>
       {renderNewProjectModal()}
     </div>

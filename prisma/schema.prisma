@@ -25,6 +25,11 @@ model User {
   passkeys          PasskeyCredential[]
   pushSubscriptions PushSubscription[]
   calendarToken     CalendarToken?
+  foldersCreated    Folder[]            @relation("FolderCreator")
+  // Admin user who uploaded each video — shown as the "uploader"
+  // in the Frame.io-style folder grid (1.0.6+). Nullable so any
+  // historical pre-1.0.6 rows still load.
+  videosCreated     Video[]             @relation("VideoCreator")
 }
 
 enum UserRole {
@@ -101,6 +106,7 @@ model Project {
   clientCompany   ClientCompany? @relation(fields: [clientCompanyId], references: [id], onDelete: SetNull)
 
   videos            Video[]
+  folders           Folder[] // Optional folder tree inside the project (1.0.6+)
   comments          Comment[]
   securityEvents    SecurityEvent[]
   analytics         VideoAnalytics[]
@@ -110,6 +116,46 @@ model Project {
   projectUploads    ProjectUpload[] // Client-submitted files via reverse share
 
   @@index([clientCompanyId])
+}
+
+/// Frame.io-style folder inside a project. Folders can be nested
+/// arbitrarily deep (parentFolderId is a self-relation). Each folder
+/// carries its own share configuration so it can be shared
+/// independently from the parent project: a unique slug + the same
+/// auth modes (NONE / PASSWORD / OTP / BOTH) the project supports.
+///
+/// Videos can sit either directly under a project (folderId = null) or
+/// inside a folder (folderId set). When a folder is deleted its
+/// subfolders are cascaded; videos inside have their folderId set to
+/// null (preserved at project root) — that's safer than data loss.
+model Folder {
+  id             String   @id @default(cuid())
+  projectId      String
+  parentFolderId String?
+  name           String
+
+  // Sharing — mirrors the Project share fields. We default authMode
+  // to NONE since the common case is "send the link to a client";
+  // admins can lock it down per-folder when they want stricter rules.
+  slug          String  @unique
+  sharePassword String?
+  authMode      String  @default("NONE") // PASSWORD | OTP | BOTH | NONE
+
+  // Comment range / visibility settings will live on the project for
+  // now; revisit per-folder overrides in a later release if needed.
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentFolder Folder?  @relation("FolderHierarchy", fields: [parentFolderId], references: [id], onDelete: Cascade)
+  subfolders   Folder[] @relation("FolderHierarchy")
+  videos       Video[]
+  createdBy    User?    @relation("FolderCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([parentFolderId])
 }
 
 enum ProjectStatus {
@@ -136,6 +182,10 @@ model ProjectRecipient {
 model Video {
   id           String @id @default(cuid())
   projectId    String
+  // Optional folder the video lives inside. Null means the video sits
+  // directly at the project root (legacy / simple projects). Folders
+  // are introduced in 1.0.6; existing rows migrate as folderId = null.
+  folderId     String?
   name         String // Name to distinguish different videos in a project (required)
   version      Int // 1, 2, 3 (for revisions)
   versionLabel String // "v1", "v2", "v3" or custom
@@ -163,6 +213,11 @@ model Video {
   preview1080Path String?
   preview720Path  String?
   thumbnailPath   String?
+  // Hover-scrub storyboard (1.0.6+). A single tiny JPEG packing 100
+  // evenly-spaced frames in a 10×10 grid. The folder grid uses CSS
+  // background-position on this sprite for instant frame-accurate
+  // scrubbing — same approach Frame.io uses.
+  storyboardPath  String?
 
   // Clean (non-watermarked) previews for approved playback
   cleanPreview2160Path String?
@@ -176,13 +231,21 @@ model Video {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Admin who uploaded the video (1.0.6+). Optional + SetNull so an
+  // admin can be deleted without orphaning their uploads.
+  createdById String?
+
   project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folder    Folder?          @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdBy User?            @relation("VideoCreator", fields: [createdById], references: [id], onDelete: SetNull)
   analytics VideoAnalytics[]
   assets    VideoAsset[]
   comments  Comment[]
 
   @@index([projectId, version])
   @@index([projectId, name])
+  @@index([folderId])
+  @@index([createdById])
 }
 
 model VideoAsset {

@@ -167,6 +167,19 @@ export default function ThumbnailReel({
     activeVideo?.versionLabel ||
     (typeof activeVideo?.version === 'number' ? `v${activeVideo.version}` : 'v1')
 
+  // Display name in the header reflects the SELECTED version's
+  // original filename (1.0.6+). After Frame.io-style stacking, every
+  // version in a group shares the same `name`, so we can't fall back
+  // to it for per-version identity. Strip the extension so the bar
+  // reads "Episode 2" not "Episode 2.mp4".
+  const stripExt = (filename: string | undefined | null) => {
+    if (!filename) return ''
+    const dot = filename.lastIndexOf('.')
+    return dot > 0 ? filename.slice(0, dot) : filename
+  }
+  const displayedHeaderName =
+    stripExt(activeVideo?.originalFileName) || activeVideoName || ''
+
   return (
     <div className="relative shrink-0 z-20 p-2 sm:p-3">
       {/* Compact Control Bar - Always visible */}
@@ -213,9 +226,9 @@ export default function ThumbnailReel({
                 />
                 <span
                   className="text-sm text-foreground/90 truncate"
-                  title={activeVideoName}
+                  title={displayedHeaderName}
                 >
-                  {activeVideoName || '—'}
+                  {displayedHeaderName || '—'}
                 </span>
               </button>
 

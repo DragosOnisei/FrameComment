@@ -1,6 +1,6 @@
 import { prisma } from '../lib/db'
 import { downloadFile, uploadFile } from '../lib/storage'
-import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata } from '../lib/ffmpeg'
+import { transcodeVideo, generateThumbnail, generateStoryboard, getVideoMetadata, VideoMetadata } from '../lib/ffmpeg'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -43,6 +43,7 @@ export interface TempFiles {
   input?: string
   preview?: string
   thumbnail?: string
+  storyboard?: string
 }
 
 export interface ProcessingSettings {
@@ -387,6 +388,51 @@ export async function processThumbnail(
 }
 
 /**
+ * Generate the hover-scrub storyboard sprite (1.0.6+). 100 frames in
+ * a 10x10 grid, each 192x108. Total payload is tiny (~50-150KB) so
+ * the dashboard can scrub instantly via CSS background-position.
+ *
+ * Returns the storage path on success, or `null` if generation
+ * failed — the caller treats it as a soft failure since the video
+ * itself is fine.
+ */
+export async function processStoryboard(
+  videoId: string,
+  projectId: string,
+  inputPath: string,
+  duration: number,
+  tempFiles: TempFiles,
+): Promise<string | null> {
+  try {
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return null
+    }
+    const tempStoryboardPath = path.join(TEMP_DIR, `${videoId}-storyboard.jpg`)
+    tempFiles.storyboard = tempStoryboardPath
+
+    const t0 = Date.now()
+    await generateStoryboard(inputPath, tempStoryboardPath, duration)
+    logMessage(`[WORKER] Generated storyboard for video ${videoId} in ${((Date.now() - t0) / 1000).toFixed(2)}s`)
+
+    const storyboardPath = `projects/${projectId}/videos/${videoId}/storyboard.jpg`
+    const stats = fs.statSync(tempStoryboardPath)
+    debugLog('Storyboard file size:', (stats.size / 1024).toFixed(2) + ' KB')
+
+    await uploadFile(
+      storyboardPath,
+      fs.createReadStream(tempStoryboardPath),
+      stats.size,
+      'image/jpeg',
+    )
+    return storyboardPath
+  } catch (err) {
+    // Soft failure — log but don't block video readiness.
+    logError(`[WORKER] Storyboard generation failed for video ${videoId}:`, err)
+    return null
+  }
+}
+
+/**
  * Update video record with final processing results
  */
 export async function finalizeVideo(
@@ -394,7 +440,8 @@ export async function finalizeVideo(
   previewPath: string,
   thumbnailPath: string,
   metadata: VideoMetadata,
-  resolution: string
+  resolution: string,
+  storyboardPath?: string | null,
 ): Promise<void> {
   // Preserve user-supplied thumbnails (assets) when reprocessing so we don't overwrite them
   const existingThumbnail = await prisma.video.findUnique({
@@ -440,6 +487,22 @@ export async function finalizeVideo(
     where: { id: videoId },
     data: updateData,
   })
+
+  // Storyboard update is intentionally a SECOND, isolated query
+  // (1.0.6+). If the DB doesn't yet have the storyboardPath column
+  // (migration not applied) this fails silently and the main video
+  // still finalizes to READY — the worst case is "no hover-scrub
+  // sprite" rather than "the whole upload is stuck in PROCESSING".
+  if (storyboardPath) {
+    try {
+      await prisma.video.update({
+        where: { id: videoId },
+        data: { storyboardPath } as any,
+      })
+    } catch (err) {
+      logError(`[WORKER] Storyboard path persist failed for ${videoId} (column missing? run prisma migrate dev):`, err)
+    }
+  }
 
   debugLog('Database updated to READY status')
 }

@@ -41,9 +41,18 @@ interface VideoUploadModalProps {
   onClose: () => void
   projectId: string
   onUploadComplete: (videoName: string, videoId: string) => void
+  /** Files to seed into the pending list on open — used by the
+   *  Frame.io-style drop zone in FolderBrowser so dragging a file
+   *  onto the empty state pre-fills this modal. The list is consumed
+   *  once per "open" (effect tracks an instance via array identity). */
+  initialFiles?: File[] | null
+  /** Optional folder to upload into. When set, the server attaches
+   *  the new video to this folder; when null/undefined, the video
+   *  goes to the project root (legacy / dashboard behaviour). */
+  folderId?: string | null
 }
 
-export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete }: VideoUploadModalProps) {
+export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete, initialFiles, folderId }: VideoUploadModalProps) {
   const t = useTranslations('videos')
   const tc = useTranslations('common')
   const storageProvider = useStorageProvider()
@@ -165,6 +174,79 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete 
     }
   }
 
+  // Consume `initialFiles` once per array identity — fires when the
+  // empty-state drop zone in FolderBrowser opens this modal with
+  // pre-selected files. The user already indicated intent by
+  // dragging, so we SKIP the "Start Upload" button and kick the
+  // pipeline off immediately. The modal stays mounted so the
+  // upload state lives somewhere; an auto-close effect below
+  // dismisses it once everything finishes.
+  const seededRef = useRef<File[] | null>(null)
+  // True between the first seeded drop and the auto-close — used by
+  // the completion watcher.
+  const [seededActive, setSeededActive] = useState(false)
+  useEffect(() => {
+    if (!isOpen) return
+    if (!initialFiles || initialFiles.length === 0) return
+    if (seededRef.current === initialFiles) return
+    seededRef.current = initialFiles
+    const videos = initialFiles.filter((f) => f.type.startsWith('video/'))
+    if (videos.length === 0) return
+    const newUploads: PendingUpload[] = videos.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      file,
+      videoName: getVideoNameFromFile(file),
+      versionLabel: '',
+      status: 'pending',
+      progress: 0,
+      speed: 0,
+    }))
+    setPendingUploads((prev) => [...prev, ...newUploads])
+    setSeededActive(true)
+    // Kick off each upload directly. `startUpload` only needs the
+    // item itself; it updates state by id via functional setters so
+    // it doesn't matter that pendingUploads hasn't flushed yet.
+    newUploads.forEach((item) => startUpload(item))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialFiles])
+
+  // Auto-close the modal once every seeded upload completes. Only
+  // fires when this modal session was started by a drag-drop seed.
+  // IMPORTANT: if any upload ended in error we keep the modal open
+  // so the user can read what went wrong (previously we closed
+  // silently, which looked like a flash with no result).
+  useEffect(() => {
+    if (!seededActive) return
+    if (pendingUploads.length === 0) return
+    const allDone = pendingUploads.every(
+      (u) => u.status === 'completed' || u.status === 'error',
+    )
+    if (!allDone) return
+    const hasError = pendingUploads.some((u) => u.status === 'error')
+    if (hasError) {
+      // Keep the modal open so the error row is visible. Drop the
+      // seeded flag so further state changes don't keep re-arming
+      // this effect.
+      setSeededActive(false)
+      return
+    }
+    const t = setTimeout(() => {
+      setSeededActive(false)
+      setPendingUploads([])
+      onClose()
+    }, 800)
+    return () => clearTimeout(t)
+  }, [seededActive, pendingUploads, onClose])
+
+  // Reset the seeded flag when the modal is fully closed so the
+  // next manual open starts in normal (non-auto-close) mode.
+  useEffect(() => {
+    if (!isOpen) {
+      seededRef.current = null
+      setSeededActive(false)
+    }
+  }, [isOpen])
+
   const handleRemove = (id: string) => {
     const tusUpload = uploadRefs.current.get(id)
     if (tusUpload) {
@@ -238,9 +320,14 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete 
       } else {
         const response = await apiPost('/api/videos', {
           projectId,
+          // 1.0.6+: route the upload into the active folder so the
+          // new video shows up in the FolderBrowser grid you're
+          // looking at, not at the project root.
+          folderId: folderId ?? null,
           versionLabel: trimmedVersionLabel,
           originalFileName: file.name,
           originalFileSize: file.size,
+          mimeType: file.type || undefined,
           name: trimmedVideoName,
         })
         videoId = response.videoId

@@ -1,12 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslations, useLocale } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { Trash2, ExternalLink, Archive, ArchiveRestore, RotateCcw, Send, Loader2, CheckCircle, BarChart3, FolderKanban, Copy, Check, Calendar } from 'lucide-react'
+import { Trash2, ExternalLink, Archive, ArchiveRestore, RotateCcw, Send, Loader2, CheckCircle, BarChart3, FolderKanban, Copy, Check, Calendar, MoreVertical } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -48,6 +48,29 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
   const [isTogglingApproval, setIsTogglingApproval] = useState(false)
   const [isArchiving, setIsArchiving] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
+  // Kebab menu state — collapses the verbose action button list into
+  // a single ⋮ dropdown at the top of the card (1.0.6+).
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (!menuRef.current) return
+      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown, { passive: true })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   // Unapprove modal state
   const [showUnapproveModal, setShowUnapproveModal] = useState(false)
@@ -283,161 +306,84 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
       })
   }
 
+  // Helper: copy share link to clipboard with a brief "copied" state
+  // on the menu item.
+  const handleCopyLink = () => {
+    if (!shareUrl) return
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 1500)
+    })
+  }
+
   return (
     <>
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <CardTitle className="flex items-center gap-2 break-words mb-2">
-                <span className="rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10">
-                  <FolderKanban className="w-4 h-4 text-primary" />
-                </span>
-                <span className="min-w-0 break-words">{project.title}</span>
-              </CardTitle>
-              <p className="text-sm text-muted-foreground break-words">{(project as any).description}</p>
-            </div>
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
-                project.status === 'APPROVED'
-                  ? 'bg-success-visible text-success border-2 border-success-visible'
-                  : project.status === 'SHARE_ONLY'
-                  ? 'bg-info-visible text-info border-2 border-info-visible'
-                  : project.status === 'IN_REVIEW'
-                  ? 'bg-primary-visible text-primary border-2 border-primary-visible'
-                  : 'bg-muted text-muted-foreground border border-border'
-              }`}
-            >
-              {project.status.replace('_', ' ')}
-            </span>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {/* Client Information */}
-          <div className="pb-3 border-b border-border">
-            <div className="text-sm">
-              <p className="text-muted-foreground mb-1">{t('client')}</p>
-              {(() => {
-                const clientCompany = (project as any).companyName
-                const primaryRecipient = recipients?.find((r: any) => r.isPrimary) || recipients?.[0]
-                const clientName = primaryRecipient?.name
-                const clientEmail = primaryRecipient?.email
-
-                return (
-                  <>
-                    {clientCompany && (
-                      <p className="font-medium break-words">{clientCompany}</p>
-                    )}
-                    {clientName && (
-                      <p className={clientCompany ? "text-muted-foreground break-words" : "font-medium break-words"}>
-                        {clientName}
-                      </p>
-                    )}
-                    {clientEmail && (
-                      <p className="text-xs text-muted-foreground break-all">
-                        {clientEmail}
-                      </p>
-                    )}
-                    {!clientCompany && !clientName && !clientEmail && (
-                      <p className="font-medium">{t('noClientInfo')}</p>
-                    )}
-                  </>
-                )
-              })()}
-            </div>
-          </div>
-
-          {/* Due Date */}
-          {(project as any).dueDate && (() => {
-            const due = new Date((project as any).dueDate)
-            const today = new Date()
-            // Compare using UTC dates to avoid timezone shifts
-            today.setHours(0, 0, 0, 0)
-            const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate())
-            const diffDays = Math.round((dueDay.getTime() - today.getTime()) / 86400000)
-            const isCompleted = project.status === 'APPROVED' || project.status === 'ARCHIVED' || project.status === 'SHARE_ONLY'
-            const colorClass = isCompleted ? '' : diffDays < 0 ? 'text-destructive' : diffDays <= 1 ? 'text-warning' : diffDays <= 7 ? 'text-primary' : ''
-            const dateStr = due.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' })
-
-            return (
-              <div className="pb-3 border-b border-border">
-                <div className="text-sm">
-                  <p className="text-muted-foreground mb-1">{t('dueDateLabel')}</p>
-                  <p className={`font-medium flex items-center gap-2 ${colorClass}`}>
-                    <Calendar className="w-4 h-4" />
-                    {dateStr}
-                  </p>
-                  {!isCompleted && diffDays < 0 && <p className="text-xs text-destructive mt-1">{Math.abs(diffDays)} {Math.abs(diffDays) !== 1 ? t('days') : t('day')} {t('overdue')}</p>}
-                  {!isCompleted && diffDays === 0 && <p className="text-xs text-warning mt-1">{t('dueToday')}</p>}
-                  {!isCompleted && diffDays === 1 && <p className="text-xs text-warning mt-1">{t('dueTomorrow')}</p>}
-                  {!isCompleted && diffDays > 1 && diffDays <= 7 && <p className="text-xs text-primary mt-1">{diffDays} {t('daysRemaining')}</p>}
-                  {!isCompleted && diffDays > 7 && <p className="text-xs text-muted-foreground mt-1">{diffDays} {t('daysRemaining')}</p>}
-                </div>
-              </div>
-            )
-          })()}
-
-          {/* Share Link */}
-          {shareUrl && (
-            <div className="pb-3 border-b border-border">
-              <p className="text-sm text-muted-foreground mb-2">{t('shareLink')}</p>
-              <div className="flex flex-col gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={shareUrl}
-                  className="flex-1 px-3 py-2 border rounded-md text-xs bg-muted truncate"
-                />
-                <div className="flex gap-2">
-                  <Button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(shareUrl)
-                      setLinkCopied(true)
-                      setTimeout(() => setLinkCopied(false), 2000)
-                    }} 
-                    variant="outline" 
-                    size="sm"
-                    className="flex-1"
-                  >
-                    {linkCopied ? (
-                      <>
-                        <Check className="w-4 h-4 mr-2 text-success" />
-                        {tc('copied')}
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-4 h-4 mr-2" />
-                        {tc('copy')}
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    onClick={() => window.open(shareUrl, '_blank', 'noopener,noreferrer')}
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                  >
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    {tc('open')}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Actions Section Title */}
-          <div className="pt-2">
-            <h3 className="text-sm font-semibold mb-3">{t('projectActions')}</h3>
-          </div>
-
-          {/* Send Notification Button - only show if there are ready videos */}
-          {readyVideos.length > 0 && (
-            <div>
-              <Button
-                variant="outline"
-                size="default"
-                className="w-full"
-                onClick={() => setShowNotificationModal(true)}
+      {/* Kebab-only render (1.0.6+) — the Card / title / client info /
+          share link panel were collapsed: the page now drops you
+          straight into the folder grid (Frame.io style), and every
+          project-level action lives behind this ⋮. */}
+      <div ref={menuRef} className="relative inline-block">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          className="rounded-md p-2 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title={t('projectActions')}
+          aria-label={t('projectActions')}
+        >
+          <MoreVertical className="w-5 h-5" />
+        </button>
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full mt-1 z-30 min-w-[240px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+          >
+            {shareUrl && (
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  handleCopyLink()
+                  // keep the menu open briefly so the user sees the
+                  // copied-state flash before it auto-closes.
+                  setTimeout(() => setMenuOpen(false), 800)
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+              >
+                {linkCopied ? (
+                  <Check className="w-4 h-4 shrink-0 text-success" />
+                ) : (
+                  <Copy className="w-4 h-4 shrink-0" />
+                )}
+                {linkCopied ? tc('copied') : t('shareLink')}
+              </button>
+            )}
+            {shareUrl && (
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false)
+                  window.open(shareUrl, '_blank', 'noopener,noreferrer')
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+              >
+                <ExternalLink className="w-4 h-4 shrink-0" />
+                {tc('open')}
+              </button>
+            )}
+            {(shareUrl) && (
+              <div className="my-1 h-px bg-border/50" role="separator" />
+            )}
+            {readyVideos.length > 0 && (
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setShowNotificationModal(true)
+                }}
                 disabled={smtpConfigured === false || !hasRecipientWithEmail}
                 title={
                   smtpConfigured === false
@@ -446,110 +392,107 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                     ? t('noRecipientsEmail')
                     : ''
                 }
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Send className="w-4 h-4 mr-2" />
+                <Send className="w-4 h-4 shrink-0" />
                 {t('sendNotification')}
-              </Button>
-              {smtpConfigured === false && (
-                <p className="text-xs text-muted-foreground mt-1 px-1">
-                  {t('configureSMTPToEnable')}
-                </p>
-              )}
-              {smtpConfigured && !hasRecipientWithEmail && (
-                <p className="text-xs text-muted-foreground mt-1 px-1">
-                  {t('addRecipientWithEmail')}
-                </p>
-              )}
-            </div>
-          )}
-
-          <Button
-            variant="outline"
-            size="default"
-            className="w-full"
-            onClick={handleViewSharePage}
-          >
-            <ExternalLink className="w-4 h-4 mr-2" />
-            {t('viewSharePage')}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="default"
-            className="w-full"
-            onClick={() => router.push(`/admin/projects/${project.id}/analytics`)}
-          >
-            <BarChart3 className="w-4 h-4 mr-2" />
-            {t('viewAnalytics')}
-          </Button>
-
-          {/* Approve/Unapprove Toggle Button - hidden when archived */}
-          {project.status !== 'ARCHIVED' && (
-            <div>
-              <Button
-                variant="outline"
-                size="default"
-                className="w-full"
-                onClick={handleToggleApproval}
-                disabled={isTogglingApproval || (project.status !== 'APPROVED' && !canApproveProject)}
-                title={
-                  project.status !== 'APPROVED' && !canApproveProject
-                    ? t('approveFirst')
-                    : ''
-                }
-              >
-                {project.status === 'APPROVED' ? (
-                  <>
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    {isTogglingApproval ? tc('changing') : t('unapproveProject')}
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    {isTogglingApproval ? tc('changing') : t('approveProject')}
-                  </>
-                )}
-              </Button>
-              {project.status !== 'APPROVED' && !canApproveProject && (
-                <p className="text-xs text-muted-foreground mt-1 px-1">
-                  {t('approveFirstLong')}
-                </p>
-              )}
-            </div>
-          )}
-
-          <Button
-            variant="outline"
-            size="default"
-            className="w-full"
-            onClick={handleToggleArchive}
-            disabled={isArchiving}
-          >
-            {project.status === 'ARCHIVED' ? (
-              <>
-                <ArchiveRestore className="w-4 h-4 mr-2" />
-                {isArchiving ? t('unarchiving') : t('unarchiveProject')}
-              </>
-            ) : (
-              <>
-                <Archive className="w-4 h-4 mr-2" />
-                {isArchiving ? t('archiving') : t('archiveProject')}
-              </>
+              </button>
             )}
-          </Button>
-
-          <Button
-            variant="destructive"
-            size="default"
-            className="w-full"
-            onClick={handleDelete}
-            disabled={isDeleting}
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            {isDeleting ? tc('deleting') : t('deleteProject')}
-          </Button>
-        </CardContent>
-      </Card>
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                setMenuOpen(false)
+                handleViewSharePage()
+              }}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+            >
+              <ExternalLink className="w-4 h-4 shrink-0" />
+              {t('viewSharePage')}
+            </button>
+                    <button
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        router.push(`/admin/projects/${project.id}/analytics`)
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                    >
+                      <BarChart3 className="w-4 h-4 shrink-0" />
+                      {t('viewAnalytics')}
+                    </button>
+                    {project.status !== 'ARCHIVED' && (
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false)
+                          handleToggleApproval()
+                        }}
+                        disabled={
+                          isTogglingApproval ||
+                          (project.status !== 'APPROVED' && !canApproveProject)
+                        }
+                        title={
+                          project.status !== 'APPROVED' && !canApproveProject
+                            ? t('approveFirst')
+                            : ''
+                        }
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {project.status === 'APPROVED' ? (
+                          <>
+                            <RotateCcw className="w-4 h-4 shrink-0" />
+                            {isTogglingApproval ? tc('changing') : t('unapproveProject')}
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-4 h-4 shrink-0" />
+                            {isTogglingApproval ? tc('changing') : t('approveProject')}
+                          </>
+                        )}
+                      </button>
+                    )}
+                    <button
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        handleToggleArchive()
+                      }}
+                      disabled={isArchiving}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50"
+                    >
+                      {project.status === 'ARCHIVED' ? (
+                        <>
+                          <ArchiveRestore className="w-4 h-4 shrink-0" />
+                          {isArchiving ? t('unarchiving') : t('unarchiveProject')}
+                        </>
+                      ) : (
+                        <>
+                          <Archive className="w-4 h-4 shrink-0" />
+                          {isArchiving ? t('archiving') : t('archiveProject')}
+                        </>
+                      )}
+                    </button>
+                    <div className="my-1 h-px bg-border/50" role="separator" />
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                setMenuOpen(false)
+                handleDelete()
+              }}
+              disabled={isDeleting}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4 shrink-0" />
+              {isDeleting ? tc('deleting') : t('deleteProject')}
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Notification Modal */}
       <Dialog open={showNotificationModal} onOpenChange={setShowNotificationModal}>

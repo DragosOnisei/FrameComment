@@ -8,6 +8,7 @@ import {
   calculateOutputDimensions,
   processPreview,
   processThumbnail,
+  processStoryboard,
   finalizeVideo,
   updateVideoStatus,
   cleanupTempFiles,
@@ -62,13 +63,24 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
         tempFiles
       )
 
+      // Storyboard sprite-sheet (1.0.6+) — used by the folder grid
+      // for instant hover-scrub. Best-effort; null if it fails.
+      const storyboardPath = await processStoryboard(
+        videoId,
+        projectId,
+        videoInfo.path,
+        videoInfo.metadata.duration,
+        tempFiles
+      )
+
       // Finalize without preview path — original file is served directly
       await finalizeVideo(
         videoId,
         '', // No preview path
         thumbnailPath,
         videoInfo.metadata,
-        settings.resolution
+        settings.resolution,
+        storyboardPath
       )
     } else {
       // Stage 4: Calculate output dimensions
@@ -94,13 +106,25 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
         tempFiles
       )
 
+      // Stage 6b: Generate the hover-scrub storyboard (1.0.6+). Cheap
+      // because it reuses the already-downloaded original; runs in
+      // best-effort mode so a failure here doesn't block readiness.
+      const storyboardPath = await processStoryboard(
+        videoId,
+        projectId,
+        videoInfo.path,
+        videoInfo.metadata.duration,
+        tempFiles
+      )
+
       // Stage 7: Finalize - update database with results
       await finalizeVideo(
         videoId,
         previewPath,
         thumbnailPath,
         videoInfo.metadata,
-        settings.resolution
+        settings.resolution,
+        storyboardPath
       )
     }
 

@@ -207,6 +207,30 @@ export const loginSchema = z.object({
 // PROJECT SCHEMAS
 // ============================================================================
 
+// ─────────────── Folder validation schemas (1.0.6+) ───────────────
+//
+// `name` is the only required field at create time — projectId always
+// comes from the URL or from the parent folder lookup, slug is
+// generated server-side, and the share-config defaults handle the
+// rest.
+
+export const createFolderSchema = z.object({
+  projectId: cuidSchema,
+  // Optional: when null/omitted, the folder lands at the project root.
+  parentFolderId: cuidSchema.nullable().optional(),
+  name: safeStringSchema(1, 255),
+})
+
+// PATCH /api/folders/[id] — all fields optional; the server applies
+// only what's provided. Cycle detection (parentFolderId can't be a
+// descendant of this folder) lives in the route handler.
+export const updateFolderSchema = z.object({
+  name: safeStringSchema(1, 255).optional(),
+  parentFolderId: cuidSchema.nullable().optional(),
+  authMode: z.enum(['NONE', 'PASSWORD', 'OTP', 'BOTH']).optional(),
+  sharePassword: z.string().min(1).max(255).nullable().optional(),
+})
+
 export const createProjectSchema = z.object({
   title: safeStringSchema(1, 255),
   description: safeStringSchema(0, 5000).optional().nullable(),

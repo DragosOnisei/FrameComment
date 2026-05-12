@@ -248,6 +248,10 @@ export async function GET(
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
         filePath = video.thumbnailPath
+      } else if (verifiedToken.quality === 'storyboard') {
+        // Hover-scrub sprite-sheet (1.0.6+). Single static JPEG —
+        // same delivery path as the thumbnail.
+        filePath = (video as any).storyboardPath || null
       } else if (isDownload && isAdminRequest && originalPath) {
         // Admin downloads should always use the original file, even before approval
         filePath = originalPath
@@ -292,9 +296,16 @@ export async function GET(
       }
 
       if (isDownload) {
-        const rawFilename = filename || (video.approved
-          ? video.originalFileName
-          : `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}${(video.originalFileName || '.mp4').slice((video.originalFileName || '.mp4').lastIndexOf('.'))}`)
+        // 1.0.6+: ALWAYS preserve the original filename for admin
+        // downloads — that's the contract the studio agreed to when
+        // they uploaded the file. For unapproved client-facing
+        // downloads we keep the obfuscated "ProjectTitle_quality"
+        // form to avoid leaking working titles before approval.
+        const rawFilename = filename || (
+          isAdminRequest || video.approved
+            ? video.originalFileName
+            : `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}${(video.originalFileName || '.mp4').slice((video.originalFileName || '.mp4').lastIndexOf('.'))}`
+        )
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const ct = assetId ? contentType : getVideoContentType(video.originalFileName || '')
         const presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, ct)
@@ -302,9 +313,9 @@ export async function GET(
           status: 302,
           headers: { 'Cache-Control': 'no-store' },
         })
-      } else if (verifiedToken.quality === 'thumbnail') {
-        // Thumbnails are static images that load in under a second — short-lived URL
-        // minimizes the window if the presigned URL leaks.
+      } else if (verifiedToken.quality === 'thumbnail' || verifiedToken.quality === 'storyboard') {
+        // Static images (thumbnail + 1.0.6+ storyboard sprite). Short-
+        // lived presigned URL minimises the window if the URL leaks.
         const presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, 'image/jpeg')
         return NextResponse.redirect(presignedUrl, {
           status: 302,
@@ -330,22 +341,27 @@ export async function GET(
 
     const stat = statSync(fullPath)
 
-    if (isDownload && verifiedToken.quality === 'thumbnail') {
+    if (isDownload && (verifiedToken.quality === 'thumbnail' || verifiedToken.quality === 'storyboard')) {
   return NextResponse.json({ error: shareMessages.thumbnailsCannotBeDownloaded || 'Thumbnails cannot be downloaded directly' }, { status: 403 })
     }
 
     const range = request.headers.get('range')
 
-    const isThumbnail = verifiedToken.quality === 'thumbnail'
+    // Treat storyboards like thumbnails for content-type + cache headers.
+    const isThumbnail = verifiedToken.quality === 'thumbnail' || verifiedToken.quality === 'storyboard'
     const cacheControl = isThumbnail
       ? 'private, no-store, must-revalidate'
       : 'public, max-age=3600'
 
     if (isDownload) {
-      // Use asset filename if available, otherwise generate from video info
-      const rawFilename = filename || (video.approved
-        ? video.originalFileName
-        : `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}${(video.originalFileName || '.mp4').slice((video.originalFileName || '.mp4').lastIndexOf('.'))}`)
+      // Same rule as the S3 branch above: keep the original filename
+      // for admins (and approved videos), obfuscate only for client
+      // share traffic on unapproved files. (1.0.6+)
+      const rawFilename = filename || (
+        isAdminRequest || video.approved
+          ? video.originalFileName
+          : `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}${(video.originalFileName || '.mp4').slice((video.originalFileName || '.mp4').lastIndexOf('.'))}`
+      )
       const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
 
       // For non-asset downloads, use original file's content type

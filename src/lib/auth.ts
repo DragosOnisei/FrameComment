@@ -44,6 +44,14 @@ interface SharePayload extends jwt.JwtPayload {
   recipientId?: string
   authMode?: string
   adminOverride?: boolean
+  // Folder-share scope (1.0.6+). When set, this token only grants
+  // access to the folder subtree rooted at `folderId` inside the
+  // parent project — not the whole project. Token consumers that
+  // serve content (video stream, comments, etc.) must additionally
+  // verify the requested video lives somewhere under this folder.
+  // Absent (undefined) means a project-wide share token, same as
+  // before.
+  folderId?: string
 }
 
 function safeParseInt(value: string | undefined, fallback: number): number {
@@ -106,6 +114,9 @@ export function signShareToken(params: {
   authMode?: string
   adminOverride?: boolean
   ttlSeconds?: number
+  /** When set, scopes the token to a folder subtree inside the
+   *  project (1.0.6+ folder shares). Omit for a project-wide token. */
+  folderId?: string
 }): string {
   if (!SHARE_TOKEN_SECRET) throw new Error('SHARE_TOKEN_SECRET missing')
   const sessionId = params.sessionId || crypto.randomBytes(16).toString('base64url')
@@ -119,6 +130,7 @@ export function signShareToken(params: {
     recipientId: params.recipientId,
     authMode: params.authMode,
     adminOverride: params.adminOverride,
+    folderId: params.folderId,
   }
   return jwt.sign(payload, SHARE_TOKEN_SECRET, {
     expiresIn: params.ttlSeconds || SHARE_TOKEN_DURATION,

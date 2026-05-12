@@ -23,10 +23,18 @@ interface AdminVideoManagerProps {
   sortMode?: 'status' | 'alphabetical'
   maxRevisions?: number
   enableRevisions?: boolean
+  /** When set, uploads launched through this manager are tagged with
+   *  the given folderId so the new video record lives inside that
+   *  folder (1.0.6+). Omit / null → project root. */
+  folderId?: string | null
 }
 
 export interface AdminVideoManagerHandle {
   triggerUpload: () => void
+  /** Open the upload modal AND pre-seed it with a list of files —
+   *  used by the Frame.io-style empty-state drop zone in
+   *  FolderBrowser. Files are filtered to video/* by the modal. */
+  triggerUploadWithFiles: (files: File[]) => void
 }
 
 const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerProps>(({
@@ -38,7 +46,8 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
   onRefresh,
   sortMode = 'alphabetical',
   maxRevisions,
-  enableRevisions
+  enableRevisions,
+  folderId,
 }, ref) => {
   const t = useTranslations('videos')
   const tc = useTranslations('common')
@@ -60,12 +69,21 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
   const [editGroupValue, setEditGroupValue] = useState('')
   const [savingGroupName, setSavingGroupName] = useState<string | null>(null)
+  // Files pre-seeded into the modal on open (used by the empty-state
+  // drop zone in FolderBrowser). Cleared once the modal consumes them
+  // so the same drop doesn't re-fire on subsequent triggers.
+  const [pendingInitialFiles, setPendingInitialFiles] = useState<File[] | null>(null)
 
   // Expose triggerUpload method to parent via ref
   useImperativeHandle(ref, () => ({
     triggerUpload: () => {
+      setPendingInitialFiles(null)
       setIsUploadModalOpen(true)
-    }
+    },
+    triggerUploadWithFiles: (files: File[]) => {
+      setPendingInitialFiles(files)
+      setIsUploadModalOpen(true)
+    },
   }))
 
   // Handle upload completion from modal - refresh to show processing inline
@@ -147,9 +165,16 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
       {/* Upload Modal - handles full upload with TUS, processing shows inline after */}
       <VideoUploadModal
         isOpen={isUploadModalOpen}
-        onClose={() => setIsUploadModalOpen(false)}
+        onClose={() => {
+          setIsUploadModalOpen(false)
+          // Clear seeded files so the next plain triggerUpload()
+          // starts with a clean slate.
+          setPendingInitialFiles(null)
+        }}
         projectId={projectId}
+        folderId={folderId ?? null}
         onUploadComplete={handleUploadComplete}
+        initialFiles={pendingInitialFiles}
       />
 
       {sortedGroupNames.map((groupName) => {

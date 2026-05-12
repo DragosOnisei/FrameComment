@@ -7,13 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Eye, EyeOff, RefreshCw, Copy, Check, Plus, X, Mail, AlertCircle, Calendar } from 'lucide-react'
+import { Eye, EyeOff, RefreshCw, Copy, Check, Plus, X, Calendar } from 'lucide-react'
 import { apiPost, apiFetch } from '@/lib/api-client'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
 import { logError } from '@/lib/logging'
-import { ClientSelector } from '@/components/ClientSelector'
 import { generateSecurePassword } from '@/lib/password-utils'
 
 export default function NewProjectPage() {
@@ -21,8 +19,7 @@ export default function NewProjectPage() {
   const t = useTranslations('projects')
   const tc = useTranslations('common')
   const [loading, setLoading] = useState(false)
-  const [isShareOnly, setIsShareOnly] = useState(false)
-  const [passwordProtected, setPasswordProtected] = useState(true)
+  const [passwordProtected, setPasswordProtected] = useState(false)
   const [sharePassword, setSharePassword] = useState('')
   const [showPassword, setShowPassword] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -30,16 +27,10 @@ export default function NewProjectPage() {
   // Authentication mode
   const [authMode, setAuthMode] = useState<'PASSWORD' | 'OTP' | 'BOTH'>('PASSWORD')
   const [smtpConfigured, setSmtpConfigured] = useState(false)
-  
+
   // Due date
   const [dueDate, setDueDate] = useState('')
   const [dueReminder, setDueReminder] = useState<'NONE' | 'DAY_BEFORE' | 'WEEK_BEFORE'>('NONE')
-
-  // Client info
-  const [companyName, setCompanyName] = useState('')
-  const [clientCompanyId, setClientCompanyId] = useState<string | null>(null)
-  const [recipientName, setRecipientName] = useState('')
-  const [recipientEmail, setRecipientEmail] = useState('')
 
   // Generate password on mount
   useEffect(() => {
@@ -61,13 +52,6 @@ export default function NewProjectPage() {
     }
   }
 
-  // Smart recommendation: if email provided, recommend OTP
-  useEffect(() => {
-    if (recipientEmail && smtpConfigured && authMode === 'PASSWORD') {
-      // Don't auto-switch, just show recommendation
-    }
-  }, [recipientEmail, smtpConfigured, authMode])
-
   function handleGeneratePassword() {
     setSharePassword(generateSecurePassword())
     setCopied(false)
@@ -84,17 +68,16 @@ export default function NewProjectPage() {
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
-    const isShareOnlyValue = formData.get('isShareOnly') === 'on'
     const data = {
       title: formData.get('title') as string,
-      description: formData.get('description') as string,
-      companyName: companyName || null,
-      clientCompanyId: clientCompanyId,
-      recipientName: recipientName || null,
-      recipientEmail: recipientEmail || null,
+      description: null,
+      companyName: null,
+      clientCompanyId: null,
+      recipientName: null,
+      recipientEmail: null,
       sharePassword: (authMode === 'PASSWORD' || authMode === 'BOTH') && passwordProtected ? sharePassword : '',
       authMode: passwordProtected ? authMode : 'NONE',
-      isShareOnly: isShareOnlyValue,
+      isShareOnly: false,
       dueDate: dueDate ? `${dueDate}T12:00:00.000Z` : null,
       dueReminder: dueDate ? dueReminder : null,
     }
@@ -109,8 +92,9 @@ export default function NewProjectPage() {
     }
   }
 
-  const canUseOTP = smtpConfigured && recipientEmail
-  const showOTPRecommendation = recipientEmail && smtpConfigured && authMode === 'PASSWORD'
+  // Create form is intentionally minimal in 1.0.6+: auth is always
+  // password-based when enabled. OTP / Both can be configured later
+  // from Project Settings.
   const needsPassword = authMode === 'PASSWORD' || authMode === 'BOTH'
 
   return (
@@ -133,30 +117,6 @@ export default function NewProjectPage() {
                   required
                 />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">{t('descriptionOptional')}</Label>
-                <Textarea
-                  id="description"
-                  name="description"
-                  placeholder={t('descriptionPlaceholder')}
-                  rows={3}
-                />
-              </div>
-
-              {/* Client Selection with Directory Search */}
-              <ClientSelector
-                companyName={companyName}
-                onCompanyChange={(name, id) => {
-                  setCompanyName(name)
-                  setClientCompanyId(id)
-                }}
-                recipientName={recipientName}
-                onRecipientNameChange={setRecipientName}
-                recipientEmail={recipientEmail}
-                onRecipientEmailChange={setRecipientEmail}
-                disabled={loading}
-              />
 
               {/* Due Date */}
               <div className="space-y-3">
@@ -214,82 +174,7 @@ export default function NewProjectPage() {
 
                 {passwordProtected && (
                   <div className="space-y-4 pt-2 border-t">
-                    {/* Authentication Method Selection */}
-                    <div className="space-y-2">
-                      <Label>{t('authMethod')}</Label>
-                      <Select value={authMode} onValueChange={(v) => setAuthMode(v as 'PASSWORD' | 'OTP' | 'BOTH')}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="PASSWORD">{t('passwordOnly')}</SelectItem>
-                          <SelectItem value="OTP" disabled={!canUseOTP}>
-                            {t('otpOnly')} {!canUseOTP ? `(${t('requiresSMTPClient')})` : ''}
-                          </SelectItem>
-                          <SelectItem value="BOTH" disabled={!canUseOTP}>
-                            {t('bothAuth')} {!canUseOTP ? `(${t('requiresSMTPClient')})` : ''}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        {authMode === 'PASSWORD' && t('passwordDescriptionLong')}
-                        {authMode === 'OTP' && t('otpDescriptionLong')}
-                        {authMode === 'BOTH' && t('bothDescriptionLong')}
-                      </p>
-
-                      {/* Smart Recommendation */}
-                      {showOTPRecommendation && (
-                        <div className="flex items-start gap-2 p-3 bg-muted border border-border rounded-md">
-                          <Mail className="w-4 h-4 text-primary mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">{t('considerOtp')}</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {t('considerOtpLong')}
-                            </p>
-                            <div className="flex gap-2 mt-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => setAuthMode('OTP')}
-                              >
-                                {t('otpOnlyShort')}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => setAuthMode('BOTH')}
-                              >
-                                {t('bothPasswordOtp')}
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {!smtpConfigured && (
-                        <div className="flex items-start gap-2 p-3 bg-warning-visible border border-warning-visible rounded-md">
-                          <AlertCircle className="w-4 h-4 text-warning mt-0.5" />
-                          <p className="text-xs text-warning">
-                            {t('configureSMTPLong')}
-                          </p>
-                        </div>
-                      )}
-
-                      {smtpConfigured && !recipientEmail && authMode !== 'PASSWORD' && (
-                        <div className="flex items-start gap-2 p-3 bg-warning-visible border border-warning-visible rounded-md">
-                          <AlertCircle className="w-4 h-4 text-warning mt-0.5" />
-                          <p className="text-xs text-warning">
-                            {t('enterClientEmail')}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Password Field (conditional) */}
+                    {/* Password Field — always Password auth (1.0.6+) */}
                     {needsPassword && (
                       <div className="space-y-3">
                         <Label htmlFor="sharePassword">{t('sharePassword')}</Label>
@@ -349,33 +234,6 @@ export default function NewProjectPage() {
                     </p>
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-4 border-t pt-4">
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      id="isShareOnly"
-                      name="isShareOnly"
-                      type="checkbox"
-                      checked={isShareOnly}
-                      onChange={(e) => setIsShareOnly(e.target.checked)}
-                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    />
-                    <Label htmlFor="isShareOnly" className="font-normal cursor-pointer">
-                      {t('shareOnly')}
-                    </Label>
-                  </div>
-                  <p className="text-xs text-muted-foreground ml-6">
-                    {t('shareOnlyLong')}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2 border-t pt-4">
-                <p className="text-sm text-muted-foreground">
-                  {t('additionalOptionsLong')}
-                </p>
               </div>
 
               <div className="flex gap-3 pt-4">

@@ -784,46 +784,12 @@ export default function VideoPlayer({
 
   return (
     <div className={`flex flex-col ${fillContainer ? 'h-full' : 'space-y-4 max-h-full'}`}>
-      {/* Version Selector - Show ABOVE video on mobile, BELOW on desktop */}
-      {displayVideos.length > 1 && (
-        <div data-tutorial="version-selector" className={`flex gap-2 overflow-x-auto py-2 px-2 flex-shrink-0 ${fillContainer ? '' : 'lg:order-2'}`}>
-          {displayVideos.map((video, index) => {
-            const videoApproved = (video as any).approved === true
-            return (
-              <Button
-                key={video.id}
-                onClick={() => setSelectedVideoIndex(index)}
-                variant={selectedVideoIndex === index ? 'default' : 'outline'}
-                size="sm"
-                className="whitespace-nowrap relative"
-              >
-                {videoApproved && (
-                  <CheckCircle2 className="w-3.5 h-3.5 mr-1.5 text-success" />
-                )}
-                {videoApproved ? t('approvedVersion') : video.versionLabel}
-              </Button>
-            )
-          })}
-          {displayVideos.length >= 2 && (
-            <Button
-              onClick={() => {
-                // Pause current video before opening comparison
-                if (videoRef.current && !videoRef.current.paused) {
-                  videoRef.current.pause()
-                  setIsPlaying(false)
-                }
-                setShowComparison(true)
-              }}
-              variant="outline"
-              size="sm"
-              className="whitespace-nowrap ml-auto"
-            >
-              <GitCompareArrows className="w-3.5 h-3.5 mr-1.5" />
-              Compare
-            </Button>
-          )}
-        </div>
-      )}
+      {/* Version selector pill row removed (1.0.6+). The top-bar
+          ThumbnailReel already has a clean Frame.io-style version
+          dropdown with filenames + approved checkmarks, so the
+          duplicate row above/below the video added clutter without
+          extra information. The "Compare versions" UX moved to the
+          version dropdown's secondary menu (TODO). */}
 
       {/* Video Player Container.
           fillContainer=true is the standard player layout (share + admin

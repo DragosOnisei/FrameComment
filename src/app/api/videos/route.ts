@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof Response) {
     return authResult
   }
+  const admin = authResult
 
   // Rate limiting: Max 50 video uploads per hour
   const rateLimitResult = await rateLimit(request, {
@@ -35,11 +36,25 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType } = body
+    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, folderId } = body
 
     // Validate required fields
     if (!name || !name.trim()) {
   return NextResponse.json({ error: videoMessages.videoNameRequired || 'Video name is required' }, { status: 400 })
+    }
+
+    // If a folderId is provided, validate that it belongs to the same
+    // project — otherwise drop it silently so we don't leak a video
+    // into someone else's folder tree (1.0.6+).
+    let resolvedFolderId: string | null = null
+    if (folderId && typeof folderId === 'string') {
+      const folder = await prisma.folder.findUnique({
+        where: { id: folderId },
+        select: { id: true, projectId: true },
+      })
+      if (folder && folder.projectId === projectId) {
+        resolvedFolderId = folder.id
+      }
     }
 
     const videoName = name.trim()
@@ -58,54 +73,78 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get the project and existing videos with the same name
+    // 1.0.6+: every new upload starts as its OWN v1 group. Stacking
+    // happens explicitly via drag-drop or POST /api/videos/[id]/stack,
+    // not implicitly by filename collision. To allow re-uploading
+    // files with the same name without auto-stacking them, we
+    // file-system-style suffix the name when there's a collision in
+    // the same folder.
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      include: {
-        videos: {
-          where: { name: videoName },
-          orderBy: { version: 'desc' },
-          take: 1,
-        },
-      },
+      select: { id: true },
     })
 
     if (!project) {
-  return NextResponse.json({ error: videoMessages.projectNotFoundApi || 'Project not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: videoMessages.projectNotFoundApi || 'Project not found' },
+        { status: 404 },
+      )
     }
 
-    // Calculate next version number for this specific video name
-    const nextVersion = project.videos.length > 0 ? project.videos[0].version + 1 : 1
-
-    // Check if revisions are enabled and validate (per-video tracking)
-    if (project.enableRevisions && project.maxRevisions > 0) {
-      // Count existing versions for this specific video name (project.videos is already filtered by name)
-      const existingVersionCount = project.videos.length
-
-      if (existingVersionCount >= project.maxRevisions) {
-        return NextResponse.json(
-          { error: (videoMessages.maxRevisionsExceeded || 'Maximum revisions ({maxRevisions}) exceeded for this video').replace('{maxRevisions}', String(project.maxRevisions)) },
-          { status: 400 }
-        )
+    // Resolve a unique name in this (project, folder) scope.
+    let finalName = videoName
+    {
+      const folderFilter =
+        resolvedFolderId === null ? { folderId: null } : { folderId: resolvedFolderId }
+      // Pull all names that look like "videoName" or "videoName (n)"
+      // so we can pick the next free suffix in one query.
+      const conflicts = await prisma.video.findMany({
+        where: {
+          projectId,
+          ...folderFilter,
+          OR: [
+            { name: videoName },
+            { name: { startsWith: `${videoName} (` } },
+          ],
+        },
+        select: { name: true },
+      })
+      if (conflicts.some((v) => v.name === videoName)) {
+        let n = 2
+        const taken = new Set(conflicts.map((v) => v.name))
+        while (taken.has(`${videoName} (${n})`)) n++
+        finalName = `${videoName} (${n})`
       }
     }
+    const nextVersion = 1
 
-    // Create video record
-    const video = await prisma.video.create({
-      data: {
-        projectId,
-        name: videoName,
-        version: nextVersion,
-        versionLabel: versionLabel || `v${nextVersion}`,
-        originalFileName,
-        originalFileSize: BigInt(originalFileSize),
-        originalStoragePath: `projects/${projectId}/videos/original-${Date.now()}-${originalFileName}`,
-        status: 'UPLOADING',
-        duration: 0,
-        width: 0,
-        height: 0,
-      },
-    })
+    // Create video record. createdById was added in 1.0.6 — when
+    // the migration for it hasn't been applied yet, Prisma throws
+    // an "Unknown arg" error on the field. Retry once without it
+    // so existing dev DBs still accept uploads.
+    const baseCreate = {
+      projectId,
+      folderId: resolvedFolderId,
+      name: finalName,
+      version: nextVersion,
+      versionLabel: versionLabel || `v${nextVersion}`,
+      originalFileName,
+      originalFileSize: BigInt(originalFileSize),
+      originalStoragePath: `projects/${projectId}/videos/original-${Date.now()}-${originalFileName}`,
+      status: 'UPLOADING' as const,
+      duration: 0,
+      width: 0,
+      height: 0,
+    }
+    let video
+    try {
+      video = await prisma.video.create({
+        data: { ...baseCreate, createdById: admin.id } as any,
+      })
+    } catch {
+      // Fall back without createdById — migration probably not run.
+      video = await prisma.video.create({ data: baseCreate })
+    }
 
     // Return videoId - TUS will handle upload directly
     return NextResponse.json({

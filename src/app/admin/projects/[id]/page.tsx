@@ -1,14 +1,14 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import AdminVideoManager from '@/components/AdminVideoManager'
+import FolderBrowser from '@/components/FolderBrowser'
 import ProjectActions from '@/components/ProjectActions'
 import ProjectUploadsBlock from '@/components/ProjectUploadsBlock'
-import { ArrowLeft, Settings, ArrowUpDown, Video, Upload, FolderUp } from 'lucide-react'
+import { ArrowLeft, Settings, FolderUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
@@ -26,8 +26,6 @@ export default function ProjectPage() {
   const [project, setProject] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
-  const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
-  const videoManagerRef = useRef<{ triggerUpload: () => void } | null>(null)
 
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
@@ -153,28 +151,15 @@ export default function ProjectPage() {
             </Button>
           </Link>
           <div className="flex items-center gap-2">
-            {project && project.status !== 'APPROVED' && (
-              <Button
-                variant="default"
-                size="default"
-                onClick={() => videoManagerRef.current?.triggerUpload()}
-              >
-                <Upload className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">{t('uploadVideos')}</span>
-              </Button>
-            )}
             <Link href={`/admin/projects/${id}/settings`}>
               <Button variant="outline" size="default">
                 <Settings className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">{t('projectSettings')}</span>
               </Button>
             </Link>
-          </div>
-        </div>
-
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Actions Panel - Top on mobile, right on desktop */}
-          <div className="lg:col-start-3 lg:row-start-1 min-w-0">
+            {/* Project kebab (1.0.6+) — Send Notification, View Admin
+                Share Page, View Analytics, Copy share link, Approve /
+                Archive / Delete. Replaces the entire right sidebar. */}
             <ProjectActions
               project={project}
               videos={project.videos}
@@ -183,57 +168,36 @@ export default function ProjectPage() {
               recipients={project.recipients || []}
             />
           </div>
+        </div>
 
-          {/* Videos Section - Below actions on mobile, left on desktop */}
-          <div className="lg:col-span-2 lg:row-start-1 space-y-6 min-w-0">
-            <div>
+        {/* Frame.io-clean project view (1.0.6+): the page is just the
+            folder grid. Everything else (client info, share link, due
+            date, project actions) collapses into the top-bar ⋮ kebab
+            above. */}
+        <div className="space-y-6 min-w-0">
+          <FolderBrowser
+            projectId={project.id}
+            projectSlug={project.slug}
+            projectTitle={project.title}
+            currentFolderId={null}
+            onMutated={fetchProject}
+            stretch
+          />
+
+          {/* Client Uploads block — only shown when reverse share is enabled */}
+          {project.allowReverseShare && (
+            <div className="min-w-0">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-semibold flex items-center gap-2">
                   <span className={iconBadgeClassName}>
-                    <Video className={iconBadgeIconClassName} />
+                    <FolderUp className={iconBadgeIconClassName} />
                   </span>
-                  {t('videos')}
+                  {t('clientUploads')}
                 </h2>
-                {project.videos.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
-                    className="text-muted-foreground hover:text-foreground"
-                    title={sortMode === 'status' ? t('sortAlphabetically') : t('sortByStatus')}
-                  >
-                    <ArrowUpDown className="w-4 h-4" />
-                  </Button>
-                )}
               </div>
-              <AdminVideoManager
-                ref={videoManagerRef}
-                projectId={project.id}
-                videos={project.videos}
-                projectStatus={project.status}
-                restrictToLatestVersion={project.restrictCommentsToLatestVersion}
-                onRefresh={fetchProject}
-                sortMode={sortMode}
-                maxRevisions={project.maxRevisions}
-                enableRevisions={project.enableRevisions}
-              />
+              <ProjectUploadsBlock projectId={project.id} />
             </div>
-
-            {/* Client Uploads block — only shown when reverse share is enabled */}
-            {project.allowReverseShare && (
-              <div className="min-w-0">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold flex items-center gap-2">
-                    <span className={iconBadgeClassName}>
-                      <FolderUp className={iconBadgeIconClassName} />
-                    </span>
-                    {t('clientUploads')}
-                  </h2>
-                </div>
-                <ProjectUploadsBlock projectId={project.id} />
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>
