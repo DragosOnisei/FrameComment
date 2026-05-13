@@ -148,6 +148,12 @@ model Folder {
   updatedAt   DateTime @updatedAt
   createdById String?
 
+  // Soft-delete timestamp (1.0.8+). Same semantics as Video — set to
+  // mark a folder as trashed without losing its rows. Cascading is
+  // application-level: deleting a folder marks its descendants too,
+  // so a restore lifts the whole subtree back at once.
+  deletedAt DateTime?
+
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parentFolder Folder?  @relation("FolderHierarchy", fields: [parentFolderId], references: [id], onDelete: Cascade)
   subfolders   Folder[] @relation("FolderHierarchy")
@@ -156,6 +162,7 @@ model Folder {
 
   @@index([projectId])
   @@index([parentFolderId])
+  @@index([deletedAt])
 }
 
 enum ProjectStatus {
@@ -235,6 +242,12 @@ model Video {
   // admin can be deleted without orphaning their uploads.
   createdById String?
 
+  // Soft-delete timestamp (1.0.8+). When set, the video lives in the
+  // Trash for 30 days before a daily cleanup job removes it for
+  // good. Listings filter `deletedAt: null` so deleted rows simply
+  // disappear from the grids and shares.
+  deletedAt DateTime?
+
   project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   folder    Folder?          @relation(fields: [folderId], references: [id], onDelete: SetNull)
   createdBy User?            @relation("VideoCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -246,6 +259,7 @@ model Video {
   @@index([projectId, name])
   @@index([folderId])
   @@index([createdById])
+  @@index([deletedAt])
 }
 
 model VideoAsset {

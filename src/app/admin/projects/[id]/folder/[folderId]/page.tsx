@@ -230,7 +230,7 @@ export default function ProjectFolderPage() {
             projectTitle={project.title}
             currentFolderId={folderId}
             breadcrumb={breadcrumbForBrowser}
-            onMutated={fetchFolder}
+            onMutated={() => fetchFolder({ silent: true })}
             onUploadAsset={() => videoManagerRef.current?.triggerUpload()}
             onUploadFiles={(files) =>
               videoManagerRef.current?.triggerUploadWithFiles(files)

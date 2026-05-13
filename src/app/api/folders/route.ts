@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const folders = await prisma.folder.findMany({
-      where: { projectId, parentFolderId },
+      where: { projectId, parentFolderId, deletedAt: null } as any,
       orderBy: { name: 'asc' },
       include: {
         _count: { select: { subfolders: true, videos: true } },
@@ -175,7 +175,7 @@ export async function GET(request: NextRequest) {
     // keep the legacy array response so existing clients stay happy.
     if (parentFolderId === null) {
       const rootVideos = await prisma.video.findMany({
-        where: { projectId, folderId: null },
+        where: { projectId, folderId: null, deletedAt: null } as any,
         orderBy: [{ name: 'asc' }, { version: 'desc' }],
         include: { _count: { select: { comments: true } } },
       })

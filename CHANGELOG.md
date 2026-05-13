@@ -17,6 +17,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.8] - 2026-05-14
+
+The "safety net" release. Deleting an asset now drops it into a
+30-day Trash, every confirmation prompt is a real modal, and the
+ancient watermark feature is gone for good.
+
+### Added — Trash (30-day soft delete)
+
+- New `deletedAt: DateTime?` column on `Video` and `Folder` (migration
+  `20260513120000_add_soft_delete`). Indexed so the cleanup query
+  stays fast on large libraries.
+- DELETE endpoints become soft-deletes by default. Pass
+  `?permanent=1` to skip the bucket entirely (used by the Trash UI's
+  Delete-permanently action and the cron). Folder soft-delete
+  cascades to every descendant folder + every video inside the
+  subtree so the whole subtree lands in Trash atomically.
+- New routes:
+  - `GET /api/trash` — every soft-deleted folder + video across the
+    admin's scope, grouped by version, with thumbnails, parent
+    location, `deletedAt`, and a precomputed `expiresAt`.
+  - `POST /api/trash/{kind}/{id}/restore` — un-trash a folder or
+    video group. When the original parent folder is itself in Trash,
+    the item is re-parented to the project root so the user actually
+    sees it after restore.
+  - `POST /api/trash/empty` — permanently delete every soft-deleted
+    item now.
+- `src/lib/trash-cleanup.ts` centralises the hard-delete logic
+  (storage file cleanup + DB row removal) and exposes
+  `purgeExpiredTrash()` so the Empty Trash button and the cron share
+  the same path.
+- Worker cron (1.0.8+) — daily `setInterval` calling
+  `purgeExpiredTrash()` to remove anything older than 30 days. Runs
+  once at worker startup so a server that's been off for days
+  catches up on first boot.
+- New admin page at `/admin/trash` — Frame.io-style **collapsible
+  tree** grouped by project. When a folder is trashed, every cascaded
+  child (sub-folders + videos) nests inside it instead of cluttering
+  the top level. Click the chevron to expand / collapse; arbitrary
+  nesting depth is preserved. Each row has Restore + Delete-
+  permanently buttons; "Empty Trash" in the header nukes everything.
+- Top-bar nav adds **Trash** between Projects and Users so admins
+  can reach it from any page.
+- Every folder/video listing endpoint now filters `deletedAt: null`
+  so trashed items never leak into the grids, share pages, mosaic
+  previews, or item counts.
+
+### Added — Split versions
+
+- New **"Split versions"** action in the VideoCard kebab (1.0.8+).
+  Surfaces only when the group has more than one version. Opens a
+  Frame.io-style modal listing every version (thumbnail + label +
+  filename + date) with checkboxes; picking one or more extracts
+  them back out into standalone cards.
+- New endpoint `POST /api/videos/split` performs the rename atomically:
+  each extracted row gets a fresh group `name` derived from its
+  `originalFileName` (extension stripped), with `" (2)"`, `" (3)"`
+  suffixes to dodge collisions. Then it renumbers the donor group
+  so the remaining versions stay `v1..vN` contiguous in `createdAt`
+  order.
+- Undoes accidental drag-to-stack: drop the wrong version onto a
+  group? Split it back out without re-uploading.
+
+### Added — Frame.io-style confirmation + share modals
+
+- `ConfirmModal` (`src/components/ConfirmModal.tsx`) — generic
+  confirmation dialog built on top of the existing Radix Dialog.
+  `default` and `destructive` variants, optional spinner during
+  long-running confirms.
+- `ShareModal` (`src/components/ShareModal.tsx`) — Frame.io-clone
+  share dialog. Big read-only link field with a `Copy` button that
+  briefly flips to a green check, plus an explanatory caption.
+  Falls back to `window.prompt` when the clipboard API is blocked.
+- All in-app destructive flows now route through `ConfirmModal`
+  instead of the OS `window.confirm`:
+  - Delete on a video card (single + bulk in selection mode)
+  - Delete on a folder card
+  - Empty Trash + Delete-permanently in the Trash page
+- All share flows now route through `ShareModal` instead of
+  `alert("Link copied")`:
+  - Share video (kebab on VideoCard)
+  - Share folder (kebab on FolderCard)
+
+### Fixed
+
+- Grids refresh instantly after Delete / Restore / Move /
+  drag-onto-folder / drag-to-stack / Split. Previously the user had
+  to reload the page because the FolderBrowser was only being told
+  to refresh by the parent (which in turn re-fetched a different
+  endpoint than the one feeding `rootVideos`). All mutation handlers
+  now call BOTH `fetchFolders()` (local refresh) and `onMutated()`
+  (parent refresh) so it doesn't matter which surface is feeding the
+  grid.
+- The loading spinner on FolderBrowser no longer flashes after every
+  mutation. `fetchFolders` accepts `{ silent: true }` to skip
+  `setLoading(true)` on background refreshes; the parent folder
+  page passes `silent: true` to its own `fetchFolder` when called via
+  `onMutated`. Initial mounts and manual reloads still show the
+  spinner.
+- "Delete permanently" in Trash now wipes every version of a video
+  group, not just the latest. `TrashItem.allIds` is wired through
+  the page and the handler iterates the full list, then the row
+  group disappears from the listing.
+
+### Removed
+
+- Watermark feature is gone. `getProcessingSettings` always returns
+  `watermarkText: undefined`, so the FFmpeg drawtext filter is
+  never applied. The legacy `Project.watermarkEnabled` /
+  `watermarkText` / `watermarkPositions` / `watermarkOpacity` /
+  `watermarkFontSize` columns stay in the schema for backward
+  compatibility but are no longer consulted.
+
 ## [1.0.7] - 2026-05-13
 
 The "Frame.io polish" release. Folders learn to upload whole trees,

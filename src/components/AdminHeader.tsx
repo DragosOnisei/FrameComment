@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { Bug, CircleHelp, Container, ExternalLink, FolderKanban, Github, Heart, LogOut, Settings, Shield, User, Users } from 'lucide-react'
+import { Bug, CircleHelp, Container, ExternalLink, FolderKanban, Github, Heart, LogOut, Settings, Shield, Trash2, User, Users } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -59,6 +59,7 @@ export default function AdminHeader() {
 
   const navLinks: Array<{ href: string; label: string; icon: typeof FolderKanban; title?: string }> = [
     { href: '/admin/projects', label: t('projects'), icon: FolderKanban },
+    { href: '/admin/trash', label: 'Trash', icon: Trash2 },
     { href: '/admin/users', label: t('users'), icon: Users },
     { href: '/admin/settings', label: t('settings'), icon: Settings },
   ]

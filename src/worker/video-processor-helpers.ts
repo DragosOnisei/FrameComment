@@ -182,12 +182,13 @@ export async function fetchProcessingSettings(
     watermarkEnabled: project?.watermarkEnabled
   })
 
-  // Determine watermark text (only if watermarks are enabled)
-  const watermarkText = project?.watermarkEnabled
-    ? (project.watermarkText || `PREVIEW-${project.title || 'PROJECT'}-${video?.versionLabel || 'v1'}`)
-    : undefined
+  // 1.0.8+: watermark feature removed app-wide. We always pass
+  // `watermarkText: undefined` so the FFmpeg drawtext filter is
+  // skipped. The legacy `project.watermarkEnabled` column stays in
+  // the schema for backward compat but is no longer consulted.
+  const watermarkText = undefined
 
-  debugLog('Final watermark text:', watermarkText || '(no watermark)')
+  debugLog('Final watermark text:', '(disabled in 1.0.8+)')
 
   return {
     resolution: project?.previewResolution || '720p',

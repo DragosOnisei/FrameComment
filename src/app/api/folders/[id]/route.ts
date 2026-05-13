@@ -40,13 +40,18 @@ export async function GET(
     const folder = await prisma.folder.findUnique({
       where: { id },
       include: {
+        // 1.0.8+: skip soft-deleted children. Trashed items live in
+        // the dedicated `/admin/trash` page; the folder grid never
+        // shows them.
         subfolders: {
+          where: { deletedAt: null } as any,
           orderBy: { name: 'asc' },
           include: {
             _count: { select: { subfolders: true, videos: true } },
           },
         },
         videos: {
+          where: { deletedAt: null } as any,
           orderBy: [{ name: 'asc' }, { version: 'desc' }],
           include: {
             // Comment count per video — drives the speech-bubble
@@ -58,6 +63,12 @@ export async function GET(
       },
     })
     if (!folder) {
+      return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
+    }
+    // If the folder itself is in Trash, treat it as a 404 — admins
+    // only reach it from the Trash page, which uses a different
+    // endpoint.
+    if ((folder as any).deletedAt) {
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
     }
 
@@ -358,6 +369,8 @@ export async function DELETE(
   if (rl) return rl
 
   const { id } = await params
+  const permanent =
+    new URL(request.url).searchParams.get('permanent') === '1'
 
   try {
     const existing = await prisma.folder.findUnique({
@@ -367,6 +380,44 @@ export async function DELETE(
     if (!existing) {
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
     }
+
+    // 1.0.8+: soft-delete by default. Cascade the soft-delete to
+    // every descendant folder + every video inside any of those
+    // folders so the whole subtree lands in Trash atomically and a
+    // restore lifts it back together. Hard-delete (`?permanent=1`)
+    // keeps the legacy cascade behaviour for the Trash UI.
+    if (!permanent) {
+      // Collect the folder + all descendants in a single recursive
+      // pass via a CTE-style walk.
+      const descendantIds = new Set<string>([id])
+      let frontier: string[] = [id]
+      while (frontier.length > 0) {
+        const children = await prisma.folder.findMany({
+          where: { parentFolderId: { in: frontier } },
+          select: { id: true },
+        })
+        frontier = []
+        for (const c of children) {
+          if (!descendantIds.has(c.id)) {
+            descendantIds.add(c.id)
+            frontier.push(c.id)
+          }
+        }
+      }
+      const now = new Date()
+      await prisma.$transaction([
+        prisma.folder.updateMany({
+          where: { id: { in: Array.from(descendantIds) } },
+          data: { deletedAt: now } as any,
+        }),
+        prisma.video.updateMany({
+          where: { folderId: { in: Array.from(descendantIds) } },
+          data: { deletedAt: now } as any,
+        }),
+      ])
+      return NextResponse.json({ success: true, soft: true })
+    }
+
     await prisma.folder.delete({ where: { id } })
     return NextResponse.json({ success: true })
   } catch (error) {

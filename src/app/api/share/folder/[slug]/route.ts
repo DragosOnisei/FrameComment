@@ -140,14 +140,14 @@ export async function GET(
     // is handled by additional GETs from the client as it drills down.
     const [subfolders, videos] = await Promise.all([
       prisma.folder.findMany({
-        where: { parentFolderId: folderMeta.id },
+        where: { parentFolderId: folderMeta.id, deletedAt: null } as any,
         orderBy: { name: 'asc' },
         include: {
           _count: { select: { subfolders: true, videos: true } },
         },
       }),
       prisma.video.findMany({
-        where: { folderId: folderMeta.id },
+        where: { folderId: folderMeta.id, deletedAt: null } as any,
         orderBy: [{ name: 'asc' }, { version: 'desc' }],
         select: {
           id: true,

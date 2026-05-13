@@ -6,6 +6,7 @@ import {
   Film as FilmIcon,
   MoreVertical,
   Pencil,
+  Scissors,
   Share2,
   Trash2,
   MessageSquare,
@@ -86,6 +87,10 @@ export interface VideoCardProps {
    *  the menu item is hidden — used on the public share page where
    *  the client should not be able to re-share. */
   onShare?: (id: string, currentName: string) => void
+  /** Open the Split-versions modal (1.0.8+). Only meaningful when
+   *  `versionCount > 1`; the menu item is hidden otherwise so a
+   *  single-version card never shows a useless action. */
+  onSplitVersions?: (id: string, currentName: string) => void
 }
 
 // Custom MIME for video drag — separate from the folder DnD so the
@@ -144,6 +149,7 @@ export default function VideoCard({
   onDelete,
   onMoveUp,
   onShare,
+  onSplitVersions,
 }: VideoCardProps) {
   // Hover state for the drop-target ring. Only set when ANOTHER
   // video is being dragged over THIS card.
@@ -485,7 +491,7 @@ export default function VideoCard({
         {/* Kebab — only renders when at least one action is wired.
             On the public client share we omit Rename/Delete entirely,
             so the kebab disappears and the card stays read-only. */}
-        {(onRename || onDelete || onMoveUp || onShare) && (
+        {(onRename || onDelete || onMoveUp || onShare || (onSplitVersions && versionCount > 1)) && (
         <div ref={menuRef} className="relative">
           <button
             type="button"
@@ -549,23 +555,29 @@ export default function VideoCard({
                   Move up one folder
                 </button>
               )}
-              {onDelete && (
+              {onSplitVersions && versionCount > 1 && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    if (
-                      window.confirm(
-                        `Delete video "${name}"? This removes ${
-                          versionCount > 1
-                            ? `all ${versionCount} versions and their`
-                            : 'the video and its'
-                        } comments.`,
-                      )
-                    ) {
-                      onDelete(id, name)
-                    }
+                    onSplitVersions(id, name)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                >
+                  <Scissors className="w-4 h-4 shrink-0" />
+                  Split versions
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    // 1.0.8+: parent shows a Frame.io-style
+                    // ConfirmModal — no native window.confirm here.
+                    setMenuOpen(false)
+                    onDelete(id, name)
                   }}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left"
                 >

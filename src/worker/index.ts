@@ -2,6 +2,7 @@ import { Worker, Queue } from 'bullmq'
 import { VideoProcessingJob, AssetProcessingJob, ProjectUploadProcessingJob, ExternalNotificationJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
+import { purgeExpiredTrash } from '../lib/trash-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
 import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
 import { processVideo } from './video-processor'
@@ -18,6 +19,7 @@ import { logError, logMessage } from '../lib/logging'
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ONE_HOUR_MS = 60 * 60 * 1000
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 async function main() {
   logMessage('[WORKER] Initializing video processing worker...')
@@ -251,11 +253,36 @@ async function main() {
     await cleanupOldTempFiles()
   }, ONE_HOUR_MS)
 
+  // Schedule Trash cleanup every 24 hours (1.0.8+). Hard-deletes
+  // soft-deleted videos and folders whose `deletedAt` is older than
+  // 30 days. Runs once at startup so a server that's been off for a
+  // few days catches up immediately.
+  logMessage('Running initial Trash cleanup...')
+  await purgeExpiredTrash()
+    .then((r) =>
+      logMessage(
+        `[WORKER] Trash cleanup removed ${r.videos} videos, ${r.folders} folders`,
+      ),
+    )
+    .catch((err) => logError('Initial trash cleanup failed', err))
+  const trashCleanupInterval = setInterval(async () => {
+    logMessage('Running scheduled Trash cleanup...')
+    try {
+      const r = await purgeExpiredTrash()
+      logMessage(
+        `[WORKER] Trash cleanup removed ${r.videos} videos, ${r.folders} folders`,
+      )
+    } catch (err) {
+      logError('Scheduled trash cleanup failed', err)
+    }
+  }, ONE_DAY_MS)
+
   // Handle shutdown gracefully
   process.on('SIGTERM', async () => {
     logMessage('SIGTERM received, closing workers...')
     clearInterval(tusCleanupInterval)
     clearInterval(tempCleanupInterval)
+    clearInterval(trashCleanupInterval)
     await Promise.all([
       worker.close(),
       assetWorker.close(),
@@ -273,6 +300,7 @@ async function main() {
     logMessage('SIGINT received, closing workers...')
     clearInterval(tusCleanupInterval)
     clearInterval(tempCleanupInterval)
+    clearInterval(trashCleanupInterval)
     await Promise.all([
       worker.close(),
       assetWorker.close(),

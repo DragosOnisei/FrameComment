@@ -266,6 +266,13 @@ export async function DELETE(
   }, 'video-delete')
   if (rateLimitResult) return rateLimitResult
 
+  // Optional `?permanent=1` skips the soft-delete bucket and removes
+  // the row + storage immediately. Used by the Trash UI for the
+  // explicit "Delete permanently" action and by the cleanup cron
+  // when expiring 30-day-old soft-deleted rows.
+  const permanent =
+    new URL(request.url).searchParams.get('permanent') === '1'
+
   try {
     const { id } = await params
     // Get video details
@@ -280,7 +287,19 @@ export async function DELETE(
       return NextResponse.json({ error: videoMessages.videoNotFoundApi || 'Video not found' }, { status: 404 })
     }
 
-    // Delete all associated files from storage
+    // Default path (1.0.8+): soft-delete. The row stays in the DB
+    // with `deletedAt` set and disappears from every listing; users
+    // can restore it from the Trash for 30 days.
+    if (!permanent) {
+      await prisma.video.update({
+        where: { id },
+        data: { deletedAt: new Date() } as any,
+      })
+      return NextResponse.json({ success: true, soft: true })
+    }
+
+    // Permanent delete — same legacy behaviour as before: wipe every
+    // associated file on disk, then drop the row.
     try {
       // Delete asset files only if no other assets point to the same storage path
       for (const asset of video.assets) {

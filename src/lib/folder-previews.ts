@@ -56,9 +56,11 @@ export async function fetchFolderPreviewData(
   if (folderIds.length === 0) return { previews, itemCounts }
 
   // 1. Pull every sub-folder so we know both how many there are and
-  // which ones to reserve preview slots for.
+  // which ones to reserve preview slots for. 1.0.8+: drop trashed
+  // rows so the mosaic never previews items that the user just sent
+  // to Trash.
   const subfolders = await prisma.folder.findMany({
-    where: { parentFolderId: { in: folderIds } },
+    where: { parentFolderId: { in: folderIds }, deletedAt: null } as any,
     orderBy: [{ name: 'asc' }],
     select: { id: true, parentFolderId: true },
   })
@@ -73,10 +75,11 @@ export async function fetchFolderPreviewData(
   // 2. Count *distinct* video groups per folder by `name` — versions
   // share a name so the groupBy collapses them into one row each.
   // This drives the "N items" label so it never inflates with
-  // versions the user already views as a single asset.
+  // versions the user already views as a single asset. Trashed rows
+  // are skipped (1.0.8+).
   const grouped = await prisma.video.groupBy({
     by: ['folderId', 'name'],
-    where: { folderId: { in: folderIds } },
+    where: { folderId: { in: folderIds }, deletedAt: null } as any,
   })
   const distinctVideoGroups = new Map<string, number>()
   for (const g of grouped) {
@@ -96,7 +99,8 @@ export async function fetchFolderPreviewData(
       folderId: { in: folderIds },
       status: 'READY',
       thumbnailPath: { not: null },
-    },
+      deletedAt: null,
+    } as any,
     orderBy: [{ createdAt: 'desc' }],
     take: cap,
     select: {

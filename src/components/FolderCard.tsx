@@ -284,10 +284,10 @@ export default function FolderCard({
                   role="menuitem"
                   type="button"
                   onClick={() => {
+                    // 1.0.8+: parent shows a Frame.io-style
+                    // ConfirmModal instead of a window.confirm prompt.
                     setMenuOpen(false)
-                    if (window.confirm(`Delete folder "${name}"? Subfolders will be deleted too. Videos inside will move back to the project root.`)) {
-                      onDelete(id)
-                    }
+                    onDelete(id)
                   }}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left"
                 >

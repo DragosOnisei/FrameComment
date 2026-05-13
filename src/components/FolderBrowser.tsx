@@ -23,6 +23,9 @@ import FolderCard from './FolderCard'
 import VideoCard from './VideoCard'
 import NewFolderDialog from './NewFolderDialog'
 import FolderContextMenu from './FolderContextMenu'
+import { ConfirmModal } from './ConfirmModal'
+import { ShareModal } from './ShareModal'
+import { SplitVersionsModal, type SplitVersionRow } from './SplitVersionsModal'
 import {
   snapshotDataTransferEntries,
   walkSnapshotEntries,
@@ -118,6 +121,10 @@ interface VideoRow {
   name: string
   version: number
   versionLabel?: string | null
+  /** Filename the admin uploaded the video as (e.g. "ep03_v2.mov").
+   *  Used as the new card name when the Split-versions modal pulls
+   *  this row out of its group (1.0.8+). */
+  originalFileName?: string | null
   duration?: number | null
   approved?: boolean
   thumbnailPath?: string | null
@@ -229,6 +236,33 @@ export default function FolderBrowser({
   // page passes its own video list via the `videos` prop instead.
   const [rootVideos, setRootVideos] = useState<VideoRow[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Frame.io-style modals (1.0.8+) — replace native window.confirm /
+  // alert calls for the destructive Delete + share-link flows. We
+  // keep a single shared piece of state per modal so any card / bulk
+  // action can route through these without prop-drilling.
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean
+    title: string
+    description?: React.ReactNode
+    confirmLabel?: string
+    variant?: 'default' | 'destructive'
+    busy?: boolean
+    onConfirm?: () => Promise<void> | void
+  }>({ open: false, title: '' })
+  const [shareState, setShareState] = useState<{
+    open: boolean
+    title: string
+    shareUrl: string
+  }>({ open: false, title: '', shareUrl: '' })
+  // Split-versions modal state (1.0.8+) — surfaces every version in a
+  // group so the admin can lift selected rows back out into their
+  // own standalone cards. Opened from the VideoCard kebab.
+  const [splitState, setSplitState] = useState<{
+    open: boolean
+    groupName: string
+    versions: SplitVersionRow[]
+  }>({ open: false, groupName: '', versions: [] })
   const [showNewDialog, setShowNewDialog] = useState(false)
   // When true the New Folder dialog renders in "restricted" mode and
   // also asks for a password (used by the right-click context menu's
@@ -259,9 +293,13 @@ export default function FolderBrowser({
   // affordance, the source card is ghosted.
   const [draggingVideoId, setDraggingVideoId] = useState<string | null>(null)
 
-  const fetchFolders = useCallback(async () => {
+  const fetchFolders = useCallback(async (opts?: { silent?: boolean }) => {
     try {
-      setLoading(true)
+      // 1.0.8+: `silent` skips the spinner flicker on background
+      // refreshes (e.g. after delete / move / drag-drop). The first
+      // mount and explicit reloads still flip `loading` so the user
+      // sees feedback when there genuinely is no data yet.
+      if (!opts?.silent) setLoading(true)
       const url = currentFolderId
         ? `/api/folders/${currentFolderId}`
         : `/api/folders?projectId=${projectId}&parentFolderId=root`
@@ -337,9 +375,10 @@ export default function FolderBrowser({
   // Refetch when a programmatic folder create finishes elsewhere in
   // the page (1.0.7+). Used by the folder-tree drag-and-drop path so
   // the brand-new sub-folders show up in the grid as soon as they
-  // exist in the DB, without waiting for the user to refresh.
+  // exist in the DB, without waiting for the user to refresh. 1.0.8+:
+  // silent so the spinner doesn't flash on every event.
   useEffect(() => {
-    const handler = () => fetchFolders()
+    const handler = () => fetchFolders({ silent: true })
     window.addEventListener('framecomment:folders-changed', handler)
     return () => {
       window.removeEventListener('framecomment:folders-changed', handler)
@@ -389,13 +428,13 @@ export default function FolderBrowser({
             throw new Error(err.error || 'Failed to set folder password')
           }
         } catch (err) {
-          await fetchFolders()
+          await fetchFolders({ silent: true })
           onMutated?.()
           throw err
         }
       }
 
-      await fetchFolders()
+      await fetchFolders({ silent: true })
       onMutated?.()
     },
     [projectId, currentFolderId, fetchFolders, onMutated],
@@ -423,7 +462,7 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to rename folder')
         }
-        await fetchFolders()
+        await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to rename folder')
@@ -437,13 +476,12 @@ export default function FolderBrowser({
       const folder = folders.find((f) => f.id === folderId)
       if (!folder) return
       const url = `${window.location.origin}/share/folder/${folder.slug}`
-      try {
-        await navigator.clipboard.writeText(url)
-        alert(`Folder share link copied to clipboard:\n${url}`)
-      } catch {
-        // Fallback: show the link in a prompt so the user can copy it manually.
-        window.prompt('Folder share link:', url)
-      }
+      // 1.0.8+: replace the OS alert with the Frame.io-style share
+      // modal (Link copied + Copy button + Done). The modal itself
+      // does the clipboard write so the user can re-copy without
+      // dismissing first.
+      setShareState({ open: true, title: folder.name, shareUrl: url })
+      return
     },
     [folders],
   )
@@ -464,7 +502,7 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to move folder')
         }
-        await fetchFolders()
+        await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move folder')
@@ -495,22 +533,47 @@ export default function FolderBrowser({
   )
 
   const handleDelete = useCallback(
-    async (folderId: string) => {
-      try {
-        const res = await apiFetch(`/api/folders/${folderId}`, {
-          method: 'DELETE',
-        })
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.error || 'Failed to delete folder')
-        }
-        await fetchFolders()
-        onMutated?.()
-      } catch (err) {
-        alert(err instanceof Error ? err.message : 'Failed to delete folder')
-      }
+    (folderId: string) => {
+      const folder = folders.find((f) => f.id === folderId)
+      const name = folder?.name ?? 'this folder'
+      // 1.0.8+: Frame.io-style ConfirmModal. The folder goes to
+      // Trash for 30 days (server soft-deletes by default), and its
+      // entire subtree comes back together on restore.
+      setConfirmState({
+        open: true,
+        title: 'Delete folder?',
+        description: (
+          <>
+            <span className="font-medium text-foreground">{name}</span>{' '}
+            and everything inside will be moved to Trash. Items can be
+            recovered for 30 days before being permanently deleted.
+          </>
+        ),
+        confirmLabel: 'Delete',
+        variant: 'destructive',
+        onConfirm: async () => {
+          setConfirmState((s) => ({ ...s, busy: true }))
+          try {
+            const res = await apiFetch(`/api/folders/${folderId}`, {
+              method: 'DELETE',
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.error || 'Failed to delete folder')
+            }
+            // Refresh both sources so the grid drops the deleted
+            // folder immediately, no page reload needed (1.0.8+).
+            await fetchFolders({ silent: true })
+            onMutated?.()
+          } catch (err) {
+            alert(err instanceof Error ? err.message : 'Failed to delete folder')
+          } finally {
+            setConfirmState({ open: false, title: '' })
+          }
+        },
+      })
     },
-    [fetchFolders, onMutated],
+    [folders, fetchFolders, onMutated],
   )
 
   // ─── video helpers ─────────────────────────────────────────
@@ -608,40 +671,57 @@ export default function FolderBrowser({
   )
 
   const handleDeleteVideo = useCallback(
-    async (videoId: string) => {
-      // Delete every version that shares this video's name so the
-      // card disappears as a whole. The card's `id` here is the
-      // latest version; we use `videoGroups` to find the siblings.
+    (videoId: string, videoName?: string) => {
       const group = videoGroups.find((g) => g.allIds.includes(videoId))
-      const idsToDelete = group ? group.allIds : [videoId]
-      // Collect errors but don't bail on the first one — when one
-      // version was already deleted (e.g. a stale UI from a prior
-      // attempt), the rest of the group should still go down, and
-      // a 404 should be treated as "already gone" rather than a real
-      // failure (1.0.7+).
-      const realErrors: string[] = []
-      for (const id of idsToDelete) {
-        try {
-          const res = await apiFetch(`/api/videos/${id}`, { method: 'DELETE' })
-          if (!res.ok && res.status !== 404) {
-            const err = await res.json().catch(() => ({}))
-            realErrors.push(err.error || `HTTP ${res.status}`)
+      const name = videoName ?? group?.name ?? 'this asset'
+      // 1.0.8+: Frame.io-style ConfirmModal for delete. Soft-deletes
+      // every version in the group; user can restore from Trash for
+      // 30 days.
+      setConfirmState({
+        open: true,
+        title: 'Delete asset?',
+        description: (
+          <>
+            <span className="font-medium text-foreground">{name}</span>{' '}
+            will be moved to Trash. You can recover it for 30 days
+            before it&apos;s permanently deleted.
+          </>
+        ),
+        confirmLabel: 'Delete',
+        variant: 'destructive',
+        onConfirm: async () => {
+          setConfirmState((s) => ({ ...s, busy: true }))
+          const idsToDelete = group ? group.allIds : [videoId]
+          const realErrors: string[] = []
+          for (const id of idsToDelete) {
+            try {
+              const res = await apiFetch(`/api/videos/${id}`, {
+                method: 'DELETE',
+              })
+              if (!res.ok && res.status !== 404) {
+                const err = await res.json().catch(() => ({}))
+                realErrors.push(err.error || `HTTP ${res.status}`)
+              }
+            } catch (err) {
+              realErrors.push(
+                err instanceof Error ? err.message : 'Network error',
+              )
+            }
           }
-        } catch (err) {
-          realErrors.push(
-            err instanceof Error ? err.message : 'Network error',
-          )
-        }
-      }
-      // Always refresh so a stale row clears even if it was the
-      // 404 case; only surface an alert when something genuinely
-      // failed.
-      onMutated?.()
-      if (realErrors.length > 0) {
-        alert(`Failed to delete video: ${realErrors[0]}`)
-      }
+          // Refresh BOTH sources (1.0.8+): the parent page (so any
+          // outer state lines up) and our own folder/video listing
+          // (so the deleted card disappears from the grid without a
+          // page reload).
+          await fetchFolders({ silent: true })
+          onMutated?.()
+          setConfirmState({ open: false, title: '' })
+          if (realErrors.length > 0) {
+            alert(`Failed to delete video: ${realErrors[0]}`)
+          }
+        },
+      })
     },
-    [onMutated, videoGroups],
+    [onMutated, videoGroups, fetchFolders],
   )
 
   // ─── multi-select + bulk actions (1.0.6+) ────────────────
@@ -733,12 +813,13 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to stack videos')
         }
+        await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to stack videos')
       }
     },
-    [onMutated],
+    [onMutated, fetchFolders],
   )
 
   // Drag-video-onto-folder handler (1.0.7+). When the user drops a
@@ -765,15 +846,17 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to move video')
         }
-        // Tell the page to refetch — it'll bring back a folder grid
-        // with the moved video gone from here and the folder's item
-        // count bumped by one.
+        // 1.0.8+: refresh BOTH the parent page state and this
+        // FolderBrowser's own state. At the project root the videos
+        // live in our local `rootVideos`; relying on `onMutated`
+        // alone leaves the card visible until the user reloads.
+        await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move video')
       }
     },
-    [videoGroups, onMutated],
+    [videoGroups, onMutated, fetchFolders],
   )
 
   // "Move up one folder" target (1.0.7+). When we're inside ANY
@@ -813,12 +896,13 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to move video')
         }
+        await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move video')
       }
     },
-    [canMoveUp, parentFolderId, videoGroups, onMutated],
+    [canMoveUp, parentFolderId, videoGroups, onMutated, fetchFolders],
   )
 
   // Per-video share handler (1.0.7+). For now we surface the same
@@ -832,16 +916,62 @@ export default function FolderBrowser({
       const params = new URLSearchParams({ video: videoName })
       if (currentFolderId) params.set('folderId', currentFolderId)
       const url = `${origin}/share/${_projectSlug}?${params.toString()}`
-      try {
-        await navigator.clipboard.writeText(url)
-        alert(`Link copied to clipboard:\n${url}`)
-      } catch {
-        // Older browsers / strict permissions — at least show the URL
-        // so the user can copy it manually.
-        window.prompt('Copy this share link:', url)
-      }
+      // 1.0.8+: Frame.io-style ShareModal instead of the OS alert.
+      setShareState({ open: true, title: videoName, shareUrl: url })
     },
     [_projectSlug, currentFolderId],
+  )
+
+  // Split-versions handler (1.0.8+). Opens the modal seeded with
+  // every version row in the group the user clicked. The actual
+  // split is performed by `/api/videos/split` once the user submits.
+  const handleSplitVersions = useCallback(
+    (videoId: string, groupName: string) => {
+      const group = videoGroups.find((g) => g.allIds.includes(videoId))
+      if (!group) return
+      // We need full per-version detail (thumbnail, originalFileName,
+      // versionLabel, createdAt). Both root and folder paths feed
+      // the same raw rows into `videos` / `rootVideos`, so we look
+      // up by `id`.
+      const source = videos.length > 0 ? videos : rootVideos
+      const rows: SplitVersionRow[] = group.allIds
+        .map((id) => source.find((v) => v.id === id))
+        .filter((v): v is VideoRow => !!v)
+        .sort((a, b) => b.version - a.version)
+        .map((v) => ({
+          id: v.id,
+          version: v.version,
+          versionLabel: v.versionLabel,
+          originalFileName: v.originalFileName,
+          thumbnailUrl: v.thumbnailUrl,
+          createdAt: v.createdAt,
+        }))
+      if (rows.length === 0) return
+      setSplitState({ open: true, groupName, versions: rows })
+    },
+    [videoGroups, videos, rootVideos],
+  )
+
+  const submitSplit = useCallback(
+    async (selectedIds: string[]) => {
+      if (selectedIds.length === 0) return
+      try {
+        const res = await apiFetch('/api/videos/split', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoIds: selectedIds }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to split versions')
+        }
+        await fetchFolders({ silent: true })
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to split versions')
+      }
+    },
+    [fetchFolders, onMutated],
   )
 
   // Folder move-up handler (1.0.7+). Mirrors the video flow but
@@ -860,7 +990,7 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to move folder')
         }
-        await fetchFolders()
+        await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move folder')
@@ -869,33 +999,44 @@ export default function FolderBrowser({
     [canMoveUp, parentFolderId, fetchFolders, onMutated],
   )
 
-  const handleBulkDelete = useCallback(async () => {
+  const handleBulkDelete = useCallback(() => {
     if (selectedVideoIds.size === 0) return
     const count = selectedVideoIds.size
-    if (
-      !window.confirm(
-        `Delete ${count} ${count === 1 ? 'video' : 'videos'}? This removes every version and its comments.`,
-      )
-    ) {
-      return
-    }
-    setBulkBusy(true)
-    try {
-      for (const cardId of selectedVideoIds) {
-        const group = videoGroups.find((g) => g.allIds.includes(cardId))
-        const idsToDelete = group ? group.allIds : [cardId]
-        for (const id of idsToDelete) {
-          await apiFetch(`/api/videos/${id}`, { method: 'DELETE' }).catch(
-            () => null,
-          )
+    // 1.0.8+: surface the Frame.io-style ConfirmModal instead of
+    // `window.confirm`. The actual delete still goes through the
+    // existing batch loop — soft-deleted rows land in Trash for 30
+    // days.
+    setConfirmState({
+      open: true,
+      title: count === 1 ? 'Delete asset?' : `Delete ${count} assets?`,
+      description:
+        'Deleted items can be recovered for 30 days before being permanently deleted.',
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+      onConfirm: async () => {
+        setConfirmState((s) => ({ ...s, busy: true }))
+        setBulkBusy(true)
+        try {
+          for (const cardId of selectedVideoIds) {
+            const group = videoGroups.find((g) => g.allIds.includes(cardId))
+            const idsToDelete = group ? group.allIds : [cardId]
+            for (const id of idsToDelete) {
+              await apiFetch(`/api/videos/${id}`, { method: 'DELETE' }).catch(
+                () => null,
+              )
+            }
+          }
+          clearSelection()
+          // Same dual refresh as the single-delete path (1.0.8+).
+          await fetchFolders({ silent: true })
+          onMutated?.()
+        } finally {
+          setBulkBusy(false)
+          setConfirmState({ open: false, title: '' })
         }
-      }
-      clearSelection()
-      onMutated?.()
-    } finally {
-      setBulkBusy(false)
-    }
-  }, [selectedVideoIds, videoGroups, onMutated, clearSelection])
+      },
+    })
+  }, [selectedVideoIds, videoGroups, onMutated, clearSelection, fetchFolders])
 
   // ─── breadcrumb rendering ──────────────────────────────────
   // The parent passes breadcrumb when at a folder sub-route. At
@@ -1382,6 +1523,7 @@ export default function FolderBrowser({
               onDelete={handleDeleteVideo}
               onMoveUp={canMoveUp ? handleMoveVideoUp : undefined}
               onShare={handleShareVideo}
+              onSplitVersions={handleSplitVersions}
             />
           ))}
         </div>
@@ -1410,6 +1552,42 @@ export default function FolderBrowser({
           setNewDialogRestricted(true)
           setShowNewDialog(true)
         }}
+      />
+
+      {/* Frame.io-style confirmation + share dialogs (1.0.8+). One
+          instance each covers Delete (single + bulk + folder) and
+          Share (video + folder). */}
+      <ConfirmModal
+        open={confirmState.open}
+        onOpenChange={(next) =>
+          setConfirmState((s) => ({ ...s, open: next }))
+        }
+        title={confirmState.title}
+        description={confirmState.description}
+        confirmLabel={confirmState.confirmLabel}
+        variant={confirmState.variant}
+        busy={confirmState.busy}
+        onConfirm={async () => {
+          await confirmState.onConfirm?.()
+        }}
+        onCancel={() => setConfirmState({ open: false, title: '' })}
+      />
+      <ShareModal
+        open={shareState.open}
+        onOpenChange={(next) =>
+          setShareState((s) => ({ ...s, open: next }))
+        }
+        title={shareState.title}
+        shareUrl={shareState.shareUrl}
+      />
+      <SplitVersionsModal
+        open={splitState.open}
+        onOpenChange={(next) =>
+          setSplitState((s) => ({ ...s, open: next }))
+        }
+        groupName={splitState.groupName}
+        versions={splitState.versions}
+        onSubmit={submitSplit}
       />
     </div>
   )
