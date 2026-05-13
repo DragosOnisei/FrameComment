@@ -4,6 +4,8 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { createFolderSchema, safeParseBody } from '@/lib/validation'
 import { generateUniqueFolderSlug } from '@/lib/folder-helpers'
+import { fetchFolderPreviewData } from '@/lib/folder-previews'
+import { enrichVideosForAdmin } from '@/lib/folder-video-enrichment'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -115,6 +117,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAdmin(request)
   if (authResult instanceof Response) return authResult
+  const admin = authResult
 
   const url = new URL(request.url)
   const projectId = url.searchParams.get('projectId')
@@ -137,7 +140,58 @@ export async function GET(request: NextRequest) {
         _count: { select: { subfolders: true, videos: true } },
       },
     })
-    return NextResponse.json(folders)
+
+    // Frame.io-style folder previews + corrected item counts
+    // (1.0.7+). The helper returns both the mosaic tiles and a count
+    // that treats a video group (e.g. v1/v2/v3 of the same asset) as
+    // a single item, so the "N items" label matches what the user
+    // visually sees inside the folder. Failures are soft (logged,
+    // treated as no preview / fall back to _count).
+    const sessionId = `admin:${admin.id}`
+    let previewsByFolder = new Map<string, unknown[]>()
+    let itemCountByFolder = new Map<string, number>()
+    try {
+      const data = await fetchFolderPreviewData(
+        folders.map((f) => f.id),
+        request,
+        sessionId,
+      )
+      previewsByFolder = data.previews as Map<string, unknown[]>
+      itemCountByFolder = data.itemCounts
+    } catch (err) {
+      logError('[GET /api/folders] preview fetch failed:', err)
+    }
+    const enriched = folders.map((f) => ({
+      ...f,
+      previewItems: previewsByFolder.get(f.id) ?? [],
+      itemCount:
+        itemCountByFolder.get(f.id) ??
+        (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
+    }))
+
+    // 1.0.7+: when the caller is listing the project root we also
+    // need to surface any videos that live there (e.g. one that was
+    // just moved up out of a top-level folder). For nested levels we
+    // keep the legacy array response so existing clients stay happy.
+    if (parentFolderId === null) {
+      const rootVideos = await prisma.video.findMany({
+        where: { projectId, folderId: null },
+        orderBy: [{ name: 'asc' }, { version: 'desc' }],
+        include: { _count: { select: { comments: true } } },
+      })
+      const enrichedVideos = await enrichVideosForAdmin(
+        rootVideos as any[],
+        request,
+        sessionId,
+        'GET /api/folders root videos',
+      )
+      return NextResponse.json({
+        folders: enriched,
+        videos: enrichedVideos,
+      })
+    }
+
+    return NextResponse.json(enriched)
   } catch (error) {
     logError('[GET /api/folders] failed:', error)
     return NextResponse.json(

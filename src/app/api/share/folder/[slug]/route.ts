@@ -10,6 +10,7 @@ import { getShareTokenTtlSeconds } from '@/lib/settings'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { fetchFolderPreviewData } from '@/lib/folder-previews'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -303,12 +304,33 @@ export async function GET(
         companyName: folderMeta.project.companyName,
         authMode: folderMeta.authMode,
       },
-      subfolders: subfolders.map((f) => ({
-        id: f.id,
-        slug: f.slug,
-        name: f.name,
-        itemCount: f._count.subfolders + f._count.videos,
-      })),
+      subfolders: await (async () => {
+        // Mirror the admin folder grid (1.0.7+): mint Frame.io-style
+        // preview tiles + corrected item counts for every sub-folder
+        // so the public share renders the same large card with a
+        // mosaic cover. Failures soft-fall to a plain glyph.
+        let previews = new Map<string, unknown[]>()
+        let counts = new Map<string, number>()
+        try {
+          const data = await fetchFolderPreviewData(
+            subfolders.map((f) => f.id),
+            request,
+            thumbSessionId,
+          )
+          previews = data.previews as Map<string, unknown[]>
+          counts = data.itemCounts
+        } catch (err) {
+          logError('[GET /api/share/folder/[slug]] preview failed:', err)
+        }
+        return subfolders.map((f) => ({
+          id: f.id,
+          slug: f.slug,
+          name: f.name,
+          itemCount:
+            counts.get(f.id) ?? f._count.subfolders + f._count.videos,
+          previewItems: previews.get(f.id) ?? [],
+        }))
+      })(),
       videos: videosWithThumb,
       isAdmin,
       sessionId,

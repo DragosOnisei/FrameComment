@@ -13,6 +13,7 @@ import CommentsKebabMenu from './CommentsKebabMenu'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
+import { getClientId } from '@/lib/client-id'
 import { formatCommentTimestamp, secondsToTimecode, timecodeToSeconds, timecodeToSeekSeconds } from '@/lib/timecode'
 import {
   getClippedComments,
@@ -290,6 +291,7 @@ export default function CommentSection({
           headers: {
             'Content-Type': 'application/json',
             ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}),
+            'X-Framecomment-Client-Id': getClientId(),
           },
           body,
         })

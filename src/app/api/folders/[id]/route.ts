@@ -10,6 +10,7 @@ import {
 import { encrypt } from '@/lib/encryption'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { fetchFolderPreviewData } from '@/lib/folder-previews'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -177,7 +178,37 @@ export async function GET(
       }),
     )
 
-    const safeFolder = { ...folder, videos: videosWithExtras }
+    // Mosaic preview + corrected item count for each subfolder
+    // (1.0.7+). Mirrors what the root-level GET /api/folders does so
+    // drilling into a folder keeps showing the same Frame.io-style
+    // cover tiles AND the version-aware "N items" label on its
+    // children.
+    let subfolderPreviews = new Map<string, unknown[]>()
+    let subfolderItemCounts = new Map<string, number>()
+    try {
+      const data = await fetchFolderPreviewData(
+        folder.subfolders.map((s: any) => s.id),
+        request,
+        sessionId,
+      )
+      subfolderPreviews = data.previews as Map<string, unknown[]>
+      subfolderItemCounts = data.itemCounts
+    } catch (err) {
+      logError('[GET /api/folders/[id]] subfolder preview failed:', err)
+    }
+    const subfoldersWithPreviews = folder.subfolders.map((s: any) => ({
+      ...s,
+      previewItems: subfolderPreviews.get(s.id) ?? [],
+      itemCount:
+        subfolderItemCounts.get(s.id) ??
+        (s._count?.subfolders ?? 0) + (s._count?.videos ?? 0),
+    }))
+
+    const safeFolder = {
+      ...folder,
+      videos: videosWithExtras,
+      subfolders: subfoldersWithPreviews,
+    }
     return NextResponse.json({ folder: safeFolder, breadcrumb })
   } catch (error) {
     logError('[GET /api/folders/[id]] failed:', error)

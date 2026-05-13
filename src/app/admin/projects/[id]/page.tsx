@@ -1,17 +1,23 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import FolderBrowser from '@/components/FolderBrowser'
+import AdminVideoManager, { type AdminVideoManagerHandle } from '@/components/AdminVideoManager'
 import ProjectActions from '@/components/ProjectActions'
 import ProjectUploadsBlock from '@/components/ProjectUploadsBlock'
 import { ArrowLeft, Settings, FolderUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
+import {
+  createFolderHierarchy,
+  uniqueDirectoryPaths,
+  type FileTreeEntry,
+} from '@/lib/folder-upload'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -26,6 +32,7 @@ export default function ProjectPage() {
   const [project, setProject] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
+  const videoManagerRef = useRef<AdminVideoManagerHandle | null>(null)
 
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
@@ -51,6 +58,57 @@ export default function ProjectPage() {
   useEffect(() => {
     fetchProject()
   }, [fetchProject])
+
+  // Handle a whole-folder drop at the project root (1.0.7+). The
+  // FolderBrowser walker has already filtered out non-video files and
+  // populated each entry's `relativePath`. We mint the matching folders
+  // at the project root, then hand the upload modal a list of
+  // `(file, folderId)` pairs so each video lands in the right place.
+  const handleUploadFolderTree = useCallback(
+    async (entries: FileTreeEntry[]) => {
+      if (entries.length === 0 || !project?.id) return
+      try {
+        const paths = uniqueDirectoryPaths(entries)
+        const pathToFolderId = await createFolderHierarchy(
+          project.id,
+          null,
+          paths,
+        )
+        const seeded = entries
+          .map((entry) => {
+            const dir = entry.relativePath.replace(/\/[^/]*$/, '')
+            const isTopLevel = !dir || dir === entry.relativePath
+            // At project root we can't host loose files — they must
+            // live inside a folder. Drop any top-level files (this is
+            // an edge case: the user dropped a single video together
+            // with a folder).
+            if (isTopLevel) return null
+            const targetFolderId = pathToFolderId.get(dir) || null
+            if (!targetFolderId) return null
+            return { file: entry.file, folderId: targetFolderId }
+          })
+          .filter(
+            (e): e is { file: File; folderId: string } => e !== null,
+          )
+        if (seeded.length === 0) {
+          // We minted folders but had nothing to upload — refresh so
+          // the new empty folders show up in the grid anyway.
+          fetchProject()
+          return
+        }
+        videoManagerRef.current?.triggerUploadWithFolderTree(seeded)
+        fetchProject()
+      } catch (err) {
+        logError('[ProjectPage] folder-tree upload failed:', err)
+        alert(
+          err instanceof Error
+            ? `Failed to create folders: ${err.message}`
+            : 'Failed to upload folder',
+        )
+      }
+    },
+    [project?.id, fetchProject],
+  )
 
   // Listen for immediate updates (approval changes, comment deletes/posts, etc.)
   useEffect(() => {
@@ -181,8 +239,28 @@ export default function ProjectPage() {
             projectTitle={project.title}
             currentFolderId={null}
             onMutated={fetchProject}
+            onUploadFolderTree={handleUploadFolderTree}
             stretch
           />
+
+          {/* AdminVideoManager mounted invisibly so the folder-tree
+              drag-and-drop path has somewhere to send its upload
+              modal. The visible UI on this page is just the folder
+              grid above. */}
+          <div className="sr-only" aria-hidden>
+            <AdminVideoManager
+              ref={videoManagerRef}
+              projectId={project.id}
+              folderId={null}
+              videos={[]}
+              projectStatus={project.status}
+              restrictToLatestVersion={project.restrictCommentsToLatestVersion}
+              onRefresh={fetchProject}
+              sortMode="alphabetical"
+              maxRevisions={project.maxRevisions}
+              enableRevisions={project.enableRevisions}
+            />
+          </div>
 
           {/* Client Uploads block — only shown when reverse share is enabled */}
           {project.allowReverseShare && (

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { sanitizeComment } from '@/lib/comment-sanitization'
+import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { getRateLimitSettings } from '@/lib/settings'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
@@ -128,12 +128,19 @@ export async function GET(
       orderBy: { createdAt: 'asc' }
     })
 
+    // 1.0.7+: build a stable Client 1 / Client 2 / Client N index
+    // across the whole listing so multiple guest reviewers don't all
+    // collapse into "Client" — handy when a single share link is
+    // forwarded around an agency.
+    const guestIndex = buildGuestSessionIndex(comments as any[])
+
     // Sanitize comments - never expose PII to non-admins
     const sanitizedComments = comments.map((comment: any) => sanitizeComment(
       comment,
       isAdmin,
       isAuthenticated,
       fallbackName,
+      guestIndex,
     ))
 
     return NextResponse.json(sanitizedComments)

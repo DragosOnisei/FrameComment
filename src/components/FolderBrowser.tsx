@@ -23,6 +23,13 @@ import FolderCard from './FolderCard'
 import VideoCard from './VideoCard'
 import NewFolderDialog from './NewFolderDialog'
 import FolderContextMenu from './FolderContextMenu'
+import {
+  snapshotDataTransferEntries,
+  walkSnapshotEntries,
+  entriesFromInputFiles,
+  isAcceptedVideoFile,
+  type FileTreeEntry,
+} from '@/lib/folder-upload'
 
 /**
  * Frame.io-style folder browser used on the admin project page and
@@ -80,6 +87,13 @@ export interface FolderBrowserProps {
    *  this to AdminVideoManager's `triggerUploadWithFiles` so the
    *  upload modal opens pre-seeded with the dropped files. */
   onUploadFiles?: (files: File[]) => void
+  /** Called when the user drops (or picks) a directory containing
+   *  sub-folders. Entries arrive flat with `relativePath` already
+   *  populated; the parent is responsible for re-creating the folder
+   *  hierarchy and routing each video into the right sub-folder
+   *  (1.0.6+). When omitted, folder drops fall back to a flat upload
+   *  into the current folder. */
+  onUploadFolderTree?: (entries: FileTreeEntry[]) => void
 }
 
 interface FolderRow {
@@ -87,6 +101,15 @@ interface FolderRow {
   slug: string
   name: string
   itemCount: number
+  /** Up to 4 preview tiles for the Frame.io-style mosaic cover
+   *  (1.0.7+). Tiles can be either video thumbnails (when the folder
+   *  has videos directly inside) or folder glyphs (when the folder
+   *  only has sub-folders). Falls back to the plain folder icon when
+   *  the array is empty. */
+  previewItems?: Array<
+    | { kind: 'video'; videoId: string; thumbnailUrl: string }
+    | { kind: 'folder'; folderId: string }
+  >
 }
 
 /** A single video row exactly as returned by /api/folders/[id]. */
@@ -161,6 +184,7 @@ export default function FolderBrowser({
   stretch = false,
   videos = [],
   onUploadFiles,
+  onUploadFolderTree,
 }: FolderBrowserProps) {
   const router = useRouter()
   // Drop zone state — true while the user is dragging OS files over
@@ -200,6 +224,10 @@ export default function FolderBrowser({
     }
   }, [uploadMenuOpen])
   const [folders, setFolders] = useState<FolderRow[]>([])
+  // Root-level videos returned by `/api/folders?parentFolderId=root`
+  // (1.0.7+). At nested folder levels this stays empty — the parent
+  // page passes its own video list via the `videos` prop instead.
+  const [rootVideos, setRootVideos] = useState<VideoRow[]>([])
   const [loading, setLoading] = useState(true)
   const [showNewDialog, setShowNewDialog] = useState(false)
   // When true the New Folder dialog renders in "restricted" mode and
@@ -240,24 +268,54 @@ export default function FolderBrowser({
       const res = await apiFetch(url)
       if (!res.ok) throw new Error(`Failed to load folders (HTTP ${res.status})`)
       const data = await res.json()
-      // /api/folders returns an array (root level).
-      // /api/folders/[id] returns { folder, breadcrumb }.
-      if (Array.isArray(data)) {
+      // /api/folders root response shapes (1.0.7+):
+      //   Array            — folders only (no root videos at all)
+      //   { folders, videos } — same folders plus the videos that
+      //                         live at the project root
+      // /api/folders/[id] returns { folder, breadcrumb } as before.
+      const rootShape =
+        !Array.isArray(data) &&
+        Array.isArray((data as any).folders) &&
+        Array.isArray((data as any).videos)
+      if (Array.isArray(data) || rootShape) {
+        const foldersArray: any[] = Array.isArray(data)
+          ? data
+          : (data as any).folders
         setFolders(
-          data.map((f: any) => ({
+          foldersArray.map((f: any) => ({
             id: f.id,
             slug: f.slug,
             name: f.name,
-            itemCount: (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
+            // Prefer the API-provided `itemCount` (counts video
+            // groups, not versions). Falls back to the raw _count
+            // sum for older API responses that don't include it.
+            itemCount:
+              typeof f.itemCount === 'number'
+                ? f.itemCount
+                : (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
+            previewItems: Array.isArray(f.previewItems) ? f.previewItems : [],
           })),
         )
+        // Root-level videos (1.0.7+) — videos parked at the project
+        // root, e.g. ones the user just moved up out of a top-level
+        // folder. Stored separately so we don't fight the parent
+        // page's `videos` prop when inside a folder.
+        if (rootShape) {
+          setRootVideos((data as any).videos as VideoRow[])
+        } else {
+          setRootVideos([])
+        }
       } else if (data?.folder?.subfolders) {
         setFolders(
           data.folder.subfolders.map((f: any) => ({
             id: f.id,
             slug: f.slug,
             name: f.name,
-            itemCount: (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
+            itemCount:
+              typeof f.itemCount === 'number'
+                ? f.itemCount
+                : (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
+            previewItems: Array.isArray(f.previewItems) ? f.previewItems : [],
           })),
         )
       } else {
@@ -274,6 +332,18 @@ export default function FolderBrowser({
 
   useEffect(() => {
     fetchFolders()
+  }, [fetchFolders])
+
+  // Refetch when a programmatic folder create finishes elsewhere in
+  // the page (1.0.7+). Used by the folder-tree drag-and-drop path so
+  // the brand-new sub-folders show up in the grid as soon as they
+  // exist in the DB, without waiting for the user to refresh.
+  useEffect(() => {
+    const handler = () => fetchFolders()
+    window.addEventListener('framecomment:folders-changed', handler)
+    return () => {
+      window.removeEventListener('framecomment:folders-changed', handler)
+    }
   }, [fetchFolders])
 
   // ─── handlers ───────────────────────────────────────────────
@@ -450,8 +520,13 @@ export default function FolderBrowser({
   // `[name asc, version desc]`, so the first row of each group is
   // the latest version.
   const videoGroups = useMemo<VideoGroup[]>(() => {
+    // At nested folder levels the parent page passes videos via the
+    // `videos` prop; at the project root FolderBrowser fetches them
+    // itself (in `rootVideos`) since the parent doesn't currently
+    // know about them. Either way we group them the same way.
+    const allVideos = videos.length > 0 ? videos : rootVideos
     const byName = new Map<string, VideoRow[]>()
-    for (const v of videos) {
+    for (const v of allVideos) {
       const existing = byName.get(v.name)
       if (existing) existing.push(v)
       else byName.set(v.name, [v])
@@ -491,15 +566,23 @@ export default function FolderBrowser({
     // Folders are ordered by name asc on the server; mirror that for
     // videos so the unified grid reads alphabetically.
     return groups.sort((a, b) => a.name.localeCompare(b.name))
-  }, [videos])
+  }, [videos, rootVideos])
 
   const handleOpenVideo = useCallback(
     (videoName: string) => {
-      router.push(
-        `/share/${_projectSlug}?video=${encodeURIComponent(videoName)}`,
-      )
+      // FolderBrowser only renders on admin pages (1.0.7+), so we
+      // navigate into the admin video player rather than the public
+      // share URL. This keeps admin privileges (rename / delete
+      // comments, admin badges, no "Client N" labelling) instead of
+      // re-entering as an anonymous reviewer. Pass folderId so the
+      // player's title flyout stays scoped to the current folder.
+      const base = `/admin/projects/${projectId}/share?video=${encodeURIComponent(videoName)}`
+      const url = currentFolderId
+        ? `${base}&folderId=${encodeURIComponent(currentFolderId)}`
+        : base
+      router.push(url)
     },
-    [router, _projectSlug],
+    [router, projectId, currentFolderId],
   )
 
   const handleRenameVideo = useCallback(
@@ -526,22 +609,36 @@ export default function FolderBrowser({
 
   const handleDeleteVideo = useCallback(
     async (videoId: string) => {
-      try {
-        // Delete every version that shares this video's name so the
-        // card disappears as a whole. The card's `id` here is the
-        // latest version; we use `videoGroups` to find the siblings.
-        const group = videoGroups.find((g) => g.allIds.includes(videoId))
-        const idsToDelete = group ? group.allIds : [videoId]
-        for (const id of idsToDelete) {
+      // Delete every version that shares this video's name so the
+      // card disappears as a whole. The card's `id` here is the
+      // latest version; we use `videoGroups` to find the siblings.
+      const group = videoGroups.find((g) => g.allIds.includes(videoId))
+      const idsToDelete = group ? group.allIds : [videoId]
+      // Collect errors but don't bail on the first one — when one
+      // version was already deleted (e.g. a stale UI from a prior
+      // attempt), the rest of the group should still go down, and
+      // a 404 should be treated as "already gone" rather than a real
+      // failure (1.0.7+).
+      const realErrors: string[] = []
+      for (const id of idsToDelete) {
+        try {
           const res = await apiFetch(`/api/videos/${id}`, { method: 'DELETE' })
-          if (!res.ok) {
+          if (!res.ok && res.status !== 404) {
             const err = await res.json().catch(() => ({}))
-            throw new Error(err.error || 'Failed to delete video')
+            realErrors.push(err.error || `HTTP ${res.status}`)
           }
+        } catch (err) {
+          realErrors.push(
+            err instanceof Error ? err.message : 'Network error',
+          )
         }
-        onMutated?.()
-      } catch (err) {
-        alert(err instanceof Error ? err.message : 'Failed to delete video')
+      }
+      // Always refresh so a stale row clears even if it was the
+      // 404 case; only surface an alert when something genuinely
+      // failed.
+      onMutated?.()
+      if (realErrors.length > 0) {
+        alert(`Failed to delete video: ${realErrors[0]}`)
       }
     },
     [onMutated, videoGroups],
@@ -642,6 +739,134 @@ export default function FolderBrowser({
       }
     },
     [onMutated],
+  )
+
+  // Drag-video-onto-folder handler (1.0.7+). When the user drops a
+  // video card onto a folder card, every version that belongs to the
+  // same version group (same `name` in this folder) is reparented to
+  // the target folder in one batch call so the move stays atomic. We
+  // optimistically remove the local card immediately to avoid a
+  // visible "double image" while the fetch resolves.
+  const handleMoveVideoToFolder = useCallback(
+    async (sourceVideoId: string, targetFolderId: string) => {
+      if (!sourceVideoId || !targetFolderId) return
+      const group = videoGroups.find((g) => g.allIds.includes(sourceVideoId))
+      const idsToMove = group ? group.allIds : [sourceVideoId]
+      try {
+        const res = await apiFetch('/api/videos/batch', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            videoIds: idsToMove,
+            folderId: targetFolderId,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to move video')
+        }
+        // Tell the page to refetch — it'll bring back a folder grid
+        // with the moved video gone from here and the folder's item
+        // count bumped by one.
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to move video')
+      }
+    },
+    [videoGroups, onMutated],
+  )
+
+  // "Move up one folder" target (1.0.7+). When we're inside ANY
+  // folder the user can move things one level up: a deep folder
+  // bubbles up to its parent, and a top-level folder bubbles up to
+  // the project root. `parentFolderId === null` means "project root";
+  // `canMoveUp === false` only when we're already at the project
+  // root (currentFolderId is null), since there is nothing above the
+  // project itself.
+  const canMoveUp = !!currentFolderId
+  const parentFolderId = useMemo<string | null>(() => {
+    if (!currentFolderId) return null
+    if (!Array.isArray(breadcrumb) || breadcrumb.length < 2) return null
+    return breadcrumb[breadcrumb.length - 2]?.id ?? null
+  }, [currentFolderId, breadcrumb])
+
+  // Move-up handler (1.0.7+) — moves the whole version group of a
+  // single video one level up the tree. Uses the same batch endpoint
+  // as the drag-onto-folder path so the move stays atomic. Sending
+  // `folderId: null` parks the group at the project root, which the
+  // API accepts.
+  const handleMoveVideoUp = useCallback(
+    async (videoId: string) => {
+      if (!canMoveUp) return
+      const group = videoGroups.find((g) => g.allIds.includes(videoId))
+      const idsToMove = group ? group.allIds : [videoId]
+      try {
+        const res = await apiFetch('/api/videos/batch', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            videoIds: idsToMove,
+            folderId: parentFolderId,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to move video')
+        }
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to move video')
+      }
+    },
+    [canMoveUp, parentFolderId, videoGroups, onMutated],
+  )
+
+  // Per-video share handler (1.0.7+). For now we surface the same
+  // project share URL but with `?video=NAME` (and `&folderId` when
+  // applicable) so the link opens the public player straight on this
+  // video. Copies to clipboard and shows a small confirmation.
+  const handleShareVideo = useCallback(
+    async (_videoId: string, videoName: string) => {
+      if (typeof window === 'undefined') return
+      const origin = window.location.origin
+      const params = new URLSearchParams({ video: videoName })
+      if (currentFolderId) params.set('folderId', currentFolderId)
+      const url = `${origin}/share/${_projectSlug}?${params.toString()}`
+      try {
+        await navigator.clipboard.writeText(url)
+        alert(`Link copied to clipboard:\n${url}`)
+      } catch {
+        // Older browsers / strict permissions — at least show the URL
+        // so the user can copy it manually.
+        window.prompt('Copy this share link:', url)
+      }
+    },
+    [_projectSlug, currentFolderId],
+  )
+
+  // Folder move-up handler (1.0.7+). Mirrors the video flow but
+  // re-parents a folder via PATCH /api/folders/[id]. The server
+  // already detects cycles, so we don't have to verify here.
+  const handleMoveFolderUp = useCallback(
+    async (folderId: string) => {
+      if (!canMoveUp) return
+      try {
+        const res = await apiFetch(`/api/folders/${folderId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentFolderId }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to move folder')
+        }
+        await fetchFolders()
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to move folder')
+      }
+    },
+    [canMoveUp, parentFolderId, fetchFolders, onMutated],
   )
 
   const handleBulkDelete = useCallback(async () => {
@@ -774,8 +999,18 @@ export default function FolderBrowser({
   // (1.0.6+) so dropping files works the same whether the folder is
   // empty or already has content. We carefully ignore in-app folder
   // drags (those use a custom MIME type — see FolderCard).
+  //
+  // 1.0.7+: also handles whole-folder drops. When the user drops a
+  // directory (or several) from their OS, we walk it via
+  // `webkitGetAsEntry` and emit the file list with each entry's
+  // relative path so the parent page can re-create the hierarchy as
+  // FrameComment folders. The same outer container drop zone serves
+  // both file and folder drops — empty-state, project root, and
+  // already-populated folders all support the same gesture.
   const containerDragOver = (e: React.DragEvent) => {
-    if (!currentFolderId || !onUploadFiles) return
+    const canDropFiles = !!currentFolderId && !!onUploadFiles
+    const canDropTree = !!onUploadFolderTree
+    if (!canDropFiles && !canDropTree) return
     const types = Array.from(e.dataTransfer.types)
     if (types.includes(FOLDER_MIME)) return // in-app folder reorder
     if (!types.includes('Files')) return
@@ -794,12 +1029,52 @@ export default function FolderBrowser({
     }
   }
   const containerDrop = (e: React.DragEvent) => {
-    if (!currentFolderId || !onUploadFiles) return
-    const files = Array.from(e.dataTransfer.files)
-    if (!files.length) return
+    const canDropFiles = !!currentFolderId && !!onUploadFiles
+    const canDropTree = !!onUploadFolderTree
+    if (!canDropFiles && !canDropTree) return
     e.preventDefault()
     setIsFileDropHover(false)
-    onUploadFiles(files)
+
+    // Try the modern entry-walk path first. CRITICAL: we snapshot
+    // every dropped DataTransferItem into FileSystemEntry objects
+    // synchronously here — `webkitGetAsEntry()` only works inside the
+    // synchronous portion of the drop handler. Anything we do with
+    // those entries (including the recursive directory walk) can then
+    // be async safely.
+    const snapshot = canDropTree
+      ? snapshotDataTransferEntries(e.dataTransfer.items)
+      : null
+    const flatFiles = canDropFiles ? Array.from(e.dataTransfer.files) : []
+
+    if (snapshot && snapshot.length > 0) {
+      void (async () => {
+        try {
+          const walked = await walkSnapshotEntries(snapshot)
+          if (walked.hadDirectory) {
+            const videoEntries = walked.entries.filter((entry) =>
+              isAcceptedVideoFile(entry.file),
+            )
+            if (videoEntries.length === 0) return
+            onUploadFolderTree?.(videoEntries)
+            return
+          }
+          // No directory was dropped — fall back to the flat-files
+          // path if the parent gave us a handler for it.
+          if (canDropFiles && flatFiles.length) {
+            onUploadFiles?.(flatFiles)
+          }
+        } catch (err) {
+          if (canDropFiles && flatFiles.length) {
+            onUploadFiles?.(flatFiles)
+          }
+        }
+      })()
+      return
+    }
+
+    if (canDropFiles && flatFiles.length) {
+      onUploadFiles?.(flatFiles)
+    }
   }
 
   const hasItems = folders.length > 0 || videoGroups.length > 0
@@ -876,7 +1151,9 @@ export default function FolderBrowser({
           <p className="mt-5 text-sm text-muted-foreground">
             {currentFolderId
               ? 'Drag files and folders to begin.'
-              : 'No folders here yet. Create your first folder to get started.'}
+              : onUploadFolderTree
+                ? 'Drag a folder of videos here, or create your first folder.'
+                : 'No folders here yet. Create your first folder to get started.'}
           </p>
           {currentFolderId ? (
             // Upload button with a small dropdown for Files / Folder.
@@ -1022,7 +1299,28 @@ export default function FolderBrowser({
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files || [])
-          if (files.length) onUploadFiles?.(files)
+          if (!files.length) {
+            e.target.value = ''
+            return
+          }
+          // When the input has `webkitdirectory` set, each File carries
+          // a `webkitRelativePath` like "MyFolder/Sub/video.mp4". We
+          // route folder pickers through the same tree handler used by
+          // drag-drop so videos in nested sub-folders land in the
+          // matching FrameComment hierarchy instead of all collapsing
+          // to the current folder.
+          const entries = entriesFromInputFiles(files).filter((entry) =>
+            isAcceptedVideoFile(entry.file),
+          )
+          const hasNesting = entries.some((entry) =>
+            entry.relativePath.includes('/'),
+          )
+          if (hasNesting && onUploadFolderTree && entries.length) {
+            onUploadFolderTree(entries)
+          } else {
+            const videoFiles = files.filter((f) => isAcceptedVideoFile(f))
+            if (videoFiles.length) onUploadFiles?.(videoFiles)
+          }
           e.target.value = ''
         }}
       />
@@ -1036,17 +1334,21 @@ export default function FolderBrowser({
               name={f.name}
               itemCount={f.itemCount}
               slug={f.slug}
+              previewItems={f.previewItems}
               onOpen={handleOpenFolder}
               onRename={handleRename}
               onShare={handleShare}
               onDelete={handleDelete}
+              onMoveUp={canMoveUp ? handleMoveFolderUp : undefined}
               onDragStart={(id) => setDraggingFolderId(id)}
               onDragEnd={() => setDraggingFolderId(null)}
               onDropFolder={handleDropOnFolder}
+              onDropVideo={handleMoveVideoToFolder}
               isBeingDragged={draggingFolderId === f.id}
               isPotentialDropTarget={
                 draggingFolderId !== null && draggingFolderId !== f.id
               }
+              isPotentialVideoDropTarget={draggingVideoId !== null}
             />
           ))}
           {videoGroups.map((v) => (
@@ -1078,6 +1380,8 @@ export default function FolderBrowser({
               onOpen={handleOpenVideo}
               onRename={handleRenameVideo}
               onDelete={handleDeleteVideo}
+              onMoveUp={canMoveUp ? handleMoveVideoUp : undefined}
+              onShare={handleShareVideo}
             />
           ))}
         </div>

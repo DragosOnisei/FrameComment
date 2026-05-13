@@ -6,11 +6,16 @@ import Link from 'next/link'
 import { ArrowLeft, Settings, Upload } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import AdminVideoManager from '@/components/AdminVideoManager'
+import AdminVideoManager, { type AdminVideoManagerHandle } from '@/components/AdminVideoManager'
 import FolderBrowser from '@/components/FolderBrowser'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
+import {
+  createFolderHierarchy,
+  uniqueDirectoryPaths,
+  type FileTreeEntry,
+} from '@/lib/folder-upload'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,10 +44,7 @@ export default function ProjectFolderPage() {
   // AdminVideoManager still needs a sortMode prop even though its
   // visible list is hidden (we use it only for the upload modal).
   const sortMode = 'alphabetical' as const
-  const videoManagerRef = useRef<{
-    triggerUpload: () => void
-    triggerUploadWithFiles: (files: File[]) => void
-  } | null>(null)
+  const videoManagerRef = useRef<AdminVideoManagerHandle | null>(null)
 
   const fetchFolder = useCallback(async (opts?: { silent?: boolean }) => {
     try {
@@ -82,6 +84,46 @@ export default function ProjectFolderPage() {
   useEffect(() => {
     fetchFolder()
   }, [fetchFolder])
+
+  // Handle a whole-folder drop (1.0.7+). The user dropped a folder
+  // from their OS — we mint the matching FrameComment folders under
+  // the current one first, then hand the upload modal a list of
+  // `(file, folderId)` pairs so each video lands in the right place.
+  // Hidden files and non-video files were already filtered out by the
+  // FolderBrowser walker.
+  const handleUploadFolderTree = useCallback(
+    async (entries: FileTreeEntry[]) => {
+      if (entries.length === 0) return
+      try {
+        const paths = uniqueDirectoryPaths(entries)
+        const pathToFolderId = await createFolderHierarchy(
+          projectId,
+          folderId,
+          paths,
+        )
+        const seeded = entries.map((entry) => {
+          const dir = entry.relativePath.replace(/\/[^/]*$/, '')
+          const isTopLevel = !dir || dir === entry.relativePath
+          const targetFolderId = isTopLevel
+            ? folderId
+            : pathToFolderId.get(dir) || folderId
+          return { file: entry.file, folderId: targetFolderId }
+        })
+        videoManagerRef.current?.triggerUploadWithFolderTree(seeded)
+        // Refresh in the background so the new folders show up in the
+        // grid as soon as the upload begins.
+        fetchFolder({ silent: true })
+      } catch (err) {
+        logError('[ProjectFolderPage] folder-tree upload failed:', err)
+        alert(
+          err instanceof Error
+            ? `Failed to create folders: ${err.message}`
+            : 'Failed to upload folder',
+        )
+      }
+    },
+    [projectId, folderId, fetchFolder],
+  )
 
   // Auto-poll while any video in this folder is still being
   // processed by the worker (UPLOADING / PROCESSING). Stops as soon
@@ -193,6 +235,7 @@ export default function ProjectFolderPage() {
             onUploadFiles={(files) =>
               videoManagerRef.current?.triggerUploadWithFiles(files)
             }
+            onUploadFolderTree={handleUploadFolderTree}
             videos={videos}
             stretch
           />

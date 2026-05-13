@@ -7,6 +7,7 @@ import { apiPost, apiDelete } from '@/lib/api-client'
 import { secondsToTimecode, timecodeToSeconds } from '@/lib/timecode'
 import { AnnotationData } from '@/types/annotations'
 import { logError } from '@/lib/logging'
+import { getClientId } from '@/lib/client-id'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -575,6 +576,9 @@ export function useCommentManagement({
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${shareToken}`,
+              // Per-browser id (1.0.7+) so two anonymous viewers on
+              // the same IP get distinct sessions on the server.
+              'X-Framecomment-Client-Id': getClientId(),
             },
             body: JSON.stringify(requestBody),
           }).then(async response => {
@@ -695,6 +699,7 @@ export function useCommentManagement({
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${shareToken}`,
+            'X-Framecomment-Client-Id': getClientId(),
           },
         })
         if (!response.ok) {

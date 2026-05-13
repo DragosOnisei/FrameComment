@@ -158,6 +158,10 @@ export async function GET(
       approved: video.approved,
       approvedAt: video.approvedAt,
       thumbnailPath: video.thumbnailPath,
+      // folderId surfaced (1.0.6+) so the share page can scope the
+      // title-flyout to videos from one folder when arriving via a
+      // folder share link.
+      folderId: video.folderId ?? null,
       createdAt: video.createdAt,
       // Explicitly omit: projectId, originalStoragePath, preview720Path, preview1080Path,
       // cleanPreview720Path, cleanPreview1080Path, processingError, processingProgress,

@@ -104,10 +104,18 @@ export async function DELETE(
         existingComment.project.authMode,
         { allowGuest: false, requiredPermission: 'comment' }
       )
-      if (
+      // Per-browser id (1.0.7+): if the stored sessionId is in the
+      // `client:<uuid>` form, match against the request's header
+      // instead of the IP-derived one. Falls back to the legacy
+      // shareTokenSessionId match for older comments.
+      const clientBrowserId = (request.headers.get('x-framecomment-client-id') || '').trim()
+      const stored = existingComment.editorSessionId
+      const matchesClient =
+        clientBrowserId.length > 0 && stored === `client:${clientBrowserId}`
+      const matchesShare =
         accessCheck.authorized &&
-        accessCheck.shareTokenSessionId === existingComment.editorSessionId
-      ) {
+        accessCheck.shareTokenSessionId === stored
+      if (matchesClient || matchesShare) {
         authorized = true
       }
     }
@@ -213,10 +221,14 @@ export async function PATCH(
         existingComment.project.authMode,
         { allowGuest: false, requiredPermission: 'comment' }
       )
-      if (
+      const clientBrowserId = (request.headers.get('x-framecomment-client-id') || '').trim()
+      const stored = existingComment.editorSessionId
+      const matchesClient =
+        clientBrowserId.length > 0 && stored === `client:${clientBrowserId}`
+      const matchesShare =
         accessCheck.authorized &&
-        accessCheck.shareTokenSessionId === existingComment.editorSessionId
-      ) {
+        accessCheck.shareTokenSessionId === stored
+      if (matchesClient || matchesShare) {
         authorized = true
       }
     }

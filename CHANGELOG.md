@@ -17,6 +17,161 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.7] - 2026-05-13
+
+The "Frame.io polish" release. Folders learn to upload whole trees,
+cards grow real mosaic covers, anonymous reviewers stop collapsing
+into a single "Client", and the admin player stays admin even when
+its parent folder is shared.
+
+### Added — Whole-folder drag-and-drop upload
+
+- Drop an OS folder onto a project or sub-folder and FrameComment
+  walks the tree via `webkitGetAsEntry`, filters to video extensions
+  (mp4, mov, mkv, webm, avi, m4v, mxf, prores; hidden files like
+  `.DS_Store` get dropped), and recreates the hierarchy as
+  FrameComment folders before uploading each video into its matching
+  destination. The "Upload Folder" picker in the empty-state dropdown
+  also routes through the same path via `webkitdirectory`.
+- `src/lib/folder-upload.ts` — `snapshotDataTransferEntries`,
+  `walkSnapshotEntries`, `uniqueDirectoryPaths`,
+  `createFolderHierarchy`, plus a shared video-extension whitelist.
+  Snapshots happen synchronously in the drop handler because
+  `DataTransferItem` references are invalidated as soon as the
+  handler returns.
+- `VideoUploadModal` learns `initialFilesWithFolders` so each pending
+  upload remembers its own `folderId` override for the
+  `POST /api/videos` call. `AdminVideoManager` exposes a new
+  `triggerUploadWithFolderTree` imperative method.
+- A global `framecomment:folders-changed` event makes the
+  FolderBrowser refetch its sub-folder list immediately after a
+  programmatic create, so the new folders appear in the grid without
+  a manual refresh.
+
+### Added — Frame.io-style folder cards
+
+- Folder cards now render a full-width mosaic cover (`aspect-video`)
+  instead of a small icon in the corner. The cover shows up to 4
+  preview tiles arranged the same way Frame.io does:
+  - 1 item → one full tile
+  - 2 items → split 50/50 vertical
+  - 3 items → 1 big left + 2 stacked right
+  - 4 items → 2×2 grid
+  Tiles are separated by a 4px gap that picks up the card background
+  so the slices read as deliberate Frame.io seams.
+- Item composition mixes sub-folder glyphs and video thumbnails:
+  sub-folders take priority (up to 4), remaining slots fill with the
+  most recent READY videos. So `1 sub-folder + 6 videos` reads as
+  `[folder, v1, v2, v3]`; `0 sub-folders + 3 videos` reads as the
+  3-cell mosaic.
+- New `src/lib/folder-previews.ts` (`fetchFolderPreviewData`) fetches
+  preview tiles + corrected item counts in a single round trip for
+  every folder. The "N items" label now counts *video groups* (one
+  per distinct `name`), not raw rows — so a folder holding
+  `1 sub-folder + 1 video with 3 versions` reads as "2 items", not 4.
+- Both `/api/folders` (root) and `/api/folders/[id]` (sub-folders)
+  emit `previewItems` + `itemCount`. The public folder share at
+  `/share/folder/[slug]` now reuses the same FolderCard component
+  (kebab hidden for clients) so reviewers see the same large mosaic
+  as admins.
+
+### Added — Numbered guest reviewers + deterministic colours
+
+- `Client 1` / `Client 2` / `Client N` labels for anonymous viewers
+  on a share link, indexed in first-comment-time order across the
+  whole project. Implemented via `buildGuestSessionIndex` in
+  `comment-sanitization.ts`, applied in:
+  - `GET /api/share/[token]/comments`
+  - `POST /api/comments` (both the listing GET and the create
+    response, so the UI doesn't flash back to plain "Client" after
+    each new post)
+  - `GET /api/projects/[id]` (admin view)
+- Per-tab `framecomment.clientId` UUID in `sessionStorage` (not
+  `localStorage` — Chrome incognito windows share a private
+  `localStorage` jar). The browser sends it as
+  `X-Framecomment-Client-Id` on every POST/PATCH/DELETE to
+  `/api/comments`, and the server uses it as the authoritative
+  `editorSessionId` (`client:<uuid>`) so two anonymous viewers on
+  the same public IP stay distinguishable. Edit/delete authorization
+  accepts both the new `client:<uuid>` and legacy `none:<ip>` forms
+  for backward compatibility.
+- `getUserColor` now snaps "Client N" labels to a deterministic slot
+  in the receiver palette (`RECEIVER_PALETTE[(n-1) % 20]`), so Client
+  3 is the same colour on every browser regardless of registry load
+  order. Used by sidebar avatars, timeline marker dots, and tooltips.
+
+### Added — Smaller, opaque timeline markers
+
+- Comment dots on the timeline are now solid-filled circles (saturated
+  500-tier fills, white initials, thin `ring-black/40` outline) instead
+  of translucent pastel bubbles. Sized down to `w-4 h-4 sm:w-[18px]
+  sm:h-[18px]` to match Frame.io. The mini-avatars in the marker
+  tooltip get the same solid treatment.
+
+### Added — Move-up, drag-into-folder, share-this-video
+
+- "Move up one folder" menu item on both VideoCard and FolderCard.
+  Videos / folders inside a top-level folder bubble up to the project
+  root via `PATCH /api/videos/batch` (`folderId` may now be null) or
+  `PATCH /api/folders/[id]`. The button is hidden only at the project
+  root, where there is nothing above.
+- Drag-and-drop a video card onto a folder card to move the whole
+  version group at once. `/api/videos/batch` PATCH now accepts an
+  optional `folderId` (string | null) and validates that the target
+  folder belongs to the same project. FolderCard lights up with a
+  primary-ring affordance whenever any video is being dragged.
+- "Share video" item in the VideoCard kebab — copies a deep-link to
+  the project share with `?video=NAME&folderId=...` so the recipient
+  lands straight on this video in the public player. Clipboard fallback
+  uses `window.prompt` when the clipboard API is restricted.
+- Project root grid now displays root-level videos (those moved up
+  out of folders). `/api/folders?parentFolderId=root` returns
+  `{ folders, videos }` with thumbnails/previews tokenised the same
+  way as the folder GET; shared enrichment lives in
+  `src/lib/folder-video-enrichment.ts`.
+
+### Added — Player + share polish
+
+- ArrowLeft / ArrowRight on the player step one frame at a time
+  (falls back to ~30 fps when metadata isn't loaded yet, auto-pauses
+  on first keypress, ignored while typing in an input).
+- Sort dropdown on the projects dashboard is now a real dropdown
+  (A-Z / Z-A); legacy Status / Due-Date entries removed.
+- Public share folder page kebab is hidden for clients (no Rename /
+  Share / Delete / Move up).
+- "All Videos" button keeps its label when the player is opened from
+  a folder share, but uses `router.back()` so admin returns to the
+  admin folder browser instead of being kicked into the public share
+  folder page. Title flyout + version dropdown are scoped to the
+  source folder when one is present.
+
+### Removed
+
+- Calendar and Clients items in the admin top navigation. The
+  underlying pages remain on disk; they just aren't linked anymore.
+
+### Fixed
+
+- Folder drag-drop with sub-folders no longer fails silently —
+  the entry walk now snapshots `FileSystemEntry` objects inside the
+  synchronous drop handler so awaits across the recursion don't
+  invalidate the browser's drag references.
+- `Move up one folder` on a video sitting in a top-level folder now
+  succeeds, sending the group to the project root (`folderId = null`).
+- Admin who clicks a video from a folder browser stays in the admin
+  player (`/admin/projects/[id]/share?video=...`) instead of being
+  bounced into the public share URL — preserves their delete/rename
+  privileges and admin badges.
+- Folder kebab and folder cover were sharing a stacking context with
+  the page header; the dropdown now sits above any later page
+  content (header gained explicit `relative z-50`).
+- Comment delete no longer surfaces "Video not found" for stale rows
+  — a 404 on one of the version ids is now treated as already gone
+  and the listing refreshes so the ghost card disappears.
+- POST `/api/comments` response now carries the same `Client N`
+  guest index as the GET, so the UI doesn't briefly flash back to
+  plain "Client" right after submitting.
+
 ## [1.0.6] - 2026-05-12
 
 The "Frame.io parity" release. Projects become folders, folders become

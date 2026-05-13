@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useTranslations } from 'next-intl'
 import { useSearchParams, usePathname, useRouter } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
@@ -52,6 +52,13 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const urlVideoName = searchParams?.get('video') || null
   const urlVersion = searchParams?.get('version') ? parseInt(searchParams.get('version')!, 10) : null
   const urlFocusCommentId = searchParams?.get('comment') || null
+  // Folder share context (1.0.6+). When the client opens a video from
+  // /share/folder/[slug], that page tacks `&folderId=<cuid>&folderSlug=<slug>`
+  // onto the URL. We use folderId to scope the title-flyout / version
+  // dropdown to just that folder, and folderSlug to power the
+  // "Back to folder" button (which replaces the default "All Videos").
+  const urlFolderId = searchParams?.get('folderId') || null
+  const urlFolderSlug = searchParams?.get('folderSlug') || null
 
   const [focusCommentId, setFocusCommentId] = useState<string | null>(urlFocusCommentId)
   const [isPasswordProtected, setIsPasswordProtected] = useState<boolean | null>(null)
@@ -69,6 +76,27 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const [sendingOtp, setSendingOtp] = useState(false)
   const [error, setError] = useState('')
   const [project, setProject] = useState<any>(null)
+
+  // Scoped videosByName (1.0.6+) — when a folderId param is present
+  // the share player only shows the siblings inside THAT folder in
+  // its title flyout + version dropdown + grid view, so a client
+  // opening a folder share link doesn't accidentally walk into a
+  // different folder's content from this player. Falls back to the
+  // full project map when no folder context is supplied.
+  const effectiveVideosByName = useMemo<Record<string, any[]> | null>(() => {
+    if (!project?.videosByName) return null
+    if (!urlFolderId) return project.videosByName
+    const filtered: Record<string, any[]> = {}
+    for (const [name, vids] of Object.entries(
+      project.videosByName as Record<string, any[]>,
+    )) {
+      const inFolder = vids.filter(
+        (v) => (v.folderId ?? null) === urlFolderId,
+      )
+      if (inFolder.length > 0) filtered[name] = inFolder
+    }
+    return filtered
+  }, [project?.videosByName, urlFolderId])
   const [comments, setComments] = useState<any[]>([])
   const [_commentsLoading, setCommentsLoading] = useState(false)
   const [_companyName, setCompanyName] = useState('Studio')
@@ -645,8 +673,24 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
   }, [project?.videosByName, searchParams, pathname, router])
 
-  // Handle back to grid - remove video param from URL
+  // Handle back to grid - remove video param from URL. When the
+  // share player was opened with folder context (1.0.6+), "back"
+  // uses router.back() so the visitor returns to whatever folder
+  // page they came from — admin folder browser for admins, share
+  // folder grid for clients — instead of being forced onto the
+  // client-side share folder page. If there is no history (e.g.
+  // the URL was pasted directly) we fall back to /share/folder/{slug}.
   const handleBackToGrid = useCallback(() => {
+    if (urlFolderId || urlFolderSlug) {
+      if (typeof window !== 'undefined' && window.history.length > 1) {
+        router.back()
+        return
+      }
+      if (urlFolderSlug) {
+        router.push(`/share/folder/${urlFolderSlug}`)
+        return
+      }
+    }
     setViewState('grid')
 
     // Remove video parameter from URL
@@ -654,7 +698,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     params.delete('video')
     const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
     router.replace(newUrl || '', { scroll: false })
-  }, [searchParams, pathname, router])
+  }, [searchParams, pathname, router, urlFolderId, urlFolderSlug])
 
   const handleDownloadAll = useCallback(async () => {
     if (downloadingAll || !shareToken) return
@@ -1084,7 +1128,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         <div className="flex-1 overflow-y-auto">
           <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8" data-tutorial="video-grid">
             <ThumbnailGrid
-              videosByName={project.videosByName}
+              videosByName={effectiveVideosByName ?? project.videosByName}
               thumbnailsByName={thumbnailsByName}
               thumbnailsLoading={thumbnailsLoading}
               onVideoSelect={handleVideoSelect}
@@ -1122,7 +1166,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     <div className="min-h-screen lg:fixed lg:inset-0 bg-background flex flex-col lg:overflow-hidden">
       {/* Thumbnail Reel - always visible, collapsible */}
         <ThumbnailReel
-          videosByName={project.videosByName}
+          videosByName={effectiveVideosByName ?? project.videosByName}
           thumbnailsByName={thumbnailsByName}
           activeVideoName={activeVideoName}
           activeVideoId={activeVideoId}

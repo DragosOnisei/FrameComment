@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import {
+  ArrowUpFromLine,
   Film as FilmIcon,
   MoreVertical,
   Pencil,
+  Share2,
   Trash2,
   MessageSquare,
   Check,
@@ -75,6 +77,15 @@ export interface VideoCardProps {
   onOpen: (name: string) => void
   onRename?: (id: string, currentName: string) => void
   onDelete?: (id: string, currentName: string) => void
+  /** Move the whole version group one level up in the folder tree
+   *  (1.0.7+). When omitted (e.g. the video is already at the
+   *  top-level folder where the parent would be the project root)
+   *  the menu item is hidden. */
+  onMoveUp?: (id: string) => void
+  /** Share this single video as a public link (1.0.7+). When omitted
+   *  the menu item is hidden — used on the public share page where
+   *  the client should not be able to re-share. */
+  onShare?: (id: string, currentName: string) => void
 }
 
 // Custom MIME for video drag — separate from the folder DnD so the
@@ -131,6 +142,8 @@ export default function VideoCard({
   onOpen,
   onRename,
   onDelete,
+  onMoveUp,
+  onShare,
 }: VideoCardProps) {
   // Hover state for the drop-target ring. Only set when ANOTHER
   // video is being dragged over THIS card.
@@ -472,7 +485,7 @@ export default function VideoCard({
         {/* Kebab — only renders when at least one action is wired.
             On the public client share we omit Rename/Delete entirely,
             so the kebab disappears and the card stays read-only. */}
-        {(onRename || onDelete) && (
+        {(onRename || onDelete || onMoveUp || onShare) && (
         <div ref={menuRef} className="relative">
           <button
             type="button"
@@ -506,6 +519,34 @@ export default function VideoCard({
                 >
                   <Pencil className="w-4 h-4 shrink-0" />
                   Rename
+                </button>
+              )}
+              {onShare && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onShare(id, name)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                >
+                  <Share2 className="w-4 h-4 shrink-0" />
+                  Share video
+                </button>
+              )}
+              {onMoveUp && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onMoveUp(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                >
+                  <ArrowUpFromLine className="w-4 h-4 shrink-0" />
+                  Move up one folder
                 </button>
               )}
               {onDelete && (

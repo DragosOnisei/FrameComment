@@ -35,6 +35,13 @@ export interface AdminVideoManagerHandle {
    *  used by the Frame.io-style empty-state drop zone in
    *  FolderBrowser. Files are filtered to video/* by the modal. */
   triggerUploadWithFiles: (files: File[]) => void
+  /** Open the upload modal AND pre-seed it with per-file folder
+   *  overrides — used by the folder-tree drag-and-drop path so each
+   *  video lands in the matching sub-folder that we just created in
+   *  FrameComment (1.0.7+). */
+  triggerUploadWithFolderTree: (
+    entries: Array<{ file: File; folderId: string | null }>,
+  ) => void
 }
 
 const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerProps>(({
@@ -73,15 +80,28 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
   // drop zone in FolderBrowser). Cleared once the modal consumes them
   // so the same drop doesn't re-fire on subsequent triggers.
   const [pendingInitialFiles, setPendingInitialFiles] = useState<File[] | null>(null)
+  // Per-file folder overrides for the folder-tree drag-and-drop path
+  // (1.0.7+). Same lifecycle as `pendingInitialFiles`: set once when
+  // the parent calls `triggerUploadWithFolderTree`, cleared when the
+  // modal closes.
+  const [pendingInitialFilesWithFolders, setPendingInitialFilesWithFolders] =
+    useState<Array<{ file: File; folderId: string | null }> | null>(null)
 
   // Expose triggerUpload method to parent via ref
   useImperativeHandle(ref, () => ({
     triggerUpload: () => {
       setPendingInitialFiles(null)
+      setPendingInitialFilesWithFolders(null)
       setIsUploadModalOpen(true)
     },
     triggerUploadWithFiles: (files: File[]) => {
+      setPendingInitialFilesWithFolders(null)
       setPendingInitialFiles(files)
+      setIsUploadModalOpen(true)
+    },
+    triggerUploadWithFolderTree: (entries) => {
+      setPendingInitialFiles(null)
+      setPendingInitialFilesWithFolders(entries)
       setIsUploadModalOpen(true)
     },
   }))
@@ -170,11 +190,13 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
           // Clear seeded files so the next plain triggerUpload()
           // starts with a clean slate.
           setPendingInitialFiles(null)
+          setPendingInitialFilesWithFolders(null)
         }}
         projectId={projectId}
         folderId={folderId ?? null}
         onUploadComplete={handleUploadComplete}
         initialFiles={pendingInitialFiles}
+        initialFilesWithFolders={pendingInitialFilesWithFolders}
       />
 
       {sortedGroupNames.map((groupName) => {

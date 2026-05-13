@@ -42,11 +42,54 @@ const normalizeTimecode = (comment: any): string => {
   return '00:00:00:00'
 }
 
+/**
+ * Build a stable `Client N` index for the set of comments returned in
+ * one listing (1.0.7+). Anonymous guests on a share link all show up
+ * as "Client" by default — useless when multiple people from one
+ * agency post feedback on the same link. We walk the comment tree
+ * (including replies), sort by creation time, and assign each unique
+ * guest `editorSessionId` a sequential index in first-seen order so
+ * the labels stay consistent across viewers and across reloads.
+ *
+ * Authenticated / admin / internal comments don't get an index — they
+ * keep whatever name they already had.
+ */
+export function buildGuestSessionIndex(
+  topLevelComments: any[],
+): Map<string, number> {
+  const flat: any[] = []
+  const walk = (list: any[] | undefined) => {
+    if (!list) return
+    for (const c of list) {
+      flat.push(c)
+      if (Array.isArray(c.replies) && c.replies.length) walk(c.replies)
+    }
+  }
+  walk(topLevelComments)
+  flat.sort((a, b) => {
+    const ta = a?.createdAt ? new Date(a.createdAt).getTime() : 0
+    const tb = b?.createdAt ? new Date(b.createdAt).getTime() : 0
+    return ta - tb
+  })
+
+  const index = new Map<string, number>()
+  for (const c of flat) {
+    if (c.userId) continue // authenticated user — they have a real name
+    if (c.isInternal) continue // admin comment — labelled "Admin"
+    const sid = c.editorSessionId
+    if (!sid) continue
+    if (index.has(sid)) continue
+    index.set(sid, index.size + 1)
+  }
+  return index
+}
+
 export function sanitizeComment(
   comment: any,
   isAdmin: boolean,
   isAuthenticated: boolean,
-  clientName?: string
+  clientName?: string,
+  guestIndex?: Map<string, number>,
 ) {
   const normalizedTimecode = normalizeTimecode(comment)
 
@@ -74,11 +117,27 @@ export function sanitizeComment(
     editorSessionId: comment.editorSessionId || null,
   }
 
+  // Compute a "Client N" suffix once per call so each branch below
+  // can fall back to it whenever a guest comment lacks a real name
+  // (1.0.7+). Returns just "Client" when no index is supplied or the
+  // session isn't in the map — keeping backward compatibility.
+  const numberedClient = (() => {
+    if (!guestIndex || !comment.editorSessionId) return 'Client'
+    const n = guestIndex.get(comment.editorSessionId)
+    return typeof n === 'number' && n > 0 ? `Client ${n}` : 'Client'
+  })()
+  const looksGeneric = (n?: string | null) =>
+    !n || !n.trim() || n.trim().toLowerCase() === 'client'
+
   // NEVER expose real names or emails to non-admins
   // Use generic labels only
   if (isAdmin) {
-    // Admins get real data for management purposes only
-    sanitized.authorName = comment.authorName
+    // Admins get real data for management purposes only — but when
+    // the stored authorName is missing/generic, surface the
+    // `Client N` index so they can still tell agency reviewers apart.
+    sanitized.authorName = looksGeneric(comment.authorName)
+      ? (comment.isInternal ? 'Admin' : numberedClient)
+      : comment.authorName
     sanitized.authorEmail = comment.authorEmail
     sanitized.userId = comment.userId
     if (comment.user) {
@@ -89,13 +148,28 @@ export function sanitizeComment(
       }
     }
   } else if (isAuthenticated) {
-    // Authenticated share users see author names but never emails
-    sanitized.authorName = comment.isInternal
-      ? (comment.authorName || 'Admin')
-      : (comment.authorName || clientName || 'Client')
+    // Authenticated share users see author names but never emails.
+    // For non-internal comments, prefer the stored name; if that's
+    // missing or generic, prefer the project's client name; if THAT
+    // is also generic (literally "Client", because the project has
+    // no companyName / primary recipient), surface the per-session
+    // numbered label so two anonymous reviewers stay distinguishable.
+    let label: string
+    if (comment.isInternal) {
+      label = comment.authorName || 'Admin'
+    } else if (!looksGeneric(comment.authorName)) {
+      label = comment.authorName
+    } else if (!looksGeneric(clientName)) {
+      label = clientName as string
+    } else {
+      label = numberedClient
+    }
+    sanitized.authorName = label
   } else {
-    // Guests/public: generic labels only, no PII
-    sanitized.authorName = comment.isInternal ? 'Admin' : 'Client'
+    // Guests/public: generic labels only, no PII. Numbered when
+    // possible so multiple anonymous reviewers don't collapse into
+    // a single "Client".
+    sanitized.authorName = comment.isInternal ? 'Admin' : numberedClient
   }
 
   // Pass through assets (safe subset already selected by Prisma query)
@@ -110,10 +184,12 @@ export function sanitizeComment(
     }))
   }
 
-  // Recursively sanitize replies
+  // Recursively sanitize replies — forward the same guest index so
+  // a reply by Client 2 stays labelled consistently regardless of
+  // depth.
   if (comment.replies && Array.isArray(comment.replies)) {
     sanitized.replies = comment.replies.map((reply: any) =>
-      sanitizeComment(reply, isAdmin, isAuthenticated, clientName)
+      sanitizeComment(reply, isAdmin, isAuthenticated, clientName, guestIndex)
     )
   }
 

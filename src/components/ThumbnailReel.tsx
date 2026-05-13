@@ -16,6 +16,10 @@ interface ThumbnailReelProps {
   onVideoSelect: (videoName: string) => void
   onBackToGrid?: () => void
   showBackButton?: boolean
+  /** Override label on the back button. When provided, takes precedence
+   *  over the default `share.allVideos` translation. Used by folder-share
+   *  player to show "Back to folder" instead of "All Videos". */
+  backLabel?: string
   // Comment panel controls
   showCommentToggle?: boolean
   isCommentPanelVisible?: boolean
@@ -37,6 +41,7 @@ export default function ThumbnailReel({
   onVideoSelect,
   onBackToGrid,
   showBackButton = true,
+  backLabel,
   showCommentToggle = false,
   isCommentPanelVisible = true,
   onToggleCommentPanel,
@@ -193,10 +198,10 @@ export default function ThumbnailReel({
                 size="sm"
                 onClick={onBackToGrid}
                 className="shrink-0 gap-1.5 px-2 sm:px-3 h-8"
-                title={tShare('backToAllVideos')}
+                title={backLabel ?? tShare('backToAllVideos')}
               >
                 <Grid3X3 className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm">{tShare('allVideos')}</span>
+                <span className="hidden sm:inline text-sm">{backLabel ?? tShare('allVideos')}</span>
               </Button>
             )}
           </div>

@@ -181,6 +181,33 @@ const colorRegistry = {
   receiver: new Map<string, string>()
 }
 
+// Receiver (client) palette — exported so the deterministic
+// `Client N` mapping below can index directly into it. Kept in sync
+// with the inline list further down inside `getUserColor` so the two
+// paths share the same swatch order.
+const RECEIVER_PALETTE = [
+  'border-red-500',
+  'border-orange-500',
+  'border-amber-500',
+  'border-yellow-400',
+  'border-lime-500',
+  'border-green-500',
+  'border-emerald-500',
+  'border-teal-500',
+  'border-cyan-500',
+  'border-sky-500',
+  'border-blue-500',
+  'border-indigo-500',
+  'border-violet-500',
+  'border-purple-500',
+  'border-fuchsia-500',
+  'border-pink-500',
+  'border-rose-500',
+  'border-red-600',
+  'border-orange-600',
+  'border-yellow-500',
+]
+
 export function getUserColor(name: string | null | undefined, isSender: boolean = false): { border: string } {
   if (!name) {
     // Default gray for anonymous
@@ -190,7 +217,24 @@ export function getUserColor(name: string | null | undefined, isSender: boolean 
   // Normalize name for consistency (trim, lowercase)
   const normalizedName = name.trim().toLowerCase()
   const palette = isSender ? 'sender' : 'receiver'
-  
+
+  // 1.0.7+: "Client N" labels get a deterministic colour straight
+  // from the number, so two browsers viewing the same project always
+  // paint Client 3 with the same swatch regardless of the order in
+  // which their local registry happened to fill. Falls through to
+  // the hash path for any other name.
+  const numbered = /^client\s+(\d+)$/.exec(normalizedName)
+  if (numbered && !isSender) {
+    const n = parseInt(numbered[1], 10)
+    if (Number.isFinite(n) && n > 0) {
+      const colors = RECEIVER_PALETTE
+      // n is 1-indexed; map to 0-indexed slot, wrap around once we
+      // exceed the palette so Client 21 is the same colour as Client 1
+      // (still consistent across viewers).
+      return { border: colors[(n - 1) % colors.length] }
+    }
+  }
+
   // Check if this name already has a color assigned
   if (colorRegistry[palette].has(normalizedName)) {
     return { border: colorRegistry[palette].get(normalizedName)! }

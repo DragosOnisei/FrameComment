@@ -480,6 +480,51 @@ export default function VideoPlayer({
         }))
         return
       }
+
+      // ArrowLeft / ArrowRight: step one frame (1.0.7+). Same
+      // behaviour as Ctrl+J / Ctrl+L but without the modifier so it
+      // matches Frame.io / DaVinci Resolve muscle memory. We skip the
+      // shortcut when the user is typing in an input / textarea /
+      // contenteditable so it doesn't fight with caret movement.
+      if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+        if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+        const target = e.target as HTMLElement | null
+        if (target) {
+          const tag = target.tagName
+          if (
+            tag === 'INPUT' ||
+            tag === 'TEXTAREA' ||
+            tag === 'SELECT' ||
+            target.isContentEditable
+          ) {
+            return
+          }
+        }
+
+        e.preventDefault()
+        e.stopPropagation()
+
+        if (!video.paused) {
+          video.pause()
+        }
+
+        // Fall back to ~30 fps when we don't know the real frame rate
+        // yet — gives a sensible "one frame" step on the first key
+        // press while the metadata is still loading.
+        const fps = selectedVideo?.fps && selectedVideo.fps > 0 ? selectedVideo.fps : 30
+        const frameDuration = 1 / fps
+        const direction = e.code === 'ArrowLeft' ? -1 : 1
+        const next = video.currentTime + direction * frameDuration
+        const duration = Number.isFinite(video.duration) ? video.duration : undefined
+        video.currentTime = duration
+          ? Math.max(0, Math.min(duration, next))
+          : Math.max(0, next)
+        currentTimeRef.current = video.currentTime
+        window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
+          detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current }
+        }))
+        return
+      }
     }
 
     // Use capture phase to intercept events before they reach other elements

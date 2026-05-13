@@ -34,6 +34,11 @@ interface PendingUpload {
   error?: string
   videoId?: string
   paused?: boolean
+  /** Per-file folder override (1.0.7+). When the modal is opened from
+   *  a folder drag-and-drop with hierarchy, each file knows which
+   *  newly-created FrameComment folder it belongs to — overrides the
+   *  top-level `folderId` prop just for this row. */
+  folderIdOverride?: string | null
 }
 
 interface VideoUploadModalProps {
@@ -46,13 +51,20 @@ interface VideoUploadModalProps {
    *  onto the empty state pre-fills this modal. The list is consumed
    *  once per "open" (effect tracks an instance via array identity). */
   initialFiles?: File[] | null
+  /** Per-file pre-seed (1.0.7+) — same as `initialFiles` but with each
+   *  file pinned to a specific folder. Used when the user drops an
+   *  entire folder tree from their OS: we mint the matching folders in
+   *  FrameComment first, then hand the upload modal a list of
+   *  `(file, folderId)` pairs so each video lands in the correct
+   *  sub-folder. The list is also consumed once per array identity. */
+  initialFilesWithFolders?: Array<{ file: File; folderId: string | null }> | null
   /** Optional folder to upload into. When set, the server attaches
    *  the new video to this folder; when null/undefined, the video
    *  goes to the project root (legacy / dashboard behaviour). */
   folderId?: string | null
 }
 
-export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete, initialFiles, folderId }: VideoUploadModalProps) {
+export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete, initialFiles, initialFilesWithFolders, folderId }: VideoUploadModalProps) {
   const t = useTranslations('videos')
   const tc = useTranslations('common')
   const storageProvider = useStorageProvider()
@@ -210,6 +222,41 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialFiles])
 
+  // Per-folder seed (1.0.7+) — same effect as above but each pending
+  // upload remembers its own folderId so the POST /api/videos call
+  // routes the new record into the right sub-folder. Used by the
+  // folder-tree drag-and-drop path.
+  const seededWithFoldersRef = useRef<
+    Array<{ file: File; folderId: string | null }> | null
+  >(null)
+  useEffect(() => {
+    if (!isOpen) return
+    if (!initialFilesWithFolders || initialFilesWithFolders.length === 0) return
+    if (seededWithFoldersRef.current === initialFilesWithFolders) return
+    seededWithFoldersRef.current = initialFilesWithFolders
+    const videos = initialFilesWithFolders.filter((entry) =>
+      entry.file.type.startsWith('video/') ||
+      // Some macOS .mov files report empty MIME — fall back to
+      // extension whitelist via a quick check.
+      /\.(mp4|mov|avi|mkv|webm|m4v|mxf|prores)$/i.test(entry.file.name),
+    )
+    if (videos.length === 0) return
+    const newUploads: PendingUpload[] = videos.map((entry) => ({
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      file: entry.file,
+      videoName: getVideoNameFromFile(entry.file),
+      versionLabel: '',
+      status: 'pending',
+      progress: 0,
+      speed: 0,
+      folderIdOverride: entry.folderId,
+    }))
+    setPendingUploads((prev) => [...prev, ...newUploads])
+    setSeededActive(true)
+    newUploads.forEach((item) => startUpload(item))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialFilesWithFolders])
+
   // Auto-close the modal once every seeded upload completes. Only
   // fires when this modal session was started by a drag-drop seed.
   // IMPORTANT: if any upload ended in error we keep the modal open
@@ -243,6 +290,7 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
   useEffect(() => {
     if (!isOpen) {
       seededRef.current = null
+      seededWithFoldersRef.current = null
       setSeededActive(false)
     }
   }, [isOpen])
@@ -323,7 +371,14 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
           // 1.0.6+: route the upload into the active folder so the
           // new video shows up in the FolderBrowser grid you're
           // looking at, not at the project root.
-          folderId: folderId ?? null,
+          // 1.0.7+: when the upload was seeded by a folder-tree drop,
+          // each pending row carries its own `folderIdOverride` for
+          // the sub-folder we just created — that beats the modal's
+          // top-level `folderId` prop.
+          folderId:
+            uploadItem.folderIdOverride !== undefined
+              ? uploadItem.folderIdOverride
+              : folderId ?? null,
           versionLabel: trimmedVersionLabel,
           originalFileName: file.name,
           originalFileSize: file.size,

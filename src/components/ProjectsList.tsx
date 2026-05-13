@@ -5,7 +5,7 @@ import { useTranslations, useLocale } from 'next-intl'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Plus, ArrowUpDown, Calendar, Lock } from 'lucide-react'
+import { Plus, ArrowUpDown, Lock } from 'lucide-react'
 import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
 import ProjectCardKebab from '@/components/ProjectCardKebab'
 import { formatDate } from '@/lib/utils'
@@ -82,6 +82,14 @@ export default function ProjectsList({ projects, onProjectMutated }: ProjectsLis
     localStorage.setItem('admin_projects_sort_mode', sortMode)
   }, [sortMode])
 
+  // If the user previously selected status/dueDate, snap back to A-Z
+  // so the visible button label always matches the actual order.
+  useEffect(() => {
+    if (sortMode !== 'alphabetical' && sortMode !== 'alphabetical-reverse') {
+      setSortMode('alphabetical')
+    }
+  }, [sortMode])
+
   function getDueDateColor(dueDate: string, status: string): string {
     // Completed projects (approved, archived, share-only) should never show overdue styling
     if (status === 'APPROVED' || status === 'ARCHIVED' || status === 'SHARE_ONLY') {
@@ -127,15 +135,16 @@ export default function ProjectsList({ projects, onProjectMutated }: ProjectsLis
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setSortMode(current => {
-              const cycle: typeof current[] = ['alphabetical', 'alphabetical-reverse', 'status', 'dueDate']
-              return cycle[(cycle.indexOf(current) + 1) % cycle.length]
-            })}
-            title={sortMode === 'alphabetical' ? t('sortByStatus') : sortMode === 'status' ? t('sortByDueDate') : t('sortAlphabetically')}
+            onClick={() =>
+              setSortMode(
+                sortMode === 'alphabetical' ? 'alphabetical-reverse' : 'alphabetical',
+              )
+            }
+            title={sortMode === 'alphabetical' ? t('zToA') : t('aToZ')}
           >
-            {sortMode === 'dueDate' ? <Calendar className="w-4 h-4" /> : <ArrowUpDown className="w-4 h-4" />}
+            <ArrowUpDown className="w-4 h-4" />
             <span className="hidden sm:inline ml-2">
-              {sortMode === 'alphabetical' ? t('aToZ') : sortMode === 'alphabetical-reverse' ? t('zToA') : sortMode === 'status' ? tc('status') : t('dueDateLabel')}
+              {sortMode === 'alphabetical' ? t('aToZ') : t('zToA')}
             </span>
           </Button>
         </div>

@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest, createCommentSchema, safeParseBody } from '@/lib/validation'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { sanitizeComment } from '@/lib/comment-sanitization'
+import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import {
 
@@ -136,6 +136,10 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'asc' }
     })
 
+    // 1.0.7+: number anonymous guest reviewers as Client 1 / 2 / N
+    // so two incognito viewers don't collapse into a single "Client".
+    const getGuestIndex = buildGuestSessionIndex(allComments as any[])
+
     // Sanitize the response data
     const sanitizedComments = allComments.map((comment: any) =>
       sanitizeComment(
@@ -143,6 +147,7 @@ export async function GET(request: NextRequest) {
         isAdmin,
         isAuthenticated,
         fallbackName,
+        getGuestIndex,
       )
     )
 
@@ -273,6 +278,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Per-browser id sent by the share player (1.0.7+). When present
+    // and the visitor is anonymous, we treat it as the authoritative
+    // session id so two incognito windows on the same IP get
+    // distinct `editorSessionId` rows — fixes both "Client 1 vs
+    // Client 2" labelling and the edit/delete authorization match.
+    const clientBrowserId = (request.headers.get('x-framecomment-client-id') || '').trim()
+    const effectiveSessionId =
+      !authContext.user && clientBrowserId.length > 0
+        ? `client:${clientBrowserId}`
+        : uploaderSessionId
+
     const { isAdmin, isAuthenticated } = accessCheck
 
     // Resolve author information
@@ -329,7 +345,7 @@ export async function POST(request: NextRequest) {
         // Track the share-token session id of the author so they can
         // edit their own comment from the same browser session later.
         // Admin-authored comments rely on userId for edit authorization.
-        editorSessionId: authContext.user ? null : uploaderSessionId,
+        editorSessionId: authContext.user ? null : effectiveSessionId,
       },
       include: {
         user: {
@@ -404,9 +420,20 @@ export async function POST(request: NextRequest) {
     // Fetch all comments for the project (to keep UI in sync)
     const allComments = await fetchProjectComments(projectId)
 
+    // 1.0.7+: same Client 1 / 2 / N numbering as the GET endpoint —
+    // without this the response from POST would drop the index and
+    // the UI flashes back to plain "Client" after every new post.
+    const postGuestIndex = buildGuestSessionIndex(allComments as any[])
+
     // Sanitize the response data
     const sanitizedComments = allComments.map((comment: any) =>
-      sanitizeComment(comment, isAdmin, isAuthenticated, fallbackName)
+      sanitizeComment(
+        comment,
+        isAdmin,
+        isAuthenticated,
+        fallbackName,
+        postGuestIndex,
+      )
     )
 
     return NextResponse.json(sanitizedComments)

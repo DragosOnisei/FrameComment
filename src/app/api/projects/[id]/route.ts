@@ -7,7 +7,7 @@ import { isSmtpConfigured } from '@/lib/settings'
 import { flushPendingClientNotifications } from '@/lib/notifications'
 import { invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
-import { sanitizeComment } from '@/lib/comment-sanitization'
+import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { updateProjectSchema } from '@/lib/validation'
 import { syncCompanyToDirectory } from '@/lib/client-directory-sync'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -96,9 +96,15 @@ export async function GET(
     const primaryRecipient = project.recipients?.find((r: any) => r.isPrimary) || project.recipients?.[0]
     const fallbackName = project.companyName || primaryRecipient?.name || 'Client'
 
+    // 1.0.7+: number anonymous guest reviewers as Client 1, Client 2…
+    // The same index is also computed on the share endpoint so the
+    // labels stay consistent between what admin sees here and what
+    // the client sees on the share link.
+    const adminGuestIndex = buildGuestSessionIndex(project.comments as any[])
+
     // Sanitize/normalize comments to ensure timecodes are consistent
     const sanitizedComments = project.comments.map((comment: any) =>
-      sanitizeComment(comment, true, true, fallbackName)
+      sanitizeComment(comment, true, true, fallbackName, adminGuestIndex)
     )
 
     // Decrypt password for admin users (needed for settings form)

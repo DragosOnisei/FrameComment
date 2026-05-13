@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
+import FolderCard from '@/components/FolderCard'
 import { logError } from '@/lib/logging'
 
 /**
@@ -52,6 +53,12 @@ interface SubfolderRow {
   slug: string
   name: string
   itemCount: number
+  /** Frame.io-style mosaic tiles served by the share API (1.0.7+) —
+   *  the same shape FolderCard expects on the admin side. */
+  previewItems?: Array<
+    | { kind: 'video'; videoId: string; thumbnailUrl: string }
+    | { kind: 'folder'; folderId: string }
+  >
 }
 
 interface VideoRow {
@@ -353,29 +360,26 @@ export default function PublicFolderSharePage() {
           </span>
         </div>
 
-        {/* Subfolders */}
+        {/* Subfolders — public share now uses the SAME FolderCard
+            component as the admin grid (1.0.7+), so the client sees
+            the Frame.io-style mosaic cover, item count, and big
+            folder glyph instead of the legacy small card. Rename /
+            share / delete / drag handlers are intentionally omitted
+            so the kebab disappears and the card stays read-only. */}
         {subfolders.length > 0 && (
           <section>
             <h2 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Folders</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
               {subfolders.map((f) => (
-                <Link
+                <FolderCard
                   key={f.id}
-                  href={`/share/folder/${f.slug}`}
-                  className="group flex flex-col gap-2 rounded-xl border border-border/50 bg-card p-4 transition-all hover:border-border hover:shadow-md"
-                >
-                  <div className="rounded-md bg-foreground/5 dark:bg-foreground/10 p-2.5 w-fit">
-                    <FolderIcon className="w-5 h-5 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate" title={f.name}>
-                      {f.name}
-                    </div>
-                    <div className="text-xs text-muted-foreground tabular-nums mt-0.5">
-                      {f.itemCount === 1 ? '1 item' : `${f.itemCount} items`}
-                    </div>
-                  </div>
-                </Link>
+                  id={f.id}
+                  name={f.name}
+                  itemCount={f.itemCount}
+                  slug={f.slug}
+                  previewItems={f.previewItems}
+                  onOpen={() => router.push(`/share/folder/${f.slug}`)}
+                />
               ))}
             </div>
           </section>
@@ -406,8 +410,14 @@ export default function PublicFolderSharePage() {
                   uploaderName={v.uploaderName}
                   createdAt={v.createdAt}
                   onOpen={(name) =>
+                    // Pass the folder context so the player can scope
+                    // its title-flyout + version dropdown to this
+                    // folder, and so "All Videos" becomes a real
+                    // "Back to folder" link (1.0.6+).
                     router.push(
-                      `${projectShareBase}?video=${encodeURIComponent(name)}`,
+                      `${projectShareBase}?video=${encodeURIComponent(name)}` +
+                        `&folderId=${encodeURIComponent(folder.id)}` +
+                        `&folderSlug=${encodeURIComponent(folder.slug)}`,
                     )
                   }
                 />
