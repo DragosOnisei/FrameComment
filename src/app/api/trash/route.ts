@@ -18,12 +18,10 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { TRASH_RETENTION_DAYS } from '@/lib/trash-cleanup'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-/** How long a trashed item lingers before the cleanup job removes it. */
-export const TRASH_RETENTION_DAYS = 30
 
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAdmin(request)
