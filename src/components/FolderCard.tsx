@@ -39,6 +39,19 @@ export interface FolderCardProps {
    *  (e.g. we're at the project root where there is nothing above)
    *  the menu item is hidden. */
   onMoveUp?: (folderId: string) => void
+  /** When true, the card mounts in inline-edit mode: the title swaps
+   *  for an `<input>` that's already focused with the existing name
+   *  pre-selected (1.0.9+). Used by the "New Folder with Selection"
+   *  flow so the user can type the real name immediately. */
+  autoEditOnMount?: boolean
+  /** Commit handler for the inline rename. Receives the new name —
+   *  parent should PATCH the folder and refresh. When omitted the
+   *  inline editor stays read-only (the kebab Rename path still
+   *  works). */
+  onRenameCommit?: (folderId: string, newName: string) => Promise<void> | void
+  /** Called once the inline edit finishes (committed or cancelled)
+   *  so the parent can clear its pending-auto-edit state. */
+  onAutoEditDone?: (folderId: string) => void
   // Drag-and-drop (Phase F)
   onDragStart?: (folderId: string) => void
   onDragEnd?: () => void
@@ -75,6 +88,9 @@ export default function FolderCard({
   onShare,
   onDelete,
   onMoveUp,
+  autoEditOnMount,
+  onRenameCommit,
+  onAutoEditDone,
   onDragStart,
   onDragEnd,
   onDropFolder,
@@ -86,6 +102,66 @@ export default function FolderCard({
   const [menuOpen, setMenuOpen] = useState(false)
   const [isHoveredDropTarget, setIsHoveredDropTarget] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // Inline-rename state (1.0.9+). Driven either by the auto-edit prop
+  // (after "New Folder with Selection") or — eventually — by clicking
+  // the name. We seed `draftName` from the live `name` so an in-flight
+  // rename from another tab doesn't blow away the user's typing.
+  const [isEditing, setIsEditing] = useState(false)
+  const [draftName, setDraftName] = useState(name)
+  const [editBusy, setEditBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const editCommittedRef = useRef(false)
+
+  // Kick off inline edit when the card mounts with auto-edit on.
+  useEffect(() => {
+    if (autoEditOnMount && onRenameCommit) {
+      editCommittedRef.current = false
+      setDraftName(name)
+      setIsEditing(true)
+    }
+    // We deliberately only run this on mount — autoEditOnMount should
+    // not retrigger if the parent flips it back on for the same card
+    // without remounting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Once we're editing, focus + select-all so the user can just type.
+  useEffect(() => {
+    if (!isEditing) return
+    const el = inputRef.current
+    if (!el) return
+    // Defer to next tick so React has painted the input.
+    const t = window.setTimeout(() => {
+      el.focus()
+      el.select()
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [isEditing])
+
+  const commitEdit = async () => {
+    if (editCommittedRef.current) return
+    editCommittedRef.current = true
+    const next = draftName.trim()
+    setIsEditing(false)
+    setEditBusy(true)
+    try {
+      // Skip the round-trip if nothing changed.
+      if (next && next !== name && onRenameCommit) {
+        await onRenameCommit(id, next)
+      }
+    } finally {
+      setEditBusy(false)
+      onAutoEditDone?.(id)
+    }
+  }
+
+  const cancelEdit = () => {
+    if (editCommittedRef.current) return
+    editCommittedRef.current = true
+    setDraftName(name)
+    setIsEditing(false)
+    onAutoEditDone?.(id)
+  }
 
   useEffect(() => {
     if (!menuOpen) return
@@ -108,11 +184,19 @@ export default function FolderCard({
 
   return (
     <div
-      onClick={() => onOpen(id)}
+      onClick={() => {
+        // While the title is being edited, clicking the card MUST
+        // NOT drill into the folder — the user is just trying to
+        // dismiss the input or click elsewhere. The input itself
+        // already swallows clicks via stopPropagation below.
+        if (isEditing) return
+        onOpen(id)
+      }}
       role="button"
       tabIndex={0}
-      // Drag SOURCE
-      draggable={!!onDragStart}
+      // Drag SOURCE — disabled while editing so dragging across the
+      // input to select text doesn't move the folder.
+      draggable={!isEditing && !!onDragStart}
       onDragStart={(e) => {
         if (!onDragStart) return
         e.dataTransfer.effectAllowed = 'move'
@@ -170,6 +254,7 @@ export default function FolderCard({
         }
       }}
       onKeyDown={(e) => {
+        if (isEditing) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onOpen(id)
@@ -204,9 +289,39 @@ export default function FolderCard({
       {/* Info row — name + count on the left, kebab on the right. */}
       <div className="flex items-start justify-between gap-2 p-4">
         <div className="min-w-0 flex-1">
-          <div className="text-base font-semibold text-foreground truncate" title={name}>
-            {name}
-          </div>
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={draftName}
+              disabled={editBusy}
+              onChange={(e) => setDraftName(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                // Stop the card-level Enter/Space handler from
+                // drilling into the folder — and let the user just
+                // type.
+                e.stopPropagation()
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void commitEdit()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  cancelEdit()
+                }
+              }}
+              onBlur={() => {
+                void commitEdit()
+              }}
+              className="w-full text-base font-semibold text-foreground bg-background border border-primary/60 rounded-md px-2 py-0.5 outline-none focus:ring-2 focus:ring-primary/40"
+              aria-label="Folder name"
+            />
+          ) : (
+            <div className="text-base font-semibold text-foreground truncate" title={name}>
+              {name}
+            </div>
+          )}
           <div className="text-xs text-muted-foreground mt-1 tabular-nums">
             {itemCount === 1 ? '1 item' : `${itemCount} items`}
           </div>

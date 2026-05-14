@@ -17,6 +17,158 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.9] - 2026-05-14
+
+The "bulk hygiene" release. The video kebab now understands the
+selection, single-target actions disappear when they don't make
+sense across a multi-select, and a brand-new **New Folder with
+Selection** action turns a pile of selected clips into a tidy
+folder in one click — with the name already in edit mode so you
+can type the real name immediately.
+
+### Added — Multi-select aware kebab
+
+- Selecting 2+ videos and clicking **Delete** or **Move up one
+  folder** from *any* card's kebab now applies the action to the
+  whole selection, not just the card the kebab was opened on. The
+  button labels swap to read "Delete N videos" / "Move N up one
+  folder" so it's obvious you're acting on the selection.
+- Selecting 2+ videos *hides* **Rename**, **Share video**, and
+  **Split versions** from the kebab — those don't make sense
+  across a selection.
+- New **New Folder with Selection** kebab item. Shows up as soon
+  as at least one video is selected. It:
+  1. Creates a folder named `New Folder` (with a `(2)`, `(3)`
+     suffix when there's already a sibling with that name) at the
+     current location.
+  2. Batch-moves every selected video's entire version group into
+     it via the existing `PATCH /api/videos/batch` endpoint, so
+     the move stays atomic.
+  3. Mounts the brand-new folder card in **inline auto-rename
+     mode** — the title swaps for an `<input>` with the placeholder
+     name already focused and selected, exactly like Frame.io. Hit
+     Enter or click away to commit; Escape reverts.
+
+### Added — Bulk drag-drop into folder
+
+- Dragging a card that's *part of* a selection of 2+ onto a folder
+  now moves the **entire selection** in one batch call. Finder /
+  Frame.io semantics: dragging a card that *isn't* in the
+  selection still moves only that card, leaving your selection
+  untouched.
+- While a selected card is being dragged, every other selected
+  sibling renders ghosted so it's obvious the whole batch is
+  travelling together. Non-selected cards stay un-ghosted and
+  available as stack-onto targets where the previous behaviour
+  allowed it.
+- The mouse cursor now carries a Frame.io-style **stacked
+  preview** during a bulk drag: up to three thumbnails layered
+  at slight rotational offsets with a blue count badge ("3") in
+  the corner — so it's immediately clear how many videos are in
+  flight. Built via a hidden DOM element passed to
+  `dataTransfer.setDragImage` and torn down on the next tick.
+- Re-enabled the HTML5 drag handle on video cards in selection
+  mode. In 1.0.6 we'd intentionally disabled dragging once any
+  card was selected to keep click-to-toggle behaviour predictable;
+  with bulk drag-to-folder now in scope that guard had to come
+  off. The HTML5 DnD API still distinguishes click from drag by
+  mouse-move threshold, so single-click toggling continues to work
+  as before.
+
+### Added — Image asset support (MVP)
+
+- Image uploads are now first-class citizens of FrameComment. JPG,
+  PNG, WebP, and GIF files travel through the same upload pipeline
+  as videos and appear in the same Frame.io-style grid. The file
+  pickers + drag-and-drop drop zones accept the new extensions
+  automatically.
+- New `MediaType` enum (`VIDEO` | `IMAGE`) on the `Video` model
+  (migration `20260514120000_add_media_type`) — defaults to `VIDEO`
+  so every existing row is unchanged. The upload route detects the
+  media kind from the request MIME (with a filename-extension
+  fallback) and stamps the new column.
+- The TUS upload-finish handler short-circuits for image uploads:
+  no worker queue, no FFmpeg, no storyboard. The original image
+  doubles as its own thumbnail (`thumbnailPath = originalStoragePath`)
+  and the row jumps straight from UPLOADING to READY.
+- Image cards in the grid swap the empty-state Film icon for a
+  Photo icon, hide the duration badge and version badge, and skip
+  hover-scrub entirely. The Frame.io thumbnail layout (cover image
+  + comment count + selection checkbox + kebab) stays unchanged so
+  videos and images read as a single grid.
+- The player renders a plain `<img>` for image assets — no `<video>`
+  element, no playback controls, no timeline below. Comments still
+  work as text-only against the asset; annotations / timeline pins
+  are intentionally out of scope for the MVP and will come later if
+  needed.
+- Re-uses every Frame.io-style affordance you already have: drag
+  into folders, drag-to-stack, multi-select, bulk delete / move /
+  download, trash, restore. None of those needed code changes.
+
+### Changed — Unified top action bar (folder page)
+
+- On a folder page, **Upload Videos**, **Download All**, **New
+  Folder**, and **Project settings** now sit on a single row at
+  the top of the page, all sized to `min-w-[150px]` so they read
+  as one cohesive bar.
+- All four buttons share the neutral outline style; the icon is
+  the differentiator, not the colour. (A first pass tried distinct
+  colours per action — blue/green/yellow/neutral — but the row read
+  too noisy.)
+- `FolderBrowser` gained a `hideHeaderActions` prop and a `ref`
+  with an imperative handle (`openNewFolderDialog`, `downloadAll`).
+  The folder page hides the inline buttons and drives the dialog +
+  download flow via the ref, so there's no duplicated UI. The
+  project root page is untouched — its `FolderBrowser` continues
+  to render the inline buttons next to the breadcrumb.
+
+### Added — Bulk actions in the right-click menu
+
+- The right-click context menu now mirrors the video kebab when
+  there's a multi-select active: **Move N up one folder**, **New
+  Folder with N videos**, **Download N videos**, and **Delete N
+  videos** show up at the top of the menu, above the usual Upload
+  / New Folder block. Right-click and kebab are now at parity —
+  pick whichever gesture you prefer.
+- Both menus widened and switched to `whitespace-nowrap` so bulk
+  labels ("Move 3 up one folder", "New Folder with 3 videos")
+  sit on a single line instead of wrapping to two.
+
+### Added — Inline rename on folder cards
+
+- `FolderCard` gained `autoEditOnMount`, `onRenameCommit`, and
+  `onAutoEditDone` props (1.0.9+). When `autoEditOnMount` is true
+  the card mounts with the input focused + select-all'd. Commits
+  PATCH `/api/folders/[id]` and clears the pending-edit flag on
+  the parent so a sibling refresh doesn't retrigger the editor.
+- While the input is focused, clicking the card no longer drills
+  into the folder and drag is disabled so you can select text
+  inside the input freely.
+
+### Changed
+
+- `VideoCard` accepts a new `bulkSelectionCount` prop. The kebab
+  reads this number to decide which actions to show, which to
+  rename ("Delete" → "Delete N videos"), and whether to surface
+  the new folder action.
+- `FolderBrowser.handleDeleteVideo` and `handleMoveVideoUp` now
+  branch on `selectedVideoIds.size`: ≥ 2 routes through a bulk
+  path that iterates the selection and refreshes once at the end;
+  the single-card behaviour for 0–1 selected is unchanged.
+
+### Notes
+
+- No schema changes — every server-side route used by this
+  release (`/api/folders` POST, `/api/videos/batch` PATCH,
+  `/api/folders/[id]` PATCH, `/api/videos/[id]` DELETE) was
+  already present in 1.0.8.
+- The bulk semantics treat the *selection* as the source of
+  truth. Clicking Delete from a card that isn't part of the
+  selection still deletes the selection (not the clicked card)
+  when 2+ are selected — this matches how Frame.io behaves and
+  avoids accidentally adding/removing items from the selection
+  through the kebab.
+
 ## [1.0.8] - 2026-05-14
 
 The "safety net" release. Deleting an asset now drops it into a

@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { validateUploadedFile } from '@/lib/file-validation'
+import {
+  isImageExtension,
+  isImageMime,
+  validateUploadedFile,
+} from '@/lib/file-validation'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -118,6 +122,15 @@ export async function POST(request: NextRequest) {
     }
     const nextVersion = 1
 
+    // Detect whether this upload is an image or a real video (1.0.9+).
+    // We check both the MIME type AND the filename extension so the
+    // route survives browsers that hand us a bogus or generic MIME.
+    // The flag is stored on the row as `mediaType` so the worker can
+    // route the file through the right pipeline.
+    const isImage =
+      isImageMime(mimeType || '') ||
+      isImageExtension(originalFileName || '')
+
     // Create video record. createdById was added in 1.0.6 — when
     // the migration for it hasn't been applied yet, Prisma throws
     // an "Unknown arg" error on the field. Retry once without it
@@ -136,14 +149,23 @@ export async function POST(request: NextRequest) {
       width: 0,
       height: 0,
     }
+    // Spread `mediaType` separately + via `as any` so the route still
+    // compiles against an older generated Prisma client that doesn't
+    // know about the field. Once `prisma generate` runs after the
+    // 20260514120000_add_media_type migration, the cast becomes a
+    // no-op.
+    const withMediaType = {
+      ...baseCreate,
+      mediaType: isImage ? 'IMAGE' : 'VIDEO',
+    } as any
     let video
     try {
       video = await prisma.video.create({
-        data: { ...baseCreate, createdById: admin.id } as any,
+        data: { ...withMediaType, createdById: admin.id },
       })
     } catch {
       // Fall back without createdById — migration probably not run.
-      video = await prisma.video.create({ data: baseCreate })
+      video = await prisma.video.create({ data: withMediaType })
     }
 
     // Return videoId - TUS will handle upload directly

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ArrowUpFromLine,
   Film as FilmIcon,
+  FolderPlus,
+  Image as ImageIcon,
   MoreVertical,
   Pencil,
   Scissors,
@@ -91,11 +93,120 @@ export interface VideoCardProps {
    *  `versionCount > 1`; the menu item is hidden otherwise so a
    *  single-version card never shows a useless action. */
   onSplitVersions?: (id: string, currentName: string) => void
+  /** Number of selected video cards on the page (1.0.9+). Drives
+   *  bulk-aware kebab gating:
+   *    ≥ 2  → hides Rename / Share / Split versions (none of those
+   *           make sense across a selection). Delete and Move-up
+   *           stay visible — the parent applies them to the whole
+   *           selection regardless of which card was clicked.
+   *    ≥ 1  → "New Folder with Selection" appears in the menu.
+   *    0    → kebab behaves as before. */
+  bulkSelectionCount?: number
+  /** "New Folder with Selection" menu item (1.0.9+). Creates a new
+   *  folder named "New Folder" in the current location, moves every
+   *  selected video card into it, and opens the folder name for
+   *  immediate rename. */
+  onNewFolderWithSelection?: () => void
+  /** Thumbnail URLs of every currently-selected card on the page
+   *  (1.0.9+). When this card kicks off a bulk drag (it's selected
+   *  AND ≥ 2 cards are selected) we paint a stack of these
+   *  thumbnails as the custom HTML5 drag image so the cursor visibly
+   *  carries every video, not just the one the user grabbed. */
+  bulkDragThumbnails?: string[]
+  /** 1.0.9+: distinguishes a real video asset from an image upload.
+   *  `IMAGE` hides duration / hover-scrub / version label / the
+   *  Split-versions action — none of which make sense for a still
+   *  image — and swaps the empty-state Film icon for a Photo icon. */
+  mediaType?: 'VIDEO' | 'IMAGE'
 }
 
 // Custom MIME for video drag — separate from the folder DnD so the
 // two systems don't collide on dragOver detection.
 const VIDEO_MIME = 'application/x-framecomment-video'
+
+/**
+ * Build a Frame.io-style "stacked thumbnails + count badge" element
+ * to hand to `dataTransfer.setDragImage` (1.0.9+). The element is
+ * positioned offscreen, snapshotted by the browser at the moment of
+ * the call, then removed on the next tick.
+ *
+ * Up to three of the supplied thumbnail URLs are drawn at slight
+ * rotational offsets (left/centre/right) so the cursor visibly
+ * carries multiple cards instead of just the one the user grabbed.
+ * A blue pill in the corner shows the full selection count even when
+ * we've only managed to paint two or three tiles.
+ */
+function buildStackedDragImage(
+  thumbnails: string[],
+  count: number,
+): HTMLElement {
+  const root = document.createElement('div')
+  // Off-screen but still in the layout — required for Chrome to
+  // include it in the drag bitmap.
+  root.style.cssText = [
+    'position: absolute',
+    'top: -10000px',
+    'left: -10000px',
+    'width: 180px',
+    'height: 120px',
+    'pointer-events: none',
+    'font-family: system-ui, -apple-system, sans-serif',
+  ].join(';')
+
+  // Pick the first three thumbnails. Missing/empty entries skip
+  // their tile but still count toward the badge.
+  const tiles = thumbnails.filter((u) => !!u).slice(0, 3)
+  const TILE_W = 140
+  const TILE_H = 80
+  // Render bottom-up so the front tile overlaps the ones behind it.
+  for (let i = tiles.length - 1; i >= 0; i--) {
+    const offset = i * 8 // px stagger between tiles
+    const rotate = (i - (tiles.length - 1) / 2) * 5 // -5°..+5°
+    const tile = document.createElement('div')
+    tile.style.cssText = [
+      'position: absolute',
+      `top: ${10 + offset}px`,
+      `left: ${10 + offset}px`,
+      `width: ${TILE_W}px`,
+      `height: ${TILE_H}px`,
+      'border-radius: 8px',
+      'border: 2px solid #ffffff',
+      'box-shadow: 0 6px 16px rgba(0,0,0,0.35)',
+      `transform: rotate(${rotate}deg)`,
+      'overflow: hidden',
+      `background: #000 url(${tiles[i]}) center/cover no-repeat`,
+      `z-index: ${10 - i}`,
+    ].join(';')
+    root.appendChild(tile)
+  }
+
+  // Count badge — Frame.io-style blue circle anchored to the top-
+  // right of the stack. Sits above every tile.
+  const badge = document.createElement('div')
+  badge.textContent = String(count)
+  badge.style.cssText = [
+    'position: absolute',
+    'top: 0',
+    'right: 0',
+    'min-width: 28px',
+    'height: 28px',
+    'padding: 0 8px',
+    'border-radius: 9999px',
+    'background: #2563eb',
+    'color: #ffffff',
+    'display: flex',
+    'align-items: center',
+    'justify-content: center',
+    'font-size: 13px',
+    'font-weight: 700',
+    'border: 2px solid #ffffff',
+    'box-shadow: 0 2px 6px rgba(0,0,0,0.35)',
+    'z-index: 20',
+  ].join(';')
+  root.appendChild(badge)
+
+  return root
+}
 
 /** Format seconds as "m:ss" — matches the public share page. */
 function formatDuration(duration?: number): string | null {
@@ -150,7 +261,25 @@ export default function VideoCard({
   onMoveUp,
   onShare,
   onSplitVersions,
+  bulkSelectionCount = 0,
+  onNewFolderWithSelection,
+  bulkDragThumbnails,
+  mediaType = 'VIDEO',
 }: VideoCardProps) {
+  const isImage = mediaType === 'IMAGE'
+  // Bulk-aware kebab gating (1.0.9+). When the user has 2+ videos
+  // selected, single-target actions (Rename, Share, Split versions)
+  // are hidden because they don't make sense across the selection.
+  // Delete and Move up stay visible — the parent treats them as a
+  // selection action.
+  const isBulk = bulkSelectionCount >= 2
+  const showRename = !!onRename && !isBulk
+  const showShare = !!onShare && !isBulk
+  const showSplit = !!onSplitVersions && versionCount > 1 && !isBulk
+  // "New Folder with Selection" surfaces as soon as there's a
+  // selection — even of just 1 video — so the user can quickly box a
+  // video into its own folder.
+  const showNewFolder = !!onNewFolderWithSelection && bulkSelectionCount >= 1
   // Hover state for the drop-target ring. Only set when ANOTHER
   // video is being dragged over THIS card.
   const [isStackHover, setIsStackHover] = useState(false)
@@ -196,14 +325,21 @@ export default function VideoCard({
   const uploadDate = formatUploadDate(createdAt)
   // Always show the version badge (Frame.io style) — even on v1 the
   // user wants to know which version they're looking at. We only
-  // skip the badge when no label is supplied at all.
-  const versionTag = versionLabel || null
+  // skip the badge when no label is supplied at all. Image cards
+  // suppress the badge entirely — image versioning isn't a 1.0.9
+  // feature, and a stray "v1" on every image card just looks noisy.
+  const versionTag = isImage ? null : versionLabel || null
   const hasThumb = !!thumbnailUrl && !thumbErrored
   // Storyboard sprite-sheet scrub (instant — preferred). Fall back to
   // <video> seeking when only previewUrl is available (legacy rows
-  // that pre-date the storyboard worker step).
-  const hasStoryboard = !!storyboardUrl
-  const canScrub = (hasStoryboard || !!previewUrl) && typeof duration === 'number' && duration > 0
+  // that pre-date the storyboard worker step). Images never scrub —
+  // there's nothing to seek through.
+  const hasStoryboard = !!storyboardUrl && !isImage
+  const canScrub =
+    !isImage &&
+    (hasStoryboard || !!previewUrl) &&
+    typeof duration === 'number' &&
+    duration > 0
 
   // Storyboard grid constants — match the worker's
   // generateStoryboard defaults. Keep these in sync if you change
@@ -297,14 +433,45 @@ export default function VideoCard({
           else onOpen(name)
         }
       }}
-      // Drag SOURCE — disabled in selection mode so the user can
-      // freely click cards without accidentally starting a drag.
-      draggable={!selectionMode && !!onStartVideoDrag}
+      // Drag SOURCE. 1.0.9+: drag is now always armed (was disabled
+      // in selection mode in 1.0.6). The HTML5 DnD API distinguishes
+      // click from drag by mouse-move threshold, so click-to-toggle
+      // still works fine on the same card. Without this the bulk
+      // drag-to-folder gesture would do nothing — by definition the
+      // user has 2+ selected which would otherwise lock the drag
+      // source.
+      draggable={!!onStartVideoDrag}
       onDragStart={(e) => {
         if (!onStartVideoDrag) return
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData(VIDEO_MIME, id)
         e.dataTransfer.setData('text/plain', `video:${id}`)
+        // 1.0.9+: paint a custom drag image when this card is part
+        // of a multi-select drag, so the cursor visibly carries
+        // every selected thumbnail (stacked) plus a count badge —
+        // rather than just the one card the user happened to grab.
+        const isBulkDrag =
+          isSelected &&
+          bulkSelectionCount >= 2 &&
+          bulkDragThumbnails &&
+          bulkDragThumbnails.length >= 1
+        if (isBulkDrag && bulkDragThumbnails) {
+          const ghost = buildStackedDragImage(
+            bulkDragThumbnails,
+            bulkSelectionCount,
+          )
+          // Element must be in the DOM at the moment we call
+          // setDragImage — the browser snapshots it synchronously.
+          // We tuck it offscreen so it doesn't flash on the page
+          // before being removed on the next tick.
+          document.body.appendChild(ghost)
+          // Anchor near the top-left of the stack so the cursor
+          // sits where the user expects "the grabbed item" to be.
+          e.dataTransfer.setDragImage(ghost, 28, 28)
+          // Remove on next tick — by then the snapshot has been
+          // taken and the DOM node is no longer needed.
+          window.setTimeout(() => ghost.remove(), 0)
+        }
         onStartVideoDrag(id)
       }}
       onDragEnd={() => {
@@ -374,7 +541,7 @@ export default function VideoCard({
             onError={() => setThumbErrored(true)}
             className="absolute inset-0 w-full h-full object-contain"
           />
-        ) : isProcessing ? (
+        ) : isProcessing && !isImage ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground/70">
             <span
               className="inline-block w-7 h-7 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
@@ -384,7 +551,11 @@ export default function VideoCard({
           </div>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60">
-            <FilmIcon className="w-8 h-8" />
+            {isImage ? (
+              <ImageIcon className="w-8 h-8" />
+            ) : (
+              <FilmIcon className="w-8 h-8" />
+            )}
           </div>
         )}
         {/* Storyboard sprite-sheet scrub (instant). One JPEG packs
@@ -490,8 +661,11 @@ export default function VideoCard({
         </div>
         {/* Kebab — only renders when at least one action is wired.
             On the public client share we omit Rename/Delete entirely,
-            so the kebab disappears and the card stays read-only. */}
-        {(onRename || onDelete || onMoveUp || onShare || (onSplitVersions && versionCount > 1)) && (
+            so the kebab disappears and the card stays read-only.
+            1.0.9+: also respects bulk-mode gating so we don't show an
+            empty popover when every visible item happens to be a
+            single-target action in a multi-select context. */}
+        {(showRename || onDelete || onMoveUp || showShare || showSplit || showNewFolder) && (
         <div ref={menuRef} className="relative">
           <button
             type="button"
@@ -510,32 +684,36 @@ export default function VideoCard({
           {menuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+              // 1.0.9+: bumped the min-width and added whitespace-
+              // nowrap on every menu item so bulk labels like
+              // "Move 3 up one folder" / "New Folder with 3 videos"
+              // sit on a single line.
+              className="absolute right-0 top-full mt-1 z-30 min-w-[240px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
               onClick={(e) => e.stopPropagation()}
             >
-              {onRename && (
+              {showRename && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    onRename(id, name)
+                    onRename!(id, name)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
                 >
                   <Pencil className="w-4 h-4 shrink-0" />
                   Rename
                 </button>
               )}
-              {onShare && (
+              {showShare && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    onShare(id, name)
+                    onShare!(id, name)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
                 >
                   <Share2 className="w-4 h-4 shrink-0" />
                   Share video
@@ -549,21 +727,39 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onMoveUp(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
                 >
                   <ArrowUpFromLine className="w-4 h-4 shrink-0" />
-                  Move up one folder
+                  {isBulk
+                    ? `Move ${bulkSelectionCount} up one folder`
+                    : 'Move up one folder'}
                 </button>
               )}
-              {onSplitVersions && versionCount > 1 && (
+              {showNewFolder && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    onSplitVersions(id, name)
+                    onNewFolderWithSelection!()
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <FolderPlus className="w-4 h-4 shrink-0" />
+                  {bulkSelectionCount > 1
+                    ? `New Folder with ${bulkSelectionCount} videos`
+                    : 'New Folder with selection'}
+                </button>
+              )}
+              {showSplit && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onSplitVersions!(id, name)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
                 >
                   <Scissors className="w-4 h-4 shrink-0" />
                   Split versions
@@ -576,13 +772,16 @@ export default function VideoCard({
                   onClick={() => {
                     // 1.0.8+: parent shows a Frame.io-style
                     // ConfirmModal — no native window.confirm here.
+                    // 1.0.9+: the parent reads the current selection
+                    // and bulk-deletes when 2+ are selected, no
+                    // matter which card's kebab was clicked.
                     setMenuOpen(false)
                     onDelete(id, name)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left whitespace-nowrap"
                 >
                   <Trash2 className="w-4 h-4 shrink-0" />
-                  Delete
+                  {isBulk ? `Delete ${bulkSelectionCount} videos` : 'Delete'}
                 </button>
               )}
             </div>

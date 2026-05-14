@@ -30,11 +30,13 @@ export interface FileTreeEntry {
 }
 
 /**
- * Returns `true` for files we want to upload. We currently accept the
- * project's standard video extensions (see `FILE_LIMITS`). Hidden /
- * system files like `.DS_Store` or `Thumbs.db` are rejected.
+ * Returns `true` for files we want to upload. Accepts the project's
+ * standard video extensions AND (1.0.9+) the supported image
+ * extensions, since both kinds of media now travel through the same
+ * upload pipeline. Hidden / system files like `.DS_Store` or
+ * `Thumbs.db` are rejected.
  */
-export function isAcceptedVideoFile(file: File): boolean {
+export function isAcceptedMediaFile(file: File): boolean {
   const name = file.name
   if (!name || name.startsWith('.')) return false
   const lower = name.toLowerCase()
@@ -43,6 +45,13 @@ export function isAcceptedVideoFile(file: File): boolean {
   const ext = lower.slice(dot)
   return FILE_LIMITS.ALLOWED_EXTENSIONS.includes(ext)
 }
+
+/**
+ * Back-compat alias for callers that pre-date image support. Same
+ * implementation as `isAcceptedMediaFile` so existing import sites
+ * keep working without an edit.
+ */
+export const isAcceptedVideoFile = isAcceptedMediaFile
 
 /**
  * Recursively walk a `FileSystemEntry` (from `webkitGetAsEntry`) and

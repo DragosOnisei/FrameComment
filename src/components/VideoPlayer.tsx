@@ -896,23 +896,45 @@ export default function VideoPlayer({
                       : '16 / 9',
                 }}
               >
-                <video
-                  key={selectedVideo?.id}
-                  ref={videoRef}
-                  src={videoUrl}
-                  poster={(selectedVideo as any).thumbnailUrl || undefined}
-                  className={`w-full h-full object-contain ${isDrawingMode ? 'pointer-events-none' : 'cursor-pointer'}`}
-                  onTimeUpdate={handleTimeUpdate}
-                  onLoadedMetadata={handleLoadedMetadata}
-                  onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
-                  onClick={isDrawingMode ? undefined : handlePlayPause}
-                  crossOrigin="anonymous"
-                  playsInline
-                  preload="metadata"
-                  // @ts-ignore - webkit attributes for iOS
-                  webkit-playsinline="true"
-                  x-webkit-airplay="allow"
-                />
+                {(selectedVideo as any)?.mediaType === 'IMAGE' ? (
+                  // 1.0.9+: image assets render as a plain <img>. The
+                  // video element + timeline + playback controls all
+                  // become inert in this branch (videoRef.current is
+                  // null), which is fine — there's no media to seek.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={selectedVideo?.id}
+                    src={
+                      (selectedVideo as any).thumbnailUrl ||
+                      (selectedVideo as any).streamUrl ||
+                      videoUrl
+                    }
+                    alt={selectedVideo?.name || 'Image asset'}
+                    draggable={false}
+                    onContextMenu={
+                      !isAdmin ? (e) => e.preventDefault() : undefined
+                    }
+                    className="w-full h-full object-contain select-none"
+                  />
+                ) : (
+                  <video
+                    key={selectedVideo?.id}
+                    ref={videoRef}
+                    src={videoUrl}
+                    poster={(selectedVideo as any).thumbnailUrl || undefined}
+                    className={`w-full h-full object-contain ${isDrawingMode ? 'pointer-events-none' : 'cursor-pointer'}`}
+                    onTimeUpdate={handleTimeUpdate}
+                    onLoadedMetadata={handleLoadedMetadata}
+                    onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
+                    onClick={isDrawingMode ? undefined : handlePlayPause}
+                    crossOrigin="anonymous"
+                    playsInline
+                    preload="metadata"
+                    // @ts-ignore - webkit attributes for iOS
+                    webkit-playsinline="true"
+                    x-webkit-airplay="allow"
+                  />
+                )}
 
                 {/* Annotation Overlay (read-only, renders saved drawing annotations during playback) */}
                 <AnnotationOverlay
@@ -945,7 +967,10 @@ export default function VideoPlayer({
               {/* Frame.io-style control bar — rendered below the video,
                   not as an overlay. flex-shrink-0 means it keeps its
                   natural size as the viewport shrinks; the video on
-                  top absorbs the difference via object-contain. */}
+                  top absorbs the difference via object-contain.
+                  1.0.9+: hidden entirely for image assets — there's
+                  no playback to control, no timeline to scrub. */}
+              {(selectedVideo as any)?.mediaType !== 'IMAGE' && (
               <div className="bg-black border-t border-white/10 flex-shrink-0">
                 <CustomVideoControls
                   videoRef={videoRef as React.RefObject<HTMLVideoElement>}
@@ -972,6 +997,7 @@ export default function VideoPlayer({
                   resolvedPlaybackQuality={resolvedPlaybackQuality}
                 />
               </div>
+              )}
             </div>
           </>
         ) : (

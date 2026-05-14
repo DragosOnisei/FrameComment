@@ -15,9 +15,59 @@ export const ALLOWED_VIDEO_TYPES = [
   'video/avi'
 ]
 
-// File configuration
+// 1.0.9+: image MIME types accepted as first-class media uploads.
+// Images travel through the same Video model + upload endpoint as
+// real video files, with `mediaType=IMAGE` set on the row. The worker
+// detects this and skips the FFmpeg transcode pipeline. See
+// CHANGELOG 1.0.9 → "Image support" for the full story.
+export const ALLOWED_IMAGE_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]
+
+// Union of both — convenient for MIME validation paths that accept
+// either kind of media.
+export const ALLOWED_MEDIA_TYPES = [
+  ...ALLOWED_VIDEO_TYPES,
+  ...ALLOWED_IMAGE_TYPES,
+]
+
+// File configuration. `ALLOWED_EXTENSIONS` is now the union of video
+// + image extensions so the existing extension validators (e.g.
+// `validateFileExtension`) accept image uploads without any code
+// changes at the call sites. The split arrays below are exposed so
+// callers that need to discriminate (e.g. picking the upload pipeline
+// to use) can do so cheaply.
 export const FILE_LIMITS = {
-  ALLOWED_EXTENSIONS: ['.mp4', '.mov', '.avi', '.webm', '.mkv']
+  ALLOWED_VIDEO_EXTENSIONS: ['.mp4', '.mov', '.avi', '.webm', '.mkv'],
+  ALLOWED_IMAGE_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.webp', '.gif'],
+  ALLOWED_EXTENSIONS: [
+    '.mp4',
+    '.mov',
+    '.avi',
+    '.webm',
+    '.mkv',
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.gif',
+  ],
+}
+
+/** Returns true when the filename's extension is one we treat as an image. */
+export function isImageExtension(filename: string): boolean {
+  if (!filename) return false
+  const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'))
+  return FILE_LIMITS.ALLOWED_IMAGE_EXTENSIONS.includes(ext)
+}
+
+/** Returns true when the MIME type is one of the supported image kinds. */
+export function isImageMime(mime: string): boolean {
+  if (!mime) return false
+  return ALLOWED_IMAGE_TYPES.includes(mime.toLowerCase())
 }
 
 // Allowed asset types by category
@@ -70,14 +120,16 @@ export function validateFileExtension(filename: string): boolean {
 }
 
 /**
- * Validate MIME type
+ * Validate MIME type. Accepts every supported media kind (video +
+ * image — 1.0.9+) so the upload endpoint can route both through the
+ * same `validateUploadedFile` gate.
  */
 export function validateMimeType(mimeType: string): boolean {
   if (!mimeType || typeof mimeType !== 'string') {
     return false
   }
 
-  return ALLOWED_VIDEO_TYPES.includes(mimeType.toLowerCase())
+  return ALLOWED_MEDIA_TYPES.includes(mimeType.toLowerCase())
 }
 
 
@@ -190,7 +242,7 @@ export function validateUploadedFile(
   if (!validateMimeType(mimeType)) {
     return {
       valid: false,
-      error: `Invalid MIME type. Allowed: ${ALLOWED_VIDEO_TYPES.join(', ')}`
+      error: `Invalid MIME type. Allowed: ${ALLOWED_MEDIA_TYPES.join(', ')}`
     }
   }
 

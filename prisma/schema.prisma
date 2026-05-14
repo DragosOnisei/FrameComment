@@ -202,7 +202,14 @@ model Video {
   originalFileSize    BigInt
   originalStoragePath String
 
+  // Media type (1.0.9+). Default VIDEO so all existing rows stay
+  // unchanged after the migration; IMAGE skips the FFmpeg pipeline.
+  mediaType MediaType @default(VIDEO)
+
   // Video metadata
+  // For IMAGE rows `duration` is always 0 (kept non-nullable so we
+  // don't have to relax every consumer that expects a number) and
+  // fps/codec are null.
   duration Float // in seconds
   width    Int
   height   Int
@@ -327,6 +334,17 @@ enum VideoStatus {
   PROCESSING
   READY
   ERROR
+}
+
+// MediaType (1.0.9+). Distinguishes a real video upload (default)
+// from an image asset. Images skip the FFmpeg transcode + storyboard
+// pipeline entirely and land at READY almost immediately. We reuse
+// the Video model rather than a separate Asset entity so folders,
+// comments, share links, soft delete, etc. all keep working out of
+// the box.
+enum MediaType {
+  VIDEO
+  IMAGE
 }
 
 model Comment {

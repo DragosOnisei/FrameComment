@@ -100,9 +100,24 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
   }
 
   // Validate video file format
+  // 1.0.9+: returns true when the file is one of the supported image
+  // kinds. We branch on this before the MP4/MOV magic-byte check so
+  // PNG / JPG / WebP / GIF uploads aren't rejected.
+  const isImageUpload = (file: File): boolean => {
+    if (file.type && file.type.startsWith('image/')) return true
+    return /\.(jpe?g|png|webp|gif)$/i.test(file.name)
+  }
+
   const validateVideoFile = async (file: File): Promise<{ valid: boolean; error?: string }> => {
     if (file.size === 0) {
       return { valid: false, error: t('fileEmpty') }
+    }
+
+    // 1.0.9+: skip the MP4 magic-byte check for image uploads — the
+    // server already does its own image-vs-video classification on
+    // mediaType and the original file is what gets stored verbatim.
+    if (isImageUpload(file)) {
+      return { valid: true }
     }
 
     try {
@@ -154,17 +169,27 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
     setIsDragging(false)
   }
 
+  // 1.0.9+: accept BOTH videos and images. Some macOS .mov / .avi
+  // files report an empty MIME, so we also accept the canonical
+  // FrameComment media extensions as a safety net.
+  const isAcceptedUpload = (f: File) =>
+    f.type.startsWith('video/') ||
+    f.type.startsWith('image/') ||
+    /\.(mp4|mov|avi|mkv|webm|m4v|mxf|prores|jpg|jpeg|png|webp|gif)$/i.test(
+      f.name,
+    )
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setIsDragging(false)
 
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('video/'))
+    const files = Array.from(e.dataTransfer.files).filter(isAcceptedUpload)
     addFiles(files)
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('video/'))
+    const files = Array.from(e.target.files || []).filter(isAcceptedUpload)
     addFiles(files)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -202,9 +227,11 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
     if (!initialFiles || initialFiles.length === 0) return
     if (seededRef.current === initialFiles) return
     seededRef.current = initialFiles
-    const videos = initialFiles.filter((f) => f.type.startsWith('video/'))
-    if (videos.length === 0) return
-    const newUploads: PendingUpload[] = videos.map((file) => ({
+    // 1.0.9+: accept images here too. `isAcceptedUpload` keeps the
+    // extension-fallback for files with an empty MIME.
+    const accepted = initialFiles.filter(isAcceptedUpload)
+    if (accepted.length === 0) return
+    const newUploads: PendingUpload[] = accepted.map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       file,
       videoName: getVideoNameFromFile(file),
@@ -234,14 +261,14 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
     if (!initialFilesWithFolders || initialFilesWithFolders.length === 0) return
     if (seededWithFoldersRef.current === initialFilesWithFolders) return
     seededWithFoldersRef.current = initialFilesWithFolders
-    const videos = initialFilesWithFolders.filter((entry) =>
-      entry.file.type.startsWith('video/') ||
-      // Some macOS .mov files report empty MIME — fall back to
-      // extension whitelist via a quick check.
-      /\.(mp4|mov|avi|mkv|webm|m4v|mxf|prores)$/i.test(entry.file.name),
+    // 1.0.9+: accept images alongside videos. Empty-MIME fallback
+    // covers both kinds via the canonical FrameComment extension
+    // whitelist.
+    const accepted = initialFilesWithFolders.filter((entry) =>
+      isAcceptedUpload(entry.file),
     )
-    if (videos.length === 0) return
-    const newUploads: PendingUpload[] = videos.map((entry) => ({
+    if (accepted.length === 0) return
+    const newUploads: PendingUpload[] = accepted.map((entry) => ({
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       file: entry.file,
       videoName: getVideoNameFromFile(entry.file),
@@ -649,7 +676,7 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
           <input
             ref={fileInputRef}
             type="file"
-            accept="video/*"
+            accept="video/*,image/jpeg,image/png,image/webp,image/gif"
             multiple
             onChange={handleFileSelect}
             className="hidden"

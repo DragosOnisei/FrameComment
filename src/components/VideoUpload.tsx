@@ -185,6 +185,10 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete, in
           versionLabel: trimmedVersionLabel,
           originalFileName: file.name,
           originalFileSize: file.size,
+          // 1.0.9+: forward the browser-reported MIME so the route
+          // can detect image uploads even when the extension is
+          // ambiguous (extension still wins as a fallback).
+          mimeType: file.type || undefined,
           name: trimmedVideoName, // Include video name for multi-video support
         })
         videoIdRef.current = videoId
@@ -500,7 +504,7 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete, in
             ref={fileInputRef}
             id="file"
             type="file"
-            accept="video/*"
+            accept="video/*,image/jpeg,image/png,image/webp,image/gif"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             disabled={uploading}
             className="hidden"

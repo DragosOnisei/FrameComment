@@ -1,6 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -97,6 +105,22 @@ export interface FolderBrowserProps {
    *  (1.0.6+). When omitted, folder drops fall back to a flat upload
    *  into the current folder. */
   onUploadFolderTree?: (entries: FileTreeEntry[]) => void
+  /** Hide the inline Download-All / New-Folder buttons that sit next
+   *  to the breadcrumb (1.0.9+). Use this when the parent page wants
+   *  to render those actions in its own top bar and drive them
+   *  through the imperative ref handle below. */
+  hideHeaderActions?: boolean
+}
+
+/**
+ * Imperative handle (1.0.9+). Lets a parent page drive the New-Folder
+ * dialog and Download-All flow from buttons it renders outside the
+ * FolderBrowser (e.g. a unified top action bar). Pair with
+ * `hideHeaderActions` to avoid duplicate UI.
+ */
+export interface FolderBrowserHandle {
+  openNewFolderDialog: (restricted?: boolean) => void
+  downloadAll: () => void
 }
 
 interface FolderRow {
@@ -149,6 +173,8 @@ interface VideoRow {
     username: string | null
     email: string
   } | null
+  /** 1.0.9+: distinguishes a real video upload from an image asset. */
+  mediaType?: 'VIDEO' | 'IMAGE'
 }
 
 /** One card per video name; we collapse multiple versions of the
@@ -177,22 +203,28 @@ interface VideoGroup {
   uploaderName?: string | null
   /** ISO timestamp of the latest version's upload. */
   createdAt?: string | Date
+  /** 1.0.9+: media type of the latest version. */
+  mediaType?: 'VIDEO' | 'IMAGE'
 }
 
-export default function FolderBrowser({
-  projectId,
-  projectSlug: _projectSlug,
-  projectTitle,
-  currentFolderId,
-  breadcrumb = [],
-  onMutated,
-  onUploadAsset,
-  onUploadFolder,
-  stretch = false,
-  videos = [],
-  onUploadFiles,
-  onUploadFolderTree,
-}: FolderBrowserProps) {
+function FolderBrowserInner(
+  {
+    projectId,
+    projectSlug: _projectSlug,
+    projectTitle,
+    currentFolderId,
+    breadcrumb = [],
+    onMutated,
+    onUploadAsset,
+    onUploadFolder,
+    stretch = false,
+    videos = [],
+    onUploadFiles,
+    onUploadFolderTree,
+    hideHeaderActions = false,
+  }: FolderBrowserProps,
+  ref: React.Ref<FolderBrowserHandle>,
+) {
   const router = useRouter()
   // Drop zone state — true while the user is dragging OS files over
   // the empty state, used for the highlight ring.
@@ -292,6 +324,15 @@ export default function FolderBrowser({
   // mid-drag — sibling cards render with the "potential target"
   // affordance, the source card is ghosted.
   const [draggingVideoId, setDraggingVideoId] = useState<string | null>(null)
+  // After "New Folder with Selection" we want the freshly-created
+  // folder card to mount in inline-edit mode with the name pre-
+  // selected (1.0.9+). The id sits here just long enough for the
+  // matching FolderCard to consume it; FolderCard then calls
+  // `onAutoEditDone` to clear it so the auto-edit doesn't retrigger
+  // on a sibling refresh.
+  const [pendingAutoEditFolderId, setPendingAutoEditFolderId] = useState<
+    string | null
+  >(null)
 
   const fetchFolders = useCallback(async (opts?: { silent?: boolean }) => {
     try {
@@ -624,6 +665,7 @@ export default function FolderBrowser({
         commentCount: totalComments,
         uploaderName,
         createdAt: latest.createdAt,
+        mediaType: latest.mediaType,
       })
     }
     // Folders are ordered by name asc on the server; mirror that for
@@ -670,8 +712,62 @@ export default function FolderBrowser({
     [onMutated],
   )
 
+  // ─── multi-select + bulk actions (1.0.6+) ────────────────
+  // Hoisted above the kebab handlers (1.0.9+) so the bulk-aware
+  // Delete / Move-up flows can read the live selection.
+  const handleToggleVideoSelect = useCallback((id: string) => {
+    setSelectedVideoIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelectedVideoIds(new Set())
+  }, [])
+
   const handleDeleteVideo = useCallback(
     (videoId: string, videoName?: string) => {
+      // 1.0.9+: bulk-aware. When the user has 2+ videos selected and
+      // clicks Delete from ANY card's kebab, we delete the whole
+      // selection regardless of which card was clicked. With 0 or 1
+      // selected we fall back to the original single-card delete.
+      if (selectedVideoIds.size >= 2) {
+        const count = selectedVideoIds.size
+        setConfirmState({
+          open: true,
+          title: `Delete ${count} assets?`,
+          description:
+            'Deleted items can be recovered for 30 days before being permanently deleted.',
+          confirmLabel: 'Delete',
+          variant: 'destructive',
+          onConfirm: async () => {
+            setConfirmState((s) => ({ ...s, busy: true }))
+            setBulkBusy(true)
+            try {
+              for (const cardId of selectedVideoIds) {
+                const grp = videoGroups.find((g) => g.allIds.includes(cardId))
+                const ids = grp ? grp.allIds : [cardId]
+                for (const id of ids) {
+                  await apiFetch(`/api/videos/${id}`, {
+                    method: 'DELETE',
+                  }).catch(() => null)
+                }
+              }
+              clearSelection()
+              await fetchFolders({ silent: true })
+              onMutated?.()
+            } finally {
+              setBulkBusy(false)
+              setConfirmState({ open: false, title: '' })
+            }
+          },
+        })
+        return
+      }
+
       const group = videoGroups.find((g) => g.allIds.includes(videoId))
       const name = videoName ?? group?.name ?? 'this asset'
       // 1.0.8+: Frame.io-style ConfirmModal for delete. Soft-deletes
@@ -721,22 +817,14 @@ export default function FolderBrowser({
         },
       })
     },
-    [onMutated, videoGroups, fetchFolders],
+    [
+      onMutated,
+      videoGroups,
+      fetchFolders,
+      selectedVideoIds,
+      clearSelection,
+    ],
   )
-
-  // ─── multi-select + bulk actions (1.0.6+) ────────────────
-  const handleToggleVideoSelect = useCallback((id: string) => {
-    setSelectedVideoIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
-
-  const clearSelection = useCallback(() => {
-    setSelectedVideoIds(new Set())
-  }, [])
 
   // Mint a one-shot signed download URL for a single video. Uses the
   // existing POST /api/videos/[id]/download-token endpoint which
@@ -796,6 +884,24 @@ export default function FolderBrowser({
     downloadVideos(ids)
   }, [videoGroups, downloadVideos])
 
+  // Expose New Folder + Download All triggers to a parent page that
+  // wants to render those actions in its own top toolbar (1.0.9+).
+  // Pair with the `hideHeaderActions` prop to suppress the inline
+  // buttons and avoid duplicating the UI.
+  useImperativeHandle(
+    ref,
+    () => ({
+      openNewFolderDialog: (restricted = false) => {
+        setNewDialogRestricted(restricted)
+        setShowNewDialog(true)
+      },
+      downloadAll: () => {
+        handleDownloadAll()
+      },
+    }),
+    [handleDownloadAll],
+  )
+
   // Drag-to-stack handler (1.0.6+). Reparents the source video's
   // group into the target video's group via POST
   // /api/videos/[id]/stack. Server enforces same-folder + same-
@@ -828,11 +934,30 @@ export default function FolderBrowser({
   // the target folder in one batch call so the move stays atomic. We
   // optimistically remove the local card immediately to avoid a
   // visible "double image" while the fetch resolves.
+  //
+  // 1.0.9+: bulk-aware. Finder / Frame.io semantics — if the dragged
+  // card is *part of* a selection of 2+ cards, dropping it onto a
+  // folder moves the ENTIRE selection in one batch call. Dragging a
+  // card that isn't selected still moves just that card so users can
+  // shuffle a single asset without losing their selection.
   const handleMoveVideoToFolder = useCallback(
     async (sourceVideoId: string, targetFolderId: string) => {
       if (!sourceVideoId || !targetFolderId) return
-      const group = videoGroups.find((g) => g.allIds.includes(sourceVideoId))
-      const idsToMove = group ? group.allIds : [sourceVideoId]
+      // Build the set of card ids to move. When the drag source is
+      // part of the selection (≥ 2), every selected card joins it;
+      // otherwise we ship just the dragged card's group.
+      const isBulk =
+        selectedVideoIds.size >= 2 && selectedVideoIds.has(sourceVideoId)
+      const sourceCardIds = isBulk
+        ? Array.from(selectedVideoIds)
+        : [sourceVideoId]
+      const idsToMove: string[] = []
+      for (const cardId of sourceCardIds) {
+        const grp = videoGroups.find((g) => g.allIds.includes(cardId))
+        if (grp) idsToMove.push(...grp.allIds)
+        else idsToMove.push(cardId)
+      }
+      if (idsToMove.length === 0) return
       try {
         const res = await apiFetch('/api/videos/batch', {
           method: 'PATCH',
@@ -846,6 +971,7 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to move video')
         }
+        if (isBulk) clearSelection()
         // 1.0.8+: refresh BOTH the parent page state and this
         // FolderBrowser's own state. At the project root the videos
         // live in our local `rootVideos`; relying on `onMutated`
@@ -856,7 +982,7 @@ export default function FolderBrowser({
         alert(err instanceof Error ? err.message : 'Failed to move video')
       }
     },
-    [videoGroups, onMutated, fetchFolders],
+    [videoGroups, onMutated, fetchFolders, selectedVideoIds, clearSelection],
   )
 
   // "Move up one folder" target (1.0.7+). When we're inside ANY
@@ -878,11 +1004,27 @@ export default function FolderBrowser({
   // as the drag-onto-folder path so the move stays atomic. Sending
   // `folderId: null` parks the group at the project root, which the
   // API accepts.
+  //
+  // 1.0.9+: bulk-aware. When 2+ videos are selected we move EVERY
+  // selected video's version group up one level in a single batch
+  // call, irrespective of which card's kebab was clicked.
   const handleMoveVideoUp = useCallback(
     async (videoId: string) => {
       if (!canMoveUp) return
-      const group = videoGroups.find((g) => g.allIds.includes(videoId))
-      const idsToMove = group ? group.allIds : [videoId]
+      // Collect every version row that belongs to either the clicked
+      // card's group (single-card path) or every selected card's
+      // group (bulk path).
+      const sourceIds =
+        selectedVideoIds.size >= 2
+          ? Array.from(selectedVideoIds)
+          : [videoId]
+      const idsToMove: string[] = []
+      for (const cardId of sourceIds) {
+        const group = videoGroups.find((g) => g.allIds.includes(cardId))
+        if (group) idsToMove.push(...group.allIds)
+        else idsToMove.push(cardId)
+      }
+      if (idsToMove.length === 0) return
       try {
         const res = await apiFetch('/api/videos/batch', {
           method: 'PATCH',
@@ -896,13 +1038,22 @@ export default function FolderBrowser({
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to move video')
         }
+        if (selectedVideoIds.size >= 2) clearSelection()
         await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move video')
       }
     },
-    [canMoveUp, parentFolderId, videoGroups, onMutated, fetchFolders],
+    [
+      canMoveUp,
+      parentFolderId,
+      videoGroups,
+      onMutated,
+      fetchFolders,
+      selectedVideoIds,
+      clearSelection,
+    ],
   )
 
   // Per-video share handler (1.0.7+). For now we surface the same
@@ -997,6 +1148,119 @@ export default function FolderBrowser({
       }
     },
     [canMoveUp, parentFolderId, fetchFolders, onMutated],
+  )
+
+  // "New Folder with Selection" (1.0.9+). Creates a folder named
+  // "New Folder" (with a "(2)", "(3)" suffix when there's already a
+  // sibling by that name), moves every selected video's version
+  // group into it via the batch endpoint, then marks the new folder
+  // for inline auto-rename so the user can immediately type a real
+  // name.
+  const handleNewFolderWithSelection = useCallback(async () => {
+    if (selectedVideoIds.size === 0) return
+    // Pick a unique default name so two consecutive presses don't
+    // produce two "New Folder" siblings.
+    const existingNames = new Set(folders.map((f) => f.name))
+    const base = 'New Folder'
+    let candidate = base
+    let suffix = 2
+    while (existingNames.has(candidate)) {
+      candidate = `${base} (${suffix})`
+      suffix += 1
+      if (suffix > 999) break // sanity
+    }
+
+    setBulkBusy(true)
+    try {
+      // 1. Create the folder at the current location.
+      const createRes = await apiFetch('/api/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          parentFolderId: currentFolderId,
+          name: candidate,
+        }),
+      })
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to create folder')
+      }
+      const created = await createRes.json().catch(() => null)
+      if (!created?.id) throw new Error('Folder created without id')
+
+      // 2. Batch-move every version of every selected card into it.
+      const idsToMove: string[] = []
+      for (const cardId of selectedVideoIds) {
+        const group = videoGroups.find((g) => g.allIds.includes(cardId))
+        if (group) idsToMove.push(...group.allIds)
+        else idsToMove.push(cardId)
+      }
+      if (idsToMove.length > 0) {
+        const moveRes = await apiFetch('/api/videos/batch', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            videoIds: idsToMove,
+            folderId: created.id,
+          }),
+        })
+        if (!moveRes.ok) {
+          const err = await moveRes.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to move videos into folder')
+        }
+      }
+
+      // 3. Mark this folder for inline auto-rename. The FolderCard
+      //    consumes the prop on mount, focuses + selects the name,
+      //    and calls back once the edit finishes.
+      setPendingAutoEditFolderId(created.id)
+      clearSelection()
+      await fetchFolders({ silent: true })
+      onMutated?.()
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? err.message
+          : 'Failed to create folder with selection',
+      )
+    } finally {
+      setBulkBusy(false)
+    }
+  }, [
+    selectedVideoIds,
+    folders,
+    projectId,
+    currentFolderId,
+    videoGroups,
+    clearSelection,
+    fetchFolders,
+    onMutated,
+  ])
+
+  // Commit handler for the inline folder rename (1.0.9+). PATCHes
+  // /api/folders/[id] then re-fetches so the grid resorts.
+  const handleFolderRenameCommit = useCallback(
+    async (folderId: string, newName: string) => {
+      const trimmed = newName.trim()
+      if (!trimmed) return
+      try {
+        const res = await apiFetch(`/api/folders/${folderId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmed }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to rename folder')
+        }
+        await fetchFolders({ silent: true })
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to rename folder')
+      }
+    },
+    [fetchFolders, onMutated],
   )
 
   const handleBulkDelete = useCallback(() => {
@@ -1230,35 +1494,39 @@ export default function FolderBrowser({
     >
       <div className="flex items-center justify-between gap-3 flex-wrap">
         {breadcrumbRendered}
-        <div className="flex items-center gap-2">
-          {/* Download All — only useful inside a folder that has
-              videos. Sequential download of the latest version per
-              video name (matches what the user sees on the cards). */}
-          {currentFolderId && videoGroups.length > 0 && (
+        {!hideHeaderActions && (
+          <div className="flex items-center gap-2">
+            {/* Download All — only useful inside a folder that has
+                videos. Sequential download of the latest version per
+                video name (matches what the user sees on the cards).
+                1.0.9+: the parent page can hoist these into its own
+                top bar via `hideHeaderActions` + the imperative ref. */}
+            {currentFolderId && videoGroups.length > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadAll}
+                disabled={bulkBusy}
+              >
+                <Download className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Download All</span>
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleDownloadAll}
-              disabled={bulkBusy}
+              onClick={() => {
+                setNewDialogRestricted(false)
+                setShowNewDialog(true)
+              }}
             >
-              <Download className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Download All</span>
+              <FolderPlus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">New Folder</span>
             </Button>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setNewDialogRestricted(false)
-              setShowNewDialog(true)
-            }}
-          >
-            <FolderPlus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">New Folder</span>
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
 
       {loading && (
@@ -1425,7 +1693,7 @@ export default function FolderBrowser({
         ref={filesInputRef}
         type="file"
         multiple
-        accept="video/*"
+        accept="video/*,image/jpeg,image/png,image/webp,image/gif"
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files || [])
@@ -1481,6 +1749,13 @@ export default function FolderBrowser({
               onShare={handleShare}
               onDelete={handleDelete}
               onMoveUp={canMoveUp ? handleMoveFolderUp : undefined}
+              autoEditOnMount={pendingAutoEditFolderId === f.id}
+              onRenameCommit={handleFolderRenameCommit}
+              onAutoEditDone={(folderId) => {
+                setPendingAutoEditFolderId((cur) =>
+                  cur === folderId ? null : cur,
+                )
+              }}
               onDragStart={(id) => setDraggingFolderId(id)}
               onDragEnd={() => setDraggingFolderId(null)}
               onDropFolder={handleDropOnFolder}
@@ -1492,7 +1767,30 @@ export default function FolderBrowser({
               isPotentialVideoDropTarget={draggingVideoId !== null}
             />
           ))}
-          {videoGroups.map((v) => (
+          {(() => {
+            // 1.0.9+: when the user drags a card that's part of a
+            // selection of 2+, every selected card "comes along" —
+            // they all ghost together so the user sees they're
+            // moving the whole batch. Compute the active flag once
+            // per render so the JSX below stays readable.
+            const dragMovesSelection =
+              draggingVideoId !== null &&
+              selectedVideoIds.size >= 2 &&
+              selectedVideoIds.has(draggingVideoId)
+            // Thumbnails of every selected card — fed to VideoCard
+            // so its onDragStart can paint a Frame.io-style stacked
+            // drag image at the cursor (1.0.9+). The dragged card's
+            // own thumbnail is included since it's selected; we
+            // just supply the same array to every selected card.
+            const bulkDragThumbs = videoGroups
+              .filter((g) => selectedVideoIds.has(g.id))
+              .map((g) => g.thumbnailUrl || '')
+              .filter((u) => !!u)
+            return videoGroups.map((v) => {
+              const isSourceCard = draggingVideoId === v.id
+              const isBulkBuddy =
+                dragMovesSelection && selectedVideoIds.has(v.id)
+              return (
             <VideoCard
               key={`video:${v.id}`}
               id={v.id}
@@ -1514,9 +1812,14 @@ export default function FolderBrowser({
               onStartVideoDrag={(id) => setDraggingVideoId(id)}
               onEndVideoDrag={() => setDraggingVideoId(null)}
               onStackOnto={handleStackVideos}
-              isBeingDragged={draggingVideoId === v.id}
+              // 1.0.9+: ghost all selected siblings while one of them
+              // is being dragged, not just the source card. Visually
+              // mirrors Finder / Frame.io batch drags.
+              isBeingDragged={isSourceCard || isBulkBuddy}
               isPotentialStackTarget={
-                draggingVideoId !== null && draggingVideoId !== v.id
+                draggingVideoId !== null &&
+                draggingVideoId !== v.id &&
+                !isBulkBuddy
               }
               onOpen={handleOpenVideo}
               onRename={handleRenameVideo}
@@ -1524,8 +1827,14 @@ export default function FolderBrowser({
               onMoveUp={canMoveUp ? handleMoveVideoUp : undefined}
               onShare={handleShareVideo}
               onSplitVersions={handleSplitVersions}
+              bulkSelectionCount={selectedVideoIds.size}
+              onNewFolderWithSelection={handleNewFolderWithSelection}
+              bulkDragThumbnails={bulkDragThumbs}
+              mediaType={v.mediaType}
             />
-          ))}
+              )
+            })
+          })()}
         </div>
       )}
 
@@ -1551,6 +1860,38 @@ export default function FolderBrowser({
         onNewRestrictedFolder={() => {
           setNewDialogRestricted(true)
           setShowNewDialog(true)
+        }}
+        // 1.0.9+: surface the same bulk actions that live in the
+        // video kebab when there's an active selection, so right-
+        // click is at parity with the kebab.
+        bulkSelectionCount={selectedVideoIds.size}
+        canBulkMoveUp={canMoveUp}
+        onBulkMoveUp={() => {
+          const first = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          if (!first) return
+          // handleMoveVideoUp already routes through the selection
+          // when size >= 2 and falls back to a single-card move for
+          // size === 1. Passing the first selected id works for both.
+          void handleMoveVideoUp(first)
+        }}
+        onBulkNewFolderWithSelection={() => {
+          void handleNewFolderWithSelection()
+        }}
+        onBulkDownload={() => {
+          // Mirrors the floating selection toolbar's Download button
+          // (1.0.9+). Downloads the latest version of every selected
+          // card, one after the other, with a small inter-request
+          // delay so the browser's popup blocker doesn't trip.
+          handleBulkDownload()
+        }}
+        onBulkDelete={() => {
+          const first = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          if (!first) return
+          handleDeleteVideo(first)
         }}
       />
 
@@ -1592,3 +1933,9 @@ export default function FolderBrowser({
     </div>
   )
 }
+
+const FolderBrowser = forwardRef<FolderBrowserHandle, FolderBrowserProps>(
+  FolderBrowserInner,
+)
+FolderBrowser.displayName = 'FolderBrowser'
+export default FolderBrowser

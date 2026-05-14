@@ -313,6 +313,35 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
     upload.metadata?.filetype as string || 'video/mp4'
   )
 
+  // 1.0.9+: image uploads share the same TUS pipeline as videos but
+  // skip the worker entirely. There's nothing to transcode, and the
+  // original file IS the thumbnail. Flip the row straight to READY
+  // and point `thumbnailPath` at the uploaded original so the folder
+  // grid and player can sign a URL for it just like a normal video
+  // thumbnail.
+  const mediaType: 'VIDEO' | 'IMAGE' =
+    ((video as any).mediaType as 'VIDEO' | 'IMAGE' | undefined) || 'VIDEO'
+  if (mediaType === 'IMAGE') {
+    await prisma.video.update({
+      where: { id: videoId },
+      data: {
+        status: 'READY',
+        processingProgress: 100,
+        thumbnailPath: video.originalStoragePath,
+        // Duration / width / height stay at the seed values from the
+        // upload route (0). Width/height ideally come from probing the
+        // image with sharp, but the player + grid already render fine
+        // off the natural dimensions of the <img>, so we skip the
+        // server-side probe for the MVP.
+      } as any,
+    })
+    logMessage(
+      `[UPLOAD] Image ${videoId} upload complete, marked READY (worker skipped)`,
+    )
+    await cleanupTUSFile(tusFilePath)
+    return {}
+  }
+
   // Update video status to PROCESSING since upload is complete and job will be queued
   await prisma.video.update({
     where: { id: videoId },
@@ -466,12 +495,18 @@ async function validateVideoFile(tusFilePath: string, filename?: string) {
   // Validate file extension
   if (filename) {
     const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'))
-    const allowedExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv']
+    // 1.0.9+: accept image extensions too. Image uploads travel
+    // through the same `/api/uploads` TUS pipeline but bypass the
+    // worker — see `handleVideoUploadFinish` below.
+    const allowedExtensions = [
+      '.mp4', '.mov', '.avi', '.webm', '.mkv',
+      '.jpg', '.jpeg', '.png', '.webp', '.gif',
+    ]
 
     if (!allowedExtensions.includes(ext)) {
       await cleanupTUSFile(tusFilePath)
       throw new Error(
-        `Invalid file extension: ${ext}. Allowed video formats: ${allowedExtensions.join(', ')}`
+        `Invalid file extension: ${ext}. Allowed: ${allowedExtensions.join(', ')}`
       )
     }
   }

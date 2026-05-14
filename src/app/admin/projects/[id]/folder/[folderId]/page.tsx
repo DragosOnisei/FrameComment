@@ -3,11 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Settings, Upload } from 'lucide-react'
+import {
+  ArrowLeft,
+  Download,
+  FolderPlus,
+  Settings,
+  Upload,
+} from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import AdminVideoManager, { type AdminVideoManagerHandle } from '@/components/AdminVideoManager'
-import FolderBrowser from '@/components/FolderBrowser'
+import FolderBrowser, {
+  type FolderBrowserHandle,
+} from '@/components/FolderBrowser'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
@@ -45,6 +53,10 @@ export default function ProjectFolderPage() {
   // visible list is hidden (we use it only for the upload modal).
   const sortMode = 'alphabetical' as const
   const videoManagerRef = useRef<AdminVideoManagerHandle | null>(null)
+  // FolderBrowser imperative handle (1.0.9+). Lets us drive the
+  // browser's New-Folder dialog and Download-All flow from buttons
+  // we render up in the top toolbar, alongside Upload + Settings.
+  const folderBrowserRef = useRef<FolderBrowserHandle | null>(null)
 
   const fetchFolder = useCallback(async (opts?: { silent?: boolean }) => {
     try {
@@ -195,24 +207,47 @@ export default function ProjectFolderPage() {
               <span className="sm:hidden">{tc('back')}</span>
             </Button>
           </Link>
-          <div className="flex items-center gap-2">
-            {/* Upload + Settings parity with the project page so the
-                user has consistent affordances no matter how deep
-                they are in the tree. The upload itself drops the
-                video at the project root for now — moving it into the
-                current folder is one drag away (1.0.6+). */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Unified top action bar (1.0.9+). All four actions
+                share the same neutral outline style + `min-w-[150px]`
+                so the row reads calm rather than as a rainbow of
+                buttons. Each one keeps its own icon as the visual
+                differentiator. */}
             {project && project.status !== 'APPROVED' && (
               <Button
-                variant="default"
+                variant="outline"
                 size="default"
+                className="min-w-[150px]"
                 onClick={() => videoManagerRef.current?.triggerUpload()}
               >
                 <Upload className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">{t('uploadVideos')}</span>
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="default"
+              className="min-w-[150px]"
+              onClick={() => folderBrowserRef.current?.downloadAll()}
+            >
+              <Download className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Download All</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="default"
+              className="min-w-[150px]"
+              onClick={() => folderBrowserRef.current?.openNewFolderDialog()}
+            >
+              <FolderPlus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">New Folder</span>
+            </Button>
             <Link href={`/admin/projects/${projectId}/settings`}>
-              <Button variant="outline" size="default">
+              <Button
+                variant="outline"
+                size="default"
+                className="min-w-[150px]"
+              >
                 <Settings className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Project settings</span>
               </Button>
@@ -225,6 +260,7 @@ export default function ProjectFolderPage() {
               videos render as siblings in the SAME grid inside
               FolderBrowser. */}
           <FolderBrowser
+            ref={folderBrowserRef}
             projectId={project.id}
             projectSlug={project.slug}
             projectTitle={project.title}
@@ -237,6 +273,7 @@ export default function ProjectFolderPage() {
             }
             onUploadFolderTree={handleUploadFolderTree}
             videos={videos}
+            hideHeaderActions
             stretch
           />
 
