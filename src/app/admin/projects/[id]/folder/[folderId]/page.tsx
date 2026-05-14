@@ -201,10 +201,16 @@ export default function ProjectFolderPage() {
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
           <Link href={`/admin/projects/${projectId}`}>
-            <Button variant="ghost" size="default" className="justify-start px-3">
+            {/* 1.0.9+: matches the neutral outline style + min width of
+                the right-hand action bar so the whole top row reads as
+                one consistent set of controls. Stays on the left. */}
+            <Button
+              variant="outline"
+              size="default"
+              className="min-w-[150px]"
+            >
               <ArrowLeft className="w-4 h-4 mr-2" />
-              <span className="hidden sm:inline">Back to project</span>
-              <span className="sm:hidden">{tc('back')}</span>
+              <span>Back</span>
             </Button>
           </Link>
           <div className="flex items-center gap-2 flex-wrap">

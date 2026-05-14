@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { CheckCircle2, ChevronDown, Film, Layers, Grid3X3, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ChevronDown, Film, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -200,8 +200,13 @@ export default function ThumbnailReel({
                 className="shrink-0 gap-1.5 px-2 sm:px-3 h-8"
                 title={backLabel ?? tShare('backToAllVideos')}
               >
-                <Grid3X3 className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm">{backLabel ?? tShare('allVideos')}</span>
+                {/* 1.0.9+: plain "Back" arrow instead of the grid
+                    glyph + "All Videos" label, to match the unified
+                    Back buttons on the project + folder pages. A
+                    `backLabel` override (e.g. folder-share's "Back to
+                    folder") still wins when provided. */}
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline text-sm">{backLabel ?? 'Back'}</span>
               </Button>
             )}
           </div>

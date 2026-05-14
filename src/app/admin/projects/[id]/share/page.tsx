@@ -491,8 +491,17 @@ function AdminSharePageInner() {
     setViewState('grid')
   }, [project?.videosByName, urlVideoName])
 
+  // 1.0.9+: track HOW the player was reached. `true` only when the
+  // user picked a video from the in-page "Select a video" grid;
+  // `false` when they landed straight on the player via a `?video=`
+  // URL — which is exactly what the admin folder / project pages do
+  // when you click a video card. The "Back" button reads this to
+  // decide where to go (see `handleBackToGrid`).
+  const enteredViaGridRef = useRef(false)
+
   // Handle video selection
   const handleVideoSelect = useCallback((videoName: string) => {
+    enteredViaGridRef.current = true
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
     setViewState('player')
@@ -502,17 +511,42 @@ function AdminSharePageInner() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
   }, [project?.videosByName, searchParams, pathname, router])
 
-  // Handle back to grid
+  // Handle the player's "Back" button.
   const handleBackToGrid = useCallback(() => {
-    setViewState('grid')
+    // Case A — the user picked this video from the in-page grid:
+    // "Back" returns to that grid (the original behaviour).
+    if (enteredViaGridRef.current) {
+      setViewState('grid')
+      const params = new URLSearchParams(searchParams?.toString() || '')
+      params.delete('video')
+      const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
+      router.replace(newUrl || '', { scroll: false })
+      return
+    }
+    // Case B — the user arrived straight on the player (clicked a
+    // card on the admin folder / project page). The in-page grid is
+    // NOT where they came from — it's a redundant detour that just
+    // looks like the client share view. Leave the share route
+    // entirely and go back to the folder the video was opened from,
+    // or the project root when there's no folder context.
+    const folderId = searchParams?.get('folderId')
+    router.push(
+      folderId
+        ? `/admin/projects/${id}/folder/${folderId}`
+        : `/admin/projects/${id}`,
+    )
+  }, [searchParams, pathname, router, id])
 
-    const params = new URLSearchParams(searchParams?.toString() || '')
-    params.delete('video')
-    const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
-    router.replace(newUrl || '', { scroll: false })
-  }, [searchParams, pathname, router])
-
-  const projectUrl = `/admin/projects/${id}`
+  // "Back" target (1.0.9+). When the player was opened from inside a
+  // folder, FolderBrowser tacks a `&folderId=` onto the share URL —
+  // so "Back" should return to THAT folder, not the project root.
+  // Falls back to the project root when there's no folder context.
+  // This always stays on the admin side (`/admin/projects/...`); it
+  // never bounces the admin out to the client-facing share view.
+  const backFolderId = searchParams?.get('folderId') || null
+  const projectUrl = backFolderId
+    ? `/admin/projects/${id}/folder/${backFolderId}`
+    : `/admin/projects/${id}`
 
   // Show loading state
   if (loading) {
@@ -691,7 +725,13 @@ function AdminSharePageInner() {
                   adminUser={adminUser}
                   recipients={project.recipients || []}
                   shareToken={null}
-                  showShortcutsButton={true}
+                  // 1.0.9+: the admin always gets the attachment +
+                  // voice-recorder buttons in their own comment box.
+                  // This prop gated BOTH buttons and was never passed
+                  // on the admin share page, so they silently never
+                  // rendered. It's an admin capability, independent of
+                  // the client-facing upload toggle.
+                  allowClientAssetUpload={true}
                   timestampDisplayMode={project.timestampDisplay || 'TIMECODE'}
                   mobileCollapsible={true}
                   initialMobileCollapsed={false}

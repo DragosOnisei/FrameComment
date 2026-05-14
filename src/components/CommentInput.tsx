@@ -7,7 +7,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { Clock, Send, X, Keyboard, Paperclip, Pencil, PenTool } from 'lucide-react'
+import { Clock, Send, X, Paperclip, Pencil, PenTool } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachmentButton from './CommentAttachmentButton'
@@ -132,23 +132,8 @@ export default function CommentInput({
   const [isVoiceActive, setIsVoiceActive] = useState(false)
 
   if (commentsDisabled) {
-    // Still show the shortcuts button when comments are disabled (e.g. after approval)
-    if (showShortcutsButton && onShowShortcuts) {
-      return (
-        <div className="p-3 flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onShowShortcuts}
-            className="hidden lg:inline-flex"
-          >
-            <Keyboard className="w-4 h-4 lg:mr-2" />
-            <span className="hidden lg:inline">{t('shortcuts')}</span>
-          </Button>
-        </div>
-      )
-    }
+    // 1.0.9+: the Shortcuts button was removed app-wide, so there's
+    // nothing left to render here once comments are disabled.
     return null
   }
 
@@ -463,25 +448,12 @@ export default function CommentInput({
               {t('selectNameFirst')}
             </p>
           ) : (
-            <div className="mt-2 flex flex-row items-center justify-between gap-2 min-w-0">
-              {/* Hide the verbose keyboard hint on narrow sidebars (the
-                  Shortcuts button covers the same ground). It comes back
-                  at 2xl where there's room for both. */}
-              <p className="text-xs text-muted-foreground hidden 2xl:block truncate">
+            // 1.0.9+: Shortcuts button removed — only the keyboard
+            // hint remains, and only on wide (2xl) sidebars.
+            <div className="mt-2 hidden 2xl:block min-w-0">
+              <p className="text-xs text-muted-foreground truncate">
                 {t('enterToSend')}
               </p>
-              {showShortcutsButton && onShowShortcuts && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={onShowShortcuts}
-                  className="ml-auto hidden lg:inline-flex shrink-0"
-                >
-                  <Keyboard className="w-4 h-4 lg:mr-2" />
-                  <span className="hidden lg:inline">{t('shortcuts')}</span>
-                </Button>
-              )}
             </div>
           )}
         </>

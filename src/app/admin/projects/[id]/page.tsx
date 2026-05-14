@@ -5,11 +5,13 @@ import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import FolderBrowser from '@/components/FolderBrowser'
+import FolderBrowser, {
+  type FolderBrowserHandle,
+} from '@/components/FolderBrowser'
 import AdminVideoManager, { type AdminVideoManagerHandle } from '@/components/AdminVideoManager'
 import ProjectActions from '@/components/ProjectActions'
 import ProjectUploadsBlock from '@/components/ProjectUploadsBlock'
-import { ArrowLeft, Settings, FolderUp } from 'lucide-react'
+import { ArrowLeft, FolderPlus, Settings, FolderUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
@@ -33,6 +35,10 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
   const videoManagerRef = useRef<AdminVideoManagerHandle | null>(null)
+  // FolderBrowser imperative handle (1.0.9+) — lets the top action
+  // bar drive the New-Folder dialog so the button can sit alongside
+  // Project settings instead of inline next to the breadcrumb.
+  const folderBrowserRef = useRef<FolderBrowserHandle | null>(null)
 
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
@@ -202,15 +208,37 @@ export default function ProjectPage() {
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
           <Link href="/admin/projects">
-            <Button variant="ghost" size="default" className="justify-start px-3">
+            {/* 1.0.9+: unified neutral outline style + min width so the
+                top row reads as one consistent set of controls. Stays
+                on the left. */}
+            <Button
+              variant="outline"
+              size="default"
+              className="min-w-[150px]"
+            >
               <ArrowLeft className="w-4 h-4 mr-2" />
-              <span className="hidden sm:inline">{t('backToProjects')}</span>
-              <span className="sm:hidden">{tc('back')}</span>
+              <span>Back</span>
             </Button>
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* New Folder hoisted up here (1.0.9+) so it sits alongside
+                Project settings instead of inline next to the
+                breadcrumb. Driven through the FolderBrowser ref. */}
+            <Button
+              variant="outline"
+              size="default"
+              className="min-w-[150px]"
+              onClick={() => folderBrowserRef.current?.openNewFolderDialog()}
+            >
+              <FolderPlus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">New Folder</span>
+            </Button>
             <Link href={`/admin/projects/${id}/settings`}>
-              <Button variant="outline" size="default">
+              <Button
+                variant="outline"
+                size="default"
+                className="min-w-[150px]"
+              >
                 <Settings className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">{t('projectSettings')}</span>
               </Button>
@@ -234,12 +262,14 @@ export default function ProjectPage() {
             above. */}
         <div className="space-y-6 min-w-0">
           <FolderBrowser
+            ref={folderBrowserRef}
             projectId={project.id}
             projectSlug={project.slug}
             projectTitle={project.title}
             currentFolderId={null}
             onMutated={fetchProject}
             onUploadFolderTree={handleUploadFolderTree}
+            hideHeaderActions
             stretch
           />
 

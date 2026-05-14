@@ -1,0 +1,41 @@
+name: framecomment
+train: community
+version: 1.0.10
+app_version: 1.0.10
+title: FrameComment
+description: Self-hosted video review and approval platform for filmmakers and video professionals.
+home: https://github.com/DragosOnisei/FrameComment
+icon: https://raw.githubusercontent.com/DragosOnisei/FrameComment/main/truenas-catalog/community/framecomment/icon.png
+sources:
+  - https://github.com/DragosOnisei/FrameComment
+  - https://hub.docker.com/r/dragosonisei/framecomment
+maintainers:
+  - email: dragosonisei@gmail.com
+    name: Dragos Onisei
+    url: https://github.com/DragosOnisei
+keywords:
+  - video
+  - review
+  - approval
+  - filmmakers
+  - self-hosted
+annotations:
+  title: FrameComment
+lib_version: 2.1.0
+lib_version_hash: aaaaaaaaaaaaaaaaaaaaaaaa
+required_features:
+  - normalize/ixVolume
+  - definitions/timezone
+  - definitions/nodePort
+  - definitions/certificate
+  - validations/nodePort
+host_mounts: []
+capabilities:
+  - name: NET_BIND_SERVICE
+    description: Allows binding to privileged ports below 1024 if needed
+run_as_context:
+  - description: FrameComment app and worker run as a non-root user.
+    gid: 568
+    group_name: apps
+    uid: 568
+    user_name: apps

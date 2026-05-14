@@ -465,7 +465,17 @@ export function useCommentManagement({
     // Convert seconds to timecode for API and storage
     const selectedVideo = videos.find(v => v.id === validatedVideoId)
     const fps = selectedVideo?.fps || 24 // Default to 24fps if not available
-    const timecode = selectedTimestamp !== null ? secondsToTimecode(selectedTimestamp, fps) : '00:00:00:00'
+    // 1.0.9+: image assets have no timeline, so their comments carry
+    // no capture moment. The server still requires a syntactically
+    // valid `timecode`, so we keep the harmless `00:00:00:00` default
+    // for images — but we never send `timestampMs`, and the UI
+    // (CommentSection / MessageBubble) suppresses the timecode badge
+    // and any click-to-seek for image comments anyway.
+    const isImageComment = (selectedVideo as any)?.mediaType === 'IMAGE'
+    const timecode =
+      !isImageComment && selectedTimestamp !== null
+        ? secondsToTimecode(selectedTimestamp, fps)
+        : '00:00:00:00'
 
     const optimisticComment: CommentWithReplies = {
       id: `temp-${Date.now()}`,
@@ -474,8 +484,11 @@ export function useCommentManagement({
       videoVersion: videos.find(v => v.id === validatedVideoId)?.version || null,
       timecode,
       // Sub-second precision moment for click-to-seek (1.0.3+).
+      // Always null for image comments.
       timestampMs:
-        typeof selectedTimestamp === 'number' && Number.isFinite(selectedTimestamp)
+        !isImageComment &&
+        typeof selectedTimestamp === 'number' &&
+        Number.isFinite(selectedTimestamp)
           ? Math.max(0, Math.round(selectedTimestamp * 1000))
           : null,
       timecodeEnd: selectedTimecodeEnd || null,
@@ -520,7 +533,13 @@ export function useCommentManagement({
       // Convert timestamp to timecode for API
       const commentVideo = videos.find(v => v.id === commentVideoId)
       const fps = commentVideo?.fps || 24
-      const commentTimecode = commentTimestamp !== null ? secondsToTimecode(commentTimestamp, fps) : '00:00:00:00'
+      // 1.0.9+: image comments carry no capture moment — see the
+      // optimistic-comment block above for the full rationale.
+      const commentIsImage = (commentVideo as any)?.mediaType === 'IMAGE'
+      const commentTimecode =
+        !commentIsImage && commentTimestamp !== null
+          ? secondsToTimecode(commentTimestamp, fps)
+          : '00:00:00:00'
 
       // Build request body - only include fields with values
       const requestBody: any = {
@@ -534,8 +553,13 @@ export function useCommentManagement({
       // Sub-second precision capture moment so the server-side
       // `timestampMs` field can be the source of truth for click-to-seek.
       // The timecode field is frame-quantized; without this, round-tripping
-      // through HH:MM:SS:FF loses up to ~21ms at 24fps.
-      if (typeof commentTimestamp === 'number' && Number.isFinite(commentTimestamp)) {
+      // through HH:MM:SS:FF loses up to ~21ms at 24fps. Skipped entirely
+      // for image comments — they have no timeline.
+      if (
+        !commentIsImage &&
+        typeof commentTimestamp === 'number' &&
+        Number.isFinite(commentTimestamp)
+      ) {
         requestBody.timestampMs = Math.max(0, Math.round(commentTimestamp * 1000))
       }
 

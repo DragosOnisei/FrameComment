@@ -17,6 +17,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.0.10] - 2026-05-14
+
+A polish + bug-fix follow-up to 1.0.9. Unifies the "Back" buttons
+and top action bars across the project, folder, and player pages;
+drops the redundant Shortcuts button; and fixes a handful of
+image-asset and navigation bugs that surfaced once 1.0.9 was in use.
+
+### Changed — Unified "Back" + top action bars
+
+- The "Back to project" / "Back to Projects" buttons (folder page
+  AND project root page) now use the unified neutral outline style
+  + `min-w-[150px]`, and both just read **"Back"** with the arrow
+  icon. They stay on the left, separated from the action group by
+  the row's `justify-between`.
+- The **project root page** top bar got the same treatment as the
+  folder page: "New Folder" is hoisted out of the FolderBrowser
+  breadcrumb row up alongside "Project settings". FolderBrowser is
+  mounted with `hideHeaderActions` there too, driven through its
+  imperative ref.
+- In the video player header, the "All Videos" button (grid glyph)
+  is now a plain **"Back"** arrow button too. The `backLabel`
+  override — e.g. folder-share's "Back to folder" — still takes
+  precedence when set.
+
+### Added
+
+- Right-clicking a video card now **auto-selects** it (Finder
+  semantics): right-clicking a card that isn't part of the current
+  selection replaces the selection with just that card, so the
+  context menu instantly exposes Download / Move up / New Folder /
+  Delete for it without ticking the checkbox first. Right-clicking
+  a card that's already selected leaves the multi-select untouched.
+
+### Removed
+
+- The **"Shortcuts" button** is gone from the comment input area
+  (both the normal and comments-disabled states). The keyboard
+  hint ("press Enter to send") stays on wide sidebars; the
+  shortcuts overlay was redundant.
+
+### Fixed
+
+- **Clicking a comment on an image no longer refreshes the page.**
+  Image comments have no timeline, but clicking one still ran the
+  seek path — and `handleSeekToTimestamp`'s "no `<video>` element"
+  fallback (an image renders as `<img>`) did a full-page
+  `window.location` navigation. Now: image assets short-circuit
+  the seek entirely, image comments never render a timecode badge
+  and don't seek on click, and newly-created image comments don't
+  store a `timestampMs` at all.
+- **Attachment + voice-recorder buttons now show in the admin
+  comment box.** They were gated behind `allowClientAssetUpload`,
+  which the admin share page never passed — so the paperclip and
+  mic buttons silently never rendered for the admin. The admin
+  share page now passes it explicitly: attaching files and
+  recording audio is an admin capability, independent of the
+  client-facing upload toggle.
+- **Player "Back" button now returns to where you came from.**
+  Previously, clicking "Back" while watching a video always dropped
+  you on the in-page "Select a video" grid — which looks like the
+  client-facing share view and isn't where an admin started. Now
+  the player tracks how it was reached: if you opened the video by
+  clicking a card on the admin folder / project page, "Back" leaves
+  the share route entirely and returns to **that folder** (or the
+  project root when there's no folder context). The in-page grid
+  is still the "Back" target only when you genuinely picked the
+  video from that grid. Everything stays on the admin side — it
+  never bounces you out to the client view.
+- The admin share/grid "Back to Project" button also reads the
+  `folderId` from the share URL, so it returns to the originating
+  folder instead of always jumping to the project root.
+
 ## [1.0.9] - 2026-05-14
 
 The "bulk hygiene" release. The video kebab now understands the

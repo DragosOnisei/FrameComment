@@ -476,6 +476,14 @@ export default function CommentSection({
     videoVersion: number | null,
     timestampMs?: number | null
   ) => {
+    // 1.0.9+: image assets have no timeline — there's nothing to seek.
+    // Bail before reaching `handleSeekToTimestamp`, whose
+    // "no <video> element on the page" fallback would otherwise do a
+    // full-page `window.location` navigation (an image renders as an
+    // <img>, so the video query never matches → page refresh bug).
+    const targetVideo = videos.find(v => v.id === videoId)
+    if (targetVideo && (targetVideo as any).mediaType === 'IMAGE') return
+
     // Prefer the precise `timestampMs` captured at comment creation
     // (1.0.3+) so the playhead lands exactly where the user paused —
     // `timecode` is frame-quantized and round-tripping loses up to ~21ms
@@ -729,7 +737,12 @@ export default function CommentSection({
                 const video = videos.find(v => v.id === comment.videoId)
                 const fps = video?.fps || 24
                 const duration = video?.duration
+                // 1.0.9+: image assets have no timeline, so a comment
+                // on an image never shows a timecode badge and never
+                // tries to seek on click.
+                const isImageComment = (video as any)?.mediaType === 'IMAGE'
                 const showTimestamp =
+                  !isImageComment &&
                   typeof comment.timecode === 'string' &&
                   comment.timecode.trim() !== ''
                 const timestampLabel = showTimestamp
@@ -756,7 +769,12 @@ export default function CommentSection({
                       comment={comment}
                       isReply={false}
                       onReply={() => handleReply(comment.id, comment.videoId)}
-                      onSeekToTimecode={handleSeekToTimecode}
+                      // 1.0.9+: no seek handler for image comments —
+                      // clicking the bubble must do nothing (images
+                      // have no timeline).
+                      onSeekToTimecode={
+                        isImageComment ? undefined : handleSeekToTimecode
+                      }
                       onDelete={
                         // Show Delete on the bubble for admins (always) and
                         // for the original author (matched via the share-

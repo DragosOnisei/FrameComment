@@ -1396,6 +1396,26 @@ function FolderBrowserInner(
     const target = e.target as HTMLElement | null
     if (target && target.closest('[data-folder-id]')) return
     if (target && target.closest('[role="menu"]')) return
+    // 1.0.9+: right-clicking a video card auto-selects it so the
+    // context menu immediately exposes the bulk actions (Download,
+    // Move up, New Folder with selection, Delete) for that asset —
+    // no need to tick the checkbox first. Finder-style semantics:
+    // right-clicking a card that's NOT part of the current
+    // selection replaces the selection with just that card; right-
+    // clicking one that's already selected leaves the selection
+    // untouched so a multi-select right-click still acts on the
+    // whole batch.
+    const videoCard = target?.closest('[data-video-id]') as
+      | HTMLElement
+      | null
+    if (videoCard) {
+      const vid = videoCard.getAttribute('data-video-id')
+      if (vid) {
+        setSelectedVideoIds((prev) =>
+          prev.has(vid) ? prev : new Set([vid]),
+        )
+      }
+    }
     e.preventDefault()
     setCtxMenu({ open: true, x: e.clientX, y: e.clientY })
   }
