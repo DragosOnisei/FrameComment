@@ -220,8 +220,11 @@ export default function ProjectFolderPage() {
                 buttons. Each one keeps its own icon as the visual
                 differentiator. */}
             {project && project.status !== 'APPROVED' && (
+              // 1.1.0+: Upload is the primary action on this page, so
+              // it gets the blue solid `default` variant. The other
+              // three actions stay neutral outline.
               <Button
-                variant="outline"
+                variant="default"
                 size="default"
                 className="min-w-[150px]"
                 onClick={() => videoManagerRef.current?.triggerUpload()}

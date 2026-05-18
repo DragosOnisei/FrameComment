@@ -17,6 +17,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.1.0] - 2026-05-14
+
+In progress.
+
+### Changed
+
+- Clicking empty space in the folder grid now clears the current
+  multi-select (Finder / Frame.io semantics). Clicks on a video
+  card, a folder card, the floating selection toolbar, or any
+  menu / dialog surface are excluded — only a click on genuinely
+  empty grid space drops the selection.
+- The **Upload Video(s)** button on the folder page top bar is
+  now the solid primary-blue style (`variant=default`) instead of
+  the neutral outline. It's the page's primary action, so it
+  earns the emphasis; the other three (Download All / New Folder
+  / Project settings) stay outline.
+- The **video card footer** (the title + meta strip below the
+  thumbnail) now has an explicit light-gray background
+  (`bg-zinc-200 dark:bg-zinc-800`) instead of inheriting the
+  card's base colour, so video cards read as clearly distinct
+  from folder cards in the same grid. Uses concrete zinc shades
+  rather than the (very subtle) `muted` token so the contrast
+  is obvious in both light and dark mode.
+
+### Changed — Action menu reorder + Duplicate
+
+- Every action menu (right-click context menu, video kebab, folder
+  kebab) is now organised into 4 visually-separated sections:
+  1. **Download · Share**
+  2. **Duplicate · Rename** (+ Split versions on video cards with
+     more than one version)
+  3. **Move up one folder · New Folder with selection**
+  4. **Delete**
+- New **Duplicate** action everywhere — creates a real file-level
+  copy of every selected video and/or folder in the **current
+  folder** with a `(1)`, `(2)`, … suffix appended to the name.
+  Implemented via a new admin endpoint
+  `POST /api/items/duplicate` that:
+  - For each video group, copies the underlying storage file
+    (via `downloadFile` → `uploadFile` streaming) for every
+    version, creates new Video records with status=PROCESSING,
+    and enqueues the worker to regenerate thumbnail / preview /
+    storyboard from the freshly-copied original.
+  - For image assets, marks the new record READY immediately and
+    reuses the new original as its own thumbnail (no worker step).
+  - For folders, walks the subtree depth-first and mirrors the
+    structure under a freshly-minted parent folder.
+- Share and Rename hide automatically at ≥ 2 selected (they
+  don't make sense across a multi-select). Single-target sections
+  collapse their separator when nothing renders, so the menu
+  doesn't show empty dividers.
+
+### Added — Multi-select on folder cards
+
+- Folder cards now participate in the same Frame.io-style multi-
+  select as videos. Each folder card gets:
+  - A top-left checkbox (visible on hover or always when the
+    selection is active), a primary ring when selected, and a
+    click-to-toggle interaction in selection mode (clicking the
+    card no longer drills into the folder while any items are
+    selected — it toggles selection instead, mirroring VideoCard).
+  - A bulk-aware kebab: at ≥ 1 selected, **New Folder with
+    selection** and **Download** appear (the download path
+    descends recursively into selected folders and gathers every
+    video). At ≥ 2 selected, **Rename** and **Share** hide, and
+    **Move up** / **Delete** swap to count-aware labels
+    ("Move 3 up one folder", "Delete 3 items").
+  - Right-click on a folder card auto-selects it (Finder
+    semantics) and opens the context menu with the combined
+    bulk actions.
+- A new `selectedFolderIds` state runs in parallel with the
+  existing `selectedVideoIds`. All bulk handlers
+  (`handleDelete`, `handleMoveFolderUp`, `handleMoveVideoUp`,
+  `handleNewFolderWithSelection`, `handleBulkDelete`,
+  `handleBulkDownload`, `handleMoveVideoToFolder`,
+  `handleDropOnFolder`) now branch on the **combined** count
+  (`totalSelected = selectedVideoIds.size +
+  selectedFolderIds.size`) so a mixed selection (videos AND
+  folders) is treated as one batch.
+- Bulk drag-and-drop crosses kinds: dragging a *selected* folder
+  card onto a target folder moves every selected folder + every
+  selected video group into the target in one pass. Same for
+  dragging a *selected* video card. Dragging an unselected card
+  still moves only that one (Finder semantics — selection stays
+  untouched).
+- "New Folder with selection" wraps mixed selections: the new
+  folder ends up containing every previously-selected folder AND
+  every previously-selected video group.
+- "Download" recurses through selected folders client-side via
+  the existing `/api/folders/[id]` endpoint, collecting the
+  latest version of every video under the subtree, then triggers
+  sequential browser downloads.
+- The floating selection toolbar now reports the **combined**
+  count ("3 items selected") instead of video-only ("3 videos
+  selected").
+
 ## [1.0.10] - 2026-05-14
 
 A polish + bug-fix follow-up to 1.0.9. Unifies the "Back" buttons

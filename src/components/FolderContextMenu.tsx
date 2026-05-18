@@ -4,10 +4,13 @@ import { useEffect, useRef } from 'react'
 import {
   ArrowUp,
   ArrowUpFromLine,
+  Copy,
   Download,
   FolderUp,
   FolderPlus,
   FolderLock,
+  Pencil,
+  Share2,
   Trash2,
 } from 'lucide-react'
 
@@ -54,6 +57,13 @@ export interface FolderContextMenuProps {
    *  files via right-click without scrolling to the toolbar. */
   onBulkDownload?: () => void
   onBulkDelete?: () => void
+  /** 1.1.0+: Share + Rename on a single selected item. Hidden when
+   *  the selection is ≥ 2 (they don't make sense across a batch). */
+  onBulkShare?: () => void
+  onBulkRename?: () => void
+  /** 1.1.0+: real-file Duplicate. Creates a copy of every selected
+   *  item in the current folder with a `(1)`, `(2)`… suffix. */
+  onBulkDuplicate?: () => void
 }
 
 export default function FolderContextMenu({
@@ -71,8 +81,14 @@ export default function FolderContextMenu({
   onBulkNewFolderWithSelection,
   onBulkDownload,
   onBulkDelete,
+  onBulkShare,
+  onBulkRename,
+  onBulkDuplicate,
 }: FolderContextMenuProps) {
   const hasSelection = bulkSelectionCount > 0
+  // 1.1.0+: Share + Rename are single-target only — they don't make
+  // sense across a multi-select.
+  const singleTarget = bulkSelectionCount === 1
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -166,12 +182,58 @@ export default function FolderContextMenu({
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {hasSelection && (
+      {hasSelection ? (
+        // 1.1.0+: when there's an active selection (or the user right-
+        // clicked a card, which auto-selects it), the context menu
+        // shows ONLY the bulk actions. The Upload / New Folder block
+        // is hidden — it's reserved for the empty-space right-click
+        // gesture (no selection), where there's no obvious "item"
+        // for those actions to target anyway.
+        //
+        // Section order (per user spec):
+        //   1. Download, Share
+        //   2. Duplicate, Rename
+        //   3. Move up one folder, New Folder with selection
+        //   4. Delete
         <>
+          <Row
+            icon={<Download className="w-4 h-4" />}
+            label={
+              singleTarget
+                ? 'Download'
+                : `Download ${bulkSelectionCount} items`
+            }
+            onClick={onBulkDownload}
+          />
+          {singleTarget && (
+            <Row
+              icon={<Share2 className="w-4 h-4" />}
+              label="Share"
+              onClick={onBulkShare}
+            />
+          )}
+          <div className="my-1 h-px bg-border/50" role="separator" />
+          <Row
+            icon={<Copy className="w-4 h-4" />}
+            label={
+              singleTarget
+                ? 'Duplicate'
+                : `Duplicate ${bulkSelectionCount} items`
+            }
+            onClick={onBulkDuplicate}
+          />
+          {singleTarget && (
+            <Row
+              icon={<Pencil className="w-4 h-4" />}
+              label="Rename"
+              onClick={onBulkRename}
+            />
+          )}
+          <div className="my-1 h-px bg-border/50" role="separator" />
           <Row
             icon={<ArrowUpFromLine className="w-4 h-4" />}
             label={
-              bulkSelectionCount === 1
+              singleTarget
                 ? 'Move up one folder'
                 : `Move ${bulkSelectionCount} up one folder`
             }
@@ -181,43 +243,37 @@ export default function FolderContextMenu({
           <Row
             icon={<FolderPlus className="w-4 h-4" />}
             label={
-              bulkSelectionCount === 1
+              singleTarget
                 ? 'New Folder with selection'
-                : `New Folder with ${bulkSelectionCount} videos`
+                : `New Folder with ${bulkSelectionCount} items`
             }
             onClick={onBulkNewFolderWithSelection}
           />
-          <Row
-            icon={<Download className="w-4 h-4" />}
-            label={
-              bulkSelectionCount === 1
-                ? 'Download'
-                : `Download ${bulkSelectionCount} videos`
-            }
-            onClick={onBulkDownload}
-          />
+          <div className="my-1 h-px bg-border/50" role="separator" />
           <Row
             icon={<Trash2 className="w-4 h-4" />}
             label={
-              bulkSelectionCount === 1
+              singleTarget
                 ? 'Delete'
-                : `Delete ${bulkSelectionCount} videos`
+                : `Delete ${bulkSelectionCount} items`
             }
             onClick={onBulkDelete}
             destructive
           />
+        </>
+      ) : (
+        <>
+          <Row icon={<ArrowUp className="w-4 h-4" />} label="Upload Asset" onClick={onUploadAsset} />
+          <Row icon={<FolderUp className="w-4 h-4" />} label="Upload Folder" onClick={onUploadFolder} />
           <div className="my-1 h-px bg-border/50" role="separator" />
+          <Row icon={<FolderPlus className="w-4 h-4" />} label="New Folder" onClick={onNewFolder} />
+          <Row
+            icon={<FolderLock className="w-4 h-4" />}
+            label="New Restricted Folder"
+            onClick={onNewRestrictedFolder}
+          />
         </>
       )}
-      <Row icon={<ArrowUp className="w-4 h-4" />} label="Upload Asset" onClick={onUploadAsset} />
-      <Row icon={<FolderUp className="w-4 h-4" />} label="Upload Folder" onClick={onUploadFolder} />
-      <div className="my-1 h-px bg-border/50" role="separator" />
-      <Row icon={<FolderPlus className="w-4 h-4" />} label="New Folder" onClick={onNewFolder} />
-      <Row
-        icon={<FolderLock className="w-4 h-4" />}
-        label="New Restricted Folder"
-        onClick={onNewRestrictedFolder}
-      />
     </div>
   )
 }

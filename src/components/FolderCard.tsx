@@ -1,7 +1,19 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpFromLine, Folder as FolderIcon, MoreVertical, Pencil, Trash2, Share2, ArrowRight } from 'lucide-react'
+import {
+  ArrowUpFromLine,
+  Check,
+  Copy,
+  Download,
+  Folder as FolderIcon,
+  FolderPlus,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  Share2,
+  ArrowRight,
+} from 'lucide-react'
 
 /**
  * Frame.io-style folder card used in the admin folder browser. A
@@ -69,6 +81,28 @@ export interface FolderCardProps {
   /** True when a video card is being dragged anywhere on the page —
    *  every folder card lights up as a potential drop target. */
   isPotentialVideoDropTarget?: boolean
+  /** 1.1.0+ multi-select. Mirrors `VideoCard`'s selection props so
+   *  folders participate in the same bulk-select / bulk-action flow
+   *  as videos. */
+  isSelected?: boolean
+  onToggleSelect?: (folderId: string) => void
+  /** True while ANY card (video OR folder) on the page is selected.
+   *  In that mode a plain click toggles selection instead of opening
+   *  the folder. */
+  selectionMode?: boolean
+  /** Combined selection count (videos + folders). Drives the kebab
+   *  gating: ≥ 2 hides Rename / Share (single-target only). ≥ 1 surf-
+   *  aces "New Folder with selection" / "Download". 0 = legacy. */
+  bulkSelectionCount?: number
+  /** Bulk-aware Download (sequential, recursive for folders). */
+  onBulkDownload?: () => void
+  /** "New Folder with selection" — wraps everything currently selected
+   *  (videos + folders) into a fresh folder at the current location. */
+  onNewFolderWithSelection?: () => void
+  /** 1.1.0+: real-file Duplicate. Creates a copy of this folder (or
+   *  the entire current selection when bulk) in the current location
+   *  with a `(1)` / `(2)` suffix. */
+  onDuplicate?: (folderId: string) => void
 }
 
 // Custom MIME types — folders carry FOLDER_MIME, videos carry
@@ -98,7 +132,21 @@ export default function FolderCard({
   isBeingDragged,
   isPotentialDropTarget,
   isPotentialVideoDropTarget,
+  isSelected = false,
+  onToggleSelect,
+  selectionMode = false,
+  bulkSelectionCount = 0,
+  onBulkDownload,
+  onNewFolderWithSelection,
+  onDuplicate,
 }: FolderCardProps) {
+  // 1.1.0+: bulk-aware kebab gating (mirror of VideoCard).
+  const isBulk = bulkSelectionCount >= 2
+  const showRename = !!onRename && !isBulk
+  const showShare = !!onShare && !isBulk
+  const showNewFolder = !!onNewFolderWithSelection && bulkSelectionCount >= 1
+  const showDownload = !!onBulkDownload && bulkSelectionCount >= 1
+  const showDuplicate = !!onDuplicate
   const [menuOpen, setMenuOpen] = useState(false)
   const [isHoveredDropTarget, setIsHoveredDropTarget] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -190,6 +238,12 @@ export default function FolderCard({
         // dismiss the input or click elsewhere. The input itself
         // already swallows clicks via stopPropagation below.
         if (isEditing) return
+        // 1.1.0+: in selection mode a click toggles selection
+        // instead of drilling into the folder (mirrors VideoCard).
+        if (selectionMode && onToggleSelect) {
+          onToggleSelect(id)
+          return
+        }
         onOpen(id)
       }}
       role="button"
@@ -257,7 +311,8 @@ export default function FolderCard({
         if (isEditing) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          onOpen(id)
+          if (selectionMode && onToggleSelect) onToggleSelect(id)
+          else onOpen(id)
         }
       }}
       className={`
@@ -269,9 +324,11 @@ export default function FolderCard({
           ? 'opacity-40 border-border/50 scale-[0.98]'
           : isHoveredDropTarget
             ? 'border-primary/80 ring-2 ring-primary/30 bg-primary/5'
-            : isPotentialDropTarget || isPotentialVideoDropTarget
-              ? 'border-primary/40 ring-1 ring-primary/20'
-              : 'border-border/50 hover:border-border hover:shadow-md'
+            : isSelected
+              ? 'border-primary ring-2 ring-primary/40'
+              : isPotentialDropTarget || isPotentialVideoDropTarget
+                ? 'border-primary/40 ring-1 ring-primary/20'
+                : 'border-border/50 hover:border-border hover:shadow-md'
         }
       `}
       data-folder-id={id}
@@ -284,6 +341,30 @@ export default function FolderCard({
           and videos read as one consistent grid. */}
       <div className="relative aspect-video w-full bg-muted/30 rounded-t-xl overflow-hidden">
         <FolderCover previewItems={previewItems} />
+        {/* Multi-select checkbox (1.1.0+). Always visible on folder
+            cards — request from the user so picking folders is one
+            tap away regardless of hover state. The empty checkbox
+            still sits comfortably on top of the cover thanks to the
+            backdrop-blur + outline. */}
+        {onToggleSelect && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleSelect(id)
+            }}
+            className={`absolute top-2 left-2 z-10 inline-flex items-center justify-center w-5 h-5 rounded transition-colors ${
+              isSelected
+                ? 'bg-primary text-white'
+                : 'bg-black/40 text-white border border-white/60 backdrop-blur-sm hover:bg-black/60'
+            }`}
+            aria-pressed={isSelected}
+            aria-label={isSelected ? 'Deselect folder' : 'Select folder'}
+            title={isSelected ? 'Deselect' : 'Select'}
+          >
+            {isSelected && <Check className="w-3.5 h-3.5" />}
+          </button>
+        )}
       </div>
 
       {/* Info row — name + count on the left, kebab on the right. */}
@@ -330,7 +411,7 @@ export default function FolderCard({
             action wired. On the public client share we omit every
             action prop so this disappears and the card stays
             read-only (1.0.7+). */}
-        {(onRename || onShare || onDelete || onMoveUp) && (
+        {(showRename || showShare || onDelete || onMoveUp || showDownload || showNewFolder || showDuplicate) && (
         <div ref={menuRef} className="relative shrink-0 -mr-1 -mt-1">
           <button
             type="button"
@@ -349,36 +430,77 @@ export default function FolderCard({
           {menuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+              className="absolute right-0 top-full mt-1 z-30 min-w-[240px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
               onClick={(e) => e.stopPropagation()}
             >
-              {onRename && (
+              {/* 1.1.0+ menu order:
+                  1. Download · Share
+                  2. Duplicate · Rename
+                  3. Move up · New Folder with selection
+                  4. Delete                                          */}
+              {showDownload && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    onRename(id)
+                    onBulkDownload!()
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  {bulkSelectionCount > 1
+                    ? `Download ${bulkSelectionCount} items`
+                    : 'Download folder'}
+                </button>
+              )}
+              {showShare && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onShare!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <Share2 className="w-4 h-4 shrink-0" />
+                  Share folder
+                </button>
+              )}
+              {(showDownload || showShare) && (showDuplicate || showRename) && (
+                <div className="my-1 h-px bg-border/50" role="separator" />
+              )}
+              {showDuplicate && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onDuplicate!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <Copy className="w-4 h-4 shrink-0" />
+                  {isBulk ? `Duplicate ${bulkSelectionCount} items` : 'Duplicate'}
+                </button>
+              )}
+              {showRename && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onRename!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
                 >
                   <Pencil className="w-4 h-4 shrink-0" />
                   Rename
                 </button>
               )}
-              {onShare && (
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onShare(id)
-                  }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
-                >
-                  <Share2 className="w-4 h-4 shrink-0" />
-                  Share folder
-                </button>
+              {(showDuplicate || showRename) && (onMoveUp || showNewFolder) && (
+                <div className="my-1 h-px bg-border/50" role="separator" />
               )}
               {onMoveUp && (
                 <button
@@ -388,26 +510,45 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onMoveUp(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
                 >
                   <ArrowUpFromLine className="w-4 h-4 shrink-0" />
-                  Move up one folder
+                  {isBulk
+                    ? `Move ${bulkSelectionCount} up one folder`
+                    : 'Move up one folder'}
                 </button>
+              )}
+              {showNewFolder && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onNewFolderWithSelection!()
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <FolderPlus className="w-4 h-4 shrink-0" />
+                  {bulkSelectionCount > 1
+                    ? `New Folder with ${bulkSelectionCount} items`
+                    : 'New Folder with selection'}
+                </button>
+              )}
+              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showDownload || showShare) && (
+                <div className="my-1 h-px bg-border/50" role="separator" />
               )}
               {onDelete && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
-                    // 1.0.8+: parent shows a Frame.io-style
-                    // ConfirmModal instead of a window.confirm prompt.
                     setMenuOpen(false)
                     onDelete(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left whitespace-nowrap"
                 >
                   <Trash2 className="w-4 h-4 shrink-0" />
-                  Delete
+                  {isBulk ? `Delete ${bulkSelectionCount} items` : 'Delete'}
                 </button>
               )}
             </div>

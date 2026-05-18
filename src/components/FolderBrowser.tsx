@@ -319,6 +319,14 @@ function FolderBrowserInner(
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(
     () => new Set(),
   )
+  // 1.1.0+: parallel set for folder cards. Bulk actions (delete /
+  // move up / new folder with selection / download / drag-drop) all
+  // operate on the COMBINED selection — `selectedVideoIds` +
+  // `selectedFolderIds`. Stored separately so dispatch can branch by
+  // entity kind (different API endpoints for folder vs video ops).
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [bulkBusy, setBulkBusy] = useState(false)
   // Drag-to-stack state (1.0.6+). When non-null, a video card is
   // mid-drag — sibling cards render with the "potential target"
@@ -553,11 +561,63 @@ function FolderBrowserInner(
   )
 
   const handleDropOnFolder = useCallback(
-    (sourceId: string, targetId: string) => {
+    async (sourceId: string, targetId: string) => {
       if (sourceId === targetId) return
-      moveFolder(sourceId, targetId)
+      // 1.1.0+: bulk drag with mixed selection. When the dragged
+      // folder is part of the selection AND the combined selection
+      // is ≥ 2, drop ALL selected items into the target — every
+      // selected folder reparents to `targetId`, every selected
+      // video's version group moves there too. Otherwise we ship
+      // only the dragged folder (selection stays untouched).
+      const combinedSize = selectedVideoIds.size + selectedFolderIds.size
+      const isBulk = combinedSize >= 2 && selectedFolderIds.has(sourceId)
+      if (!isBulk) {
+        moveFolder(sourceId, targetId)
+        return
+      }
+      try {
+        for (const fid of selectedFolderIds) {
+          if (fid === targetId) continue // can't nest a folder into itself
+          await apiFetch(`/api/folders/${fid}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parentFolderId: targetId }),
+          }).catch(() => null)
+        }
+        if (selectedVideoIds.size > 0) {
+          const idsToMove: string[] = []
+          for (const cardId of selectedVideoIds) {
+            const grp = videoGroups.find((g) => g.allIds.includes(cardId))
+            if (grp) idsToMove.push(...grp.allIds)
+            else idsToMove.push(cardId)
+          }
+          if (idsToMove.length > 0) {
+            await apiFetch('/api/videos/batch', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                videoIds: idsToMove,
+                folderId: targetId,
+              }),
+            }).catch(() => null)
+          }
+        }
+        clearSelection()
+        await fetchFolders({ silent: true })
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to move into folder')
+      }
     },
-    [moveFolder],
+    // `videoGroups` / `clearSelection` declared lower — TDZ-safe via
+    // closure. eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      moveFolder,
+      selectedVideoIds,
+      selectedFolderIds,
+      fetchFolders,
+      onMutated,
+    ],
   )
 
   // Drop target on a breadcrumb crumb: moves the folder to that
@@ -575,6 +635,54 @@ function FolderBrowserInner(
 
   const handleDelete = useCallback(
     (folderId: string) => {
+      // 1.1.0+: bulk-aware. When 2+ items (videos + folders) are
+      // selected, clicking Delete on any folder kebab routes through
+      // the combined bulk-delete flow. We inline the bulk path here
+      // (rather than calling the lower-down `performBulkDelete`)
+      // because that helper is declared further down the component
+      // and lifting it up would hit JS's TDZ. The `videoGroups` /
+      // `clearSelection` closure references resolve at click time,
+      // by which point both have rendered.
+      const combinedSize = selectedVideoIds.size + selectedFolderIds.size
+      if (combinedSize >= 2) {
+        const count = combinedSize
+        setConfirmState({
+          open: true,
+          title: `Delete ${count} items?`,
+          description:
+            'Deleted items can be recovered for 30 days before being permanently deleted. Folders cascade-delete their entire contents.',
+          confirmLabel: 'Delete',
+          variant: 'destructive',
+          onConfirm: async () => {
+            setConfirmState((s) => ({ ...s, busy: true }))
+            setBulkBusy(true)
+            try {
+              for (const cardId of selectedVideoIds) {
+                const grp = videoGroups.find((g) => g.allIds.includes(cardId))
+                const ids = grp ? grp.allIds : [cardId]
+                for (const id of ids) {
+                  await apiFetch(`/api/videos/${id}`, {
+                    method: 'DELETE',
+                  }).catch(() => null)
+                }
+              }
+              for (const fid of selectedFolderIds) {
+                await apiFetch(`/api/folders/${fid}`, {
+                  method: 'DELETE',
+                }).catch(() => null)
+              }
+              clearSelection()
+              await fetchFolders({ silent: true })
+              onMutated?.()
+            } finally {
+              setBulkBusy(false)
+              setConfirmState({ open: false, title: '' })
+            }
+          },
+        })
+        return
+      }
+
       const folder = folders.find((f) => f.id === folderId)
       const name = folder?.name ?? 'this folder'
       // 1.0.8+: Frame.io-style ConfirmModal. The folder goes to
@@ -614,7 +722,12 @@ function FolderBrowserInner(
         },
       })
     },
-    [folders, fetchFolders, onMutated],
+    // `selectedVideoIds` and `selectedFolderIds` are state declared
+    // above and safe to include. `videoGroups` / `clearSelection`
+    // are declared lower and would hit JS's TDZ if listed — they're
+    // read via closure inside the callback body, which only runs
+    // after render completes. eslint-disable-next-line react-hooks/exhaustive-deps
+    [folders, fetchFolders, onMutated, selectedVideoIds, selectedFolderIds],
   )
 
   // ─── video helpers ─────────────────────────────────────────
@@ -724,47 +837,89 @@ function FolderBrowserInner(
     })
   }, [])
 
+  // 1.1.0+: parallel toggle for folder cards.
+  const handleToggleFolderSelect = useCallback((id: string) => {
+    setSelectedFolderIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
   const clearSelection = useCallback(() => {
     setSelectedVideoIds(new Set())
+    setSelectedFolderIds(new Set())
   }, [])
+
+  // Combined selection size — drives the floating toolbar count, the
+  // kebab bulk-label gating, and every bulk handler's "is this a
+  // multi-select?" check (1.1.0+).
+  const totalSelected = selectedVideoIds.size + selectedFolderIds.size
+
+  // 1.1.0+: shared bulk-delete that handles both folders AND videos
+  // in the current selection. Used by every kebab Delete trigger
+  // (video card, folder card, floating selection toolbar) when the
+  // combined selection is ≥ 2.
+  const performBulkDelete = useCallback(() => {
+    const count = totalSelected
+    if (count < 2) return
+    setConfirmState({
+      open: true,
+      title: `Delete ${count} items?`,
+      description:
+        'Deleted items can be recovered for 30 days before being permanently deleted. Folders cascade-delete their entire contents.',
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+      onConfirm: async () => {
+        setConfirmState((s) => ({ ...s, busy: true }))
+        setBulkBusy(true)
+        try {
+          // Videos first (their groups expand to allIds), then folders
+          // (one DELETE per folder — server cascades soft-delete).
+          for (const cardId of selectedVideoIds) {
+            const grp = videoGroups.find((g) => g.allIds.includes(cardId))
+            const ids = grp ? grp.allIds : [cardId]
+            for (const id of ids) {
+              await apiFetch(`/api/videos/${id}`, {
+                method: 'DELETE',
+              }).catch(() => null)
+            }
+          }
+          for (const folderId of selectedFolderIds) {
+            await apiFetch(`/api/folders/${folderId}`, {
+              method: 'DELETE',
+            }).catch(() => null)
+          }
+          clearSelection()
+          await fetchFolders({ silent: true })
+          onMutated?.()
+        } finally {
+          setBulkBusy(false)
+          setConfirmState({ open: false, title: '' })
+        }
+      },
+    })
+  }, [
+    totalSelected,
+    selectedVideoIds,
+    selectedFolderIds,
+    videoGroups,
+    clearSelection,
+    fetchFolders,
+    onMutated,
+  ])
 
   const handleDeleteVideo = useCallback(
     (videoId: string, videoName?: string) => {
-      // 1.0.9+: bulk-aware. When the user has 2+ videos selected and
+      // 1.0.9+: bulk-aware. When the user has 2+ items selected and
       // clicks Delete from ANY card's kebab, we delete the whole
-      // selection regardless of which card was clicked. With 0 or 1
-      // selected we fall back to the original single-card delete.
-      if (selectedVideoIds.size >= 2) {
-        const count = selectedVideoIds.size
-        setConfirmState({
-          open: true,
-          title: `Delete ${count} assets?`,
-          description:
-            'Deleted items can be recovered for 30 days before being permanently deleted.',
-          confirmLabel: 'Delete',
-          variant: 'destructive',
-          onConfirm: async () => {
-            setConfirmState((s) => ({ ...s, busy: true }))
-            setBulkBusy(true)
-            try {
-              for (const cardId of selectedVideoIds) {
-                const grp = videoGroups.find((g) => g.allIds.includes(cardId))
-                const ids = grp ? grp.allIds : [cardId]
-                for (const id of ids) {
-                  await apiFetch(`/api/videos/${id}`, {
-                    method: 'DELETE',
-                  }).catch(() => null)
-                }
-              }
-              clearSelection()
-              await fetchFolders({ silent: true })
-              onMutated?.()
-            } finally {
-              setBulkBusy(false)
-              setConfirmState({ open: false, title: '' })
-            }
-          },
-        })
+      // selection regardless of which card was clicked. 1.1.0+: the
+      // selection can include folders too, so we route through the
+      // shared `performBulkDelete`. With 0 or 1 selected we fall
+      // back to the original single-card delete.
+      if (totalSelected >= 2) {
+        performBulkDelete()
         return
       }
 
@@ -821,8 +976,8 @@ function FolderBrowserInner(
       onMutated,
       videoGroups,
       fetchFolders,
-      selectedVideoIds,
-      clearSelection,
+      totalSelected,
+      performBulkDelete,
     ],
   )
 
@@ -871,13 +1026,52 @@ function FolderBrowserInner(
     }
   }, [])
 
-  const handleBulkDownload = useCallback(() => {
-    // Collapse video-group ids → only the latest version per name
-    // (the card id). That's what the user sees and what they
-    // expect to grab.
-    const ids = Array.from(selectedVideoIds)
-    downloadVideos(ids)
-  }, [selectedVideoIds, downloadVideos])
+  const handleBulkDownload = useCallback(async () => {
+    // 1.1.0+: bulk download spans both selected videos AND every
+    // video found recursively inside each selected folder. We walk
+    // sub-folders client-side via the existing `/api/folders/[id]`
+    // endpoint (which returns this folder's direct videos +
+    // sub-folder ids) and accumulate the unique latest-version ids.
+    const ids = new Set<string>(selectedVideoIds)
+    const visited = new Set<string>()
+    const queue: string[] = Array.from(selectedFolderIds)
+    while (queue.length > 0) {
+      const fid = queue.shift()!
+      if (visited.has(fid)) continue
+      visited.add(fid)
+      try {
+        const res = await apiFetch(`/api/folders/${fid}`)
+        if (!res.ok) continue
+        const data = await res.json().catch(() => null)
+        const folderPayload = data?.folder
+        if (!folderPayload) continue
+        // Videos: take only the LATEST version per (projectId, name)
+        // — same grouping the grid uses on the card.
+        const vids = Array.isArray(folderPayload.videos)
+          ? (folderPayload.videos as Array<any>)
+          : []
+        const byName = new Map<string, any>()
+        for (const v of vids) {
+          const key = `${v.projectId}:${v.name}`
+          const prev = byName.get(key)
+          if (!prev || (v.version ?? 0) > (prev.version ?? 0)) {
+            byName.set(key, v)
+          }
+        }
+        for (const v of byName.values()) ids.add(v.id)
+        // Recurse into sub-folders.
+        const subs = Array.isArray(folderPayload.subfolders)
+          ? (folderPayload.subfolders as Array<any>)
+          : []
+        for (const sf of subs) {
+          if (sf?.id) queue.push(sf.id)
+        }
+      } catch {
+        // Best-effort — skip folders we can't read.
+      }
+    }
+    downloadVideos(Array.from(ids))
+  }, [selectedVideoIds, selectedFolderIds, downloadVideos])
 
   const handleDownloadAll = useCallback(() => {
     const ids = videoGroups.map((g) => g.id)
@@ -943,11 +1137,13 @@ function FolderBrowserInner(
   const handleMoveVideoToFolder = useCallback(
     async (sourceVideoId: string, targetFolderId: string) => {
       if (!sourceVideoId || !targetFolderId) return
-      // Build the set of card ids to move. When the drag source is
-      // part of the selection (≥ 2), every selected card joins it;
-      // otherwise we ship just the dragged card's group.
-      const isBulk =
-        selectedVideoIds.size >= 2 && selectedVideoIds.has(sourceVideoId)
+      // 1.1.0+: bulk drag with mixed selection. When the dragged
+      // card is part of the selection AND the combined selection is
+      // ≥ 2, every selected video AND every selected folder gets
+      // moved into the target. Otherwise we ship only the dragged
+      // video's group (selection stays untouched).
+      const combinedSize = selectedVideoIds.size + selectedFolderIds.size
+      const isBulk = combinedSize >= 2 && selectedVideoIds.has(sourceVideoId)
       const sourceCardIds = isBulk
         ? Array.from(selectedVideoIds)
         : [sourceVideoId]
@@ -957,19 +1153,31 @@ function FolderBrowserInner(
         if (grp) idsToMove.push(...grp.allIds)
         else idsToMove.push(cardId)
       }
-      if (idsToMove.length === 0) return
       try {
-        const res = await apiFetch('/api/videos/batch', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoIds: idsToMove,
-            folderId: targetFolderId,
-          }),
-        })
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.error || 'Failed to move video')
+        if (idsToMove.length > 0) {
+          const res = await apiFetch('/api/videos/batch', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoIds: idsToMove,
+              folderId: targetFolderId,
+            }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.error || 'Failed to move video')
+          }
+        }
+        if (isBulk && selectedFolderIds.size > 0) {
+          for (const fid of selectedFolderIds) {
+            // Skip nesting a folder into itself.
+            if (fid === targetFolderId) continue
+            await apiFetch(`/api/folders/${fid}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parentFolderId: targetFolderId }),
+            }).catch(() => null)
+          }
         }
         if (isBulk) clearSelection()
         // 1.0.8+: refresh BOTH the parent page state and this
@@ -982,7 +1190,14 @@ function FolderBrowserInner(
         alert(err instanceof Error ? err.message : 'Failed to move video')
       }
     },
-    [videoGroups, onMutated, fetchFolders, selectedVideoIds, clearSelection],
+    [
+      videoGroups,
+      onMutated,
+      fetchFolders,
+      selectedVideoIds,
+      selectedFolderIds,
+      clearSelection,
+    ],
   )
 
   // "Move up one folder" target (1.0.7+). When we're inside ANY
@@ -1011,34 +1226,46 @@ function FolderBrowserInner(
   const handleMoveVideoUp = useCallback(
     async (videoId: string) => {
       if (!canMoveUp) return
-      // Collect every version row that belongs to either the clicked
-      // card's group (single-card path) or every selected card's
-      // group (bulk path).
-      const sourceIds =
-        selectedVideoIds.size >= 2
-          ? Array.from(selectedVideoIds)
-          : [videoId]
+      // 1.1.0+: bulk-aware over BOTH videos AND folders. When the
+      // combined selection is ≥ 2, move every selected video group
+      // AND every selected folder up one level. With 0–1 selected
+      // we fall back to moving just the kebab's video.
+      const combinedSize = selectedVideoIds.size + selectedFolderIds.size
+      const isBulk = combinedSize >= 2
+      const sourceIds = isBulk
+        ? Array.from(selectedVideoIds)
+        : [videoId]
       const idsToMove: string[] = []
       for (const cardId of sourceIds) {
         const group = videoGroups.find((g) => g.allIds.includes(cardId))
         if (group) idsToMove.push(...group.allIds)
         else idsToMove.push(cardId)
       }
-      if (idsToMove.length === 0) return
       try {
-        const res = await apiFetch('/api/videos/batch', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoIds: idsToMove,
-            folderId: parentFolderId,
-          }),
-        })
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.error || 'Failed to move video')
+        if (idsToMove.length > 0) {
+          const res = await apiFetch('/api/videos/batch', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoIds: idsToMove,
+              folderId: parentFolderId,
+            }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.error || 'Failed to move video')
+          }
         }
-        if (selectedVideoIds.size >= 2) clearSelection()
+        if (isBulk && selectedFolderIds.size > 0) {
+          for (const fid of selectedFolderIds) {
+            await apiFetch(`/api/folders/${fid}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parentFolderId }),
+            }).catch(() => null)
+          }
+        }
+        if (isBulk) clearSelection()
         await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
@@ -1052,6 +1279,7 @@ function FolderBrowserInner(
       onMutated,
       fetchFolders,
       selectedVideoIds,
+      selectedFolderIds,
       clearSelection,
     ],
   )
@@ -1131,23 +1359,53 @@ function FolderBrowserInner(
   const handleMoveFolderUp = useCallback(
     async (folderId: string) => {
       if (!canMoveUp) return
+      // 1.1.0+: bulk-aware. When 2+ items are selected, move every
+      // selected folder + every selected video group up one level in
+      // one pass. The folder PATCHes go one at a time (no batch
+      // endpoint exists yet); video versions reuse the existing
+      // `/api/videos/batch`.
+      const combinedSize = selectedVideoIds.size + selectedFolderIds.size
+      const isBulk = combinedSize >= 2
+      const folderIdsToMove = isBulk
+        ? Array.from(selectedFolderIds)
+        : [folderId]
       try {
-        const res = await apiFetch(`/api/folders/${folderId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ parentFolderId }),
-        })
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.error || 'Failed to move folder')
+        for (const fid of folderIdsToMove) {
+          await apiFetch(`/api/folders/${fid}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parentFolderId }),
+          }).catch(() => null)
         }
+        if (isBulk && selectedVideoIds.size > 0) {
+          const videoIdsToMove: string[] = []
+          for (const cardId of selectedVideoIds) {
+            const grp = videoGroups.find((g) => g.allIds.includes(cardId))
+            if (grp) videoIdsToMove.push(...grp.allIds)
+            else videoIdsToMove.push(cardId)
+          }
+          if (videoIdsToMove.length > 0) {
+            await apiFetch('/api/videos/batch', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                videoIds: videoIdsToMove,
+                folderId: parentFolderId,
+              }),
+            }).catch(() => null)
+          }
+        }
+        if (isBulk) clearSelection()
         await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move folder')
       }
     },
-    [canMoveUp, parentFolderId, fetchFolders, onMutated],
+    // `videoGroups` / `clearSelection` are below in the component;
+    // we read them via closure at click time. See `handleDelete`
+    // for the same TDZ workaround. eslint-disable-next-line react-hooks/exhaustive-deps
+    [canMoveUp, parentFolderId, fetchFolders, onMutated, selectedVideoIds, selectedFolderIds],
   )
 
   // "New Folder with Selection" (1.0.9+). Creates a folder named
@@ -1157,7 +1415,9 @@ function FolderBrowserInner(
   // for inline auto-rename so the user can immediately type a real
   // name.
   const handleNewFolderWithSelection = useCallback(async () => {
-    if (selectedVideoIds.size === 0) return
+    // 1.1.0+: accepts mixed selection — at least one video OR one
+    // folder selected triggers the flow.
+    if (selectedVideoIds.size + selectedFolderIds.size === 0) return
     // Pick a unique default name so two consecutive presses don't
     // produce two "New Folder" siblings.
     const existingNames = new Set(folders.map((f) => f.name))
@@ -1189,7 +1449,7 @@ function FolderBrowserInner(
       const created = await createRes.json().catch(() => null)
       if (!created?.id) throw new Error('Folder created without id')
 
-      // 2. Batch-move every version of every selected card into it.
+      // 2. Batch-move every version of every selected video card.
       const idsToMove: string[] = []
       for (const cardId of selectedVideoIds) {
         const group = videoGroups.find((g) => g.allIds.includes(cardId))
@@ -1209,6 +1469,19 @@ function FolderBrowserInner(
           const err = await moveRes.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to move videos into folder')
         }
+      }
+
+      // 2b. 1.1.0+: also re-parent every selected folder into the
+      //     new folder so the bulk selection genuinely "wraps" both
+      //     kinds of items.
+      for (const fid of selectedFolderIds) {
+        // Don't try to nest the freshly-created folder into itself.
+        if (fid === created.id) continue
+        await apiFetch(`/api/folders/${fid}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentFolderId: created.id }),
+        }).catch(() => null)
       }
 
       // 3. Mark this folder for inline auto-rename. The FolderCard
@@ -1238,6 +1511,63 @@ function FolderBrowserInner(
     onMutated,
   ])
 
+  // 1.1.0+: Duplicate. Mirrors the FolderBrowser-level bulk-aware
+  // pattern — when the combined selection is ≥ 1, duplicate every
+  // selected video group + folder via the server endpoint (which
+  // performs a REAL file copy in storage, not just a DB clone) into
+  // the current folder. Falls back to duplicating the single card
+  // whose kebab was clicked when nothing is selected.
+  const handleDuplicate = useCallback(
+    async (singleCardId?: string, singleKind?: 'video' | 'folder') => {
+      const combinedSize = selectedVideoIds.size + selectedFolderIds.size
+      const isBulk = combinedSize >= 1
+      const videoCardIds = isBulk
+        ? Array.from(selectedVideoIds)
+        : singleKind === 'video' && singleCardId
+          ? [singleCardId]
+          : []
+      const folderIdsArr = isBulk
+        ? Array.from(selectedFolderIds)
+        : singleKind === 'folder' && singleCardId
+          ? [singleCardId]
+          : []
+      if (videoCardIds.length === 0 && folderIdsArr.length === 0) return
+      setBulkBusy(true)
+      try {
+        const res = await apiFetch('/api/items/duplicate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            targetFolderId: currentFolderId,
+            videoCardIds,
+            folderIds: folderIdsArr,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to duplicate items')
+        }
+        if (isBulk) clearSelection()
+        await fetchFolders({ silent: true })
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to duplicate items')
+      } finally {
+        setBulkBusy(false)
+      }
+    },
+    [
+      selectedVideoIds,
+      selectedFolderIds,
+      projectId,
+      currentFolderId,
+      clearSelection,
+      fetchFolders,
+      onMutated,
+    ],
+  )
+
   // Commit handler for the inline folder rename (1.0.9+). PATCHes
   // /api/folders/[id] then re-fetches so the grid resorts.
   const handleFolderRenameCommit = useCallback(
@@ -1264,17 +1594,17 @@ function FolderBrowserInner(
   )
 
   const handleBulkDelete = useCallback(() => {
-    if (selectedVideoIds.size === 0) return
-    const count = selectedVideoIds.size
-    // 1.0.8+: surface the Frame.io-style ConfirmModal instead of
-    // `window.confirm`. The actual delete still goes through the
-    // existing batch loop — soft-deleted rows land in Trash for 30
-    // days.
+    const combined = selectedVideoIds.size + selectedFolderIds.size
+    if (combined === 0) return
+    const count = combined
+    // 1.0.8+: Frame.io-style ConfirmModal. 1.1.0+: includes folders
+    // in the bulk-delete loop — selected folders cascade-soft-delete
+    // their entire subtree on the server.
     setConfirmState({
       open: true,
-      title: count === 1 ? 'Delete asset?' : `Delete ${count} assets?`,
+      title: count === 1 ? 'Delete item?' : `Delete ${count} items?`,
       description:
-        'Deleted items can be recovered for 30 days before being permanently deleted.',
+        'Deleted items can be recovered for 30 days before being permanently deleted. Folders cascade-delete their entire contents.',
       confirmLabel: 'Delete',
       variant: 'destructive',
       onConfirm: async () => {
@@ -1290,6 +1620,11 @@ function FolderBrowserInner(
               )
             }
           }
+          for (const fid of selectedFolderIds) {
+            await apiFetch(`/api/folders/${fid}`, { method: 'DELETE' }).catch(
+              () => null,
+            )
+          }
           clearSelection()
           // Same dual refresh as the single-delete path (1.0.8+).
           await fetchFolders({ silent: true })
@@ -1300,7 +1635,7 @@ function FolderBrowserInner(
         }
       },
     })
-  }, [selectedVideoIds, videoGroups, onMutated, clearSelection, fetchFolders])
+  }, [selectedVideoIds, selectedFolderIds, videoGroups, onMutated, clearSelection, fetchFolders])
 
   // ─── breadcrumb rendering ──────────────────────────────────
   // The parent passes breadcrumb when at a folder sub-route. At
@@ -1394,30 +1729,68 @@ function FolderBrowserInner(
   // own kebab menu and shouldn't trigger this one).
   const handleContextMenu = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement | null
-    if (target && target.closest('[data-folder-id]')) return
     if (target && target.closest('[role="menu"]')) return
-    // 1.0.9+: right-clicking a video card auto-selects it so the
-    // context menu immediately exposes the bulk actions (Download,
-    // Move up, New Folder with selection, Delete) for that asset —
-    // no need to tick the checkbox first. Finder-style semantics:
-    // right-clicking a card that's NOT part of the current
-    // selection replaces the selection with just that card; right-
-    // clicking one that's already selected leaves the selection
-    // untouched so a multi-select right-click still acts on the
-    // whole batch.
+    // 1.0.9+ / 1.1.0+: right-clicking a video OR folder card auto-
+    // selects it so the context menu immediately exposes the bulk
+    // actions (Download, Move up, New Folder with selection, Delete)
+    // for that asset — no need to tick the checkbox first. Finder-
+    // style semantics: right-clicking a card that's NOT part of the
+    // current selection replaces the selection with just that card;
+    // right-clicking one that's already selected leaves the
+    // selection untouched so a multi-select right-click still acts
+    // on the whole batch.
     const videoCard = target?.closest('[data-video-id]') as
+      | HTMLElement
+      | null
+    const folderCard = target?.closest('[data-folder-id]') as
       | HTMLElement
       | null
     if (videoCard) {
       const vid = videoCard.getAttribute('data-video-id')
       if (vid) {
-        setSelectedVideoIds((prev) =>
-          prev.has(vid) ? prev : new Set([vid]),
-        )
+        // Drop any folder selection — right-click on a video isolates
+        // it (unless it was already in the selection).
+        if (!selectedVideoIds.has(vid)) {
+          setSelectedVideoIds(new Set([vid]))
+          setSelectedFolderIds(new Set())
+        }
+      }
+    } else if (folderCard) {
+      const fid = folderCard.getAttribute('data-folder-id')
+      if (fid) {
+        if (!selectedFolderIds.has(fid)) {
+          setSelectedFolderIds(new Set([fid]))
+          setSelectedVideoIds(new Set())
+        }
       }
     }
     e.preventDefault()
     setCtxMenu({ open: true, x: e.clientX, y: e.clientY })
+  }
+
+  // 1.1.0+: clicking "empty space" — anywhere that isn't a video
+  // card, a folder card, the floating selection toolbar, or a
+  // menu/dialog surface — clears the current multi-select. Mirrors
+  // Finder / Frame.io: click off the items and the selection drops.
+  // Video cards are excluded because their own onClick toggles
+  // selection; folder cards because clicking one navigates away.
+  const handleContainerClick = (e: React.MouseEvent) => {
+    // 1.1.0+: also clear folder-only selections. The original check
+    // looked at `selectedVideoIds.size` only, so a folder-only
+    // selection would never be cleared by clicking empty space.
+    if (selectedVideoIds.size + selectedFolderIds.size === 0) return
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    if (
+      target.closest('[data-video-id]') ||
+      target.closest('[data-folder-id]') ||
+      target.closest('[data-selection-toolbar]') ||
+      target.closest('[role="menu"]') ||
+      target.closest('[role="dialog"]')
+    ) {
+      return
+    }
+    clearSelection()
   }
 
   // OS file drag-and-drop handlers, attached to the outer container
@@ -1507,6 +1880,7 @@ function FolderBrowserInner(
   return (
     <div
       className={`relative space-y-3${stretch ? ' min-h-[calc(100vh-9rem)]' : ''}`}
+      onClick={handleContainerClick}
       onContextMenu={handleContextMenu}
       onDragOver={containerDragOver}
       onDragLeave={containerDragLeave}
@@ -1648,8 +2022,11 @@ function FolderBrowserInner(
           bottom-center of the viewport when any video card is
           selected. Mirrors Frame.io's selection toolbar — count on
           the left, actions on the right, easy to dismiss with X. */}
-      {selectedVideoIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full bg-popover text-popover-foreground border border-border shadow-2xl pl-2 pr-2 py-1.5">
+      {totalSelected > 0 && (
+        <div
+          data-selection-toolbar
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full bg-popover text-popover-foreground border border-border shadow-2xl pl-2 pr-2 py-1.5"
+        >
           <button
             type="button"
             onClick={clearSelection}
@@ -1660,8 +2037,8 @@ function FolderBrowserInner(
             <X className="w-4 h-4" />
           </button>
           <span className="text-sm font-medium px-1 select-none">
-            {selectedVideoIds.size}{' '}
-            {selectedVideoIds.size === 1 ? 'video' : 'videos'} selected
+            {totalSelected}{' '}
+            {totalSelected === 1 ? 'item' : 'items'} selected
           </span>
           <div className="h-5 w-px bg-border" aria-hidden />
           <Button
@@ -1785,6 +2162,14 @@ function FolderBrowserInner(
                 draggingFolderId !== null && draggingFolderId !== f.id
               }
               isPotentialVideoDropTarget={draggingVideoId !== null}
+              // 1.1.0+: multi-select parity with VideoCard.
+              isSelected={selectedFolderIds.has(f.id)}
+              onToggleSelect={handleToggleFolderSelect}
+              selectionMode={totalSelected > 0}
+              bulkSelectionCount={totalSelected}
+              onBulkDownload={handleBulkDownload}
+              onNewFolderWithSelection={handleNewFolderWithSelection}
+              onDuplicate={(fid) => void handleDuplicate(fid, 'folder')}
             />
           ))}
           {(() => {
@@ -1828,7 +2213,7 @@ function FolderBrowserInner(
               createdAt={v.createdAt}
               isSelected={selectedVideoIds.has(v.id)}
               onToggleSelect={handleToggleVideoSelect}
-              selectionMode={selectedVideoIds.size > 0}
+              selectionMode={totalSelected > 0}
               onStartVideoDrag={(id) => setDraggingVideoId(id)}
               onEndVideoDrag={() => setDraggingVideoId(null)}
               onStackOnto={handleStackVideos}
@@ -1847,10 +2232,21 @@ function FolderBrowserInner(
               onMoveUp={canMoveUp ? handleMoveVideoUp : undefined}
               onShare={handleShareVideo}
               onSplitVersions={handleSplitVersions}
-              bulkSelectionCount={selectedVideoIds.size}
+              bulkSelectionCount={totalSelected}
               onNewFolderWithSelection={handleNewFolderWithSelection}
               bulkDragThumbnails={bulkDragThumbs}
               mediaType={v.mediaType}
+              onDownload={(vid) => {
+                // Single-card download from the kebab. When bulk is
+                // active the parent's `handleBulkDownload` covers the
+                // selection; otherwise just grab this single id.
+                if (totalSelected >= 2) {
+                  void handleBulkDownload()
+                } else {
+                  void downloadVideos([vid])
+                }
+              }}
+              onDuplicate={(vid) => void handleDuplicate(vid, 'video')}
             />
               )
             })
@@ -1881,37 +2277,78 @@ function FolderBrowserInner(
           setNewDialogRestricted(true)
           setShowNewDialog(true)
         }}
-        // 1.0.9+: surface the same bulk actions that live in the
-        // video kebab when there's an active selection, so right-
-        // click is at parity with the kebab.
-        bulkSelectionCount={selectedVideoIds.size}
+        // 1.0.9+ / 1.1.0+: surface the same bulk actions that live
+        // in the video/folder kebabs when there's an active selection.
+        // The count reflects the COMBINED selection (videos +
+        // folders).
+        bulkSelectionCount={totalSelected}
         canBulkMoveUp={canMoveUp}
         onBulkMoveUp={() => {
-          const first = selectedVideoIds.values().next().value as
+          // Both handleMoveVideoUp and handleMoveFolderUp now check
+          // the combined selection and bulk-act on it. Route through
+          // whichever kind has a "first id" handy.
+          const firstVideo = selectedVideoIds.values().next().value as
             | string
             | undefined
-          if (!first) return
-          // handleMoveVideoUp already routes through the selection
-          // when size >= 2 and falls back to a single-card move for
-          // size === 1. Passing the first selected id works for both.
-          void handleMoveVideoUp(first)
+          const firstFolder = selectedFolderIds.values().next().value as
+            | string
+            | undefined
+          if (firstVideo) void handleMoveVideoUp(firstVideo)
+          else if (firstFolder) void handleMoveFolderUp(firstFolder)
         }}
         onBulkNewFolderWithSelection={() => {
           void handleNewFolderWithSelection()
         }}
         onBulkDownload={() => {
-          // Mirrors the floating selection toolbar's Download button
-          // (1.0.9+). Downloads the latest version of every selected
-          // card, one after the other, with a small inter-request
-          // delay so the browser's popup blocker doesn't trip.
-          handleBulkDownload()
+          void handleBulkDownload()
         }}
         onBulkDelete={() => {
-          const first = selectedVideoIds.values().next().value as
+          // Either handler short-circuits to the combined bulk path
+          // when total selection ≥ 2; we just need to call one.
+          const firstVideo = selectedVideoIds.values().next().value as
             | string
             | undefined
-          if (!first) return
-          handleDeleteVideo(first)
+          const firstFolder = selectedFolderIds.values().next().value as
+            | string
+            | undefined
+          if (firstVideo) handleDeleteVideo(firstVideo)
+          else if (firstFolder) handleDelete(firstFolder)
+        }}
+        onBulkShare={() => {
+          // Single-target only (gated upstream). Route to the right
+          // share handler depending on what's selected.
+          const firstVideo = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          const firstFolder = selectedFolderIds.values().next().value as
+            | string
+            | undefined
+          if (firstVideo) {
+            const grp = videoGroups.find((g) => g.allIds.includes(firstVideo))
+            void handleShareVideo(firstVideo, grp?.name ?? '')
+          } else if (firstFolder) {
+            void handleShare(firstFolder)
+          }
+        }}
+        onBulkRename={() => {
+          const firstVideo = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          const firstFolder = selectedFolderIds.values().next().value as
+            | string
+            | undefined
+          if (firstVideo) {
+            const grp = videoGroups.find((g) => g.allIds.includes(firstVideo))
+            void handleRenameVideo(firstVideo, grp?.name ?? '')
+          } else if (firstFolder) {
+            void handleRename(firstFolder)
+          }
+        }}
+        onBulkDuplicate={() => {
+          // handleDuplicate already reads the combined selection when
+          // size >= 1, so the kind/id hints are only used at exactly
+          // 0 selected (which shouldn't reach here anyway).
+          void handleDuplicate()
         }}
       />
 

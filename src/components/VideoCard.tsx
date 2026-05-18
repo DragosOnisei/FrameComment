@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowUpFromLine,
+  Copy,
+  Download,
   Film as FilmIcon,
   FolderPlus,
   Image as ImageIcon,
@@ -118,6 +120,14 @@ export interface VideoCardProps {
    *  Split-versions action — none of which make sense for a still
    *  image — and swaps the empty-state Film icon for a Photo icon. */
   mediaType?: 'VIDEO' | 'IMAGE'
+  /** 1.1.0+: download this card (sequential per version) — when
+   *  ≥ 1 selected the parent's bulk download handler is called
+   *  instead, which fans out across the full selection. */
+  onDownload?: (id: string) => void
+  /** 1.1.0+: real-file duplicate. Creates a copy in the current
+   *  folder with a `(1)` / `(2)` suffix. When bulk (≥ 2), parent
+   *  duplicates every selected item. */
+  onDuplicate?: (id: string) => void
 }
 
 // Custom MIME for video drag — separate from the folder DnD so the
@@ -265,6 +275,8 @@ export default function VideoCard({
   onNewFolderWithSelection,
   bulkDragThumbnails,
   mediaType = 'VIDEO',
+  onDownload,
+  onDuplicate,
 }: VideoCardProps) {
   const isImage = mediaType === 'IMAGE'
   // Bulk-aware kebab gating (1.0.9+). When the user has 2+ videos
@@ -280,6 +292,9 @@ export default function VideoCard({
   // selection — even of just 1 video — so the user can quickly box a
   // video into its own folder.
   const showNewFolder = !!onNewFolderWithSelection && bulkSelectionCount >= 1
+  // 1.1.0+: Download + Duplicate are always available when wired.
+  const showDownload = !!onDownload
+  const showDuplicate = !!onDuplicate
   // Hover state for the drop-target ring. Only set when ANOTHER
   // video is being dragged over THIS card.
   const [isStackHover, setIsStackHover] = useState(false)
@@ -641,8 +656,12 @@ export default function VideoCard({
         </div>
       </div>
 
-      {/* Footer: name + meta + kebab */}
-      <div className="flex items-start gap-2 p-4">
+      {/* Footer: name + meta + kebab. 1.1.0+: explicit light-gray
+          tint so the video footer reads as visually distinct from
+          the flat folder cards next to it in the grid. Uses zinc
+          shades directly instead of the (very subtle) `muted`
+          token so the contrast lands in both light and dark mode. */}
+      <div className="flex items-start gap-2 p-4 bg-zinc-200 dark:bg-zinc-800 rounded-b-xl">
         <div className="flex-1 min-w-0">
           <div
             className="text-base font-semibold text-foreground truncate"
@@ -665,7 +684,7 @@ export default function VideoCard({
             1.0.9+: also respects bulk-mode gating so we don't show an
             empty popover when every visible item happens to be a
             single-target action in a multi-select context. */}
-        {(showRename || onDelete || onMoveUp || showShare || showSplit || showNewFolder) && (
+        {(showRename || onDelete || onMoveUp || showShare || showSplit || showNewFolder || showDownload || showDuplicate) && (
         <div ref={menuRef} className="relative">
           <button
             type="button"
@@ -691,18 +710,23 @@ export default function VideoCard({
               className="absolute right-0 top-full mt-1 z-30 min-w-[240px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
               onClick={(e) => e.stopPropagation()}
             >
-              {showRename && (
+              {/* 1.1.0+ menu order:
+                  1. Download · Share
+                  2. Duplicate · Rename · Split versions (single-only)
+                  3. Move up · New Folder with selection
+                  4. Delete                                          */}
+              {showDownload && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    onRename!(id, name)
+                    onDownload!(id)
                   }}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
                 >
-                  <Pencil className="w-4 h-4 shrink-0" />
-                  Rename
+                  <Download className="w-4 h-4 shrink-0" />
+                  {isBulk ? `Download ${bulkSelectionCount} items` : 'Download'}
                 </button>
               )}
               {showShare && (
@@ -718,6 +742,54 @@ export default function VideoCard({
                   <Share2 className="w-4 h-4 shrink-0" />
                   Share video
                 </button>
+              )}
+              {(showDownload || showShare) && (showDuplicate || showRename || showSplit) && (
+                <div className="my-1 h-px bg-border/50" role="separator" />
+              )}
+              {showDuplicate && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onDuplicate!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <Copy className="w-4 h-4 shrink-0" />
+                  {isBulk ? `Duplicate ${bulkSelectionCount} items` : 'Duplicate'}
+                </button>
+              )}
+              {showRename && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onRename!(id, name)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <Pencil className="w-4 h-4 shrink-0" />
+                  Rename
+                </button>
+              )}
+              {showSplit && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onSplitVersions!(id, name)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <Scissors className="w-4 h-4 shrink-0" />
+                  Split versions
+                </button>
+              )}
+              {(showDuplicate || showRename || showSplit) && (onMoveUp || showNewFolder) && (
+                <div className="my-1 h-px bg-border/50" role="separator" />
               )}
               {onMoveUp && (
                 <button
@@ -747,41 +819,25 @@ export default function VideoCard({
                 >
                   <FolderPlus className="w-4 h-4 shrink-0" />
                   {bulkSelectionCount > 1
-                    ? `New Folder with ${bulkSelectionCount} videos`
+                    ? `New Folder with ${bulkSelectionCount} items`
                     : 'New Folder with selection'}
                 </button>
               )}
-              {showSplit && (
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onSplitVersions!(id, name)
-                  }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
-                >
-                  <Scissors className="w-4 h-4 shrink-0" />
-                  Split versions
-                </button>
+              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showDownload || showShare) && (
+                <div className="my-1 h-px bg-border/50" role="separator" />
               )}
               {onDelete && (
                 <button
                   role="menuitem"
                   type="button"
                   onClick={() => {
-                    // 1.0.8+: parent shows a Frame.io-style
-                    // ConfirmModal — no native window.confirm here.
-                    // 1.0.9+: the parent reads the current selection
-                    // and bulk-deletes when 2+ are selected, no
-                    // matter which card's kebab was clicked.
                     setMenuOpen(false)
                     onDelete(id, name)
                   }}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left whitespace-nowrap"
                 >
                   <Trash2 className="w-4 h-4 shrink-0" />
-                  {isBulk ? `Delete ${bulkSelectionCount} videos` : 'Delete'}
+                  {isBulk ? `Delete ${bulkSelectionCount} items` : 'Delete'}
                 </button>
               )}
             </div>
