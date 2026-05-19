@@ -11,7 +11,7 @@ function formatTimeWithMode(
   videoDurationSeconds: number,
   mode: 'TIMECODE' | 'AUTO'
 ): string {
-  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return mode === 'TIMECODE' ? '00:00:00:00' : '0:00'
+  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return mode === 'TIMECODE' ? '00:00' : '0:00'
   const timecode = secondsToTimecode(seconds, fps)
   return formatCommentTimestamp({ timecode, fps, videoDurationSeconds, mode })
 }

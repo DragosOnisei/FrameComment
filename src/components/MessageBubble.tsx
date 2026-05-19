@@ -1,9 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
-import { Clock, Trash2, Brush, Pencil } from 'lucide-react'
+import {
+  Trash2,
+  Brush,
+  Pencil,
+  Check,
+  MoreHorizontal,
+} from 'lucide-react'
 import DOMPurify from 'isomorphic-dompurify'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachments from './CommentAttachments'
@@ -11,6 +17,14 @@ import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
+}
+
+// 1.2.0+: shape of the per-emoji reaction groups returned by sanitizeComment.
+type ReactionGroup = {
+  emoji: string
+  count: number
+  mine: boolean
+  reactors: { id: string; authorName: string | null; createdAt: string | Date }[]
 }
 
 interface MessageBubbleProps {
@@ -43,6 +57,17 @@ interface MessageBubbleProps {
   timecodeEndLabel?: string | null
   hasAnnotation?: boolean
   shareToken?: string | null
+  /**
+   * 1.2.0+: Frame.io-style "Mark as done". Toggling flips `isResolved` on
+   * the server. Returns the updated comment so the parent can splice it
+   * into its cache without a full refetch.
+   */
+  onResolveToggle?: (commentId: string, nextResolved: boolean) => Promise<void> | void
+  /**
+   * 1.2.0+: emoji reaction toggle. Same emoji from the same viewer twice
+   * removes their reaction (toggle semantics handled server-side).
+   */
+  onReact?: (commentId: string, emoji: string) => Promise<void> | void
 }
 
 /**
@@ -80,6 +105,8 @@ export default function MessageBubble({
   timecodeEndLabel,
   hasAnnotation,
   shareToken,
+  onResolveToggle,
+  onReact,
 }: MessageBubbleProps) {
   const t = useTranslations('comments')
 
@@ -93,6 +120,28 @@ export default function MessageBubble({
   const [replyEditValue, setReplyEditValue] = useState('')
   const [isSavingReply, setIsSavingReply] = useState(false)
 
+  // 1.2.0+: kebab dropdown open state + click-outside to close.
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!menuRef.current) return
+      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [menuOpen])
+
+  // 1.2.0+: optimistic guard so rapid clicks don't double-toggle.
+  const [resolving, setResolving] = useState(false)
+  const isResolved = !!(comment as any).isResolved
+
+  // 1.2.0+: reactions array (grouped by emoji) — already shaped server-side.
+  const reactions: ReactionGroup[] = Array.isArray((comment as any).reactions)
+    ? ((comment as any).reactions as ReactionGroup[])
+    : []
+
   /** Strip HTML tags so the textarea shows plain text the user can edit. */
   const htmlToPlainText = (html: string): string => {
     if (typeof document === 'undefined') return html
@@ -104,10 +153,7 @@ export default function MessageBubble({
   const handleStartEdit = () => {
     setEditValue(htmlToPlainText(comment.content))
     setIsEditing(true)
-    // Tell the timeline (via CommentSection) about the comment we're
-    // editing so it can paint the existing in/out range with the
-    // draggable handle. The user can then adjust the range as part of
-    // the edit.
+    setMenuOpen(false)
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('commentEditStart', {
@@ -227,24 +273,38 @@ export default function MessageBubble({
     annotationCtx?.setActiveCommentId(comment.id)
   }
 
+  const handleResolveToggle = async () => {
+    if (!onResolveToggle || resolving) return
+    try {
+      setResolving(true)
+      await onResolveToggle(comment.id, !isResolved)
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const handleReactSelect = (emoji: string) => {
+    if (!onReact) return
+    void onReact(comment.id, emoji)
+  }
+
   const threadReplies = !isReply && replies && replies.length > 0 ? replies : []
   const hasReplies = threadReplies.length > 0
 
   return (
-    // Frame.io-style flat list item \u2014 no card wrapper, no border
-    // around the whole comment, no shadow. Just a small avatar +
-    // metadata row + content + actions, separated from siblings by
-    // a thin divider. The active comment (annotation focused) gets
-    // a subtle ring on the LEFT margin instead of around the whole
-    // box, so the visual emphasis is light.
+    // Frame.io-style flat list item — no card wrapper, no border around the
+    // whole comment, no shadow. Hover reveals the right-side action cluster
+    // (emoji react / kebab / mark as done). When the comment is resolved
+    // we dim the whole row and stamp a green ✓ where the sequence number
+    // used to sit.
     <div className="w-full" id={`comment-${comment.id}`}>
       <div
         onClick={handleBubbleClick}
-        className={`relative cursor-pointer transition-colors py-2 pl-3 pr-1 -mx-2 rounded-md ${
+        className={`group relative cursor-pointer transition-colors py-2 pl-3 pr-1 -mx-2 rounded-md ${
           isAnnotationFocused
             ? 'bg-primary/5 ring-1 ring-primary/30'
             : 'hover:bg-muted/30'
-        }`}
+        } ${isResolved ? 'opacity-70' : ''}`}
       >
         {hasReplies && (
           <div className="absolute left-[18px] top-9 bottom-9 w-px bg-border/50" aria-hidden="true" />
@@ -262,34 +322,39 @@ export default function MessageBubble({
               <span className="text-[11px] text-muted-foreground flex-shrink-0">
                 {formatMessageTime(comment.createdAt)}
               </span>
-              {typeof sequenceNumber === 'number' && sequenceNumber > 0 && (
-                <span className="ml-auto text-[11px] text-muted-foreground/70 shrink-0 tabular-nums">
-                  #{sequenceNumber}
-                </span>
-              )}
-            </div>
-
-            {!isReply && timestampLabel && (
-              <div className="flex items-center gap-1.5 mt-1 mb-0.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={handleTimestampClick}
-                  className="inline-flex items-center gap-1 rounded-md bg-warning-visible px-1.5 py-0.5 text-[11px] font-semibold text-warning hover:opacity-90 transition-opacity"
-                  title={t('seekToTimecode')}
-                >
-                  <Clock className="w-3 h-3" />
-                  <span className="font-mono tabular-nums">
-                    {timestampLabel}{timecodeEndLabel ? ` \u2192 ${timecodeEndLabel}` : ''}
+              {/*
+                1.2.0+: resolved replaces the sequence number badge with a
+                green check chip; otherwise we keep the #N indicator.
+              */}
+              <div className="ml-auto shrink-0">
+                {isResolved ? (
+                  <span
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-white shadow-sm"
+                    title={
+                      (comment as any).resolvedBy
+                        ? `${t('resolved') || 'Done'} · ${(comment as any).resolvedBy}`
+                        : t('resolved') || 'Done'
+                    }
+                  >
+                    <Check className="w-3 h-3" strokeWidth={3} />
                   </span>
-                </button>
-                {hasAnnotation && (
-                  <span className="inline-flex items-center rounded-md bg-blue-500/10 px-1.5 py-0.5 text-blue-600 dark:text-blue-400" title={t('hasAnnotation')}>
-                    <Brush className="w-3 h-3" />
-                  </span>
+                ) : (
+                  typeof sequenceNumber === 'number' &&
+                  sequenceNumber > 0 && (
+                    <span className="text-[11px] text-muted-foreground/70 tabular-nums">
+                      #{sequenceNumber}
+                    </span>
+                  )
                 )}
               </div>
-            )}
+            </div>
 
+            {/*
+              1.2.0+: timestamp + content live on the SAME visual row. The
+              timecode badge sits inline at the start of the text flow
+              (like Frame.io), so a short reply reads as one continuous
+              line instead of stacked.
+            */}
             {isEditing ? (
               <div className="mt-1 flex flex-col gap-2">
                 <textarea
@@ -319,9 +384,36 @@ export default function MessageBubble({
                 </div>
               </div>
             ) : (
-              <div className="mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words leading-snug">
-                <div
-                  className="[&>p]:m-0"
+              <div
+                className={`mt-0.5 text-sm whitespace-pre-wrap break-words leading-snug ${
+                  isResolved ? 'text-muted-foreground' : 'text-foreground'
+                }`}
+              >
+                {!isReply && timestampLabel && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleTimestampClick}
+                      className="inline-flex items-center align-baseline gap-1 rounded-md bg-warning-visible px-1.5 py-0.5 text-[11px] font-semibold text-warning hover:opacity-90 transition-opacity mr-1.5"
+                      title={t('seekToTimecode')}
+                    >
+                      <span className="font-mono tabular-nums">
+                        {timestampLabel}
+                        {timecodeEndLabel ? ` → ${timecodeEndLabel}` : ''}
+                      </span>
+                    </button>
+                    {hasAnnotation && (
+                      <span
+                        className="inline-flex items-center rounded-md bg-blue-500/10 px-1.5 py-0.5 text-blue-600 dark:text-blue-400 mr-1.5 align-baseline"
+                        title={t('hasAnnotation')}
+                      >
+                        <Brush className="w-3 h-3" />
+                      </span>
+                    )}
+                  </>
+                )}
+                <span
+                  className="[&>p]:m-0 [&>p]:inline"
                   dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
                 />
               </div>
@@ -337,36 +429,155 @@ export default function MessageBubble({
               </div>
             )}
 
+            {/* 1.2.0+: reactions chip row */}
+            {!isEditing && reactions.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                {reactions.map((r) => (
+                  <button
+                    key={r.emoji}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleReactSelect(r.emoji)
+                    }}
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs leading-none transition-colors border ${
+                      r.mine
+                        ? 'bg-primary/10 border-primary/30 text-primary'
+                        : 'bg-muted/40 border-border hover:bg-muted'
+                    }`}
+                    title={r.reactors
+                      .map((rc) => rc.authorName || t('anonymous'))
+                      .join(', ')}
+                  >
+                    <span className="text-base leading-none">{r.emoji}</span>
+                    <span className="tabular-nums">{r.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/*
+              1.2.0+: action row. "Reply" is always visible; the rest of
+              the cluster (react / kebab / done) only appears on hover so
+              the comment list reads cleanly.
+            */}
             {!isEditing && (
-              <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground/80 min-w-0">
-                {!isReply && !commentsDisabled && onReply && (
-                  <button
-                    onClick={onReply}
-                    className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
-                  >
-                    {t('reply')}
-                  </button>
-                )}
-                {canEdit && onEdit && (
-                  <button
-                    onClick={handleStartEdit}
-                    className="inline-flex items-center hover:text-foreground transition-colors"
-                    title={t('editComment')}
-                    aria-label={t('editComment')}
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {onDelete && (
-                  <button
-                    onClick={onDelete}
-                    className="inline-flex items-center hover:text-destructive transition-colors"
-                    title={t('deleteComment')}
-                    aria-label={t('deleteComment')}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
+              <div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground/80 min-w-0">
+                <div className="flex items-center gap-3">
+                  {!isReply && !commentsDisabled && onReply && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onReply()
+                      }}
+                      className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
+                    >
+                      {t('reply')}
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/*
+                    1.2.0+: reactions live behind the kebab dropdown — the
+                    standalone smiley button was removed at the user's
+                    request to keep the action row visually quiet. The
+                    `onReact` prop is still wired in via the reactions
+                    pills above, and a future iteration can move it into
+                    the kebab menu if the picker is still desired.
+                  */}
+
+                  {/* Kebab → Edit / Delete (rounded chip, matches Frame.io). */}
+                  {(canEdit || onDelete) && (
+                    <div ref={menuRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setMenuOpen((v) => !v)
+                        }}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-border bg-transparent hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                        title={t('moreActions') || 'More'}
+                        aria-label={t('moreActions') || 'More'}
+                      >
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+                      {menuOpen && (
+                        <div
+                          role="menu"
+                          className="absolute right-0 top-full mt-1 z-30 min-w-[140px] rounded-md border border-border bg-popover shadow-md py-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {canEdit && onEdit && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMenuOpen(false)
+                                handleStartEdit()
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-muted transition-colors"
+                              role="menuitem"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              {t('editComment') || 'Edit'}
+                            </button>
+                          )}
+                          {onDelete && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMenuOpen(false)
+                                onDelete()
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors"
+                              role="menuitem"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              {t('deleteComment') || 'Delete'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Mark as done — same circular chip as the kebab so the
+                      two sit balanced next to each other. */}
+                  {onResolveToggle && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void handleResolveToggle()
+                      }}
+                      disabled={resolving}
+                      className={`inline-flex items-center justify-center w-7 h-7 rounded-full border bg-transparent transition-colors ${
+                        isResolved
+                          ? 'border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10'
+                          : 'border-border text-muted-foreground hover:text-emerald-600 hover:bg-muted'
+                      }`}
+                      title={
+                        isResolved
+                          ? t('markUnresolved') || 'Mark as not done'
+                          : t('markResolved') || 'Mark as done'
+                      }
+                      aria-label={
+                        isResolved
+                          ? t('markUnresolved') || 'Mark as not done'
+                          : t('markResolved') || 'Mark as done'
+                      }
+                      aria-pressed={isResolved}
+                    >
+                      <Check
+                        className="w-4 h-4"
+                        strokeWidth={isResolved ? 3 : 2}
+                      />
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>

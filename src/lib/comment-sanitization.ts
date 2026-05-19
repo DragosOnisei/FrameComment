@@ -90,6 +90,13 @@ export function sanitizeComment(
   isAuthenticated: boolean,
   clientName?: string,
   guestIndex?: Map<string, number>,
+  /**
+   * 1.2.0+: caller's identity for the `mine` flag on each reaction so the
+   * client can render its own reactions as toggled-on without re-deriving
+   * the comparison. Pass the share-token session id OR `client:<browserId>`
+   * for guests, or the admin user id for logged-in viewers.
+   */
+  viewerSessionId?: string | null,
 ) {
   const normalizedTimecode = normalizeTimecode(comment)
 
@@ -115,6 +122,10 @@ export function sanitizeComment(
     // The session id is not personal data; it's a per-tab identifier the
     // client already holds. Admin client gets it too for completeness.
     editorSessionId: comment.editorSessionId || null,
+    // 1.2.0+: resolved bookkeeping (Frame.io-style "Mark as done").
+    isResolved: !!comment.isResolved,
+    resolvedAt: comment.resolvedAt || null,
+    resolvedBy: comment.resolvedBy || null,
   }
 
   // Compute a "Client N" suffix once per call so each branch below
@@ -184,12 +195,58 @@ export function sanitizeComment(
     }))
   }
 
+  // 1.2.0+: surface reactions grouped by emoji so the UI gets a stable
+  // counts-per-emoji shape with a `mine` flag for toggle highlighting.
+  // The raw rows are also passed through (without sessionId) so the
+  // client can render avatars / tooltips if it wants.
+  if (Array.isArray(comment.reactions)) {
+    type RawReaction = {
+      id: string
+      emoji: string
+      authorName: string | null
+      sessionId: string
+      createdAt: Date | string
+    }
+    const groups = new Map<string, {
+      emoji: string
+      count: number
+      mine: boolean
+      firstAt: number
+      reactors: { id: string; authorName: string | null; createdAt: Date | string }[]
+    }>()
+    for (const r of comment.reactions as RawReaction[]) {
+      const key = r.emoji
+      const t = r.createdAt instanceof Date ? r.createdAt.getTime() : new Date(r.createdAt).getTime()
+      const existing = groups.get(key)
+      const isMine = !!viewerSessionId && r.sessionId === viewerSessionId
+      if (existing) {
+        existing.count += 1
+        if (isMine) existing.mine = true
+        existing.firstAt = Math.min(existing.firstAt, t)
+        existing.reactors.push({ id: r.id, authorName: r.authorName, createdAt: r.createdAt })
+      } else {
+        groups.set(key, {
+          emoji: r.emoji,
+          count: 1,
+          mine: isMine,
+          firstAt: t,
+          reactors: [{ id: r.id, authorName: r.authorName, createdAt: r.createdAt }],
+        })
+      }
+    }
+    sanitized.reactions = Array.from(groups.values())
+      .sort((a, b) => a.firstAt - b.firstAt)
+      .map(({ firstAt: _firstAt, ...rest }) => rest)
+  } else {
+    sanitized.reactions = []
+  }
+
   // Recursively sanitize replies — forward the same guest index so
   // a reply by Client 2 stays labelled consistently regardless of
   // depth.
   if (comment.replies && Array.isArray(comment.replies)) {
     sanitized.replies = comment.replies.map((reply: any) =>
-      sanitizeComment(reply, isAdmin, isAuthenticated, clientName, guestIndex)
+      sanitizeComment(reply, isAdmin, isAuthenticated, clientName, guestIndex, viewerSessionId)
     )
   }
 

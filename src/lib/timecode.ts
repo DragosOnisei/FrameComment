@@ -237,8 +237,16 @@ export function formatTimecodeDisplay(timecode: string): string {
 
   const [hours, minutes, seconds, frames] = parts.map(part => part.padStart(2, '0'))
 
-  // Use semicolon before frames for DF, colon for NDF
-  return `${hours}:${minutes}:${seconds}${separator}${frames}`
+  // v1.1.1+: trim leading zero segments so "00:00:04:23" displays as "04:23"
+  // and "00:01:23:04" displays as "01:23:04". The frames separator (DF/NDF)
+  // is preserved on the trailing frames component.
+  if (hours !== '00') {
+    return `${hours}:${minutes}:${seconds}${separator}${frames}`
+  }
+  if (minutes !== '00') {
+    return `${minutes}:${seconds}${separator}${frames}`
+  }
+  return `${seconds}${separator}${frames}`
 }
 
 function formatClockTime(secondsTotal: number, includeHours: boolean): string {
@@ -259,12 +267,13 @@ export function formatCommentTimestamp(params: {
   videoDurationSeconds?: number | null
   mode: 'TIMECODE' | 'AUTO'
 }): string {
-  const { timecode, fps, videoDurationSeconds, mode } = params
+  const { timecode, fps, videoDurationSeconds } = params
 
-  if (mode === 'TIMECODE') {
-    return formatTimecodeDisplay(timecode)
-  }
-
+  // 1.2.0+: every display surfaces just clock time (MM:SS, or HH:MM:SS
+  // when the clip is an hour or longer) — never frame numbers. Keeps
+  // the comment badges, the input chip and the player time display all
+  // reading the same shape. The `mode` parameter is accepted for
+  // backwards compatibility but no longer changes the output.
   try {
     const seconds = timecodeToSeconds(timecode, typeof fps === 'number' && Number.isFinite(fps) ? fps : 24)
     const duration = typeof videoDurationSeconds === 'number' && Number.isFinite(videoDurationSeconds) ? videoDurationSeconds : seconds

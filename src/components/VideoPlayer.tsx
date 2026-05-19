@@ -404,8 +404,15 @@ export default function VideoPlayer({
 
       const video = videoRef.current
 
+      // 1.1.1+: every Ctrl-based shortcut below also requires
+      // `!e.metaKey` so the macOS Character Viewer (Ctrl+Cmd+Space)
+      // and any other Cmd-augmented combos fall through to the OS
+      // instead of being swallowed by the player. Previously
+      // Ctrl+Cmd+Space matched the play/pause check and killed the
+      // emoji picker via preventDefault().
+
       // Ctrl+Space: Play/Pause
-      if (e.ctrlKey && e.code === 'Space') {
+      if (e.ctrlKey && !e.metaKey && e.code === 'Space') {
         e.preventDefault()
         e.stopPropagation()
         if (video.paused) {
@@ -417,7 +424,7 @@ export default function VideoPlayer({
       }
 
       // Ctrl+, or Ctrl+<: Decrease speed by 0.25x
-      if (e.ctrlKey && (e.code === 'Comma' || e.key === '<')) {
+      if (e.ctrlKey && !e.metaKey && (e.code === 'Comma' || e.key === '<')) {
         e.preventDefault()
         e.stopPropagation()
         setPlaybackSpeed(prev => Math.max(0.25, prev - 0.25))
@@ -425,7 +432,7 @@ export default function VideoPlayer({
       }
 
       // Ctrl+. or Ctrl+>: Increase speed by 0.25x
-      if (e.ctrlKey && (e.code === 'Period' || e.key === '>')) {
+      if (e.ctrlKey && !e.metaKey && (e.code === 'Period' || e.key === '>')) {
         e.preventDefault()
         e.stopPropagation()
         setPlaybackSpeed(prev => Math.min(2.0, prev + 0.25))
@@ -433,7 +440,7 @@ export default function VideoPlayer({
       }
 
       // Ctrl+/: Reset speed to 1.0x
-      if (e.ctrlKey && (e.code === 'Slash' || e.key === '/' || e.key === '?')) {
+      if (e.ctrlKey && !e.metaKey && (e.code === 'Slash' || e.key === '/' || e.key === '?')) {
         e.preventDefault()
         e.stopPropagation()
         setPlaybackSpeed(1.0)
@@ -441,7 +448,7 @@ export default function VideoPlayer({
       }
 
       // Ctrl+J: Go back one frame
-      if (e.ctrlKey && e.code === 'KeyJ') {
+      if (e.ctrlKey && !e.metaKey && e.code === 'KeyJ') {
         e.preventDefault()
         e.stopPropagation()
         if (!selectedVideo?.fps) return
@@ -460,7 +467,7 @@ export default function VideoPlayer({
       }
 
       // Ctrl+L: Go forward one frame
-      if (e.ctrlKey && e.code === 'KeyL') {
+      if (e.ctrlKey && !e.metaKey && e.code === 'KeyL') {
         e.preventDefault()
         e.stopPropagation()
         if (!selectedVideo?.fps) return
@@ -542,6 +549,13 @@ export default function VideoPlayer({
         currentTimeRef.current = videoRef.current.currentTime
         setCurrentTimeState(videoRef.current.currentTime)
         lastTimeUpdateRef.current = now
+        // 1.2.0+: broadcast playback ticks so the CommentInput's
+        // always-on timestamp chip can reflect the live playhead even
+        // when nothing is focused. Same payload shape as the existing
+        // seek/skip emissions.
+        window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
+          detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current }
+        }))
       }
     }
   }

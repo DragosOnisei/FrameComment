@@ -10,6 +10,7 @@ import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
 import ProjectCardKebab from '@/components/ProjectCardKebab'
 import { formatDate } from '@/lib/utils'
 import { projectGradient, formatBytes, formatRelativeTime } from '@/lib/project-gradient'
+import ProjectCoverImage from '@/components/ProjectCoverImage'
 
 interface Project {
   id: string
@@ -38,9 +39,15 @@ interface ProjectsListProps {
    *  delete) so the parent can re-fetch the list. Falls back to a
    *  router.refresh() inside the kebab if not supplied. */
   onProjectMutated?: () => void
+  /**
+   * 1.2.0+: when provided, the "+ New Project" tile and the empty
+   *  state CTA open the Frame.io-style modal hosted by the parent
+   *  instead of navigating to the legacy `/admin/projects/new` page.
+   */
+  onNewProject?: () => void
 }
 
-export default function ProjectsList({ projects, onProjectMutated }: ProjectsListProps) {
+export default function ProjectsList({ projects, onProjectMutated, onNewProject }: ProjectsListProps) {
   const t = useTranslations('projects')
   const tc = useTranslations('common')
   const tn = useTranslations('nav')
@@ -154,12 +161,19 @@ export default function ProjectsList({ projects, onProjectMutated }: ProjectsLis
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground mb-4">{t('noProjectsYet')}</p>
-            <Link href="/admin/projects/new">
-              <Button variant="default" size="default">
+            {onNewProject ? (
+              <Button variant="default" size="default" onClick={onNewProject}>
                 <Plus className="w-4 h-4 mr-2" />
                 {t('createFirst')}
               </Button>
-            </Link>
+            ) : (
+              <Link href="/admin/projects/new">
+                <Button variant="default" size="default">
+                  <Plus className="w-4 h-4 mr-2" />
+                  {t('createFirst')}
+                </Button>
+              </Link>
+            )}
           </CardContent>
         </Card>
       ) : viewMode === 'grid' ? (
@@ -183,15 +197,38 @@ export default function ProjectsList({ projects, onProjectMutated }: ProjectsLis
                   className="block relative aspect-square rounded-xl overflow-hidden ring-1 ring-border/40 hover:ring-border transition-[box-shadow,outline]"
                   aria-label={project.title}
                 >
-                  {/* Gradient lives on an inner layer so we can move
-                      it on hover without affecting the tile's border
-                      or overlay icons. `scale-110` reveals the unseen
-                      edges of the gradient — feels like the colours
-                      breathe rather than a hard pop. */}
-                  <div
-                    className="absolute inset-0 transition-transform duration-700 ease-out will-change-transform group-hover:scale-110"
-                    style={{ background: projectGradient(project.id) }}
-                  />
+                  {/* 1.2.0+: prefer an uploaded cover image; fall back
+                      to the deterministic gradient. The cover image is
+                      admin-gated (bearer token), so we route through
+                      ProjectCoverImage which fetches via apiFetch +
+                      blob URL instead of a naked <img src> that would
+                      401. When a cover exists we render a neutral
+                      muted backdrop underneath (NOT the gradient) so
+                      the user never sees the wrong-colour gradient
+                      flash before their cover loads, and no gradient
+                      edge bleeds out from behind the image on hover. */}
+                  {(project as any).coverImagePath ? (
+                    <>
+                      <div className="absolute inset-0 bg-muted" />
+                      <ProjectCoverImage
+                        projectId={project.id}
+                        cacheKey={
+                          project.updatedAt
+                            ? new Date(project.updatedAt).getTime()
+                            : undefined
+                        }
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    </>
+                  ) : (
+                    // 1.2.0+: hover-zoom dropped at the user's request
+                    // for a calmer dashboard — the tile still
+                    // brightens its ring on hover, that's enough.
+                    <div
+                      className="absolute inset-0"
+                      style={{ background: projectGradient(project.id) }}
+                    />
+                  )}
                   {isLocked && (
                     <span
                       className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded-md bg-black/40 text-white backdrop-blur-sm"
@@ -232,17 +269,33 @@ export default function ProjectsList({ projects, onProjectMutated }: ProjectsLis
 
           {/* + New Project tile — same footprint as a project, dark
               dashed look so it reads as "add" without taking colour
-              away from the real tiles. */}
-          <Link
-            href="/admin/projects/new"
-            className="group flex flex-col items-center justify-center aspect-square rounded-xl border border-dashed border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:border-border transition-colors"
-            aria-label={t('newProject')}
-          >
-            <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-muted/60 group-hover:bg-muted transition-colors">
-              <Plus className="w-6 h-6" />
-            </span>
-            <span className="mt-3 text-sm font-medium">{t('newProject')}</span>
-          </Link>
+              away from the real tiles. 1.2.0+: when a parent passes
+              `onNewProject`, the tile opens that modal instead of
+              navigating to the legacy /new page. */}
+          {onNewProject ? (
+            <button
+              type="button"
+              onClick={onNewProject}
+              className="group flex flex-col items-center justify-center aspect-square rounded-xl border border-dashed border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:border-border transition-colors"
+              aria-label={t('newProject')}
+            >
+              <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-muted/60 group-hover:bg-muted transition-colors">
+                <Plus className="w-6 h-6" />
+              </span>
+              <span className="mt-3 text-sm font-medium">{t('newProject')}</span>
+            </button>
+          ) : (
+            <Link
+              href="/admin/projects/new"
+              className="group flex flex-col items-center justify-center aspect-square rounded-xl border border-dashed border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:border-border transition-colors"
+              aria-label={t('newProject')}
+            >
+              <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-muted/60 group-hover:bg-muted transition-colors">
+                <Plus className="w-6 h-6" />
+              </span>
+              <span className="mt-3 text-sm font-medium">{t('newProject')}</span>
+            </Link>
+          )}
         </div>
       ) : (
         /* Table View */

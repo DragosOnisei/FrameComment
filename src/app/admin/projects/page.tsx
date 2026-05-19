@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { FolderKanban, Plus, Eye, EyeOff, RefreshCw, Copy, Check, AlertCircle } from 'lucide-react'
+import { FolderKanban, Plus, Eye, EyeOff, RefreshCw, Copy, Check, AlertCircle, ImagePlus, Lock, LockOpen, X as XIcon } from 'lucide-react'
+import { projectGradient } from '@/lib/project-gradient'
 import ProjectsList from '@/components/ProjectsList'
-import { apiFetch, apiPost } from '@/lib/api-client'
+import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 import { useTranslations } from 'next-intl'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
@@ -31,6 +32,18 @@ export default function AdminPage() {
   const [copied, setCopied] = useState(false)
   const [authMode, setAuthMode] = useState<'PASSWORD' | 'OTP' | 'BOTH'>('PASSWORD')
   const [smtpConfigured, setSmtpConfigured] = useState(false)
+  // 1.2.0+: Frame.io-style modal state. `restricted` collapses the
+  // legacy passwordProtected/authMode UI into a single toggle; the
+  // server auto-generates a password when restricted=true and the
+  // admin can view / rotate it later from Project Settings.
+  const [restricted, setRestricted] = useState(false)
+  const [coverImageFile, setCoverImageFile] = useState<File | null>(null)
+  const [coverImagePreview, setCoverImagePreview] = useState<string | null>(null)
+  // 1.2.0+: pin the preview gradient to a random seed at modal-open
+  // time so it stays stable while the user types the title. Without
+  // this the gradient would re-roll on every keystroke (since
+  // projectGradient hashes its input).
+  const [gradientSeed, setGradientSeed] = useState('')
   const [projectTitle, setProjectTitle] = useState('')
   const [projectDescription, setProjectDescription] = useState('')
   const [companyName, setCompanyName] = useState('')
@@ -95,53 +108,77 @@ export default function AdminPage() {
     setRecipientEmail('')
     setIsShareOnly(false)
     // Auth is OFF by default — most users want a quick public project.
-    // They can flip the checkbox if they need a password / OTP.
     setPasswordProtected(false)
     setSharePassword(generateSecurePassword())
     setShowPassword(true)
     setCopied(false)
     setAuthMode('PASSWORD')
+    setRestricted(false)
+    setCoverImageFile(null)
+    if (coverImagePreview) URL.revokeObjectURL(coverImagePreview)
+    setCoverImagePreview(null)
+    // Roll a fresh gradient seed for this modal session. We use
+    // crypto.randomUUID where available (modern browsers) and fall
+    // back to a Math.random hex so the modal stays usable on older
+    // engines / SSR-derived paths.
+    setGradientSeed(
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `seed-${Math.random().toString(36).slice(2, 12)}`,
+    )
     setFormError('')
     setShowNewProjectModal(true)
   }
 
-  // Create project
-  async function handleCreateProject() {
-    if (!projectTitle.trim()) {
-      setFormError(t('titleRequired2'))
+  // 1.2.0+: cover image picker handler. Generates an object URL so
+  // the preview shows immediately; revoked when the modal closes or
+  // a new image is picked.
+  function handlePickCoverImage(file: File | null) {
+    if (coverImagePreview) URL.revokeObjectURL(coverImagePreview)
+    if (!file) {
+      setCoverImageFile(null)
+      setCoverImagePreview(null)
       return
     }
+    if (!file.type.startsWith('image/')) {
+      setFormError('Please select an image file')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setFormError('Image must be smaller than 10MB')
+      return
+    }
+    setCoverImageFile(file)
+    setCoverImagePreview(URL.createObjectURL(file))
+  }
 
-    // Client-side validation for password modes
-    const needsPasswordForMode = passwordProtected && (authMode === 'PASSWORD' || authMode === 'BOTH')
-    if (needsPasswordForMode && !sharePassword.trim()) {
-      setFormError(t('passwordRequired'))
-      return
-    }
+  // Create project — 1.2.0+ multipart path. Sends title + restricted
+  // flag + optional cover image in one form; server handles auth-mode
+  // mapping and cover upload.
+  async function handleCreateProject() {
+    const title = projectTitle.trim() || 'Untitled Project'
 
     setCreating(true)
     setFormError('')
 
     try {
-      const data: Record<string, unknown> = {
-        title: projectTitle,
-        authMode: passwordProtected ? authMode : 'NONE',
-        isShareOnly: isShareOnly,
-      }
-      
-      // Only include optional fields if they have values
-      if (projectDescription) data.description = projectDescription
-      if (companyName) data.companyName = companyName
-      if (clientCompanyId) data.clientCompanyId = clientCompanyId
-      if (recipientName) data.recipientName = recipientName
-      if (recipientEmail) data.recipientEmail = recipientEmail
-      
-      // Only include password for password-based auth modes
-      if ((authMode === 'PASSWORD' || authMode === 'BOTH') && passwordProtected && sharePassword) {
-        data.sharePassword = sharePassword
-      }
+      const form = new FormData()
+      form.append('title', title)
+      form.append('restricted', restricted ? 'true' : 'false')
+      if (coverImageFile) form.append('coverImage', coverImageFile)
 
-      const project = await apiPost('/api/projects', data)
+      const res = await apiFetch('/api/projects', {
+        method: 'POST',
+        body: form,
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data?.error || t('failedToCreateProject'))
+      }
+      const project = await res.json()
+      if (coverImagePreview) URL.revokeObjectURL(coverImagePreview)
+      setCoverImagePreview(null)
+      setCoverImageFile(null)
       setShowNewProjectModal(false)
       router.push(`/admin/projects/${project.id}`)
     } catch (error) {
@@ -164,134 +201,208 @@ export default function AdminPage() {
   function renderNewProjectModal() {
     return (
       <Dialog open={showNewProjectModal} onOpenChange={setShowNewProjectModal}>
-        <DialogContent className="sm:max-w-lg max-h-[calc(100dvh-3rem)] sm:max-h-[85vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FolderKanban className="w-5 h-5 text-primary" />
-              {t('createNew')}
-            </DialogTitle>
-            <DialogDescription>
-              {t('createDescription')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 py-4 -mx-4 px-4 sm:-mx-6 sm:px-6">
-            {formError && (
-              <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
-                <span className="text-sm text-destructive">{formError}</span>
-              </div>
-            )}
+        <DialogContent className="sm:max-w-md max-h-[calc(100dvh-3rem)] sm:max-h-[85vh] flex flex-col">
+          {/*
+            1.2.0+: Frame.io-style composer.
+            - Big preview tile up top (gradient by default, optional
+              uploaded image), title input centered at the bottom of
+              the tile.
+            - Single "Make Restricted" toggle row.
+            - Footer: Cancel + Create New Project.
 
-            {/* Project Title */}
-            <div className="space-y-2">
-              <Label htmlFor="projectTitle">{t('titleRequired')}</Label>
-              <Input
-                id="projectTitle"
-                placeholder={t('titlePlaceholder')}
-                value={projectTitle}
-                onChange={(e) => setProjectTitle(e.target.value)}
-                autoComplete="off"
-                data-form-type="other"
-                data-lpignore="true"
-                data-1p-ignore
-              />
-            </div>
+            The legacy fields (description, recipient, share-only,
+            explicit password / authMode dropdown) live in Project
+            Settings — they were noise on the create step.
+          */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!creating) void handleCreateProject()
+            }}
+            className="contents"
+          >
+            <DialogHeader className="sr-only">
+              <DialogTitle>{t('createNew')}</DialogTitle>
+              <DialogDescription>{t('createDescription')}</DialogDescription>
+            </DialogHeader>
 
-            {/* Authentication Section */}
-            <div className="space-y-4 border rounded-lg p-4 bg-primary-visible border-2 border-primary-visible">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <Label htmlFor="passwordProtected" className="text-sm font-semibold">
-                    {t('requireAuth')}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    {t('requireAuthDescription')}
-                  </p>
+            <div className="flex-1 overflow-y-auto space-y-4 -mx-4 px-4 sm:-mx-6 sm:px-6 pt-2">
+              {formError && (
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+                  <span className="text-sm text-destructive">{formError}</span>
                 </div>
+              )}
+
+              {/*
+                Preview tile — whole tile is now the file-picker
+                target (label). Gradient by default; an uploaded
+                image replaces it. A centered icon hints at the
+                upload affordance when the tile is still empty.
+                The lock chip in the top-right reflects the
+                Make Restricted toggle and animates between
+                LockOpen ↔ Lock when the user flips it.
+              */}
+              <label
+                className="relative block aspect-square rounded-xl overflow-hidden ring-1 ring-border/40 hover:ring-border cursor-pointer group/cover"
+                title={coverImagePreview ? 'Replace image' : 'Upload image'}
+              >
                 <input
-                  id="passwordProtected"
-                  type="checkbox"
-                  checked={passwordProtected}
-                  onChange={(e) => setPasswordProtected(e.target.checked)}
-                  className="h-5 w-5 rounded border-border text-primary focus:ring-primary mt-1"
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null
+                    handlePickCoverImage(f)
+                    e.target.value = ''
+                  }}
                 />
-              </div>
 
-              {passwordProtected && (
-                <div className="space-y-3 pt-2 border-t">
-                  {/* Password Field — always Password auth (1.0.6+) */}
-                  {needsPassword && (
-                    <div className="space-y-2">
-                      <Label htmlFor="sharePassword">{t('sharePassword')}</Label>
-                      <div className="flex gap-2">
-                        <div className="relative flex-1 min-w-0">
-                          <Input
-                            id="sharePassword"
-                            value={sharePassword}
-                            onChange={(e) => setSharePassword(e.target.value)}
-                            type={showPassword ? 'text' : 'password'}
-                            className="pr-10 font-mono text-sm"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                          >
-                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={handleGeneratePassword}
-                          title={t('generatePassword')}
-                          className="flex-shrink-0"
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={handleCopyPassword}
-                          title={t('copyPassword')}
-                          className="flex-shrink-0"
-                        >
-                          {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
-                        </Button>
-                      </div>
-                      {sharePassword && (
-                        <SharePasswordRequirements password={sharePassword} />
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        {t('savePasswordWarning')}
-                      </p>
+                {coverImagePreview ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={coverImagePreview}
+                    alt=""
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                ) : (
+                  <div
+                    className="absolute inset-0"
+                    style={{ background: projectGradient(gradientSeed || 'untitled') }}
+                  />
+                )}
+
+                {/* Subtle bottom gradient overlay so the title input
+                    stays readable over busy cover images. */}
+                <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/55 via-black/20 to-transparent pointer-events-none" />
+
+                {/* Centered upload affordance. Hidden once an image
+                    is loaded; the user can still click anywhere on
+                    the tile to swap it. */}
+                {!coverImagePreview && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-black/40 text-white shadow-lg backdrop-blur-sm transition-transform duration-200 group-hover/cover:scale-105">
+                      <ImagePlus className="w-6 h-6" />
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
 
-              {!passwordProtected && (
-                <div className="flex items-start gap-2 p-2 bg-warning-visible border-2 border-warning-visible rounded-md">
-                  <span className="text-warning text-sm font-bold">!</span>
-                  <p className="text-xs text-warning font-medium">
-                    {t('noAuthWarning')}
+                {/* Lock chip in the top-right corner — visual
+                    indicator of the Make Restricted toggle. The
+                    icon morphs between LockOpen / Lock with a
+                    rotate+scale animation. Tile click would
+                    otherwise open the file picker, so the chip
+                    stops propagation and flips the toggle directly
+                    for a one-click feel. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setRestricted((v) => !v)
+                  }}
+                  aria-pressed={restricted}
+                  title={restricted ? 'Restricted (click to unlock)' : 'Unrestricted (click to lock)'}
+                  className={`absolute top-3 right-3 inline-flex items-center justify-center w-9 h-9 rounded-lg backdrop-blur-sm shadow-md transition-colors ${
+                    restricted
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-black/55 text-white hover:bg-black/70'
+                  }`}
+                >
+                  <span
+                    key={restricted ? 'locked' : 'unlocked'}
+                    className="inline-flex items-center justify-center w-full h-full animate-in zoom-in-50 spin-in-12 duration-200"
+                  >
+                    {restricted ? (
+                      <Lock className="w-4 h-4" />
+                    ) : (
+                      <LockOpen className="w-4 h-4" />
+                    )}
+                  </span>
+                </button>
+
+                {/* Remove cover image button (visible only when one is set) */}
+                {coverImagePreview && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      handlePickCoverImage(null)
+                    }}
+                    className="absolute top-3 right-14 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-black/55 text-white hover:bg-black/70 backdrop-blur-sm shadow-md transition-colors"
+                    title="Remove image"
+                  >
+                    <XIcon className="w-4 h-4" />
+                  </button>
+                )}
+
+                {/* Title input pinned at the bottom-center, inline
+                    over the cover. Clicking it must NOT trigger the
+                    file picker — onClick stops propagation, and we
+                    use a wrapper to opt out of the parent <label>. */}
+                <div className="absolute inset-x-4 bottom-4">
+                  <Input
+                    id="projectTitle"
+                    placeholder="Untitled Project"
+                    value={projectTitle}
+                    onChange={(e) => setProjectTitle(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    autoComplete="off"
+                    data-form-type="other"
+                    data-lpignore="true"
+                    data-1p-ignore
+                    autoFocus
+                    className="bg-black/40 border-white/20 text-white placeholder:text-white/70 backdrop-blur-md text-base font-semibold focus-visible:ring-primary/60"
+                  />
+                </div>
+              </label>
+
+              {/* Make Restricted toggle row. */}
+              <button
+                type="button"
+                onClick={() => setRestricted((v) => !v)}
+                className="w-full flex items-center gap-3 rounded-xl border border-border bg-card/40 hover:bg-card/70 px-4 py-3 text-left transition-colors"
+              >
+                <Lock
+                  className={`w-5 h-5 shrink-0 ${
+                    restricted ? 'text-primary' : 'text-muted-foreground'
+                  }`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-foreground">
+                    Make Restricted
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-snug">
+                    Only people directly invited to the project will have access.
                   </p>
                 </div>
-              )}
+                {/* Visual switch */}
+                <span
+                  aria-hidden="true"
+                  className={`relative inline-flex h-6 w-10 shrink-0 rounded-full transition-colors ${
+                    restricted ? 'bg-primary' : 'bg-muted'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      restricted ? 'translate-x-[18px]' : 'translate-x-0.5'
+                    }`}
+                  />
+                </span>
+              </button>
             </div>
 
-          </div>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline" disabled={creating}>{tc('cancel')}</Button>
-            </DialogClose>
-            <Button onClick={handleCreateProject} disabled={creating}>
-              <Plus className="w-4 h-4 mr-2" />
-              {creating ? tc('creating') : t('createProject')}
-            </Button>
-          </DialogFooter>
+            <DialogFooter className="pt-2">
+              <DialogClose asChild>
+                <Button type="button" variant="outline" disabled={creating}>{tc('cancel')}</Button>
+              </DialogClose>
+              <Button type="submit" disabled={creating}>
+                {creating ? tc('creating') : 'Create New Project'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     )
@@ -346,7 +457,11 @@ export default function AdminPage() {
           </Button>
         </div>
 
-        <ProjectsList projects={projects} onProjectMutated={loadProjects} />
+        <ProjectsList
+          projects={projects}
+          onProjectMutated={loadProjects}
+          onNewProject={openNewProjectModal}
+        />
       </div>
       {renderNewProjectModal()}
     </div>

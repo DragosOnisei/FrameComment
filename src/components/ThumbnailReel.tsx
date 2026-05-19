@@ -4,7 +4,7 @@ import Image from 'next/image'
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { ArrowLeft, CheckCircle2, ChevronDown, Film, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
 import LanguageToggle from '@/components/LanguageToggle'
@@ -185,6 +185,40 @@ export default function ThumbnailReel({
   const displayedHeaderName =
     stripExt(activeVideo?.originalFileName) || activeVideoName || ''
 
+  // 1.2.0+: surface the active version's upload timestamp directly
+  // under the title so the reviewer can see how long passed between
+  // v1, v2, v3… `createdAt` is the row's insertion time on Video,
+  // which is when the original file was uploaded.
+  const activeUploadedAt: Date | null = activeVideo?.createdAt
+    ? (activeVideo.createdAt instanceof Date
+        ? activeVideo.createdAt
+        : new Date(activeVideo.createdAt as any))
+    : null
+  const uploadedAtLabel =
+    activeUploadedAt && !isNaN(activeUploadedAt.getTime())
+      ? formatDateTime(activeUploadedAt)
+      : null
+  // Compact relative-time tag ("Just now", "5m ago", "2h ago",
+  // "3d ago", "1mo ago", "2y ago"). Frame.io-style — keeps the line
+  // short even when the timestamp is years old.
+  const relativeUploadedLabel = (() => {
+    if (!activeUploadedAt || isNaN(activeUploadedAt.getTime())) return null
+    const diffMs = Date.now() - activeUploadedAt.getTime()
+    if (diffMs < 0) return 'Just now'
+    const sec = Math.floor(diffMs / 1000)
+    if (sec < 45) return 'Just now'
+    const min = Math.floor(sec / 60)
+    if (min < 60) return `${min} ${min === 1 ? 'Minute' : 'Minutes'} ago`
+    const hr = Math.floor(min / 60)
+    if (hr < 24) return `${hr} ${hr === 1 ? 'Hour' : 'Hours'} ago`
+    const day = Math.floor(hr / 24)
+    if (day < 30) return `${day} ${day === 1 ? 'Day' : 'Days'} ago`
+    const mo = Math.floor(day / 30)
+    if (mo < 12) return `${mo} ${mo === 1 ? 'Month' : 'Months'} ago`
+    const yr = Math.floor(day / 365)
+    return `${yr} ${yr === 1 ? 'Year' : 'Years'} ago`
+  })()
+
   return (
     <div className="relative shrink-0 z-20 p-2 sm:p-3">
       {/* Compact Control Bar - Always visible */}
@@ -234,12 +268,30 @@ export default function ThumbnailReel({
                     hasApprovedCurrent ? 'text-success' : 'text-muted-foreground/50'
                   )}
                 />
-                <span
-                  className="text-sm text-foreground/90 truncate"
-                  title={displayedHeaderName}
-                >
-                  {displayedHeaderName || '—'}
-                </span>
+                {/*
+                  1.2.0+: title + upload-date stack. The date sits
+                  directly under the title (centered) with a compact
+                  relative-time tag in parentheses, so the reviewer
+                  can tell at a glance when this version landed and
+                  roughly how long passed since the previous one.
+                */}
+                <div className="flex flex-col items-center min-w-0 leading-tight">
+                  <span
+                    className="text-sm text-foreground/90 truncate max-w-full"
+                    title={displayedHeaderName}
+                  >
+                    {displayedHeaderName || '—'}
+                  </span>
+                  {uploadedAtLabel && (
+                    <span
+                      className="text-[10px] text-muted-foreground truncate max-w-full"
+                      title={`Uploaded ${uploadedAtLabel}`}
+                    >
+                      {uploadedAtLabel}
+                      {relativeUploadedLabel ? ` (${relativeUploadedLabel})` : ''}
+                    </span>
+                  )}
+                </div>
               </button>
 
               {/* Version chip — clickable when there's more than one version */}

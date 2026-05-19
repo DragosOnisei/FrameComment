@@ -1,18 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { Clock, Send, X, Paperclip, Pencil, PenTool } from 'lucide-react'
+import { Send, X, Paperclip, Pencil, PenTool } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachmentButton from './CommentAttachmentButton'
 import VoiceRecorderButton from './VoiceRecorderButton'
 import AnnotationToolbarInline from './AnnotationToolbarInline'
+import EmojiPicker from './EmojiPicker'
 import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 
 interface CommentInputProps {
@@ -131,6 +132,90 @@ export default function CommentInput({
   // paperclip) so the recorder UI gets the whole input row to itself.
   const [isVoiceActive, setIsVoiceActive] = useState(false)
 
+  // 1.1.1+: ref + native input listener to catch OS-level insertions
+  // that React's synthetic `onChange` misses. macOS Sequoia's Apple
+  // Intelligence emoji picker writes the emoji directly to the DOM
+  // (skipping React's event tracking), so the very next controlled-
+  // input re-render restores the previous `value` and the emoji is
+  // gone. By listening on the raw element we get the new value
+  // *before* React's render cycle can wipe it.
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Keep the latest `newComment` in a ref so the native listener
+  // closure stays valid across renders without re-binding on every
+  // keystroke.
+  const newCommentRef = useRef(newComment)
+  useEffect(() => {
+    newCommentRef.current = newComment
+  }, [newComment])
+  // 1.1.1+: insert text (an emoji, but generic) at the current
+  // caret position. Used by the in-app emoji picker to side-step
+  // the Chrome+Sequoia bug where the OS emoji picker doesn't
+  // dispatch any events on `<textarea>`.
+  const insertAtCursor = (text: string) => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? el.value.length
+    const end = el.selectionEnd ?? el.value.length
+    const before = el.value.slice(0, start)
+    const after = el.value.slice(end)
+    const next = before + text + after
+    onCommentChange(next)
+    // Restore focus + caret after the next render. Without
+    // `requestAnimationFrame` React would set `value` AFTER our
+    // setSelectionRange call, which would reset the caret to the
+    // end.
+    requestAnimationFrame(() => {
+      el.focus()
+      const pos = start + text.length
+      try {
+        el.setSelectionRange(pos, pos)
+      } catch {
+        /* Some browsers throw on programmatic setSelectionRange
+           when the element isn't fully reflowed yet. Best-effort
+           is fine — the caret just lands at the end. */
+      }
+    })
+  }
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const sync = () => {
+      const v = el.value
+      // Only push if the DOM diverges from React state — otherwise
+      // every keystroke would fire onCommentChange twice (once via
+      // React onChange, once here) and double-trigger
+      // handleCommentChange side-effects (auto-pause / capture
+      // timestamp).
+      if (v !== newCommentRef.current) {
+        onCommentChange(v)
+      }
+    }
+    // `input` covers regular typing + most OS insertions.
+    // `compositionend` covers IME (Chinese / Japanese / etc.).
+    // `beforeinput` fires earliest and is the only event that the
+    // macOS Sequoia Apple Intelligence emoji picker reliably emits
+    // — we schedule the sync on the next tick so the DOM has
+    // actually been updated by the time we read `el.value`.
+    const syncSoon = () => {
+      // microtask + raf double-bounce so we land after WHATEVER the
+      // OS is doing — synchronous insert, async paste, IME commit,
+      // whatever. Cheap, fires at most a couple of times per insert.
+      Promise.resolve().then(sync)
+      requestAnimationFrame(sync)
+    }
+    el.addEventListener('input', sync)
+    el.addEventListener('compositionend', sync)
+    el.addEventListener('beforeinput', syncSoon)
+    el.addEventListener('paste', syncSoon)
+    return () => {
+      el.removeEventListener('input', sync)
+      el.removeEventListener('compositionend', sync)
+      el.removeEventListener('beforeinput', syncSoon)
+      el.removeEventListener('paste', syncSoon)
+    }
+  }, [onCommentChange])
+
   if (commentsDisabled) {
     // 1.0.9+: the Shortcuts button was removed app-wide, so there's
     // nothing left to render here once comments are disabled.
@@ -141,15 +226,34 @@ export default function CommentInput({
   const isNameRequired = showAuthorInput && namedRecipients.length > 0 && nameSource === 'none'
   const hasAttachments = pendingAttachments.length > 0
   const canSubmit = !loading && (newComment.trim() || hasAttachments || pendingAnnotation) && !isNameRequired
-  const timestampLabel =
+  // 1.2.0+: the chip stays visible at all times — when the input
+  // hasn't been focused yet (and therefore there's no captured IN
+  // point), we render the LIVE playhead so the composer reads
+  // "[12:34] Leave your comment..." in sync with the player. Once the
+  // user focuses the input we freeze on the captured IN point.
+  const [livePlayheadSeconds, setLivePlayheadSeconds] = useState(0)
+  useEffect(() => {
+    const onTime = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { time?: number; videoId?: string } | undefined
+      if (!detail || typeof detail.time !== 'number') return
+      // Filter by selected video so a comparison player on another
+      // video doesn't drive our chip.
+      if (selectedVideoIdProp && detail.videoId && detail.videoId !== selectedVideoIdProp) return
+      setLivePlayheadSeconds(detail.time)
+    }
+    window.addEventListener('videoTimeUpdated', onTime as EventListener)
+    return () => window.removeEventListener('videoTimeUpdated', onTime as EventListener)
+  }, [selectedVideoIdProp])
+
+  const hasCapturedTimestamp =
     selectedTimestamp !== null && selectedTimestamp !== undefined
-      ? formatCommentTimestamp({
-          timecode: secondsToTimecode(selectedTimestamp, selectedVideoFps),
-          fps: selectedVideoFps,
-          videoDurationSeconds: selectedVideoDurationSeconds,
-          mode: timestampDisplayMode,
-        })
-      : null
+  const chipSeconds = hasCapturedTimestamp ? selectedTimestamp! : livePlayheadSeconds
+  const timestampLabel = formatCommentTimestamp({
+    timecode: secondsToTimecode(Math.max(0, chipSeconds), selectedVideoFps),
+    fps: selectedVideoFps,
+    videoDurationSeconds: selectedVideoDurationSeconds,
+    mode: timestampDisplayMode,
+  })
 
   const timecodeEndLabel = selectedTimecodeEnd
     ? formatCommentTimestamp({
@@ -349,39 +453,71 @@ export default function CommentInput({
             </div>
           )}
 
-          <div className="flex flex-col gap-2">
-            {/* Frame.io-style inline range chip. Sits just above the
-                textarea; clicking the X clears both in and out so the
-                comment becomes project-level. The chip itself is not
-                clickable beyond that — it's purely a status indicator. */}
-            {timestampLabel && !currentVideoRestricted && (
-              <div className="self-start inline-flex items-center gap-1 rounded-md bg-warning-visible px-1.5 py-0.5 text-[11px] font-mono font-semibold text-warning">
-                <Clock className="w-3 h-3 shrink-0" />
-                <span className="tabular-nums">
-                  {timestampLabel}
-                  {timecodeEndLabel ? ` - ${timecodeEndLabel}` : ''}
-                </span>
-                <button
-                  type="button"
-                  onClick={onClearTimestamp}
-                  className="ml-0.5 -mr-0.5 p-0.5 rounded hover:bg-warning/20 opacity-70 hover:opacity-100 transition-opacity"
-                  title={t('clearTimestamp')}
-                  aria-label={t('clearTimestamp')}
-                >
-                  <X className="w-3 h-3" />
-                </button>
+          {/*
+            1.2.0+: Frame.io-style single-row composer.
+            The wrapper is the only visible card; the textarea inside has
+            no border / no background of its own so the timestamp chip
+            and the placeholder/text live on the same continuous line.
+            The action row sits below within the same wrapper, separated
+            only by spacing — no internal divider, no double-box look.
+          */}
+          <div className="rounded-lg border border-border bg-transparent px-3 py-2 focus-within:border-primary/60 transition-colors">
+            <div className="flex items-start gap-2 min-w-0">
+              {!currentVideoRestricted && (
+                // 1.2.0+: Inline timestamp chip — Frame.io-style, ALWAYS
+                // visible (even before the input is focused) so the
+                // composer reads "[00:00] Leave your comment…" at idle.
+                // The X button only appears once the user has actually
+                // captured an IN point, since clearing a non-existent
+                // selection is a no-op.
+                <div className="self-start inline-flex items-center gap-1 rounded-md bg-warning-visible px-1.5 py-0.5 text-[11px] font-mono font-semibold text-warning shrink-0 mt-[2px]">
+                  <span className="tabular-nums">
+                    {timestampLabel}
+                    {timecodeEndLabel ? ` - ${timecodeEndLabel}` : ''}
+                  </span>
+                  {hasCapturedTimestamp && (
+                    <button
+                      type="button"
+                      onClick={onClearTimestamp}
+                      className="ml-0.5 -mr-0.5 p-0.5 rounded hover:bg-warning/20 opacity-70 hover:opacity-100 transition-opacity"
+                      title={t('clearTimestamp')}
+                      aria-label={t('clearTimestamp')}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+              {/*
+                1.2.0+: overlay an animated shimmer placeholder on top
+                of the textarea. Native `::placeholder` can't be
+                gradient-animated reliably, so we render our own text
+                in a sibling element and hide the textarea's built-in
+                placeholder. It disappears as soon as the user starts
+                typing.
+              */}
+              <div className="relative flex-1 min-w-0">
+                <Textarea
+                  ref={textareaRef}
+                  placeholder=""
+                  value={newComment}
+                  onChange={(e) => onCommentChange(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onFocus={onInputFocus}
+                  className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-snug"
+                  rows={1}
+                />
+                {!newComment && (
+                  <span
+                    aria-hidden="true"
+                    className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm leading-snug"
+                  >
+                    {t('typeMessage')}
+                  </span>
+                )}
               </div>
-            )}
-            <Textarea
-              placeholder={t('typeMessage')}
-              value={newComment}
-              onChange={(e) => onCommentChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onFocus={onInputFocus}
-              className="resize-none"
-              rows={2}
-            />
-            <div className="flex items-center justify-between gap-2 min-w-0">
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 min-w-0">
               {annotationCtx?.isDrawingMode ? (
                 // Drawing mode: replace the icon row with the inline toolbar.
                 <AnnotationToolbarInline />
@@ -393,17 +529,25 @@ export default function CommentInput({
                     lost — restoring them feels instant when the user
                     cancels the recording. */}
                 {onStartDrawing && !isVoiceActive && (
-                  <Button
+                  // 1.2.0+: match the borderless mic/emoji style so the
+                  // whole input action row reads as one unified strip
+                  // (no card-on-card look). Active state (pending
+                  // annotation) tinted with the primary color instead
+                  // of using the filled `default` variant.
+                  <button
                     type="button"
                     onClick={onStartDrawing}
-                    variant={pendingAnnotation ? 'default' : 'outline'}
-                    size="icon"
-                    className="h-8 w-8 flex-shrink-0"
-                    title={t('drawOnVideo')}
                     disabled={loading}
+                    title={t('drawOnVideo')}
+                    aria-label={t('drawOnVideo')}
+                    className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      pendingAnnotation
+                        ? 'bg-primary/15 text-primary hover:bg-primary/20'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }`}
                   >
                     <PenTool className="w-4 h-4" />
-                  </Button>
+                  </button>
                 )}
                 {allowClientAssetUpload && selectedVideoIdProp && onAttachmentAdded && !isVoiceActive && (
                   <CommentAttachmentButton
@@ -422,6 +566,17 @@ export default function CommentInput({
                     onAttachmentAdded={onAttachmentAdded}
                     disabled={loading}
                     onActiveChange={setIsVoiceActive}
+                  />
+                )}
+                {/* In-app emoji picker (1.1.1+). Side-steps the
+                    Chrome+Sequoia bug where the system Apple
+                    Intelligence picker doesn't fire any events on
+                    <textarea>. Always shown — works for everyone
+                    regardless of OS/browser. */}
+                {!isVoiceActive && (
+                  <EmojiPicker
+                    onSelect={(emoji) => insertAtCursor(emoji)}
+                    disabled={loading}
                   />
                 )}
               </div>

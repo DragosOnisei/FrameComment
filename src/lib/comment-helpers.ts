@@ -386,6 +386,19 @@ export async function fetchProjectComments(projectId: string) {
     },
   }
 
+  // 1.2.0+: load reactions in chronological order so the UI can display
+  // them grouped + sorted by first-seen consistently across reloads.
+  const reactionSelect = {
+    select: {
+      id: true,
+      emoji: true,
+      authorName: true,
+      sessionId: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' as const },
+  }
+
   return prisma.comment.findMany({
     where: {
       projectId,
@@ -401,6 +414,9 @@ export async function fetchProjectComments(projectId: string) {
         }
       },
       assets: assetSelect,
+      // 1.2.0: cast through `any` until `prisma generate` regenerates
+      // the client locally — the field is real, the runtime accepts it.
+      reactions: reactionSelect,
       replies: {
         include: {
           user: {
@@ -412,10 +428,11 @@ export async function fetchProjectComments(projectId: string) {
             }
           },
           assets: assetSelect,
+          reactions: reactionSelect,
         },
         orderBy: { createdAt: 'asc' }
       }
-    },
+    } as any,
     orderBy: { createdAt: 'asc' }
   })
 }

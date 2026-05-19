@@ -17,6 +17,231 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.2.0] - 2026-05-20
+
+### Added
+
+- **Frame.io-style "Mark as done" on every comment.** A new check
+  icon appears in the hover cluster on each comment — clicking it
+  flips the comment to resolved (and clicking again unflips). When
+  resolved, the small `#N` indicator in the top-right of the
+  comment is replaced by a green ✓ badge and the whole comment
+  body dims so reviewers can focus on what's still actionable.
+  Backed by three new columns on `Comment` (`isResolved`,
+  `resolvedAt`, `resolvedBy`); any viewer with comment permission
+  can toggle, mirroring Frame.io's collaborative workflow.
+- **Emoji reactions on comments.** Hover a comment to reveal the
+  emoji button, pick one from the in-app picker, and it lands as
+  a pill under the comment grouped by emoji with a per-emoji
+  count. Tapping a pill again removes your reaction (idempotent
+  on (comment, viewer, emoji)). Backed by a new `CommentReaction`
+  table with a unique constraint per viewer + emoji + comment, so
+  duplicate clicks don't fan out into multiple rows.
+- **Editable display name for guests.** A name field under the
+  "Feedback & Discussion" header lets a reviewer replace their
+  auto-assigned "Client N" label with their real name. The
+  rename endpoint bulk-updates every existing comment owned by
+  that viewer, so the change is retroactive across the whole
+  share link. Persists to localStorage, predicts the next
+  available "Client N" before the viewer posts, and pushes
+  through to new comments without a flash of the wrong name.
+- **Single-video share links.** Admin "Copy link" on one video now
+  produces an HMAC-signed URL (`?v={name}&sig={hmac}`). The share
+  GET endpoint validates the signature and serves only that video
+  — no neighbouring videos in the thumbnail reel, no comments
+  from other videos. Tampering with the URL breaks the
+  signature so clients can't widen scope. No DB / migration
+  required.
+- **Live playhead + always-on timestamp chip in the comment input.**
+  The chip displays the playhead position in real time before the
+  user even focuses the input (driven by a throttled
+  `videoTimeUpdated` event), freezes on the captured IN point
+  once they click in, and clears back to the live playhead when
+  the chip's X is pressed.
+- **Shimmer placeholder animation** sweeps across the "Leave your
+  comment…" text via a 3.6s gradient + `background-clip: text`,
+  reinforcing that the input is interactive.
+- **Upload date under the player title** shows the active version's
+  creation time (`12-05-2026 23:05 (7 Days ago)`), so reviewers
+  can tell at a glance how long passed between v1 / v2 / v3 just
+  by switching versions.
+- **Project cover images.** Optional upload at New Project time
+  (or via a future Settings field) replaces the deterministic
+  gradient on the dashboard card. Stored under
+  `projects/{id}/cover.{ext}` via the existing storage abstraction
+  and served by a new admin-only endpoint
+  (`GET /api/projects/[id]/cover`). Frontend pulls the image
+  through `apiFetch` + `URL.createObjectURL` so the bearer token
+  is honoured even though it's an `<img>` source.
+- **Soft-deleted projects + 30-day Trash.** `DELETE /api/projects/[id]`
+  no longer hard-deletes — it stamps `Project.deletedAt`, kicks
+  every share session, and hides the project from listings + the
+  share endpoint (clients get 404 immediately). The Trash page
+  now lists projects alongside videos and folders, with Restore
+  bringing the whole subtree back instantly. The daily cleanup
+  cron permanently removes projects (and their files) once
+  `deletedAt` is older than 30 days, mirroring the existing
+  video/folder pattern.
+- **Frame.io-style New Project modal.**
+  - Single-card composer with a big square preview area on top.
+    Whole tile is the file picker — drop or click anywhere to
+    upload a cover image. A centered `ImagePlus` icon hints at
+    the affordance when empty; a remove button shows when a
+    cover is attached.
+  - Title input pinned inline at the bottom of the preview,
+    over a subtle dark fade so it stays readable on any image.
+  - "Make Restricted" toggle replaces the legacy
+    authentication checkbox + password field. Server
+    auto-generates a strong password when the toggle is on;
+    admins view/rotate it later from Project Settings.
+  - Lock chip in the corner mirrors the toggle with a
+    `LockOpen` ↔ `Lock` swap animation.
+  - Enter submits the form, no `+` icon on the Create button,
+    `Untitled Project` placeholder follows Frame.io.
+- **Modern in-app confirm dialog.** Replaces the native
+  `window.confirm()` for destructive actions (Delete / Archive
+  project). Themed Radix Dialog with a warning icon, descriptive
+  copy, and a busy spinner while the action runs.
+
+### Changed
+
+- **MessageBubble redesign — closer to Frame.io.** The timecode
+  badge now sits inline at the start of the comment body (so a
+  one-line reply reads as one line, not three), the action row
+  shows only "Reply" by default, and the rest of the cluster
+  (emoji react / kebab / mark as done) only appears on hover so
+  the comment list stays quiet. The kebab dropdown is now the
+  single source of truth for Edit + Delete — the old inline
+  pencil / trash icons are gone, and "Copy Link" is no longer
+  surfaced as a per-comment action.
+- **Comment input layout** is now a single Frame.io-style row:
+  no separate textarea card, transparent background, timestamp
+  inline with the placeholder/text, action row tucked
+  underneath. Inline icons (annotation, attachment, mic, emoji)
+  share one borderless style so the strip reads as one unit.
+- **MM:SS everywhere** for comment timestamps. `formatCommentTimestamp`
+  now ignores the `TIMECODE`/`AUTO` setting and always emits
+  clock format (MM:SS, or HH:MM:SS for clips ≥ 1 hour) — the
+  frames component was just noise next to the per-second
+  granularity of the live playhead.
+- **Trim leading `00:` segments** from every other timecode
+  display too (player time, range chip, badges).
+- **Muted gradient palette** for the project tiles. Saturation
+  pinned to 18–28% and lightness to 12–19% so the dashboard
+  reads as a quiet family of dark tiles instead of a wall of
+  primary colours. Two distinct projects still get visibly
+  different tints; nothing looks neon.
+- **Hover-zoom dropped on project tiles** — only the ring
+  highlight remains, the cover/gradient itself stays still.
+- **`+ New Project` tile + empty state CTA** open the new modal
+  directly instead of navigating to the legacy `/admin/projects/new`
+  page.
+
+### Fixed
+
+- **Range selection only via the orange handle.** Clicking the
+  timeline ahead of the IN point used to silently set the
+  comment's OUT (and the scrub drag did the same), making it
+  impossible to seek inside the marked range without clobbering
+  it. Range now only moves when the user drags the dedicated
+  orange handle above the timeline.
+- **Re-focusing the comment input re-syncs the IN point** to the
+  current playhead, so adjusting the starting frame is just a
+  matter of scrubbing and re-clicking the input.
+- **Edit / Delete now appear on the guest's own comments.** The
+  ownership check used `clientSessionId` (share-token id) but
+  comments store `client:<browserId>` since 1.0.7+; the new
+  helper accepts both, matching the server-side authorization
+  that already worked.
+- **New comments use the chosen guest name + instant rename.**
+  Posting now carries the editable name to the server; renaming
+  optimistically patches every existing row of the viewer in the
+  same listing so the change is visible the instant Enter is
+  pressed instead of flickering once the network reply lands.
+- **Project cover endpoint** is admin-gated; the frontend fetches
+  it through `apiFetch` + blob URL so the bearer token is
+  honoured. Cards never flash the wrong-colour gradient before
+  the cover loads — we render a neutral `bg-muted` underneath
+  instead, and the gradient outline that bled out at hover is
+  gone.
+- **Single-video share — client-side fetches forward the signed
+  params.** The share page used to scope correctly only on the
+  initial SSR-style fetch; subsequent client refreshes pulled
+  the whole project. Both `loadProject` and `fetchComments`
+  now thread `v` + `sig` from `window.location.search`.
+- **i18n keys** added for the new comment actions
+  (`addReaction`, `moreActions`, `markResolved`,
+  `markUnresolved`, `resolved`) so `next-intl` no longer throws
+  `MISSING_MESSAGE` on the redesigned hover cluster.
+
+## [1.1.1] - 2026-05-14
+
+### Fixed
+
+- **macOS emoji picker (Ctrl+Cmd+Space) now opens AND inserts**
+  while writing a comment in the player. Two stacked bugs:
+  1. The player's global keyboard shortcut for play/pause checked
+     `e.ctrlKey && e.code === 'Space'` without excluding `metaKey`,
+     so Ctrl+Cmd+Space matched the play/pause branch and
+     `preventDefault()` killed the OS shortcut before macOS could
+     even open the picker. Every Ctrl-based shortcut in both
+     `VideoPlayer` and `VideoComparison` (Ctrl+Space, Ctrl+, / `<`,
+     Ctrl+. / `>`, Ctrl+/, Ctrl+J, Ctrl+L) now also requires
+     `!e.metaKey`, so any Cmd-augmented combo falls through to the
+     OS.
+  2. Even with the picker open, clicking an emoji did nothing.
+     After instrumenting the textarea with every plausible event
+     listener (`input`, `beforeinput`, `composition*`, `keydown`,
+     `keypress`, `paste`) we confirmed that **Chrome on macOS
+     Sequoia fires zero events for the system Apple Intelligence
+     emoji picker** — the OS believes it inserted but no event
+     ever reaches the page. Slack / Discord / Frame.io all ship
+     their own picker for this reason, so we did the same.
+
+### Changed
+
+- **Re-focusing the comment input re-syncs the IN point.** If you
+  clicked the textarea, then scrubbed the timeline to a different
+  position, then clicked the textarea again, the IN marker used to
+  stay at its original spot. Now it follows the playhead on every
+  focus, so you can keep adjusting your starting frame just by
+  re-clicking the input. Any user-defined OUT is dropped since a
+  range anchored to a now-stale IN is more confusing than useful.
+- **Comment range is now set ONLY by dragging the orange handle.**
+  Clicking the timeline ahead of the IN point used to silently set
+  the comment's OUT point (and the playhead-scrub drag did the
+  same), which made it impossible to seek inside the marked range
+  without accidentally clobbering it. Now those gestures just
+  scrub like normal — the OUT only moves when you drag the
+  dedicated orange handle above the bar.
+- **Trim leading `00:` segments from every timecode display.**
+  Short clips no longer waste pixels on the unused hours/minutes
+  fields: a 4-second-23-frame timestamp now reads `04:23` instead
+  of `00:00:04:23`, and a 1m23s clip reads `01:23:04`. The trim
+  applies everywhere the timecode is rendered — comment badges,
+  the range chip above the comment input, and the player time
+  display below the video. Hours stay visible when the clip is
+  actually an hour or longer.
+
+### Added
+
+- **In-app emoji picker.** A new smile-icon button sits next to
+  the paperclip / mic icons under the comment input. Clicking it
+  opens a Frame.io-style popover (floating via `position: fixed`
+  so it doesn't push the sidebar around) with:
+  - A **"Recently used"** row right under the search — picks are
+    persisted in `localStorage` and survive reloads, so the
+    emojis you actually use are always one click away.
+  - Categorised emojis (Smileys, People & gestures incl. 🙏,
+    Hearts, Work & video, Reactions) plus a search box.
+  - Selecting an emoji inserts it at the current caret position
+    via the textarea ref and restores focus + cursor.
+  - ~500 hand-picked emojis shipped inline. No external deps.
+- The native `input` / `compositionend` listener added in the
+  previous fix attempt is kept in place — it's a no-op for the
+  Sequoia picker (no events fire) but still useful insurance for
+  legitimate IME inputs that might bypass React's `onChange`.
+
 ## [1.1.0] - 2026-05-14
 
 In progress.

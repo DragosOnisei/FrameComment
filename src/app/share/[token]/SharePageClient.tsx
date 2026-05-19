@@ -206,7 +206,20 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
     setCommentsLoading(true)
     try {
-      const response = await fetch(`/api/share/${token}/comments`, {
+      // 1.2.0+: forward the single-video signature so the comments
+      // endpoint can scope its result to the same one video the
+      // share GET is already serving. Without this the reviewer
+      // would see a filtered video list but the FULL comments
+      // listing — including comments on videos they can't open.
+      const currentParams = new URLSearchParams(window.location.search)
+      const passThrough = new URLSearchParams()
+      const sigVideo = currentParams.get('v') || currentParams.get('video')
+      const sig = currentParams.get('sig')
+      if (sigVideo) passThrough.set('v', sigVideo)
+      if (sig) passThrough.set('sig', sig)
+      const qs = passThrough.toString()
+      const url = `/api/share/${token}/comments${qs ? `?${qs}` : ''}`
+      const response = await fetch(url, {
         cache: 'no-store',
         headers: {
           Authorization: `Bearer ${shareToken}`
@@ -251,10 +264,27 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const fetchProjectData = async (tokenOverride?: string | null) => {
     try {
       const authToken = tokenOverride || shareToken
-      const projectResponse = await fetch(`/api/share/${token}`, {
-        cache: 'no-store',
-        headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...getConsentHeader() }
-      })
+      // 1.2.0+: forward the single-video signed params so the share
+      // GET endpoint can scope its response. Without this the URL
+      // params would only affect the initial server render — every
+      // client-side refresh would re-fetch the unscoped full project.
+      const currentParams =
+        typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search)
+          : new URLSearchParams()
+      const passThrough = new URLSearchParams()
+      const sigVideo = currentParams.get('v') || currentParams.get('video')
+      const sig = currentParams.get('sig')
+      if (sigVideo) passThrough.set('v', sigVideo)
+      if (sig) passThrough.set('sig', sig)
+      const qs = passThrough.toString()
+      const projectResponse = await fetch(
+        `/api/share/${token}${qs ? `?${qs}` : ''}`,
+        {
+          cache: 'no-store',
+          headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...getConsentHeader() }
+        }
+      )
 
       // Recover automatically from stale/expired stored share token.
       if (projectResponse.status === 401 && authToken) {
@@ -297,10 +327,27 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
     async function loadProject() {
       try {
-        const response = await fetch(`/api/share/${token}`, {
-          cache: 'no-store',
-          headers: { ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}), ...getConsentHeader() }
-        })
+        // 1.2.0+: forward the single-video signed params on the initial
+        // load too. This is the path the very first paint goes through,
+        // so without it the user briefly sees the full project before
+        // any client-side fetch kicks in to re-scope.
+        const initialParams =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search)
+            : new URLSearchParams()
+        const initialPass = new URLSearchParams()
+        const sigVideo = initialParams.get('v') || initialParams.get('video')
+        const sig = initialParams.get('sig')
+        if (sigVideo) initialPass.set('v', sigVideo)
+        if (sig) initialPass.set('sig', sig)
+        const initialQs = initialPass.toString()
+        const response = await fetch(
+          `/api/share/${token}${initialQs ? `?${initialQs}` : ''}`,
+          {
+            cache: 'no-store',
+            headers: { ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}), ...getConsentHeader() }
+          }
+        )
 
         if (!isMounted) return
 

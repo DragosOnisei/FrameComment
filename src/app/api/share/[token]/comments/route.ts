@@ -7,6 +7,7 @@ import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitizat
 import { getRateLimitSettings } from '@/lib/settings'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
+import { verifyVideoShareName } from '@/lib/share-video-sig'
 
 export const runtime = 'nodejs'
 
@@ -94,11 +95,49 @@ export async function GET(
       },
     }
 
+    // 1.2.0+: emoji reactions per comment, chronologically ordered.
+    const reactionSelect = {
+      select: {
+        id: true,
+        emoji: true,
+        authorName: true,
+        sessionId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' as const },
+    }
+
+    // 1.2.0+: single-video share scope. The signed URL pinned to one
+    // video also restricts the comments listing to that video group, so
+    // the reviewer doesn't see commentary on siblings they can't open.
+    // Same scope rules as the main share GET — applied to every viewer
+    // (admin included) when the URL carries valid `v` + `sig` params.
+    const singleVideoName = (request.nextUrl.searchParams.get('v') || '').trim()
+    const singleVideoSig = (request.nextUrl.searchParams.get('sig') || '').trim()
+    const singleVideoScopeActive =
+      singleVideoName.length > 0 &&
+      singleVideoSig.length > 0 &&
+      verifyVideoShareName(token, singleVideoName, singleVideoSig)
+    let scopedVideoIds: string[] | null = null
+    if (singleVideoScopeActive) {
+      const rows = await prisma.video.findMany({
+        where: { projectId: project.id, name: singleVideoName },
+        select: { id: true },
+      })
+      scopedVideoIds = rows.map((r) => r.id)
+      // Empty scope = no comments returned. Safer to short-circuit
+      // than to omit the filter and leak the entire project.
+      if (scopedVideoIds.length === 0) {
+        return NextResponse.json([])
+      }
+    }
+
     // Fetch comments with nested replies
     const comments = await prisma.comment.findMany({
       where: {
         projectId: project.id,
         parentId: null, // Only top-level comments
+        ...(scopedVideoIds ? { videoId: { in: scopedVideoIds } } : {}),
       },
       include: {
         user: {
@@ -110,6 +149,7 @@ export async function GET(
           }
         },
         assets: assetSelect,
+        reactions: reactionSelect,
         replies: {
           include: {
             user: {
@@ -121,10 +161,11 @@ export async function GET(
               }
             },
             assets: assetSelect,
+            reactions: reactionSelect,
           },
           orderBy: { createdAt: 'asc' }
         }
-      },
+      } as any,
       orderBy: { createdAt: 'asc' }
     })
 
@@ -134,6 +175,14 @@ export async function GET(
     // forwarded around an agency.
     const guestIndex = buildGuestSessionIndex(comments as any[])
 
+    // 1.2.0+: viewer identity for the `mine` flag on reactions.
+    const browserId = (request.headers.get('x-framecomment-client-id') || '').trim()
+    const viewerSessionId = isAdmin
+      ? `admin:${(accessCheck as any).user?.id || ''}`
+      : browserId
+        ? `client:${browserId}`
+        : (accessCheck as any).shareTokenSessionId || null
+
     // Sanitize comments - never expose PII to non-admins
     const sanitizedComments = comments.map((comment: any) => sanitizeComment(
       comment,
@@ -141,6 +190,7 @@ export async function GET(
       isAuthenticated,
       fallbackName,
       guestIndex,
+      viewerSessionId,
     ))
 
     return NextResponse.json(sanitizedComments)

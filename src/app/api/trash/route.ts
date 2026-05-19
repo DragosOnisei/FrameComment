@@ -38,11 +38,11 @@ export async function GET(request: NextRequest) {
   try {
     const sessionId = `admin:${admin.id}`
 
-    // Fetch trashed folders + videos in parallel. We only surface
-    // items whose `deletedAt` is set; the rest of the listing
+    // Fetch trashed folders + videos + projects in parallel. We only
+    // surface items whose `deletedAt` is set; the rest of the listing
     // endpoints stay filtered out, so the Trash page is the single
     // place these rows appear.
-    const [trashedFolders, trashedVideos] = await Promise.all([
+    const [trashedFolders, trashedVideos, trashedProjects] = await Promise.all([
       prisma.folder.findMany({
         where: { deletedAt: { not: null } } as any,
         orderBy: { deletedAt: 'desc' } as any,
@@ -58,6 +58,20 @@ export async function GET(request: NextRequest) {
           project: { select: { id: true, title: true, slug: true } },
           folder: { select: { id: true, name: true } },
         },
+      }),
+      // 1.2.0+: include soft-deleted projects in the Trash listing
+      // alongside folders and videos. Restore returns the whole
+      // project (and its subtree) to active state.
+      prisma.project.findMany({
+        where: { deletedAt: { not: null } } as any,
+        orderBy: { deletedAt: 'desc' } as any,
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          deletedAt: true,
+          coverImagePath: true,
+        } as any,
       }),
     ])
 
@@ -135,7 +149,24 @@ export async function GET(request: NextRequest) {
       ),
     }))
 
-    const items = [...folderItems, ...videoItems].sort((a, b) => {
+    const projectItems = (trashedProjects as any[]).map((p) => ({
+      kind: 'project' as const,
+      id: p.id,
+      name: p.title,
+      projectId: p.id,
+      projectTitle: p.title,
+      projectSlug: p.slug ?? null,
+      parent: { kind: 'root' as const, id: null, name: 'Dashboard' },
+      deletedAt: p.deletedAt,
+      expiresAt: new Date(
+        new Date(p.deletedAt).getTime() +
+          TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+      ),
+      // Same content endpoint we use for the dashboard card.
+      hasCover: !!p.coverImagePath,
+    }))
+
+    const items = [...projectItems, ...folderItems, ...videoItems].sort((a, b) => {
       const da = new Date(a.deletedAt).getTime()
       const db = new Date(b.deletedAt).getTime()
       return db - da

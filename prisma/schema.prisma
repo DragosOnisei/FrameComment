@@ -47,6 +47,18 @@ model Project {
   guestMode       Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
   guestLatestOnly Boolean @default(true) // Guests can only view latest version of each video
 
+  // 1.2.0+: optional cover image displayed on the project card in
+  // place of the deterministic gradient. Stored as a path within the
+  // storage abstraction (`projects/{id}/cover.{ext}`). Null means the
+  // dashboard falls back to the gradient default.
+  coverImagePath  String?
+
+  // 1.2.0+: soft-delete column matching the Video / Folder pattern.
+  // A daily cleanup job hard-deletes projects whose deletedAt is older
+  // than TRASH_RETENTION_DAYS (30). Listings filter `deletedAt IS NULL`
+  // so trashed projects only show up on the dedicated Trash page.
+  deletedAt       DateTime?
+
   // Revision tracking (optional)
   enableRevisions Boolean @default(false)
   maxRevisions    Int     @default(3)
@@ -386,14 +398,47 @@ model Comment {
   parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies  Comment[] @relation("CommentReplies")
 
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  video   Video        @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  assets  VideoAsset[]
+  // 1.2.0+: Frame.io-style "Mark as done" workflow. Any viewer can flip
+  // a comment to resolved (and unresolve it), and the timeline + thread
+  // gray it out so reviewers can focus on what's still actionable.
+  // `resolvedBy` stores the display name (anonymous-friendly) so we can
+  // surface "Resolved by X" without exposing session ids.
+  isResolved Boolean   @default(false)
+  resolvedAt DateTime?
+  resolvedBy String?
+
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  video     Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  assets    VideoAsset[]
+  reactions CommentReaction[]
 
   @@index([projectId])
   @@index([videoId])
   @@index([parentId])
   @@index([userId])
+  @@index([isResolved])
+}
+
+// 1.2.0+: Quick emoji reactions on a comment. Frame.io-style — anyone
+// viewing the share page (or an admin) can drop a 👍 / ❤️ / 🎬 etc.
+// onto a comment, and reactions are grouped by emoji in the UI.
+// One reaction per (comment, session, emoji) so toggling is idempotent.
+model CommentReaction {
+  id         String   @id @default(cuid())
+  commentId  String
+  emoji      String // The emoji character itself (UTF-8). Keep raw so the
+  //               UI doesn't need a lookup table.
+  authorName String? // Display name at the time of reaction (anonymous-friendly)
+  sessionId  String // share-token session id OR admin user id — used for
+  //                de-dupe + revocation. Required so we can always remove
+  //                the right row when a viewer clicks again.
+  createdAt  DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, sessionId, emoji])
+  @@index([commentId])
+  @@index([sessionId])
 }
 
 model NotificationQueue {

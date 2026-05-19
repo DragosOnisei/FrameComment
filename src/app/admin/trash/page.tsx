@@ -37,7 +37,10 @@ import { ConfirmModal } from '@/components/ConfirmModal'
 import { logError } from '@/lib/logging'
 
 interface TrashItem {
-  kind: 'video' | 'folder'
+  /** 1.2.0+: projects can be trashed too. They render as top-level
+   *  entries with the project gradient as a thumbnail; restore brings
+   *  the whole subtree (videos + folders + comments) back at once. */
+  kind: 'video' | 'folder' | 'project'
   id: string
   /** For video groups, all version ids — used so Permanent Delete
    *  wipes every version, not just the latest (1.0.8+). */
@@ -52,6 +55,8 @@ interface TrashItem {
   parent: { kind: string; id: string | null; name: string }
   deletedAt: string
   expiresAt: string
+  /** Whether a trashed project has an uploaded cover image. */
+  hasCover?: boolean
 }
 
 export default function TrashPage() {

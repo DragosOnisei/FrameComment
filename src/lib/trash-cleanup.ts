@@ -8,7 +8,7 @@
  */
 
 import { prisma } from './db'
-import { deleteFile } from './storage'
+import { deleteFile, deleteDirectory } from './storage'
 import { logError } from './logging'
 
 /** How long a trashed item lingers before the cleanup job removes it. */
@@ -114,6 +114,67 @@ export async function hardDeleteFolderById(id: string): Promise<void> {
 }
 
 /**
+ * Permanently delete a project, including every video file under it.
+ * 1.2.0+: extracted from the legacy DELETE handler when projects
+ * moved to a soft-delete + 30-day Trash flow. Mirrors the original
+ * file-by-file teardown so we don't leak storage on long-term
+ * libraries.
+ */
+export async function hardDeleteProjectById(id: string): Promise<void> {
+  const project = await prisma.project.findUnique({
+    where: { id },
+    include: { videos: true },
+  })
+  if (!project) return
+
+  for (const video of project.videos) {
+    try {
+      if (video.originalStoragePath) {
+        await deleteFile(video.originalStoragePath).catch(() => {})
+      }
+      if ((video as any).preview2160Path) {
+        await deleteFile((video as any).preview2160Path).catch(() => {})
+      }
+      if (video.preview1080Path) {
+        await deleteFile(video.preview1080Path).catch(() => {})
+      }
+      if (video.preview720Path) {
+        await deleteFile(video.preview720Path).catch(() => {})
+      }
+      if ((video as any).cleanPreview2160Path) {
+        await deleteFile((video as any).cleanPreview2160Path).catch(() => {})
+      }
+      if (video.cleanPreview1080Path) {
+        await deleteFile(video.cleanPreview1080Path).catch(() => {})
+      }
+      if (video.cleanPreview720Path) {
+        await deleteFile(video.cleanPreview720Path).catch(() => {})
+      }
+      if (video.thumbnailPath) {
+        await deleteFile(video.thumbnailPath).catch(() => {})
+      }
+      if ((video as any).storyboardPath) {
+        await deleteFile((video as any).storyboardPath).catch(() => {})
+      }
+    } catch (err) {
+      logError(`[hardDeleteProjectById] file cleanup for video ${video.id}:`, err)
+    }
+  }
+
+  // Cover image + any other project-scoped files live under
+  // projects/{id}/, so a recursive directory removal sweeps them.
+  try {
+    await deleteDirectory(`projects/${id}`)
+  } catch (err) {
+    logError(`[hardDeleteProjectById] directory cleanup for ${id}:`, err)
+  }
+
+  // The DB cascade drops videos / folders / comments along with
+  // the project row.
+  await prisma.project.delete({ where: { id } })
+}
+
+/**
  * Cron entry point. Hard-deletes every soft-deleted item whose
  * `deletedAt` is older than `TRASH_RETENTION_DAYS` days. Safe to
  * call repeatedly; the cron schedules it daily.
@@ -121,11 +182,12 @@ export async function hardDeleteFolderById(id: string): Promise<void> {
 export async function purgeExpiredTrash(): Promise<{
   videos: number
   folders: number
+  projects: number
 }> {
   const cutoff = new Date(
     Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   )
-  const [expiredVideos, expiredFolders] = await Promise.all([
+  const [expiredVideos, expiredFolders, expiredProjects] = await Promise.all([
     prisma.video.findMany({
       where: { deletedAt: { lt: cutoff } } as any,
       select: { id: true },
@@ -133,6 +195,10 @@ export async function purgeExpiredTrash(): Promise<{
     prisma.folder.findMany({
       where: { deletedAt: { lt: cutoff } } as any,
       select: { id: true },
+    }),
+    prisma.project.findMany({
+      where: { deletedAt: { lt: cutoff } } as any,
+      select: { id: true } as any,
     }),
   ])
 
@@ -154,5 +220,14 @@ export async function purgeExpiredTrash(): Promise<{
       logError('[purgeExpiredTrash] folder failed:', err)
     }
   }
-  return { videos, folders }
+  let projects = 0
+  for (const p of expiredProjects as any[]) {
+    try {
+      await hardDeleteProjectById(p.id)
+      projects += 1
+    } catch (err) {
+      logError('[purgeExpiredTrash] project failed:', err)
+    }
+  }
+  return { videos, folders, projects }
 }

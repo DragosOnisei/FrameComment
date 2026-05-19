@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Comment, Video } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { CheckCircle2, MessageSquare, ChevronDown, ChevronUp, PanelRightClose } from 'lucide-react'
+import { CheckCircle2, MessageSquare, ChevronDown, ChevronUp, PanelRightClose, Pencil, Check, X as XIcon } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
@@ -270,6 +270,242 @@ export default function CommentSection({
    * `SharePageClient` listen to it and refetch comments, which propagates
    * the new content into the comment-management hook.
    */
+  // 1.2.0+: shared headers builder so the new resolve / reactions calls
+  // pick up the admin token OR the share bearer + client-id automatically.
+  const buildAuthedHeaders = useCallback(
+    (extra?: Record<string, string>): HeadersInit => ({
+      'Content-Type': 'application/json',
+      ...(shareToken && !isAdminView ? { Authorization: `Bearer ${shareToken}` } : {}),
+      ...(!isAdminView ? { 'X-Framecomment-Client-Id': getClientId() } : {}),
+      ...extra,
+    }),
+    [isAdminView, shareToken],
+  )
+
+  /**
+   * 1.2.0+: toggle resolved state on a comment. The endpoint returns the
+   * full sanitized comment, but we just refetch the list so any other
+   * tabs see the change too.
+   */
+  const handleResolveToggle = useCallback(
+    async (commentId: string, nextResolved: boolean) => {
+      const url = `/api/comments/${commentId}/resolve`
+      const body = JSON.stringify({ isResolved: nextResolved })
+      const response = isAdminView
+        ? await apiFetch(url, { method: 'PATCH', headers: buildAuthedHeaders(), body })
+        : await fetch(url, { method: 'PATCH', headers: buildAuthedHeaders(), body })
+      if (!response.ok) {
+        throw new Error(`Failed to toggle resolved (HTTP ${response.status})`)
+      }
+      await fetchComments()
+    },
+    [isAdminView, buildAuthedHeaders, fetchComments],
+  )
+
+  /**
+   * 1.2.0+: toggle an emoji reaction on a comment. The server treats
+   * duplicate calls from the same viewer as a toggle (idempotent on
+   * (commentId, sessionId, emoji)) so the UI doesn't need to track the
+   * prior state.
+   */
+  const handleReact = useCallback(
+    async (commentId: string, emoji: string) => {
+      const url = `/api/comments/${commentId}/reactions`
+      const body = JSON.stringify({ emoji, toggle: true })
+      const response = isAdminView
+        ? await apiFetch(url, { method: 'POST', headers: buildAuthedHeaders(), body })
+        : await fetch(url, { method: 'POST', headers: buildAuthedHeaders(), body })
+      if (!response.ok) {
+        throw new Error(`Failed to react (HTTP ${response.status})`)
+      }
+      await fetchComments()
+    },
+    [isAdminView, buildAuthedHeaders, fetchComments],
+  )
+
+  // 1.2.0+: ownership check used everywhere we surface Edit / Delete on
+  // a guest's own comment. The server prefers the per-browser id
+  // (`client:<uuid>`) over the share-token session id, so two devices
+  // sharing one link have distinct identities. We accept either form so
+  // legacy comments still match.
+  const isMyComment = useCallback(
+    (commentOrReply: any): boolean => {
+      const sid = commentOrReply?.editorSessionId
+      if (!sid || typeof sid !== 'string') return false
+      if (typeof window === 'undefined') return false
+      const myClientId = `client:${getClientId()}`
+      if (sid === myClientId) return true
+      if (clientSessionId && sid === clientSessionId) return true
+      return false
+    },
+    [clientSessionId],
+  )
+
+  // 1.2.0+: editable guest display name. Shown only to non-admin viewers
+  // under the "Feedback & Discussion" header. Persists to localStorage so
+  // the chosen name survives reloads even before any comment is posted.
+  const GUEST_NAME_LS_KEY = `framecomment:guest-name:${projectId}`
+  const [guestName, setGuestName] = useState<string>('')
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [savingName, setSavingName] = useState(false)
+
+  // Derive viewer's current name from any of THEIR existing comments
+  // (matched by editorSessionId) — this is what every other reader sees.
+  // We don't store the chosen name on the server outside the comment
+  // rows themselves; this just sources the initial display.
+  useEffect(() => {
+    if (isAdminView) return
+    try {
+      const cached = window.localStorage.getItem(GUEST_NAME_LS_KEY)
+      if (cached) {
+        setGuestName(cached)
+        return
+      }
+    } catch {
+      /* localStorage might be disabled — fall through to comment-derived name */
+    }
+    // 1.2.0+: identifiers that may match THIS viewer's stored
+    // editorSessionId on existing comments. The server prefers the
+    // per-browser id (client:<uuid>) when present, otherwise falls
+    // back to the share-token session id. We accept either so a
+    // legacy comment posted from this browser still matches.
+    const myClientId = `client:${getClientId()}`
+    const isMine = (sid: unknown): boolean =>
+      typeof sid === 'string' &&
+      sid.length > 0 &&
+      (sid === myClientId || (!!clientSessionId && sid === clientSessionId))
+
+    // Search the raw `comments` prop (and nested replies) for any row
+    // authored by this viewer, then use that name as the initial value.
+    const findMine = (list: any[]): string | null => {
+      for (const c of list) {
+        if (isMine(c?.editorSessionId) && c?.authorName) return c.authorName
+        if (Array.isArray(c?.replies)) {
+          const r = findMine(c.replies)
+          if (r) return r
+        }
+      }
+      return null
+    }
+    const name = findMine(comments as any[])
+    if (name) {
+      setGuestName(name)
+      return
+    }
+    // 1.2.0+: viewer hasn't posted yet — predict the `Client N` label
+    // they'd be assigned on their next post so the field matches the
+    // experience instead of showing a generic "Client". We mirror the
+    // server's `buildGuestSessionIndex`:
+    //   - sort by createdAt
+    //   - skip admin / internal comments
+    //   - skip the viewer's OWN session (it's not yet a "previous"
+    //     reviewer — it's the one we're predicting for)
+    //   - count distinct guest editorSessionIds in first-seen order
+    // and return that count + 1.
+    const seenSessions = new Set<string>()
+    const walk = (list: any[]) => {
+      const sorted = [...list].sort((a: any, b: any) => {
+        const ta = a?.createdAt ? new Date(a.createdAt).getTime() : 0
+        const tb = b?.createdAt ? new Date(b.createdAt).getTime() : 0
+        return ta - tb
+      })
+      for (const c of sorted) {
+        if (c?.userId) continue // authenticated/admin (admin viewer only)
+        if (c?.isInternal) continue
+        const sid = c?.editorSessionId
+        if (!sid) continue
+        if (isMine(sid)) continue
+        // Defensive: a comment authored as "Dragos" / a real name
+        // shouldn't count as a numbered guest. Without this an admin
+        // who posted from the share UI (no isInternal flag) would
+        // bump the count and we'd predict the wrong number.
+        const author = typeof c?.authorName === 'string' ? c.authorName : ''
+        const looksLikeGuest = /^client(\s+\d+)?$/i.test(author.trim())
+        if (!looksLikeGuest) continue
+        if (!seenSessions.has(sid)) seenSessions.add(sid)
+        if (Array.isArray(c?.replies)) walk(c.replies)
+      }
+    }
+    walk(comments as any[])
+    setGuestName(`Client ${seenSessions.size + 1}`)
+  }, [GUEST_NAME_LS_KEY, isAdminView, clientSessionId, comments])
+
+  // 1.2.0+: keep the comment-posting state (useCommentManagement's
+  // `authorName`) in sync with the chosen guest name so a NEW comment
+  // is created with that label too. Without this, only the existing
+  // rows get bulk-renamed and the next post lands back as "Client N".
+  useEffect(() => {
+    if (isAdminView) return
+    if (!guestName) return
+    if (authorName === guestName) return
+    setAuthorName(guestName)
+  }, [isAdminView, guestName, authorName, setAuthorName])
+
+  const handleStartRename = useCallback(() => {
+    setNameDraft(guestName || '')
+    setIsEditingName(true)
+  }, [guestName])
+
+  const handleCancelRename = useCallback(() => {
+    setIsEditingName(false)
+    setNameDraft('')
+  }, [])
+
+  const handleSaveRename = useCallback(async () => {
+    const trimmed = nameDraft.trim()
+    if (!trimmed) return
+    try {
+      setSavingName(true)
+      // 1.2.0+: optimistic UI — patch every comment we recognise as
+      // ours to the new name immediately, before the network roundtrip.
+      // Mirrors the bulk update the server will do, so the rename
+      // shows up instantly when the user hits Enter.
+      setLocalComments((prev) => {
+        const renameTree = (list: CommentWithReplies[]): CommentWithReplies[] =>
+          list.map((c: any) => {
+            const mine = isMyComment(c)
+            const nextReplies = Array.isArray(c.replies)
+              ? renameTree(c.replies)
+              : c.replies
+            return {
+              ...c,
+              authorName: mine ? trimmed : c.authorName,
+              replies: nextReplies,
+            }
+          })
+        return renameTree(prev)
+      })
+      setGuestName(trimmed)
+      try {
+        window.localStorage.setItem(GUEST_NAME_LS_KEY, trimmed)
+      } catch {
+        /* ignore quota errors — UI state still updates */
+      }
+      setIsEditingName(false)
+      setNameDraft('')
+
+      const response = await fetch('/api/comments/rename', {
+        method: 'PATCH',
+        headers: buildAuthedHeaders(),
+        body: JSON.stringify({ projectId, newName: trimmed }),
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to rename (HTTP ${response.status})`)
+      }
+      await fetchComments()
+    } finally {
+      setSavingName(false)
+    }
+  }, [
+    GUEST_NAME_LS_KEY,
+    buildAuthedHeaders,
+    fetchComments,
+    isMyComment,
+    nameDraft,
+    projectId,
+  ])
+
   const handleEditComment = useCallback(async (commentId: string, newContent: string) => {
     const url = `/api/comments/${commentId}`
     // Include the (possibly updated) timecodeEnd from edit-mode range
@@ -382,7 +618,22 @@ export default function CommentSection({
 
   // Always use hook comments (includes optimistic updates)
   // Local comments only used as fallback if hook hasn't loaded
-  const mergedComments = comments.length > 0 ? comments : localComments
+  const baseMergedComments = comments.length > 0 ? comments : localComments
+  // 1.2.0+: while a rename is being applied, the `comments` prop hasn't
+  // yet been replaced with the freshly fetched data. Layer the chosen
+  // guest name on top during render so the change is visible the
+  // instant the user hits Enter — the server-side update reconciles
+  // in the background.
+  const mergedComments = (() => {
+    if (isAdminView || !guestName) return baseMergedComments
+    const applyRename = (list: CommentWithReplies[]): CommentWithReplies[] =>
+      list.map((c: any) => ({
+        ...c,
+        authorName: isMyComment(c) ? guestName : c.authorName,
+        replies: Array.isArray(c.replies) ? applyRename(c.replies) : c.replies,
+      }))
+    return applyRename(baseMergedComments)
+  })()
 
   // Filter comments based on currently selected video
   const displayComments = (() => {
@@ -612,12 +863,79 @@ export default function CommentSection({
             )}
           </div>
         </div>
-        {selectedVideoId && currentVideo && !isAdminView && (
-          <p className="text-xs text-muted-foreground mt-1">
-            {commentsDisabled
-              ? t('watchingApprovedVersion')
-              : `${t('currentlyViewing')} ${currentVideo.versionLabel}`}
-          </p>
+        {/*
+          1.2.0+: editable display-name row for guests. Lets a reviewer
+          replace their auto-assigned "Client N" label with their real
+          name; the rename endpoint bulk-updates all of their existing
+          comments so the change is retroactive on this share link.
+          Admins skip the row entirely — they already have a profile.
+
+          The "Currently viewing: v1" line was retired here — the active
+          version label is already shown next to the title in the player's
+          top bar, so the duplicate read-only line just added noise.
+        */}
+        {!isAdminView && (
+          <div className="mt-2 flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground shrink-0">Name:</span>
+            {isEditingName ? (
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <input
+                  type="text"
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleSaveRename()
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      handleCancelRename()
+                    }
+                  }}
+                  autoFocus
+                  maxLength={120}
+                  placeholder="Your name"
+                  className="flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveRename()}
+                  disabled={savingName || !nameDraft.trim()}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Save"
+                  aria-label="Save"
+                >
+                  <Check className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelRename}
+                  disabled={savingName}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+                  title="Cancel"
+                  aria-label="Cancel"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              // 1.2.0+: rendered as a proper input-style box (border +
+              // padding + size matching the edit-mode input) so it's
+              // obvious the value is editable. Click anywhere in the
+              // box opens edit mode.
+              <button
+                type="button"
+                onClick={handleStartRename}
+                className="group flex items-center justify-between gap-2 flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-left text-sm text-foreground hover:border-primary/50 hover:bg-muted/40 transition-colors"
+                title="Edit your display name"
+              >
+                <span className="font-medium truncate min-w-0">
+                  {guestName || 'Client'}
+                </span>
+                <Pencil className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 text-muted-foreground shrink-0" />
+              </button>
+            )}
+          </div>
         )}
       </CardHeader>
 
@@ -714,6 +1032,69 @@ export default function CommentSection({
             </div>
           </button>
         )}
+        {/*
+          1.2.0+: same editable name row for guests on mobile. Sits
+          right under the collapsible header so it's findable without
+          scrolling.
+        */}
+        {mobileCollapsible && !isAdminView && !isMobileCollapsed && (
+          <div className="order-2 lg:hidden px-3 py-2 border-b border-border/50 flex items-center gap-2 text-sm bg-muted/10">
+            <span className="text-muted-foreground shrink-0">Name:</span>
+            {isEditingName ? (
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <input
+                  type="text"
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleSaveRename()
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      handleCancelRename()
+                    }
+                  }}
+                  autoFocus
+                  maxLength={120}
+                  placeholder="Your name"
+                  className="flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveRename()}
+                  disabled={savingName || !nameDraft.trim()}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-40"
+                  title="Save"
+                  aria-label="Save"
+                >
+                  <Check className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelRename}
+                  disabled={savingName}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+                  title="Cancel"
+                  aria-label="Cancel"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartRename}
+                className="group flex items-center justify-between gap-2 flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-left text-sm text-foreground hover:border-primary/50 hover:bg-muted/40 transition-colors"
+              >
+                <span className="font-medium truncate min-w-0">
+                  {guestName || 'Client'}
+                </span>
+                <Pencil className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 text-muted-foreground shrink-0" />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Messages Area - Threaded Conversations */}
         <div
@@ -777,12 +1158,11 @@ export default function CommentSection({
                       }
                       onDelete={
                         // Show Delete on the bubble for admins (always) and
-                        // for the original author (matched via the share-
-                        // token session id stored when the comment was
-                        // created). Authorisation is also enforced server-
-                        // side in DELETE /api/comments/[id].
-                        isAdminView ||
-                        (!!clientSessionId && (comment as any).editorSessionId === clientSessionId)
+                        // for the original author. 1.2.0+: match against
+                        // both `client:<browserId>` and the legacy share-
+                        // token session id via `isMyComment`. Server-side
+                        // DELETE /api/comments/[id] enforces the same.
+                        isAdminView || isMyComment(comment)
                           ? () => {
                               if (window.confirm(t('confirmDeleteComment') || 'Delete this comment?')) {
                                 handleDeleteComment(comment.id)
@@ -792,14 +1172,8 @@ export default function CommentSection({
                       }
                       onEdit={(newContent) => handleEditComment(comment.id, newContent)}
                       onEditReply={(replyId, newContent) => handleEditComment(replyId, newContent)}
-                      canEdit={
-                        isAdminView ||
-                        (!!clientSessionId && (comment as any).editorSessionId === clientSessionId)
-                      }
-                      canEditReply={(reply) =>
-                        isAdminView ||
-                        (!!clientSessionId && (reply as any).editorSessionId === clientSessionId)
-                      }
+                      canEdit={isAdminView || isMyComment(comment)}
+                      canEditReply={(reply) => isAdminView || isMyComment(reply)}
                       formatMessageTime={formatMessageTime}
                       commentsDisabled={commentsDisabled}
                       sequenceNumber={sequenceNumber}
@@ -807,10 +1181,7 @@ export default function CommentSection({
                       onDeleteReply={(replyId) => {
                         const reply = (replies || []).find((r: any) => r.id === replyId)
                         const canDeleteReply =
-                          isAdminView ||
-                          (!!clientSessionId &&
-                            !!reply &&
-                            (reply as any).editorSessionId === clientSessionId)
+                          isAdminView || (!!reply && isMyComment(reply))
                         if (!canDeleteReply) return
                         if (window.confirm(t('confirmDeleteComment') || 'Delete this comment?')) {
                           handleDeleteComment(replyId)
@@ -820,6 +1191,8 @@ export default function CommentSection({
                       timecodeEndLabel={timecodeEndLabel}
                       hasAnnotation={hasAnnotation}
                       shareToken={shareToken}
+                      onResolveToggle={handleResolveToggle}
+                      onReact={handleReact}
                     />
                   </div>
                 )

@@ -1291,14 +1291,39 @@ function FolderBrowserInner(
   const handleShareVideo = useCallback(
     async (_videoId: string, videoName: string) => {
       if (typeof window === 'undefined') return
+      // 1.2.0+: ask the server for an HMAC-signed URL that scopes the
+      // share to this one video. Server-side filters lock the response
+      // to this video name so a reviewer opening the link can't see
+      // siblings via the thumbnail reel. We fall back to the legacy
+      // unsigned URL if the request fails (e.g. SHARE_TOKEN_SECRET
+      // not configured) — better to share something than nothing.
+      try {
+        const res = await apiFetch('/api/share-video-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            videoName,
+            folderId: currentFolderId || undefined,
+          }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data?.url) {
+            setShareState({ open: true, title: videoName, shareUrl: data.url })
+            return
+          }
+        }
+      } catch {
+        /* fall through to unsigned URL */
+      }
       const origin = window.location.origin
       const params = new URLSearchParams({ video: videoName })
       if (currentFolderId) params.set('folderId', currentFolderId)
       const url = `${origin}/share/${_projectSlug}?${params.toString()}`
-      // 1.0.8+: Frame.io-style ShareModal instead of the OS alert.
       setShareState({ open: true, title: videoName, shareUrl: url })
     },
-    [_projectSlug, currentFolderId],
+    [_projectSlug, currentFolderId, projectId],
   )
 
   // Split-versions handler (1.0.8+). Opens the modal seeded with

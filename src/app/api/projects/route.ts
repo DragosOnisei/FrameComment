@@ -7,6 +7,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { createProjectSchema, validateRequest } from '@/lib/validation'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
+import { uploadFile } from '@/lib/storage'
+import { generateSecurePassword } from '@/lib/password-utils'
 
 export const runtime = 'nodejs'
 
@@ -40,6 +42,10 @@ export async function GET(request: NextRequest) {
   try {
     // Optimized query: only fetch essential fields + minimal video data for list view
     const projects = await prisma.project.findMany({
+      // 1.2.0+: hide soft-deleted projects from the dashboard list.
+      // They live on the dedicated Trash page until the cleanup cron
+      // purges them after TRASH_RETENTION_DAYS.
+      where: { deletedAt: null } as any,
       select: {
         id: true,
         title: true,
@@ -60,6 +66,9 @@ export async function GET(request: NextRequest) {
         dueDate: true,
         maxRevisions: true,
         enableRevisions: true,
+        // 1.2.0+: cover image path. Cast through `any` until the
+        // generated Prisma client picks up the new column locally.
+        coverImagePath: true,
         videos: {
           select: {
             id: true,
@@ -82,7 +91,7 @@ export async function GET(request: NextRequest) {
             folders: true,
           },
         },
-      },
+      } as any,
       orderBy: {
         createdAt: 'desc',
       },
@@ -94,18 +103,18 @@ export async function GET(request: NextRequest) {
     // string in JSON so it survives JSON.stringify.
     const sizeRows = await prisma.video.groupBy({
       by: ['projectId'],
-      where: { projectId: { in: projects.map((p) => p.id) } },
+      where: { projectId: { in: (projects as any[]).map((p: any) => p.id) } },
       _sum: { originalFileSize: true },
     })
     const sizeByProject = new Map<string, string>()
     for (const row of sizeRows) {
       sizeByProject.set(
         row.projectId,
-        (row._sum.originalFileSize ?? BigInt(0)).toString(),
+        ((row._sum?.originalFileSize ?? BigInt(0)) as bigint).toString(),
       )
     }
 
-    const sanitizedProjects = projects.map(({ sharePassword, recipients, ...project }) => ({
+    const sanitizedProjects = (projects as any[]).map(({ sharePassword, recipients, ...project }: any) => ({
       ...project,
       sharePassword: Boolean(sharePassword),
       recipients,
@@ -145,7 +154,49 @@ export async function POST(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   try {
-    const body = await request.json()
+    // 1.2.0+: support both legacy JSON body AND the new multipart body
+    // used by the Frame.io-style modal (carries an optional coverImage
+    // file + a minimal `restricted` flag).
+    const contentType = (request.headers.get('content-type') || '').toLowerCase()
+    let coverImageFile: File | null = null
+    let body: any
+
+    if (contentType.includes('multipart/form-data')) {
+      const form = await request.formData()
+      const titleRaw = String(form.get('title') || '').trim()
+      const restrictedRaw = String(form.get('restricted') || 'false').toLowerCase()
+      const restricted = restrictedRaw === 'true'
+      const fileEntry = form.get('coverImage')
+      if (fileEntry && typeof (fileEntry as any).arrayBuffer === 'function') {
+        coverImageFile = fileEntry as File
+        // Guard: cover image type + size. Anything bigger than 10MB is
+        // almost certainly a mistake and would balloon the storage
+        // bucket; anything that isn't an image gets rejected outright.
+        if (!coverImageFile.type.startsWith('image/')) {
+          return NextResponse.json(
+            { error: 'Cover image must be an image file' },
+            { status: 400 },
+          )
+        }
+        if (coverImageFile.size > 10 * 1024 * 1024) {
+          return NextResponse.json(
+            { error: 'Cover image must be smaller than 10MB' },
+            { status: 400 },
+          )
+        }
+      }
+      // Auto-generate a strong password whenever the project is
+      // restricted — the new modal hides the field on purpose; the
+      // admin can view / rotate the password later from Project
+      // Settings.
+      body = {
+        title: titleRaw,
+        authMode: restricted ? 'PASSWORD' : 'NONE',
+        sharePassword: restricted ? generateSecurePassword() : undefined,
+      }
+    } else {
+      body = await request.json()
+    }
 
     // Validate request body
     const validation = validateRequest(createProjectSchema, body)
@@ -273,6 +324,28 @@ export async function POST(request: NextRequest) {
 
       return newProject
     })
+
+    // 1.2.0+: if a cover image was uploaded with the create request,
+    // persist it to the storage abstraction and stamp the path on the
+    // freshly-created project. Failure here is non-fatal — the project
+    // already exists with the gradient fallback; we just log and move
+    // on rather than rolling the whole thing back.
+    if (coverImageFile) {
+      try {
+        const extFromType = coverImageFile.type.split('/')[1] || 'jpg'
+        const ext = extFromType.split(';')[0].replace(/[^a-z0-9]/gi, '').toLowerCase() || 'jpg'
+        const coverPath = `projects/${project.id}/cover.${ext}`
+        const buffer = Buffer.from(await coverImageFile.arrayBuffer())
+        await uploadFile(coverPath, buffer, buffer.length, coverImageFile.type)
+        await prisma.project.update({
+          where: { id: project.id },
+          data: { coverImagePath: coverPath } as any,
+        })
+        ;(project as any).coverImagePath = coverPath
+      } catch (err) {
+        logError('[API] Cover image upload failed (project created without cover):', err)
+      }
+    }
 
     return NextResponse.json(project)
   } catch (error) {

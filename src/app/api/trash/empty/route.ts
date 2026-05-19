@@ -12,7 +12,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
-import { hardDeleteVideoById, hardDeleteFolderById } from '@/lib/trash-cleanup'
+import { hardDeleteVideoById, hardDeleteFolderById, hardDeleteProjectById } from '@/lib/trash-cleanup'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,10 +29,10 @@ export async function POST(request: NextRequest) {
   if (rl) return rl
 
   try {
-    // Pull every trashed video + folder, then permanently delete
-    // each one. Done one at a time so a single storage failure
-    // doesn't roll back the rest.
-    const [videos, folders] = await Promise.all([
+    // Pull every trashed video + folder + project, then permanently
+    // delete each one. Done one at a time so a single storage
+    // failure doesn't roll back the rest.
+    const [videos, folders, projects] = await Promise.all([
       prisma.video.findMany({
         where: { deletedAt: { not: null } } as any,
         select: { id: true },
@@ -41,10 +41,39 @@ export async function POST(request: NextRequest) {
         where: { deletedAt: { not: null } } as any,
         select: { id: true },
       }),
+      prisma.project.findMany({
+        where: { deletedAt: { not: null } } as any,
+        select: { id: true } as any,
+      }),
     ])
 
     let removed = 0
+    // Process projects first — purging a project also drops its
+    // videos/folders by cascade, so we skip duplicate work below.
+    const skipVideoIds = new Set<string>()
+    const skipFolderIds = new Set<string>()
+    for (const p of projects as any[]) {
+      try {
+        // Track child rows so the later loops don't try to hard-delete
+        // something the cascade just removed.
+        const childVideos = await prisma.video.findMany({
+          where: { projectId: p.id },
+          select: { id: true },
+        })
+        const childFolders = await prisma.folder.findMany({
+          where: { projectId: p.id },
+          select: { id: true },
+        })
+        childVideos.forEach((v) => skipVideoIds.add(v.id))
+        childFolders.forEach((f) => skipFolderIds.add(f.id))
+        await hardDeleteProjectById(p.id)
+        removed += 1
+      } catch (err) {
+        logError('[POST /api/trash/empty] project cleanup failed:', err)
+      }
+    }
     for (const v of videos) {
+      if (skipVideoIds.has(v.id)) continue
       try {
         await hardDeleteVideoById(v.id)
         removed += 1
@@ -53,6 +82,7 @@ export async function POST(request: NextRequest) {
       }
     }
     for (const f of folders) {
+      if (skipFolderIds.has(f.id)) continue
       try {
         await hardDeleteFolderById(f.id)
         removed += 1

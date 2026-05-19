@@ -9,6 +9,7 @@ import { trackSharePageAccess, readAnalyticsConsent } from '@/lib/share-access-t
 import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { verifyVideoShareName } from '@/lib/share-video-sig'
 export const runtime = 'nodejs'
 
 
@@ -35,8 +36,9 @@ export async function GET(
     }, `share-access:${token}`)
     if (rateLimitResult) return rateLimitResult
 
-    const projectMeta = await prisma.project.findUnique({
-      where: { slug: token },
+    const projectMeta = await prisma.project.findFirst({
+      // 1.2.0+: a soft-deleted project must look 404 to clients.
+      where: { slug: token, deletedAt: null } as any,
       select: {
         id: true,
         guestMode: true,
@@ -142,6 +144,22 @@ export async function GET(
       }, { status: 401 })
     }
 
+    // 1.2.0+: single-video share. When the admin shares a single video,
+    // the URL carries `?v={name}&sig={hmac}`. We verify the signature
+    // here and, on match, scope the response to that one video name so
+    // the reviewer cannot navigate to siblings via the thumbnail reel.
+    // The scope applies to EVERY viewer — admins included — so an admin
+    // opening the link in the same browser session sees exactly what
+    // their client will see, which is the whole point of "Copy link".
+    // Admins wanting the full project view just use the bare share URL
+    // without `v` / `sig`.
+    const singleVideoName = (request.nextUrl.searchParams.get('v') || '').trim()
+    const singleVideoSig = (request.nextUrl.searchParams.get('sig') || '').trim()
+    const singleVideoScopeActive =
+      singleVideoName.length > 0 &&
+      singleVideoSig.length > 0 &&
+      verifyVideoShareName(token, singleVideoName, singleVideoSig)
+
     const videosSanitizedBase = project.videos.map((video: any) => ({
       id: video.id,
       name: video.name,
@@ -172,7 +190,16 @@ export async function GET(
       thumbnailUrl: null,
     }))
 
-    const videosByName = videosSanitizedBase.reduce((acc: any, video: any) => {
+    // When the single-video signature validated, drop every other
+    // video from the response before grouping. Everything downstream
+    // (videosByName, the thumbnail reel, the version chip) keys off
+    // this array, so this single filter is enough to lock the share
+    // to one video.
+    const scopedVideos = singleVideoScopeActive
+      ? videosSanitizedBase.filter((v: any) => v.name === singleVideoName)
+      : videosSanitizedBase
+
+    const videosByName = scopedVideos.reduce((acc: any, video: any) => {
       const name = video.name
       if (!acc[name]) {
         acc[name] = []

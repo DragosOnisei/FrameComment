@@ -280,7 +280,17 @@ export async function PATCH(
             createdAt: true,
           }
         },
-      }
+        reactions: {
+          select: {
+            id: true,
+            emoji: true,
+            authorName: true,
+            sessionId: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      } as any,
     })
 
     // Sanitize for response

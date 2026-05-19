@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 /**
  * Kebab dropdown attached to each project card on the dashboard
@@ -52,6 +53,11 @@ export default function ProjectCardKebab({
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 1.2.0+: pretty confirm dialogs in place of window.confirm() for
+  // Archive / Unarchive / Delete. Each opens through its own state
+  // toggle so they can't fight each other.
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -103,19 +109,20 @@ export default function ProjectCardKebab({
 
   const isArchived = projectStatus === 'ARCHIVED'
 
-  const handleArchive = async (e: React.MouseEvent) => {
+  const openArchiveConfirm = (e: React.MouseEvent) => {
     stop(e)
     if (busy) return
-    const confirmMsg = isArchived
-      ? `Unarchive "${projectTitle}"?`
-      : `Archive "${projectTitle}"? It will be moved out of the active list.`
-    if (!window.confirm(confirmMsg)) return
+    setOpen(false)
+    setConfirmArchive(true)
+  }
+
+  const runArchive = async () => {
+    if (busy) return
     setBusy(true)
     try {
       await apiPatch(`/api/projects/${projectId}`, {
         status: isArchived ? 'IN_REVIEW' : 'ARCHIVED',
       })
-      setOpen(false)
       onMutated?.()
       router.refresh()
     } catch (err) {
@@ -125,20 +132,18 @@ export default function ProjectCardKebab({
     }
   }
 
-  const handleDelete = async (e: React.MouseEvent) => {
+  const openDeleteConfirm = (e: React.MouseEvent) => {
     stop(e)
     if (busy) return
-    if (
-      !window.confirm(
-        `Delete project "${projectTitle}"? This is permanent — all folders, videos, and comments are removed.`,
-      )
-    ) {
-      return
-    }
+    setOpen(false)
+    setConfirmDelete(true)
+  }
+
+  const runDelete = async () => {
+    if (busy) return
     setBusy(true)
     try {
       await apiDelete(`/api/projects/${projectId}`)
-      setOpen(false)
       onMutated?.()
       router.refresh()
     } catch (err) {
@@ -204,7 +209,7 @@ export default function ProjectCardKebab({
           <button
             role="menuitem"
             type="button"
-            onClick={handleArchive}
+            onClick={openArchiveConfirm}
             disabled={busy}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50"
           >
@@ -223,7 +228,7 @@ export default function ProjectCardKebab({
           <button
             role="menuitem"
             type="button"
-            onClick={handleDelete}
+            onClick={openDeleteConfirm}
             disabled={busy}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left disabled:opacity-50"
           >
@@ -232,6 +237,37 @@ export default function ProjectCardKebab({
           </button>
         </div>
       )}
+
+      {/* 1.2.0+: pretty confirm dialogs replace the native browser
+          confirm() box for these two destructive actions. */}
+      <ConfirmDialog
+        open={confirmArchive}
+        onOpenChange={setConfirmArchive}
+        title={isArchived ? `Unarchive "${projectTitle}"?` : `Archive "${projectTitle}"?`}
+        description={
+          isArchived
+            ? 'It will return to your active list of projects.'
+            : 'It will be moved out of the active list. You can restore it any time from the archive.'
+        }
+        confirmLabel={isArchived ? 'Unarchive' : 'Archive'}
+        cancelLabel="Cancel"
+        onConfirm={runArchive}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        variant="destructive"
+        title={`Move "${projectTitle}" to Trash?`}
+        description={
+          <>
+            The project, its folders, videos, and comments stay recoverable
+            from Trash for 30 days. After that they're permanently deleted.
+          </>
+        }
+        confirmLabel="Move to Trash"
+        cancelLabel="Cancel"
+        onConfirm={runDelete}
+      />
     </div>
   )
 }

@@ -95,22 +95,25 @@ export default function AnnotationToolbarInline() {
   }, [canUndo, canRedo, hasShapes, drawing, finishDrawingMode, cancelDrawingMode])
 
   return (
-    <div className="flex items-center gap-1 w-full">
+    // 1.2.0+: shrink the toolbar — smaller icons + tighter padding +
+    // `flex-1 min-w-0` so the Send button on the right of CommentInput
+    // never gets pushed out of the input row.
+    <div className="flex items-center gap-0.5 flex-1 min-w-0 overflow-hidden">
       {/* Back: leaves drawing mode (commits if there are shapes). */}
       <button
         type="button"
         onClick={handleBack}
-        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+        className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
         title={t('back') || 'Back'}
         aria-label={t('back') || 'Back'}
       >
         <ChevronLeft className="w-4 h-4" />
       </button>
 
-      <div className="w-px h-5 bg-border mx-1" />
+      <div className="w-px h-4 bg-border mx-1 shrink-0" />
 
       {/* Tool buttons */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0 shrink-0">
         {TOOLS.map(({ id, Icon, labelKey }) => {
           const isActive = drawing.activeTool === id
           return (
@@ -118,7 +121,7 @@ export default function AnnotationToolbarInline() {
               key={id}
               type="button"
               onClick={() => drawing.setActiveTool(id)}
-              className={`p-1.5 rounded-md transition-colors ${
+              className={`p-1 rounded-md transition-colors ${
                 isActive
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -133,11 +136,10 @@ export default function AnnotationToolbarInline() {
         })}
       </div>
 
-      <div className="w-px h-5 bg-border mx-1" />
+      <div className="w-px h-4 bg-border mx-1 shrink-0" />
 
-      {/* Colour swatches — small, with an inset ring instead of an outer
-          ring so the selected swatch never overlaps its neighbours. */}
-      <div className="flex items-center gap-2">
+      {/* Colour swatches — mid-sized so the row fits the input width. */}
+      <div className="flex items-center gap-1.5 shrink-0">
         {ANNOTATION_COLORS.map((color) => {
           const isActive = drawing.activeColor === color
           return (
@@ -159,15 +161,15 @@ export default function AnnotationToolbarInline() {
         })}
       </div>
 
-      <div className="w-px h-5 bg-border mx-1" />
+      <div className="w-px h-4 bg-border mx-1 shrink-0" />
 
       {/* Undo / Redo */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0 shrink-0">
         <button
           type="button"
           onClick={drawing.undo}
           disabled={!canUndo}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           title={`${t('undo')} (⌘Z)`}
           aria-label={t('undo')}
         >
@@ -177,7 +179,7 @@ export default function AnnotationToolbarInline() {
           type="button"
           onClick={drawing.redo}
           disabled={!canRedo}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           title={`${t('redo')} (⌘⇧Z)`}
           aria-label={t('redo')}
         >

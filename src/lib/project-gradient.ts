@@ -23,9 +23,11 @@ function hashStringToInt(input: string): number {
 
 /**
  * Returns a CSS background string suitable for `style.background`
- * applied to a tile element. The gradient uses two hues in the
- * 220° → 320° range (cool blue → magenta) with a hint of warmth on
- * the corner, mirroring Frame.io's macOS-wallpaper look.
+ * applied to a tile element. 1.2.0+: muted, dark palette only —
+ * the previous vibrant scheme felt too loud once the dashboard
+ * filled up with tiles. Same id → same gradient, but every output
+ * sits in low-saturation territory with low lightness so the grid
+ * reads as one calm family.
  */
 export function projectGradient(id: string): string {
   const hash = hashStringToInt(id)
@@ -35,14 +37,17 @@ export function projectGradient(id: string): string {
   const b3 = (hash >> 16) & 0xff
   const b4 = (hash >> 24) & 0xff
 
-  // Hue arcs. We keep them in the cool/magenta range so the grid
-  // looks like one family. ~220° (blue) → ~330° (pink).
-  const hueA = 210 + (b1 % 130) // 210–340
-  const hueB = (hueA + 30 + (b2 % 60)) % 360 // 30–90° off from A
+  // Wider hue arc now that the colours are dark — every hue reads
+  // as a neutral charcoal-with-a-tint instead of a bright primary.
+  const hueA = b1 % 360
+  const hueB = (hueA + 20 + (b2 % 40)) % 360 // 20–60° off
   const angle = 100 + (b3 % 80) // 100°–180° tilt
-  const sat = 65 + (b4 % 20) // 65–85% — vivid but not neon
-  const lightA = 55
-  const lightB = 60
+  // Saturation + lightness pinned to muted-dark territory.
+  // 18–28% saturation keeps a hint of colour without being vivid;
+  // 12–18% lightness sits in deep charcoal-to-near-black.
+  const sat = 18 + (b4 % 11) // 18–28%
+  const lightA = 12 + (b4 % 4) // 12–15%
+  const lightB = 16 + (b3 % 4) // 16–19%
 
   return `linear-gradient(${angle}deg, hsl(${hueA} ${sat}% ${lightA}%) 0%, hsl(${hueB} ${sat}% ${lightB}%) 100%)`
 }

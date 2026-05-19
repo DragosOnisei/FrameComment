@@ -325,4 +325,37 @@
       transform: scale(1.1);
     }
   }
+
+  /*
+   * 1.2.0+: shimmer sweep for the comment-input placeholder. A
+   * subtle highlight band crosses the text every few seconds without
+   * being distracting. Implemented with a 3-stop gradient + animated
+   * background-position; `background-clip: text` paints the gradient
+   * onto the glyphs themselves so the rest of the row stays clean.
+   */
+  .placeholder-shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted-foreground)) 0%,
+      hsl(var(--muted-foreground)) 35%,
+      hsl(var(--foreground)) 50%,
+      hsl(var(--muted-foreground)) 65%,
+      hsl(var(--muted-foreground)) 100%
+    );
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    animation: placeholder-shimmer 3.6s ease-in-out infinite;
+  }
+
+  @keyframes placeholder-shimmer {
+    0% {
+      background-position: 120% 0;
+    }
+    100% {
+      background-position: -20% 0;
+    }
+  }
 }

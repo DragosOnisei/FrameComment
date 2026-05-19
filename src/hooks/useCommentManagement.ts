@@ -397,18 +397,25 @@ export function useCommentManagement({
   // Frame.io-style "click on the input → in marker at playhead". Same
   // pause-and-capture flow as typing, but fires on focus instead of on
   // first keystroke. Only runs when there's no timestamp yet, so an
-  // explicitly-set timestamp (or an existing in/out range) isn't
-  // clobbered.
+  // 1.1.1+: re-focusing the textarea always re-captures the current
+  // playhead as the new IN point. The previous behaviour skipped
+  // re-capture once `hasAutoFilledTimestamp` flipped true, so if you
+  // clicked the input, then scrubbed elsewhere on the timeline, then
+  // clicked the input again, the IN marker stayed where it was —
+  // forcing you to clear and start over. Now every focus syncs IN
+  // to "wherever the playhead is right now". Any user-defined OUT is
+  // dropped because a range anchored to a now-stale IN is more
+  // confusing than helpful — the orange handle takes ~1 second to
+  // re-drag.
   const handleCommentInputFocus = useCallback(() => {
-    if (hasAutoFilledTimestamp) return
-    if (selectedTimestamp !== null) return
+    setSelectedTimecodeEnd(null)
     window.dispatchEvent(new CustomEvent('pauseVideoForComment'))
     window.dispatchEvent(
       new CustomEvent('getCurrentTime', {
         detail: { callback: captureTimestamp },
       })
     )
-  }, [hasAutoFilledTimestamp, selectedTimestamp, captureTimestamp])
+  }, [captureTimestamp])
 
   // Submit comment
   const handleSubmitComment = async () => {
@@ -494,9 +501,13 @@ export function useCommentManagement({
       timecodeEnd: selectedTimecodeEnd || null,
       annotations: (pendingAnnotation as Prisma.JsonValue) || null,
       content: commentContent,
+      // 1.2.0+: if the guest has chosen / edited a display name, use it
+      // on the optimistic row too so there's no brief flash of "Client"
+      // before the server response lands. Falls back to "Client" for
+      // viewers that never opened the rename field.
       authorName: isInternalComment
         ? (adminUser!.name || 'Admin')
-        : (isPasswordProtected ? authorName : 'Client'),
+        : (authorName?.trim() || (isPasswordProtected ? authorName : 'Client')),
       authorEmail: isInternalComment ? null : (clientEmail || null),
       isInternal: isInternalComment,
       createdAt: new Date(),
@@ -504,6 +515,11 @@ export function useCommentManagement({
       parentId: replyingToCommentId,
       userId: null,
       editorSessionId: null,
+      // 1.2.0+: resolved bookkeeping defaults — a brand-new comment is
+      // never resolved at creation time.
+      isResolved: false,
+      resolvedAt: null,
+      resolvedBy: null,
       replies: [],
     }
 

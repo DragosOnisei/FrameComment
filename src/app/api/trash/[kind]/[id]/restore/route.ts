@@ -96,6 +96,26 @@ export async function POST(
       return NextResponse.json({ success: true })
     }
 
+    if (kind === 'project') {
+      // 1.2.0+: bring a soft-deleted project back. The project row
+      // alone is enough; videos / folders / comments were never
+      // touched on delete (we just stamped `deletedAt` on the
+      // project). Active share links resume working once the
+      // listing endpoint stops filtering it out.
+      const project = await prisma.project.findUnique({
+        where: { id },
+        select: { id: true, deletedAt: true } as any,
+      })
+      if (!project) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+      }
+      await prisma.project.update({
+        where: { id },
+        data: { deletedAt: null } as any,
+      })
+      return NextResponse.json({ success: true })
+    }
+
     if (kind === 'video') {
       const video = (await prisma.video.findUnique({
         where: { id },

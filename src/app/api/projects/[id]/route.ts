@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { deleteFile, deleteDirectory } from '@/lib/storage'
+// 1.2.0+: deleteFile / deleteDirectory no longer needed here — the
+// project is soft-deleted now, and files only get torn down when the
+// daily cleanup cron purges expired Trash rows (see trash-cleanup.ts).
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured } from '@/lib/settings'
@@ -536,83 +538,38 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    // Get project with all videos
+    // 1.2.0+: soft-delete instead of immediate hard-delete. The
+    // project + all its videos/folders/comments stay on disk; we
+    // just stamp `deletedAt` so listings hide it and the share
+    // links 404. The daily cleanup cron purges the row + files
+    // after TRASH_RETENTION_DAYS (30 days). Admins can restore
+    // from the Trash page within that window.
     const project = await prisma.project.findUnique({
       where: { id },
-      include: {
-        videos: true,
-      },
+      select: { id: true, deletedAt: true } as any,
     })
 
     if (!project) {
       return NextResponse.json({ error: projectMessages.projectNotFoundApi || 'Project not found' }, { status: 404 })
     }
 
-    // Delete all video files from storage
-    for (const video of project.videos) {
-      try {
-        // Delete original file
-        if (video.originalStoragePath) {
-          await deleteFile(video.originalStoragePath)
-        }
-
-        // Delete preview files (watermarked)
-        if ((video as any).preview2160Path) {
-          await deleteFile((video as any).preview2160Path)
-        }
-        if (video.preview1080Path) {
-          await deleteFile(video.preview1080Path)
-        }
-        if (video.preview720Path) {
-          await deleteFile(video.preview720Path)
-        }
-
-        // Delete clean preview files (non-watermarked, created after approval)
-        if ((video as any).cleanPreview2160Path) {
-          await deleteFile((video as any).cleanPreview2160Path)
-        }
-        if (video.cleanPreview1080Path) {
-          await deleteFile(video.cleanPreview1080Path)
-        }
-        if (video.cleanPreview720Path) {
-          await deleteFile(video.cleanPreview720Path)
-        }
-
-        // Delete thumbnail
-        if (video.thumbnailPath) {
-          await deleteFile(video.thumbnailPath)
-        }
-      } catch (error) {
-        logError(`Failed to delete files for video ${video.id}:`, error)
-        // Continue deleting other files even if one fails
-      }
-    }
-
-    // Delete the entire project directory after all files are removed
-    try {
-      await deleteDirectory(`projects/${id}`)
-    } catch (error) {
-      logError(`Failed to delete project directory for ${id}:`, error)
-      // Continue even if directory deletion fails
-    }
-
-    // SECURITY: Invalidate all share sessions for this project before deletion
+    // SECURITY: invalidate all share sessions immediately so anyone
+    // currently viewing the project loses access right away.
     try {
       const invalidatedCount = await invalidateShareTokensByProject(id)
-      logMessage(`[SECURITY] Project deleted - invalidated ${invalidatedCount} share sessions`)
+      logMessage(`[SECURITY] Project trashed — invalidated ${invalidatedCount} share sessions`)
     } catch (error) {
-      logError('[SECURITY] Failed to invalidate sessions during project deletion:', error)
-      // Continue with deletion even if session invalidation fails
+      logError('[SECURITY] Failed to invalidate sessions during project soft-delete:', error)
     }
 
-    // Delete project and all related data (cascade will handle videos, comments, shares)
-    await prisma.project.delete({
-      where: { id: id },
+    await prisma.project.update({
+      where: { id },
+      data: { deletedAt: new Date() } as any,
     })
 
     return NextResponse.json({
       success: true,
-      message: projectMessages.projectDeletedSuccessfully || 'Project and all related files deleted successfully'
+      message: projectMessages.projectDeletedSuccessfully || 'Project moved to Trash. It will be permanently deleted in 30 days.',
     })
   } catch (error) {
     return NextResponse.json(

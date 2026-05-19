@@ -402,17 +402,18 @@ export default function CommentAttachmentButton({
 
   return (
     <>
-      <Button
+      {/* 1.2.0+: borderless icon to match the mic / emoji style in the
+          same input action row. */}
+      <button
         type="button"
-        variant="outline"
-        size="icon"
         onClick={() => setOpen(true)}
         disabled={disabled}
-        className="h-8 w-8 flex-shrink-0"
         title={t('attachFiles')}
+        aria-label={t('attachFiles')}
+        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Paperclip className="w-4 h-4" />
-      </Button>
+      </button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-md">

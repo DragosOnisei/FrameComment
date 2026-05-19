@@ -128,7 +128,7 @@ function formatTimeWithMode(
   videoDurationSeconds: number,
   mode: 'TIMECODE' | 'AUTO'
 ): string {
-  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return mode === 'TIMECODE' ? '00:00:00:00' : '0:00'
+  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return mode === 'TIMECODE' ? '00:00' : '0:00'
   
   const timecode = secondsToTimecode(seconds, fps)
   return formatCommentTimestamp({
@@ -381,20 +381,11 @@ export default function CustomVideoControls({
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
 
-    // Range-selection mode: when the user has focused the comment
-    // composer (so an "in" point is set) and clicks a position AFTER
-    // the in time, treat that click as setting the OUT point of the
-    // range AND seek there so they see the exact frame the OUT will
-    // land on. Clicking before/at the in time still seeks normally.
-    const inT = pendingInRef.current
-    if (inT !== null && time > inT + 0.05) {
-      window.dispatchEvent(
-        new CustomEvent('setCommentOutPoint', { detail: { time } })
-      )
-      onSeek(time)
-      return
-    }
-
+    // 1.1.1+: clicking the timeline just seeks now. Creating a
+    // comment range is reserved for the dedicated orange handle —
+    // the previous behaviour (any click past the IN point silently
+    // set an OUT) made it impossible to seek inside the marked
+    // range without accidentally clobbering the comment selection.
     onSeek(time)
   }, [videoDuration, onSeek])
 
@@ -413,15 +404,8 @@ export default function CustomVideoControls({
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
 
-    // Mirror the click handler's range-selection branch on touch.
-    const inT = pendingInRef.current
-    if (inT !== null && time > inT + 0.05) {
-      window.dispatchEvent(
-        new CustomEvent('setCommentOutPoint', { detail: { time } })
-      )
-      onSeek(time)
-      return
-    }
+    // 1.1.1+: touch on timeline just seeks. Comment-range OUT is
+    // set only by dragging the orange handle.
     onSeek(time)
   }, [videoDuration, onSeek])
 
@@ -434,15 +418,7 @@ export default function CustomVideoControls({
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
 
-    // Same range-selection swipe-out logic as the mouse path.
-    const inT = pendingInRef.current
-    if (inT !== null && time > inT + 0.05) {
-      window.dispatchEvent(
-        new CustomEvent('setCommentOutPoint', { detail: { time } })
-      )
-      onSeek(time)
-      return
-    }
+    // 1.1.1+: same — drag on the timeline just scrubs the playhead.
     onSeek(time)
   }, [isDragging, videoDuration, onSeek])
 
@@ -461,18 +437,10 @@ export default function CustomVideoControls({
     setHoveredTime(time)
 
     if (isDragging) {
-      // Range-selection drag: while the comment composer has an "in"
-      // point set and the user is dragging past it, every mouse move
-      // updates the OUT point continuously AND seeks there, so the
-      // user sees the exact frame as they drag.
-      const inT = pendingInRef.current
-      if (inT !== null && time > inT + 0.05) {
-        window.dispatchEvent(
-          new CustomEvent('setCommentOutPoint', { detail: { time } })
-        )
-        onSeek(time)
-        return
-      }
+      // 1.1.1+: dragging the playhead on the timeline only scrubs.
+      // The comment-range OUT point is set only when the user
+      // grabs the dedicated orange handle (see the
+      // `isDraggingOutHandle` effect above).
       onSeek(time)
     }
   }, [isDragging, videoDuration, onSeek])

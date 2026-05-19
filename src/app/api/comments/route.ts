@@ -102,6 +102,18 @@ export async function GET(request: NextRequest) {
       },
     }
 
+    // 1.2.0+: include emoji reactions on every comment + reply.
+    const reactionSelect = {
+      select: {
+        id: true,
+        emoji: true,
+        authorName: true,
+        sessionId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' as const },
+    }
+
     // Fetch all comments for the project
     const allComments = await prisma.comment.findMany({
       where: {
@@ -118,6 +130,7 @@ export async function GET(request: NextRequest) {
           }
         },
         assets: assetSelect,
+        reactions: reactionSelect,
         replies: {
           include: {
             user: {
@@ -129,16 +142,26 @@ export async function GET(request: NextRequest) {
               }
             },
             assets: assetSelect,
+            reactions: reactionSelect,
           },
           orderBy: { createdAt: 'asc' }
         }
-      },
+      } as any,
       orderBy: { createdAt: 'asc' }
     })
 
     // 1.0.7+: number anonymous guest reviewers as Client 1 / 2 / N
     // so two incognito viewers don't collapse into a single "Client".
     const getGuestIndex = buildGuestSessionIndex(allComments as any[])
+
+    // 1.2.0+: identity for the `mine` flag on reactions. Prefer the
+    // per-browser id when present (matches reactions POST behaviour).
+    const browserId = (request.headers.get('x-framecomment-client-id') || '').trim()
+    const viewerSessionId = isAdmin
+      ? `admin:${(accessCheck as any).user?.id || ''}`
+      : browserId
+        ? `client:${browserId}`
+        : (accessCheck as any).shareTokenSessionId || null
 
     // Sanitize the response data
     const sanitizedComments = allComments.map((comment: any) =>
@@ -148,6 +171,7 @@ export async function GET(request: NextRequest) {
         isAuthenticated,
         fallbackName,
         getGuestIndex,
+        viewerSessionId,
       )
     )
 

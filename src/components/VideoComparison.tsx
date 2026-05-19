@@ -205,7 +205,7 @@ export default function VideoComparison({
       }
 
       // Ctrl+Space: Play/Pause
-      if (e.ctrlKey && e.code === 'Space') {
+      if (e.ctrlKey && !e.metaKey && e.code === 'Space') {
         e.preventDefault()
         e.stopPropagation()
         togglePlayPause()
@@ -213,7 +213,7 @@ export default function VideoComparison({
       }
 
       // Ctrl+, or Ctrl+<: Decrease speed by 0.25x
-      if (e.ctrlKey && (e.code === 'Comma' || e.key === '<')) {
+      if (e.ctrlKey && !e.metaKey && (e.code === 'Comma' || e.key === '<')) {
         e.preventDefault()
         e.stopPropagation()
         setPlaybackSpeed(prev => {
@@ -226,7 +226,7 @@ export default function VideoComparison({
       }
 
       // Ctrl+. or Ctrl+>: Increase speed by 0.25x
-      if (e.ctrlKey && (e.code === 'Period' || e.key === '>')) {
+      if (e.ctrlKey && !e.metaKey && (e.code === 'Period' || e.key === '>')) {
         e.preventDefault()
         e.stopPropagation()
         setPlaybackSpeed(prev => {
@@ -239,7 +239,7 @@ export default function VideoComparison({
       }
 
       // Ctrl+/: Reset speed to 1.0x
-      if (e.ctrlKey && (e.code === 'Slash' || e.key === '/' || e.key === '?')) {
+      if (e.ctrlKey && !e.metaKey && (e.code === 'Slash' || e.key === '/' || e.key === '?')) {
         e.preventDefault()
         e.stopPropagation()
         setPlaybackSpeed(1.0)
@@ -249,7 +249,7 @@ export default function VideoComparison({
       }
 
       // Ctrl+J: Go back one frame
-      if (e.ctrlKey && e.code === 'KeyJ') {
+      if (e.ctrlKey && !e.metaKey && e.code === 'KeyJ') {
         e.preventDefault()
         e.stopPropagation()
         stepFrameRef.current('backward')
@@ -257,7 +257,7 @@ export default function VideoComparison({
       }
 
       // Ctrl+L: Go forward one frame
-      if (e.ctrlKey && e.code === 'KeyL') {
+      if (e.ctrlKey && !e.metaKey && e.code === 'KeyL') {
         e.preventDefault()
         e.stopPropagation()
         stepFrameRef.current('forward')
