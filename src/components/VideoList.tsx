@@ -73,6 +73,11 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
     // Perform deletion in background without blocking UI
     apiDelete(`/api/videos/${videoId}`)
       .then(() => {
+        // 1.2.1+: a successful video DELETE always lands in Trash
+        // (videos don't have an "empty" short-circuit — they always
+        // carry media), so unconditionally bump the AdminHeader
+        // count.
+        window.dispatchEvent(new CustomEvent('trash:changed'))
         // Refresh in background
         onRefresh?.()
       })

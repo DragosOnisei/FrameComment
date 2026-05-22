@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import CoverImageCropper, { type CoverImageCropperHandle } from '@/components/CoverImageCropper'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,7 +39,12 @@ export default function AdminPage() {
   // admin can view / rotate it later from Project Settings.
   const [restricted, setRestricted] = useState(false)
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null)
-  const [coverImagePreview, setCoverImagePreview] = useState<string | null>(null)
+  // 1.2.0+: when a file is picked we hand it to <CoverImageCropper>
+  // for in-place positioning + zoom. The cropper draws the final
+  // square via canvas only at submit time (via the imperative
+  // `commit()` handle below), so we don't keep a blob URL of the
+  // preview here — the cropper manages its own object URL.
+  const cropperRef = useRef<CoverImageCropperHandle | null>(null)
   // 1.2.0+: pin the preview gradient to a random seed at modal-open
   // time so it stays stable while the user types the title. Without
   // this the gradient would re-roll on every keystroke (since
@@ -115,8 +121,6 @@ export default function AdminPage() {
     setAuthMode('PASSWORD')
     setRestricted(false)
     setCoverImageFile(null)
-    if (coverImagePreview) URL.revokeObjectURL(coverImagePreview)
-    setCoverImagePreview(null)
     // Roll a fresh gradient seed for this modal session. We use
     // crypto.randomUUID where available (modern browsers) and fall
     // back to a Math.random hex so the modal stays usable on older
@@ -130,14 +134,13 @@ export default function AdminPage() {
     setShowNewProjectModal(true)
   }
 
-  // 1.2.0+: cover image picker handler. Generates an object URL so
-  // the preview shows immediately; revoked when the modal closes or
-  // a new image is picked.
+  // 1.2.0+: cover image picker handler. The actual crop preview is
+  // managed by <CoverImageCropper>, which owns its own object URL;
+  // we just keep the raw File in state and re-render the cropper
+  // when it changes.
   function handlePickCoverImage(file: File | null) {
-    if (coverImagePreview) URL.revokeObjectURL(coverImagePreview)
     if (!file) {
       setCoverImageFile(null)
-      setCoverImagePreview(null)
       return
     }
     if (!file.type.startsWith('image/')) {
@@ -149,7 +152,6 @@ export default function AdminPage() {
       return
     }
     setCoverImageFile(file)
-    setCoverImagePreview(URL.createObjectURL(file))
   }
 
   // Create project — 1.2.0+ multipart path. Sends title + restricted
@@ -162,10 +164,23 @@ export default function AdminPage() {
     setFormError('')
 
     try {
+      // 1.2.0+: if a cover was picked, pull the cropped square via
+      // the cropper's imperative handle. Fall back to the raw file
+      // if the canvas export fails for any reason — better to ship
+      // something than nothing.
+      let coverToUpload: File | null = null
+      if (coverImageFile) {
+        try {
+          coverToUpload = (await cropperRef.current?.commit()) || coverImageFile
+        } catch {
+          coverToUpload = coverImageFile
+        }
+      }
+
       const form = new FormData()
       form.append('title', title)
       form.append('restricted', restricted ? 'true' : 'false')
-      if (coverImageFile) form.append('coverImage', coverImageFile)
+      if (coverToUpload) form.append('coverImage', coverToUpload)
 
       const res = await apiFetch('/api/projects', {
         method: 'POST',
@@ -176,8 +191,6 @@ export default function AdminPage() {
         throw new Error(data?.error || t('failedToCreateProject'))
       }
       const project = await res.json()
-      if (coverImagePreview) URL.revokeObjectURL(coverImagePreview)
-      setCoverImagePreview(null)
       setCoverImageFile(null)
       setShowNewProjectModal(false)
       router.push(`/admin/projects/${project.id}`)
@@ -243,27 +256,23 @@ export default function AdminPage() {
                 Make Restricted toggle and animates between
                 LockOpen ↔ Lock when the user flips it.
               */}
-              <label
-                className="relative block aspect-square rounded-xl overflow-hidden ring-1 ring-border/40 hover:ring-border cursor-pointer group/cover"
-                title={coverImagePreview ? 'Replace image' : 'Upload image'}
-              >
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] || null
-                    handlePickCoverImage(f)
-                    e.target.value = ''
-                  }}
-                />
-
-                {coverImagePreview ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={coverImagePreview}
-                    alt=""
-                    className="absolute inset-0 w-full h-full object-cover"
+              {/*
+                1.2.0+: outer wrapper is always a plain <div> with
+                aspect-square + ring. When NO image is loaded a
+                transparent <label> overlay opens the file picker on
+                click. Once an image is loaded the overlay is gone,
+                so drag / wheel-zoom on the cropper can't accidentally
+                re-trigger the picker. Replacing the image is done by
+                the explicit X button (clears the file → label
+                returns next paint).
+              */}
+              <div className="relative block aspect-square rounded-xl overflow-hidden ring-1 ring-border/40 group/cover">
+                {/* Layer 1: background — gradient or cropper */}
+                {coverImageFile ? (
+                  <CoverImageCropper
+                    ref={cropperRef}
+                    file={coverImageFile}
+                    className="absolute inset-0"
                   />
                 ) : (
                   <div
@@ -272,38 +281,52 @@ export default function AdminPage() {
                   />
                 )}
 
-                {/* Subtle bottom gradient overlay so the title input
-                    stays readable over busy cover images. */}
-                <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/55 via-black/20 to-transparent pointer-events-none" />
+                {/* Layer 2: invisible file-picker label, only when
+                    no image is loaded. Sits ABOVE the gradient but
+                    BELOW the lock chip / title input which have a
+                    higher z-index. */}
+                {!coverImageFile && (
+                  <label
+                    htmlFor="coverImageInputFallback"
+                    className="absolute inset-0 z-10 cursor-pointer"
+                    title="Upload image"
+                  >
+                    <input
+                      id="coverImageInputFallback"
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null
+                        handlePickCoverImage(f)
+                        e.target.value = ''
+                      }}
+                    />
+                  </label>
+                )}
 
-                {/* Centered upload affordance. Hidden once an image
-                    is loaded; the user can still click anywhere on
-                    the tile to swap it. */}
-                {!coverImagePreview && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                {/* Bottom gradient so the title input stays readable
+                    on top of busy covers. */}
+                <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/55 via-black/20 to-transparent pointer-events-none z-20" />
+
+                {/* Centered upload affordance — only shown in the
+                    empty state. Pointer-events-none so the click
+                    falls through to the <label> below it. */}
+                {!coverImageFile && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
                     <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-black/40 text-white shadow-lg backdrop-blur-sm transition-transform duration-200 group-hover/cover:scale-105">
                       <ImagePlus className="w-6 h-6" />
                     </div>
                   </div>
                 )}
 
-                {/* Lock chip in the top-right corner — visual
-                    indicator of the Make Restricted toggle. The
-                    icon morphs between LockOpen / Lock with a
-                    rotate+scale animation. Tile click would
-                    otherwise open the file picker, so the chip
-                    stops propagation and flips the toggle directly
-                    for a one-click feel. */}
+                {/* Lock chip in the top-right corner. */}
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setRestricted((v) => !v)
-                  }}
+                  onClick={() => setRestricted((v) => !v)}
                   aria-pressed={restricted}
                   title={restricted ? 'Restricted (click to unlock)' : 'Unrestricted (click to lock)'}
-                  className={`absolute top-3 right-3 inline-flex items-center justify-center w-9 h-9 rounded-lg backdrop-blur-sm shadow-md transition-colors ${
+                  className={`absolute top-3 right-3 z-30 inline-flex items-center justify-center w-9 h-9 rounded-lg backdrop-blur-sm shadow-md transition-colors ${
                     restricted
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-black/55 text-white hover:bg-black/70'
@@ -322,33 +345,24 @@ export default function AdminPage() {
                 </button>
 
                 {/* Remove cover image button (visible only when one is set) */}
-                {coverImagePreview && (
+                {coverImageFile && (
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      handlePickCoverImage(null)
-                    }}
-                    className="absolute top-3 right-14 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-black/55 text-white hover:bg-black/70 backdrop-blur-sm shadow-md transition-colors"
+                    onClick={() => handlePickCoverImage(null)}
+                    className="absolute top-3 right-14 z-30 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-black/55 text-white hover:bg-black/70 backdrop-blur-sm shadow-md transition-colors"
                     title="Remove image"
                   >
                     <XIcon className="w-4 h-4" />
                   </button>
                 )}
 
-                {/* Title input pinned at the bottom-center, inline
-                    over the cover. Clicking it must NOT trigger the
-                    file picker — onClick stops propagation, and we
-                    use a wrapper to opt out of the parent <label>. */}
-                <div className="absolute inset-x-4 bottom-4">
+                {/* Title input pinned at the bottom-center. */}
+                <div className="absolute inset-x-4 bottom-4 z-30">
                   <Input
                     id="projectTitle"
                     placeholder="Untitled Project"
                     value={projectTitle}
                     onChange={(e) => setProjectTitle(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
                     autoComplete="off"
                     data-form-type="other"
                     data-lpignore="true"
@@ -357,7 +371,7 @@ export default function AdminPage() {
                     className="bg-black/40 border-white/20 text-white placeholder:text-white/70 backdrop-blur-md text-base font-semibold focus-visible:ring-primary/60"
                   />
                 </div>
-              </label>
+              </div>
 
               {/* Make Restricted toggle row. */}
               <button

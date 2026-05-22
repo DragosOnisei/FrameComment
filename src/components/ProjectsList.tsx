@@ -62,23 +62,20 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
     }
     return 'alphabetical'
   })
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  useEffect(() => {
-    const storageKey = 'admin_projects_view'
-    const stored = localStorage.getItem(storageKey)
-
-    if (stored === 'grid' || stored === 'table') {
-      setViewMode(stored)
-      return
-    }
-    // Migrate old 'list' preference to 'table'
-    if (stored === 'list') {
-      setViewMode('table')
-      return
-    }
-
-    setViewMode('grid')
-  }, [])
+  // 1.2.0+: lazy initial value so the first render already reflects
+  // the saved preference. Previously the initial state was hard-coded
+  // to 'grid' and a useEffect synced FROM localStorage on mount — but
+  // a sibling effect then SYNCED BACK 'grid' to localStorage before
+  // the read effect committed, wiping the saved preference on every
+  // reload. Both effects collapse into the lazy init below.
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === 'undefined') return 'grid'
+    const stored = localStorage.getItem('admin_projects_view')
+    if (stored === 'grid' || stored === 'table') return stored
+    // Migrate the old 'list' preference to 'table'.
+    if (stored === 'list') return 'table'
+    return 'grid'
+  })
 
   useEffect(() => {
     localStorage.setItem('admin_projects_view', viewMode)
@@ -260,6 +257,8 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                     projectSlug={project.slug}
                     projectTitle={project.title}
                     projectStatus={project.status}
+                    projectFolderCount={project._count?.folders ?? 0}
+                    projectVideoCount={project._count?.videos ?? 0}
                     onMutated={onProjectMutated}
                   />
                 </div>
@@ -305,23 +304,23 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
             <span className="text-xs text-muted-foreground">{sortedProjects.length} {t('projectsCount')}</span>
           </div>
           {/* Table Header — status column removed (1.0.6+); videos &
-              comments columns swapped for folders & total size. */}
+              comments columns swapped for folders & total size.
+              1.2.0+: Client + Due Date columns retired (the create
+              modal no longer asks for either; both still exist in
+              Project Settings if the workflow needs them). */}
           <div className="hidden sm:flex items-center gap-4 px-5 py-2 text-xs text-muted-foreground bg-muted/20 border-b">
             <span className="flex-1 min-w-0">{tc('name')}</span>
-            <span className="w-36 hidden md:block">{t('client')}</span>
             <span className="w-20 text-center hidden lg:block">Folders</span>
             <span className="w-24 text-right hidden lg:block">Size</span>
-            <span className="w-20 hidden lg:block">{t('dueDateLabel')}</span>
             <span className="w-24 hidden xl:block">{tc('created')}</span>
             <span className="w-24 hidden lg:block">{tc('updated')}</span>
             <span className="w-8"></span>
           </div>
           <div className="divide-y">
             {sortedProjects.map((project) => {
-              const primaryRecipient = project.recipients?.find((r: any) => r.isPrimary) || project.recipients?.[0]
-              const displayName = project.companyName || primaryRecipient?.name || primaryRecipient?.email || t('client')
               const folderCount = project._count?.folders ?? 0
               const sizeLabel = formatBytes(project.totalSize)
+              const hasCover = !!(project as any).coverImagePath
 
               return (
                 <Link
@@ -329,13 +328,34 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                   href={`/admin/projects/${project.id}`}
                   className="flex items-center gap-4 px-5 py-3 text-sm hover:bg-accent/30 transition-colors"
                 >
+                  {/* 1.2.0+: tiny rounded thumbnail before the title,
+                      Frame.io-style. Cover image when uploaded, else
+                      the project gradient. Same visual identity as
+                      the grid view tile, just at avatar size. */}
+                  <div className="relative w-8 h-8 shrink-0 rounded-md overflow-hidden ring-1 ring-border/40">
+                    {hasCover ? (
+                      <>
+                        <div className="absolute inset-0 bg-muted" />
+                        <ProjectCoverImage
+                          projectId={project.id}
+                          cacheKey={
+                            project.updatedAt
+                              ? new Date(project.updatedAt).getTime()
+                              : undefined
+                          }
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      </>
+                    ) : (
+                      <div
+                        className="absolute inset-0"
+                        style={{ background: projectGradient(project.id) }}
+                      />
+                    )}
+                  </div>
                   <span className="flex-1 min-w-0 font-medium truncate">{project.title}</span>
-                  <span className="w-36 text-xs text-muted-foreground truncate hidden md:block">{displayName}</span>
                   <span className="w-20 text-center text-xs text-muted-foreground tabular-nums hidden lg:block">{folderCount}</span>
                   <span className="w-24 text-right text-xs text-muted-foreground tabular-nums hidden lg:block">{sizeLabel}</span>
-                  <span className={`w-20 text-xs hidden lg:block ${project.dueDate ? getDueDateColor(project.dueDate, project.status) : 'text-muted-foreground'}`}>
-                    {project.dueDate ? new Date(project.dueDate).toLocaleDateString(locale, { month: 'short', day: 'numeric' }) : '—'}
-                  </span>
                   <span className="w-24 text-xs text-muted-foreground hidden xl:block">
                     {formatDate(project.createdAt)}
                   </span>
@@ -347,11 +367,40 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                     projectSlug={project.slug}
                     projectTitle={project.title}
                     projectStatus={project.status}
+                    projectFolderCount={project._count?.folders ?? 0}
+                    projectVideoCount={project._count?.videos ?? 0}
                     onMutated={onProjectMutated}
                   />
                 </Link>
               )
             })}
+
+            {/* 1.2.0+: in-flow "New Project" row at the end of the
+                table, mirroring the grid view's `+` tile. Calls the
+                parent-supplied modal opener so the same Frame.io-
+                style composer pops up. */}
+            {onNewProject ? (
+              <button
+                type="button"
+                onClick={onNewProject}
+                className="w-full flex items-center gap-4 px-5 py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors text-left"
+              >
+                <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <span className="flex-1 min-w-0 font-medium">{t('newProject')}</span>
+              </button>
+            ) : (
+              <Link
+                href="/admin/projects/new"
+                className="w-full flex items-center gap-4 px-5 py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
+              >
+                <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <span className="flex-1 min-w-0 font-medium">{t('newProject')}</span>
+              </Link>
+            )}
           </div>
         </Card>
       )}

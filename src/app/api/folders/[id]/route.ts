@@ -404,6 +404,21 @@ export async function DELETE(
           }
         }
       }
+
+      // 1.2.1+: short-circuit for empty folders. If neither the
+      // folder itself nor any descendant holds a single video, the
+      // whole subtree is just empty containers — there's nothing
+      // worth recovering, so we skip Trash and delete the folders
+      // outright. The DB cascade drops descendant folder rows along
+      // with `id`.
+      const videoCountInSubtree = await prisma.video.count({
+        where: { folderId: { in: Array.from(descendantIds) } },
+      })
+      if (videoCountInSubtree === 0) {
+        await prisma.folder.delete({ where: { id } })
+        return NextResponse.json({ success: true, soft: false, wasEmpty: true })
+      }
+
       const now = new Date()
       await prisma.$transaction([
         prisma.folder.updateMany({

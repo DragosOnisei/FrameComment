@@ -38,6 +38,15 @@ export interface ProjectCardKebabProps {
   projectSlug: string
   projectTitle: string
   projectStatus: string
+  /**
+   * 1.2.1+: passing the project's child counts lets the kebab skip
+   * the confirm dialog entirely when the project is empty. Trash
+   * the server already short-circuits an empty project to a hard
+   * delete; the dialog's "moved to Trash" language would be a lie
+   * for an empty container anyway.
+   */
+  projectFolderCount?: number
+  projectVideoCount?: number
   onMutated?: () => void
 }
 
@@ -46,6 +55,8 @@ export default function ProjectCardKebab({
   projectSlug,
   projectTitle,
   projectStatus,
+  projectFolderCount,
+  projectVideoCount,
   onMutated,
 }: ProjectCardKebabProps) {
   const router = useRouter()
@@ -136,6 +147,22 @@ export default function ProjectCardKebab({
     stop(e)
     if (busy) return
     setOpen(false)
+    // 1.2.1+: empty-project fast path. If the parent knows the
+    // project has no folders and no videos, the confirm dialog is
+    // redundant — the server skips Trash for empty projects, so
+    // "moved to Trash" wouldn't be true anyway. Delete straight
+    // away without prompting. We only short-circuit when BOTH
+    // counts were explicitly provided (otherwise we don't know
+    // what we don't know and fall back to the dialog).
+    if (
+      typeof projectFolderCount === 'number' &&
+      typeof projectVideoCount === 'number' &&
+      projectFolderCount === 0 &&
+      projectVideoCount === 0
+    ) {
+      void runDelete()
+      return
+    }
     setConfirmDelete(true)
   }
 
@@ -143,7 +170,14 @@ export default function ProjectCardKebab({
     if (busy) return
     setBusy(true)
     try {
-      await apiDelete(`/api/projects/${projectId}`)
+      // 1.2.1+: apiDelete returns the parsed JSON body. The server
+      // sets `wasEmpty: true` when it hard-deletes an empty project
+      // (skipping Trash), so we only fire the AdminHeader's
+      // trash:changed event when the count actually moved.
+      const data = (await apiDelete<{ wasEmpty?: boolean }>(`/api/projects/${projectId}`)) || {}
+      if (!data.wasEmpty) {
+        window.dispatchEvent(new CustomEvent('trash:changed'))
+      }
       onMutated?.()
       router.refresh()
     } catch (err) {

@@ -17,6 +17,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.2.1] - 2026-05-22
+
+A small polish release focused on the Trash workflow.
+
+### Added
+
+- **Trash count badge on the admin nav.** A compact red pill sits
+  over the Trash icon in the admin header whenever there are
+  recoverable items. The count refreshes automatically on tab focus
+  and after every delete / restore / empty-Trash action so it
+  always reflects the live state without needing a manual reload.
+  Backed by a new lightweight `GET /api/trash/count` endpoint that
+  only returns the number (no thumbnails, no signed tokens) so the
+  header stays cheap to render.
+- **Empty containers skip Trash entirely.** Deleting a folder that
+  holds no videos in its entire subtree — or a project with no
+  folders and no videos — now hard-deletes right away instead of
+  parking an empty shell in Trash for 30 days. Trash stays focused
+  on items that actually carry recoverable work.
+- **No confirm dialog on empty deletes.** The "Move to Trash"
+  confirmation now skips itself when the folder or project being
+  deleted is empty. There's nothing to lose, so the prompt would
+  just be friction — clicking Delete on an empty container removes
+  it in one tap.
+
+### Fixed
+
+- **"Delete permanently" on a project from Trash.** The Trash page
+  used to fall through to the video DELETE path for projects,
+  silently 404 on a missing video id, and leave the project stuck
+  in Trash. Projects now route to their own DELETE endpoint with
+  `?permanent=1`, which calls the same teardown helper the cleanup
+  cron uses.
+
 ## [1.2.0] - 2026-05-20
 
 ### Added

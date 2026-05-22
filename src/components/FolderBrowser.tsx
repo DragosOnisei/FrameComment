@@ -671,6 +671,13 @@ function FolderBrowserInner(
                   method: 'DELETE',
                 }).catch(() => null)
               }
+              // 1.2.1+: nudge the AdminHeader Trash badge. We fire
+              // once per user action (not once per item) so the
+              // count doesn't get re-fetched N times in a tight
+              // loop. Empty containers may have skipped Trash on
+              // the server, but the count endpoint reflects the
+              // truth either way.
+              window.dispatchEvent(new CustomEvent('trash:changed'))
               clearSelection()
               await fetchFolders({ silent: true })
               onMutated?.()
@@ -685,6 +692,37 @@ function FolderBrowserInner(
 
       const folder = folders.find((f) => f.id === folderId)
       const name = folder?.name ?? 'this folder'
+
+      // 1.2.1+: empty-folder fast path. If the folder has no
+      // immediate children, it can't have deeper descendants
+      // either — so we skip the confirm dialog entirely and just
+      // delete. The server already hard-deletes empty folders
+      // (skipping Trash), so the dialog's "moved to Trash"
+      // language would be a lie anyway. Nothing to recover means
+      // nothing to confirm.
+      if (folder && folder.itemCount === 0) {
+        ;(async () => {
+          try {
+            const res = await apiFetch(`/api/folders/${folderId}`, {
+              method: 'DELETE',
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.error || 'Failed to delete folder')
+            }
+            // Empty-folder deletes don't touch the Trash count,
+            // but firing the event is cheap and harmless — the
+            // count endpoint reflects the true state either way.
+            window.dispatchEvent(new CustomEvent('trash:changed'))
+            await fetchFolders({ silent: true })
+            onMutated?.()
+          } catch (err) {
+            alert(err instanceof Error ? err.message : 'Failed to delete folder')
+          }
+        })()
+        return
+      }
+
       // 1.0.8+: Frame.io-style ConfirmModal. The folder goes to
       // Trash for 30 days (server soft-deletes by default), and its
       // entire subtree comes back together on restore.
@@ -710,6 +748,11 @@ function FolderBrowserInner(
               const err = await res.json().catch(() => ({}))
               throw new Error(err.error || 'Failed to delete folder')
             }
+            // 1.2.1+: refresh the AdminHeader Trash badge — the
+            // count endpoint handles both soft-delete (folder
+            // moved to Trash) and the empty-folder short-circuit
+            // (folder hard-deleted, count unchanged) correctly.
+            window.dispatchEvent(new CustomEvent('trash:changed'))
             // Refresh both sources so the grid drops the deleted
             // folder immediately, no page reload needed (1.0.8+).
             await fetchFolders({ silent: true })
@@ -891,6 +934,8 @@ function FolderBrowserInner(
               method: 'DELETE',
             }).catch(() => null)
           }
+          // 1.2.1+: bump the AdminHeader Trash badge.
+          window.dispatchEvent(new CustomEvent('trash:changed'))
           clearSelection()
           await fetchFolders({ silent: true })
           onMutated?.()
@@ -959,6 +1004,10 @@ function FolderBrowserInner(
               )
             }
           }
+          // 1.2.1+: a video DELETE always lands in Trash, so the
+          // count always moves — fire the event regardless of how
+          // many versions were involved.
+          window.dispatchEvent(new CustomEvent('trash:changed'))
           // Refresh BOTH sources (1.0.8+): the parent page (so any
           // outer state lines up) and our own folder/video listing
           // (so the deleted card disappears from the grid without a
@@ -1650,6 +1699,8 @@ function FolderBrowserInner(
               () => null,
             )
           }
+          // 1.2.1+: nudge the AdminHeader Trash badge.
+          window.dispatchEvent(new CustomEvent('trash:changed'))
           clearSelection()
           // Same dual refresh as the single-delete path (1.0.8+).
           await fetchFolders({ silent: true })

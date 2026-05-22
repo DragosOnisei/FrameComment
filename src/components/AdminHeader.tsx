@@ -16,6 +16,12 @@ export default function AdminHeader() {
   const pathname = usePathname()
   const [showSecurityDashboard, setShowSecurityDashboard] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  // 1.2.1+: small numeric badge next to the Trash nav link so admins
+  // can see at a glance how many items are still recoverable. The
+  // count is fetched from a cheap dedicated endpoint and refreshed
+  // on window focus + whenever a delete-side component fires a
+  // `trash:changed` window event.
+  const [trashCount, setTrashCount] = useState<number | null>(null)
   const t = useTranslations('nav')
   const ta = useTranslations('auth')
 
@@ -35,6 +41,41 @@ export default function AdminHeader() {
 
     fetchSecuritySettings()
   }, [])
+
+  // Trash count — polled on mount, on tab focus, and on
+  // `trash:changed` events so the badge always reflects the live
+  // state. We intentionally don't poll on an interval; the focus +
+  // event combo covers the cases the admin actually cares about
+  // (came back to the tab, just trashed/restored something).
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+
+    const fetchCount = async () => {
+      try {
+        const res = await apiFetch('/api/trash/count')
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        if (typeof data?.count === 'number') {
+          setTrashCount(data.count)
+        }
+      } catch {
+        /* network blip — leave the previous count */
+      }
+    }
+
+    fetchCount()
+    const onFocus = () => fetchCount()
+    const onTrashChanged = () => fetchCount()
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('trash:changed', onTrashChanged)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('trash:changed', onTrashChanged)
+    }
+  }, [user])
 
   const userMenuRef = useRef<HTMLDivElement>(null)
 
@@ -78,19 +119,44 @@ export default function AdminHeader() {
               {navLinks.map((link) => {
                 const Icon = link.icon
                 const isActive = pathname === link.href || (link.href !== '/admin/projects' && pathname?.startsWith(link.href))
+                // Only the Trash link gets the count badge; every
+                // other nav item ignores it. Keeping the rendering
+                // logic inline keeps the existing nav config array
+                // simple (just href/label/icon).
+                const isTrashLink = link.href === '/admin/trash'
+                const showBadge =
+                  isTrashLink && typeof trashCount === 'number' && trashCount > 0
 
                 return (
                   <Link
                     key={link.href}
                     href={link.href}
                     title={link.title || link.label || undefined}
-                    className={`flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap ${
+                    className={`relative flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap ${
                       isActive
                         ? 'bg-primary text-primary-foreground shadow-elevation'
                         : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                     }`}
                   >
-                    {Icon && <Icon className="w-4 h-4" />}
+                    {Icon && (
+                      <span className="relative inline-flex">
+                        <Icon className="w-4 h-4" />
+                        {showBadge && (
+                          // Compact red pill that hugs the top-right
+                          // of the icon. Caps the display at 99+ so
+                          // it never overruns the chip; the title
+                          // attribute carries the exact number for
+                          // accessibility.
+                          <span
+                            className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-[16px] font-semibold text-center shadow-sm"
+                            aria-label={`${trashCount} items in Trash`}
+                            title={`${trashCount} items in Trash`}
+                          >
+                            {trashCount! > 99 ? '99+' : trashCount}
+                          </span>
+                        )}
+                      </span>
+                    )}
                     {link.label && <span className="hidden sm:inline">{link.label}</span>}
                   </Link>
                 )

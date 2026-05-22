@@ -267,8 +267,14 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
     setIsDeleting(true)
 
     // Delete project in background without blocking UI
-    apiDelete(`/api/projects/${project.id}`)
-      .then(() => {
+    apiDelete<{ wasEmpty?: boolean }>(`/api/projects/${project.id}`)
+      .then((data) => {
+        // 1.2.1+: kick the AdminHeader Trash badge unless the
+        // server hard-deleted the project (empty containers skip
+        // Trash, so the count doesn't move).
+        if (!data?.wasEmpty) {
+          window.dispatchEvent(new CustomEvent('trash:changed'))
+        }
         // Redirect to admin page after successful deletion
         router.push('/admin/projects')
         router.refresh()

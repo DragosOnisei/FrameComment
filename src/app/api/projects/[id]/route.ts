@@ -3,6 +3,10 @@ import { prisma } from '@/lib/db'
 // 1.2.0+: deleteFile / deleteDirectory no longer needed here — the
 // project is soft-deleted now, and files only get torn down when the
 // daily cleanup cron purges expired Trash rows (see trash-cleanup.ts).
+// 1.2.1+: we DO reach for hardDeleteProjectById when the project
+// being deleted has no folders/videos — skipping Trash for an empty
+// container.
+import { hardDeleteProjectById } from '@/lib/trash-cleanup'
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured } from '@/lib/settings'
@@ -538,6 +542,12 @@ export async function DELETE(
 
   try {
     const { id } = await params
+    // 1.2.1+: `?permanent=1` skips Trash entirely and tears the
+    // project down right now. Used by the Trash page's "Delete
+    // permanently" action; the regular dashboard kebab uses the
+    // soft-delete path below.
+    const permanent =
+      new URL(request.url).searchParams.get('permanent') === '1'
     // 1.2.0+: soft-delete instead of immediate hard-delete. The
     // project + all its videos/folders/comments stay on disk; we
     // just stamp `deletedAt` so listings hide it and the share
@@ -560,6 +570,35 @@ export async function DELETE(
       logMessage(`[SECURITY] Project trashed — invalidated ${invalidatedCount} share sessions`)
     } catch (error) {
       logError('[SECURITY] Failed to invalidate sessions during project soft-delete:', error)
+    }
+
+    // 1.2.1+: Trash UI's permanent delete path. Same teardown as the
+    // empty-project short-circuit and the cleanup cron.
+    if (permanent) {
+      await hardDeleteProjectById(id)
+      return NextResponse.json({
+        success: true,
+        permanent: true,
+        message: projectMessages.projectDeletedSuccessfully || 'Project permanently deleted.',
+      })
+    }
+
+    // 1.2.1+: short-circuit for empty projects. If there's no
+    // content worth recovering — no folders, no videos — skip
+    // Trash entirely and tear the project down right now. This
+    // keeps Trash useful (only items that actually hold work) and
+    // avoids cluttering it with abandoned blank projects.
+    const [folderCount, videoCount] = await Promise.all([
+      prisma.folder.count({ where: { projectId: id } }),
+      prisma.video.count({ where: { projectId: id } }),
+    ])
+    if (folderCount === 0 && videoCount === 0) {
+      await hardDeleteProjectById(id)
+      return NextResponse.json({
+        success: true,
+        wasEmpty: true,
+        message: projectMessages.projectDeletedPermanentlyEmpty || 'Empty project deleted.',
+      })
     }
 
     await prisma.project.update({

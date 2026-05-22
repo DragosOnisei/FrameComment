@@ -129,6 +129,9 @@ export default function TrashPage() {
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to restore')
         }
+        // 1.2.1+: restoring removes the item from Trash — refresh
+        // the AdminHeader badge so the count drops immediately.
+        window.dispatchEvent(new CustomEvent('trash:changed'))
         await fetchTrash()
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to restore')
@@ -163,6 +166,19 @@ export default function TrashPage() {
                 const err = await res.json().catch(() => ({}))
                 throw new Error(err.error || 'Failed to delete')
               }
+            } else if (item.kind === 'project') {
+              // 1.2.1+: projects route to their own DELETE endpoint
+              // with ?permanent=1. The previous build fell through
+              // to the video branch and silently 404'd, leaving the
+              // project stuck in Trash.
+              const res = await apiFetch(
+                `/api/projects/${item.id}?permanent=1`,
+                { method: 'DELETE' },
+              )
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}))
+                throw new Error(err.error || 'Failed to delete')
+              }
             } else {
               const ids =
                 item.allIds && item.allIds.length > 0
@@ -183,6 +199,9 @@ export default function TrashPage() {
                 throw new Error(errors[0])
               }
             }
+            // 1.2.1+: permanently removing an item drops the Trash
+            // count — refresh the header badge.
+            window.dispatchEvent(new CustomEvent('trash:changed'))
             await fetchTrash()
           } catch (err) {
             alert(err instanceof Error ? err.message : 'Failed to delete')
@@ -210,6 +229,9 @@ export default function TrashPage() {
             const err = await res.json().catch(() => ({}))
             throw new Error(err.error || 'Failed to empty Trash')
           }
+          // 1.2.1+: Trash is now empty — the header badge should
+          // disappear immediately.
+          window.dispatchEvent(new CustomEvent('trash:changed'))
           await fetchTrash()
         } catch (err) {
           alert(err instanceof Error ? err.message : 'Failed to empty Trash')
