@@ -434,15 +434,25 @@ export default function AdminPage() {
     return (
       <div className="flex-1 min-h-0 bg-background">
         <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-          <div className="flex justify-between items-center gap-4 mb-4 sm:mb-6">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-                <FolderKanban className="w-7 h-7 sm:w-8 sm:h-8" />
-                {t('dashboard')}
+          {/* 1.3.0+: mobile-first header. `min-w-0 flex-1` lets the
+              title block shrink so the long subtitle never pushes
+              the action button past the viewport edge. The button
+              is icon-only on phones, full label from sm: up. */}
+          <div className="flex justify-between items-center gap-3 mb-4 sm:mb-6">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl sm:text-3xl font-bold flex items-center gap-2 min-w-0">
+                <FolderKanban className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
+                <span className="truncate">{t('dashboard')}</span>
               </h1>
-              <p className="text-muted-foreground mt-1 text-sm sm:text-base">{t('dashboardDescription')}</p>
+              <p className="text-muted-foreground mt-1 text-xs sm:text-base truncate">{t('dashboardDescription')}</p>
             </div>
-            <Button variant="default" size="default" onClick={openNewProjectModal}>
+            <Button
+              variant="default"
+              size="sm"
+              className="shrink-0 sm:h-10 sm:px-4"
+              onClick={openNewProjectModal}
+              aria-label={t('newProject')}
+            >
               <Plus className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">{t('newProject')}</span>
             </Button>
@@ -457,15 +467,21 @@ export default function AdminPage() {
   return (
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="flex justify-between items-center gap-4 mb-4 sm:mb-6">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-              <FolderKanban className="w-7 h-7 sm:w-8 sm:h-8" />
-              {t('dashboard')}
+        <div className="flex justify-between items-center gap-3 mb-4 sm:mb-6">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-3xl font-bold flex items-center gap-2 min-w-0">
+              <FolderKanban className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
+              <span className="truncate">{t('dashboard')}</span>
             </h1>
-            <p className="text-muted-foreground mt-1 text-sm sm:text-base">{t('dashboardDescription')}</p>
+            <p className="text-muted-foreground mt-1 text-xs sm:text-base truncate">{t('dashboardDescription')}</p>
           </div>
-          <Button variant="default" size="default" onClick={openNewProjectModal}>
+          <Button
+            variant="default"
+            size="sm"
+            className="shrink-0 sm:h-10 sm:px-4"
+            onClick={openNewProjectModal}
+            aria-label={t('newProject')}
+          >
             <Plus className="w-4 h-4 sm:mr-2" />
             <span className="hidden sm:inline">{t('newProject')}</span>
           </Button>

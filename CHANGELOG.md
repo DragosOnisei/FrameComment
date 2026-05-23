@@ -17,6 +17,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.3.0] - 2026-05-23
+
+A responsive pass across the entire admin surface. Every page the
+admin sees on a 360-414px phone or a 768-1024px tablet has been
+tightened up: titles shrink, action buttons collapse to icon-only
+on phones, and content blocks gain `min-w-0` so they can actually
+shrink in their flex containers.
+
+### Changed
+
+- **Admin dashboard (Projects).** Page header uses a proper flex
+  layout (`min-w-0 flex-1` on the title block + `shrink-0` on the
+  New Project button) so the title can truncate gracefully and the
+  button never gets pushed off-screen at 360px. Title drops to
+  `text-xl` on phones, the subtitle to `text-xs`, and the button
+  becomes icon-only below sm:. Table view rows get tighter side
+  padding on mobile (`px-3` instead of `px-5`) so the thumbnail +
+  name + kebab all fit.
+- **Project detail page (folder browser).** Back / New Folder /
+  Project Settings buttons no longer claim `min-w-[150px]` on
+  phones — they're proper `size="sm"` icon-only buttons below sm:
+  and restore the desktop look from sm: up. All three fit on one
+  row at 360px now (used to wrap awkwardly).
+- **Folder browser grid.** Switched from `grid-cols-1` on mobile
+  to `grid-cols-2`. A single-column layout was wasting screen
+  space on phones — two cards per row reads much better and
+  matches the Frame.io reference. Gap tightens from `gap-4` to
+  `gap-3` on phones.
+- **Empty state inside a folder.** Vertical padding drops from
+  `py-20` to `py-10` on phones and the minimum height from 400px
+  to 280px so the "drop files here" prompt doesn't dominate the
+  screen on small viewports.
+- **Trash page.** Header title shrinks + description truncates so
+  the Empty Trash button stays visible. Empty Trash collapses to
+  icon-only below sm:. Each Trash row gets tighter horizontal
+  padding on phones, Restore button hides its label below sm:,
+  and the per-level indent halves on phones (12px steps instead
+  of 24px) so deeply nested items don't push the action controls
+  off-screen.
+- **Users + Settings pages.** Same header pattern as the dashboard:
+  title block gets `min-w-0 flex-1`, icon shrinks to `w-6 h-6`,
+  primary action button (Add User / Save) becomes icon-only on
+  phones. Settings page's existing mobile-stacked layout (vs.
+  desktop sidebar) was already in place — this release just
+  polishes the title row.
+
+### Notes
+
+- The share page (the public viewer clients see) was already
+  rebuilt for mobile in 1.0.4 (stacked player + comments,
+  resizable sidebar from lg+, mobile-collapsible comment panel).
+  This release leaves that work in place.
+- Login / Setup pages already used a centered `max-w-md` card so
+  they were mobile-friendly out of the box — no change needed.
+
 ## [1.2.1] - 2026-05-22
 
 A small polish release focused on the Trash workflow.

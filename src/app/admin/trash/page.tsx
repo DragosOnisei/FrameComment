@@ -302,14 +302,17 @@ export default function TrashPage() {
   }, [items])
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-6">
-      <div className="flex items-end justify-between gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Trash2 className="w-6 h-6 text-muted-foreground" />
-            Trash
+    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
+      {/* 1.3.0+: min-w-0 + truncate on the description so the
+          "Empty Trash" button stays visible at 360-414px viewports.
+          The button collapses to icon-only on phones. */}
+      <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2 min-w-0">
+            <Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-muted-foreground shrink-0" />
+            <span className="truncate">Trash</span>
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">
             Items here are recoverable for 30 days, then deleted
             permanently.
           </p>
@@ -318,10 +321,13 @@ export default function TrashPage() {
           <Button
             type="button"
             variant="outline"
+            size="sm"
+            className="shrink-0 sm:h-10 sm:px-4"
             onClick={handleEmptyTrash}
+            aria-label="Empty Trash"
           >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Empty Trash
+            <Trash2 className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Empty Trash</span>
           </Button>
         )}
       </div>
@@ -340,8 +346,8 @@ export default function TrashPage() {
       )}
 
       {!loading && !error && items.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-border/50 bg-card/40 p-16 text-center">
-          <Trash2 className="w-12 h-12 mx-auto text-muted-foreground/40" />
+        <div className="rounded-2xl border border-dashed border-border/50 bg-card/40 p-8 sm:p-16 text-center">
+          <Trash2 className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground/40" />
           <p className="mt-4 text-sm text-muted-foreground">
             Trash is empty.
           </p>
@@ -438,11 +444,16 @@ function TrashRow({
   const hasChildren = node.children && node.children.length > 0
   const isFolder = node.kind === 'folder'
 
+  // 1.3.0+: tighter indent step on phones (12 vs 24) so deep nests
+  // don't push the controls off-screen. Plus mobile-friendly side
+  // padding on the row (p-2 vs p-3) so the 16x40 thumbnail + name +
+  // Restore + X all fit at 360px.
+  const isMobileDepthFactor = typeof window !== 'undefined' && window.innerWidth < 640 ? 12 : 24
   return (
     <>
       <div
-        className="flex items-center gap-3 p-3"
-        style={{ paddingLeft: 12 + depth * 24 }}
+        className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3"
+        style={{ paddingLeft: 8 + depth * isMobileDepthFactor }}
       >
         {/* Chevron / spacer. Folders with children get a chevron;
             videos + empty folders get a same-width placeholder so
@@ -510,13 +521,14 @@ function TrashRow({
             variant="outline"
             disabled={busy}
             onClick={() => onRestore(node)}
+            aria-label="Restore"
           >
             {busy ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              <Undo2 className="w-4 h-4 mr-1.5" />
+              <Undo2 className="w-4 h-4 sm:mr-1.5" />
             )}
-            Restore
+            <span className="hidden sm:inline">Restore</span>
           </Button>
           <Button
             type="button"

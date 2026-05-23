@@ -750,18 +750,28 @@ export default function GlobalSettingsPage() {
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-4 sm:mb-6">
-          <div className="flex justify-between items-center gap-4">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-                <SettingsIcon className="w-7 h-7 sm:w-8 sm:h-8" />
-                {t('title')}
+          {/* 1.3.0+: title shrinks + save button stays visible on
+              phones. The button keeps its label past sm: but is icon
+              only on `<sm`. */}
+          <div className="flex justify-between items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl sm:text-3xl font-bold flex items-center gap-2 min-w-0">
+                <SettingsIcon className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
+                <span className="truncate">{t('title')}</span>
               </h1>
-              <p className="text-sm sm:text-base text-muted-foreground mt-1">
+              <p className="text-xs sm:text-base text-muted-foreground mt-1 truncate">
                 {t('description')}
               </p>
             </div>
 
-            <Button onClick={handleSave} variant="default" disabled={saving} size="default">
+            <Button
+              onClick={handleSave}
+              variant="default"
+              disabled={saving}
+              size="sm"
+              className="shrink-0 sm:h-10 sm:px-4"
+              aria-label={saving ? tc('saving') : tc('saveChanges')}
+            >
               <Save className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
             </Button>

@@ -2018,7 +2018,7 @@ function FolderBrowserInner(
         // dashed border + CTA. At the project root we swap the CTA
         // for "New Folder" since videos can't live at the root.
         <div
-          className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-20 px-6 text-center min-h-[400px] transition-colors ${
+          className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-10 sm:py-20 px-4 sm:px-6 text-center min-h-[280px] sm:min-h-[400px] transition-colors ${
             isFileDropHover
               ? 'border-primary/70 bg-primary/5'
               : 'border-border/40 bg-card/30'
@@ -2208,7 +2208,11 @@ function FolderBrowserInner(
       />
 
       {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+        // 1.3.0+: start at 2 columns on phones (used to be 1) so the
+        // cards don't fill the entire screen each. 2 fits a 360-414px
+        // viewport comfortably; we step up to 3 → 4 → 5 → 6 on bigger
+        // viewports.
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4">
           {folders.map((f) => (
             <FolderCard
               key={`folder:${f.id}`}

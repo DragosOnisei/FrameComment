@@ -206,29 +206,32 @@ export default function ProjectPage() {
   return (
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
+        {/* 1.3.0+: top action bar is now phone-friendly. On `<sm` the
+            buttons are icon-only with no min-width so they all fit
+            on one row even at 360px. From sm: up, the labels return
+            and a 150px floor restores the desktop look. */}
+        <div className="mb-4 sm:mb-6 flex items-center justify-between gap-2">
           <Link href="/admin/projects">
-            {/* 1.0.9+: unified neutral outline style + min width so the
-                top row reads as one consistent set of controls. Stays
-                on the left. */}
             <Button
               variant="outline"
-              size="default"
-              className="min-w-[150px]"
+              size="sm"
+              className="sm:size-default sm:h-10 sm:px-4 sm:min-w-[150px]"
+              aria-label="Back"
             >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              <span>Back</span>
+              <ArrowLeft className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Back</span>
             </Button>
           </Link>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
             {/* New Folder hoisted up here (1.0.9+) so it sits alongside
                 Project settings instead of inline next to the
                 breadcrumb. Driven through the FolderBrowser ref. */}
             <Button
               variant="outline"
-              size="default"
-              className="min-w-[150px]"
+              size="sm"
+              className="sm:h-10 sm:px-4 sm:min-w-[150px]"
               onClick={() => folderBrowserRef.current?.openNewFolderDialog()}
+              aria-label="New Folder"
             >
               <FolderPlus className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">New Folder</span>
@@ -236,8 +239,9 @@ export default function ProjectPage() {
             <Link href={`/admin/projects/${id}/settings`}>
               <Button
                 variant="outline"
-                size="default"
-                className="min-w-[150px]"
+                size="sm"
+                className="sm:h-10 sm:px-4 sm:min-w-[150px]"
+                aria-label={t('projectSettings')}
               >
                 <Settings className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">{t('projectSettings')}</span>

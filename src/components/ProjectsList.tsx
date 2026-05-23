@@ -299,7 +299,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
       ) : (
         /* Table View */
         <Card className="overflow-hidden">
-          <div className="flex items-center justify-between px-4 sm:px-5 py-2.5 border-b bg-muted/30">
+          <div className="flex items-center justify-between px-3 sm:px-5 py-2.5 border-b bg-muted/30">
             <span className="text-sm font-medium">{tn('projects')}</span>
             <span className="text-xs text-muted-foreground">{sortedProjects.length} {t('projectsCount')}</span>
           </div>
@@ -307,8 +307,10 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
               comments columns swapped for folders & total size.
               1.2.0+: Client + Due Date columns retired (the create
               modal no longer asks for either; both still exist in
-              Project Settings if the workflow needs them). */}
-          <div className="hidden sm:flex items-center gap-4 px-5 py-2 text-xs text-muted-foreground bg-muted/20 border-b">
+              Project Settings if the workflow needs them).
+              1.3.0+: tighter side padding on phones; the header row
+              hides on `<sm` since only Name + kebab show there. */}
+          <div className="hidden sm:flex items-center gap-4 px-3 sm:px-5 py-2 text-xs text-muted-foreground bg-muted/20 border-b">
             <span className="flex-1 min-w-0">{tc('name')}</span>
             <span className="w-20 text-center hidden lg:block">Folders</span>
             <span className="w-24 text-right hidden lg:block">Size</span>
@@ -326,7 +328,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                 <Link
                   key={project.id}
                   href={`/admin/projects/${project.id}`}
-                  className="flex items-center gap-4 px-5 py-3 text-sm hover:bg-accent/30 transition-colors"
+                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm hover:bg-accent/30 transition-colors"
                 >
                   {/* 1.2.0+: tiny rounded thumbnail before the title,
                       Frame.io-style. Cover image when uploaded, else
@@ -383,7 +385,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
               <button
                 type="button"
                 onClick={onNewProject}
-                className="w-full flex items-center gap-4 px-5 py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors text-left"
+                className="w-full flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors text-left"
               >
                 <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center">
                   <Plus className="w-4 h-4" />
@@ -393,7 +395,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
             ) : (
               <Link
                 href="/admin/projects/new"
-                className="w-full flex items-center gap-4 px-5 py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
+                className="w-full flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
               >
                 <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center">
                   <Plus className="w-4 h-4" />
