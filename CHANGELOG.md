@@ -17,6 +17,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.3.2] - 2026-05-24
+
+A small follow-up to 1.3.1 that brings the Frame.io-style timeline
+comment popover to desktop and fixes a couple of hover ergonomics
+issues spotted in real use.
+
+### Changed
+
+- **Unified popover design across breakpoints.** Desktop now uses
+  the same translucent card (50 % `bg-card` + `backdrop-blur-sm` +
+  yellow timestamp chip) as mobile instead of a separate compact
+  black tooltip. The two surfaces now read as the same component
+  at any width.
+- **Prev/Next buttons are real buttons.** The stack-navigation
+  controls inside the popover have a filled `bg-muted` background +
+  `ring-border` outline + medium-weight label, so they read as
+  clickable actions instead of dim text links.
+
+### Fixed
+
+- **Popover overflowed at the start / end of the timeline on
+  desktop.** A marker at position < 20 % (or > 80 %) used to push
+  half the 220 px tooltip off-screen because an inline
+  `translateX(-50%)` overrode the alignment classes. The transform
+  is gone, the alignment helper now emits `sm:left-0` / `sm:right-0`
+  / `sm:left-1/2 sm:-translate-x-1/2`, and the card stays inside
+  the viewport regardless of where the marker is.
+- **Popover dismissed before the mouse could reach it.** There's an
+  8 px gap between the avatar marker and the popover above it —
+  crossing that gap used to fire `mouseleave` immediately and close
+  the popover before the cursor landed on it. A 220 ms close-debounce
+  on the hover state lets the cursor traverse the gap and re-enter
+  the popover without losing it.
+
 ## [1.3.1] - 2026-05-24
 
 A polish pass on top of 1.3.0's responsive work, focused on the
@@ -42,13 +76,7 @@ feel native on small screens.
   share a timestamp, the card shows one at a time with a 1/N
   indicator and swipe navigation (← / → buttons on desktop). The
   popover stays open until you tap outside it — no auto-dismiss
-  timer. The same translucent design now ships on desktop too, with
-  smart left/right/centre alignment that clamps the card inside the
-  viewport so a marker at the start of the timeline never pushes the
-  popover off-screen. A 220 ms close-debounce lets the mouse cross
-  the gap from the avatar to the popover without it disappearing
-  mid-flight, and the Prev/Next buttons are filled + ringed so they
-  read as real, clickable actions instead of dim text links.
+  timer.
 - **Smart-positioned kebab menus everywhere.** Video, folder, and
   project cards now compute the kebab's screen position when the
   menu opens and place the popover at the right offset so it never
