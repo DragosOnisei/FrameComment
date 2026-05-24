@@ -17,6 +17,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.3.1] - 2026-05-24
+
+A polish pass on top of 1.3.0's responsive work, focused on the
+real-world phone experience after testing FrameComment on an actual
+device. Touches almost every interactive surface — uploads, menus,
+the timeline comment popover, the comment input — to make each one
+feel native on small screens.
+
+### Added
+
+- **Mobile single-PATCH TUS upload path.** Mobile browsers (iOS
+  Safari, Chrome on Android, Brave) would drop the XHR connection
+  between TUS PATCH requests, stalling the upload after the first
+  10 MB chunk. We now send the entire file in a single PATCH on
+  phones for anything under 100 MB, which fully sidesteps the
+  "between chunks" failure mode. Files above that still chunk at
+  8 MB to avoid memory pressure.
+- **Frame.io-style timeline comment popover.** Tapping a comment
+  avatar on the timeline now opens a card centred on the viewport
+  with a yellow timestamp chip, the full body text (no line-clamp,
+  word-break safe), and a 50 % opaque background that lets you see
+  the drawn annotations through the popover. When several comments
+  share a timestamp, the card shows one at a time with a 1/N
+  indicator and swipe navigation (← / → buttons on desktop). The
+  popover stays open until you tap outside it — no auto-dismiss
+  timer.
+- **Smart-positioned kebab menus everywhere.** Video, folder, and
+  project cards now compute the kebab's screen position when the
+  menu opens and place the popover at the right offset so it never
+  overflows the viewport — exactly how Frame.io behaves. Helper
+  lives in `src/lib/popover-position.ts`.
+- **`computePopoverStyle` helper.** Shared smart-positioning code
+  with horizontal clamping and vertical flip ("open above when not
+  enough room below") so the kebab popovers on the dashboard work
+  the same as the ones inside folders.
+- **`allowedDevOrigins` config.** Lets the dev server accept
+  requests from LAN IPs (used for live phone testing). Dev-only —
+  production builds are unaffected.
+
+### Changed
+
+- **Iconize the project folder top bar on phones.** Back, Upload,
+  Download All, New Folder, and Project Settings collapse to
+  icon-only buttons that all fit on one row at 360 px instead of
+  stacking 2x2.
+- **Trash row controls upgraded.** Delete (X) button now uses the
+  outline-destructive style so it reads as a real action on phones
+  instead of disappearing into the dark row. Empty Trash header
+  button also picks up the destructive accent.
+- **Comment input auto-grows.** The composer textarea now expands
+  vertically with the user's typing, capped at 40 % of the
+  viewport with internal scroll for very long messages. New
+  `maxLength={6000}` matches the server-side validator.
+- **Comment popover transparency.** Background at 50 % opacity
+  with a subtle backdrop-blur so the annotations underneath stay
+  visible without losing legibility on the text.
+- **Avatar wrapper z-index.** Bumped to z-30 so the timeline
+  popover paints above the annotation overlay (z-10) and the
+  drawing canvas (z-20) — previously the SVG drawings could
+  appear to cut through the popover surface.
+
+### Fixed
+
+- **iOS Safari auto-zoom on input focus.** All text inputs and
+  textareas use 16 px font on mobile (`text-base sm:text-sm`) so
+  iOS doesn't trigger its automatic zoom when the user focuses an
+  input. Pinch-zoom for accessibility still works.
+- **Layout shift on first paint on Android Chrome.** Added an
+  explicit `<meta name="viewport">` as the very first `<head>`
+  child plus `viewport-fit=cover` so the browser sees device-width
+  before it starts laying anything out — fixes the "everything is
+  zoomed in / clipped" first render.
+- **Horizontal overflow on the Trash page.** Long file names
+  pushed the Empty Trash / Delete buttons off the visible viewport
+  edge on phones. The header and row containers now have
+  `min-w-0 w-full` so the truncate utility actually shrinks them.
+- **Smooth-scroll attribute.** Added `data-scroll-behavior="smooth"`
+  on `<html>` so Next.js doesn't smooth-scroll the entire page when
+  the user navigates between admin tabs.
+- **`overflow-x: clip` on `<html>`.** A stronger guard than
+  `overflow: hidden` on `<body>` for Android Chrome, which can
+  still scroll the document element if any descendant breaks out.
+- **No auto-scroll to comment on phones.** Tapping a dot on the
+  timeline used to scroll the comment list into view, which threw
+  the video off-screen on phones. We now seek + highlight without
+  scrolling so the player stays visible — Frame.io style.
+
 ## [1.3.0] - 2026-05-23
 
 A responsive pass across the entire admin surface. Every page the

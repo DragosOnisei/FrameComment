@@ -22,6 +22,7 @@ import {
 } from './ui/select'
 import { UnapproveModal } from './UnapproveModal'
 import { apiPost, apiPatch, apiDelete } from '@/lib/api-client'
+import { computePopoverStyle } from '@/lib/popover-position'
 
 interface Video {
   id: string
@@ -52,6 +53,9 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
   // a single ⋮ dropdown at the top of the card (1.0.6+).
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 1.3.1+: Frame.io-style smart-positioned popover.
+  const kebabRef = useRef<HTMLButtonElement>(null)
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({})
 
   useEffect(() => {
     if (!menuOpen) return
@@ -330,8 +334,17 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
           project-level action lives behind this ⋮. */}
       <div ref={menuRef} className="relative inline-block">
         <button
+          ref={kebabRef}
           type="button"
-          onClick={() => setMenuOpen((v) => !v)}
+          onClick={() => {
+            if (menuOpen) {
+              setMenuOpen(false)
+              return
+            }
+            const rect = kebabRef.current?.getBoundingClientRect()
+            if (rect) setMenuStyle(computePopoverStyle(rect, { width: 260 }))
+            setMenuOpen(true)
+          }}
           className="rounded-md p-2 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
@@ -343,7 +356,9 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
         {menuOpen && (
           <div
             role="menu"
-            className="absolute right-0 top-full mt-1 z-30 min-w-[240px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+            // 1.3.1+: Frame.io-style smart popover (see VideoCard).
+            style={menuStyle}
+            className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
           >
             {shareUrl && (
               <button

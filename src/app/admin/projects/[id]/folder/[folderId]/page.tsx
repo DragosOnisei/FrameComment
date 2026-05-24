@@ -199,35 +199,34 @@ export default function ProjectFolderPage() {
   return (
     <div className="flex-1 min-h-0 bg-background">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
+        {/* 1.3.0+: Frame.io-style top action bar. On phones (<sm)
+            every button is icon-only with no min-width so the entire
+            row — Back + Upload + Download + New Folder + Settings —
+            fits on a single line at 360px. From sm: up we restore the
+            150px floor + visible labels so the desktop layout is
+            unchanged. Removed `flex-wrap` so buttons never stack into
+            a 2x2 grid on mobile (Frame.io-style single-row toolbar). */}
+        <div className="mb-4 sm:mb-6 flex items-center justify-between gap-2">
           <Link href={`/admin/projects/${projectId}`}>
-            {/* 1.0.9+: matches the neutral outline style + min width of
-                the right-hand action bar so the whole top row reads as
-                one consistent set of controls. Stays on the left. */}
             <Button
               variant="outline"
-              size="default"
-              className="min-w-[150px]"
+              size="sm"
+              className="sm:size-default sm:h-10 sm:px-4 sm:min-w-[150px]"
+              aria-label="Back"
             >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              <span>Back</span>
+              <ArrowLeft className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Back</span>
             </Button>
           </Link>
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Unified top action bar (1.0.9+). All four actions
-                share the same neutral outline style + `min-w-[150px]`
-                so the row reads calm rather than as a rainbow of
-                buttons. Each one keeps its own icon as the visual
-                differentiator. */}
+          <div className="flex items-center gap-1 sm:gap-2">
             {project && project.status !== 'APPROVED' && (
-              // 1.1.0+: Upload is the primary action on this page, so
-              // it gets the blue solid `default` variant. The other
-              // three actions stay neutral outline.
+              // Upload is the primary action — solid blue variant.
               <Button
                 variant="default"
-                size="default"
-                className="min-w-[150px]"
+                size="sm"
+                className="sm:h-10 sm:px-4 sm:min-w-[150px]"
                 onClick={() => videoManagerRef.current?.triggerUpload()}
+                aria-label={t('uploadVideos')}
               >
                 <Upload className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">{t('uploadVideos')}</span>
@@ -235,18 +234,20 @@ export default function ProjectFolderPage() {
             )}
             <Button
               variant="outline"
-              size="default"
-              className="min-w-[150px]"
+              size="sm"
+              className="sm:h-10 sm:px-4 sm:min-w-[150px]"
               onClick={() => folderBrowserRef.current?.downloadAll()}
+              aria-label="Download All"
             >
               <Download className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">Download All</span>
             </Button>
             <Button
               variant="outline"
-              size="default"
-              className="min-w-[150px]"
+              size="sm"
+              className="sm:h-10 sm:px-4 sm:min-w-[150px]"
               onClick={() => folderBrowserRef.current?.openNewFolderDialog()}
+              aria-label="New Folder"
             >
               <FolderPlus className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">New Folder</span>
@@ -254,8 +255,9 @@ export default function ProjectFolderPage() {
             <Link href={`/admin/projects/${projectId}/settings`}>
               <Button
                 variant="outline"
-                size="default"
-                className="min-w-[150px]"
+                size="sm"
+                className="sm:h-10 sm:px-4 sm:min-w-[150px]"
+                aria-label="Project settings"
               >
                 <Settings className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Project settings</span>

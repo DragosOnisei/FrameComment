@@ -140,12 +140,32 @@ export default function CommentInput({
   // gone. By listening on the raw element we get the new value
   // *before* React's render cycle can wipe it.
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // 1.3.1+: max length is enforced by the textarea's native
+  // `maxLength` attribute (also passed to the server-side validator).
+  // 6 000 chars matches a long paragraph — way past anything someone
+  // would type in a single comment.
+  const MAX_COMMENT_LENGTH = 6000
   // Keep the latest `newComment` in a ref so the native listener
   // closure stays valid across renders without re-binding on every
   // keystroke.
   const newCommentRef = useRef(newComment)
   useEffect(() => {
     newCommentRef.current = newComment
+  }, [newComment])
+
+  // 1.3.1+: auto-resize the textarea so every line of typed text is
+  // visible. Setting `height = 'auto'` first lets the element shrink
+  // back down when the user deletes lines; `scrollHeight` then gives
+  // the real intrinsic height. Capped at ~50% of the viewport so a
+  // 100-line comment doesn't push the player off-screen.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const maxHeight = Math.max(120, Math.floor(window.innerHeight * 0.4))
+    const next = Math.min(el.scrollHeight, maxHeight)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
   }, [newComment])
   // 1.1.1+: insert text (an emoji, but generic) at the current
   // caret position. Used by the in-app emoji picker to side-step
@@ -504,6 +524,7 @@ export default function CommentInput({
                   onChange={(e) => onCommentChange(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onFocus={onInputFocus}
+                  maxLength={MAX_COMMENT_LENGTH}
                   className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-snug"
                   rows={1}
                 />

@@ -302,11 +302,16 @@ export default function TrashPage() {
   }, [items])
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
+    // 1.3.1+: explicit `w-full max-w-full` + `overflow-x-hidden`
+    // guard rails so a long subtitle / file name in a TrashRow can
+    // never push the right-hand actions (Empty Trash, Delete) off
+    // the visible viewport edge on phones.
+    <div className="w-full max-w-full overflow-x-hidden">
+      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
       {/* 1.3.0+: min-w-0 + truncate on the description so the
           "Empty Trash" button stays visible at 360-414px viewports.
           The button collapses to icon-only on phones. */}
-      <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
+      <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6 min-w-0">
         <div className="min-w-0 flex-1">
           <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2 min-w-0">
             <Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-muted-foreground shrink-0" />
@@ -318,11 +323,14 @@ export default function TrashPage() {
           </p>
         </div>
         {items.length > 0 && (
+          // 1.3.1+: destructive accent so the action stands out on
+          // phones — the plain outline button was easy to miss against
+          // the dark background.
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="shrink-0 sm:h-10 sm:px-4"
+            className="shrink-0 sm:h-10 sm:px-4 text-destructive hover:text-destructive border-destructive/40 hover:border-destructive hover:bg-destructive/10"
             onClick={handleEmptyTrash}
             aria-label="Empty Trash"
           >
@@ -355,13 +363,13 @@ export default function TrashPage() {
       )}
 
       {!loading && !error && items.length > 0 && (
-        <div className="space-y-8">
+        <div className="space-y-8 min-w-0">
           {projectGroups.map((group) => (
-            <section key={group.projectId}>
+            <section key={group.projectId} className="min-w-0">
               <h2 className="text-xs uppercase tracking-wide text-muted-foreground mb-3">
                 {group.projectTitle}
               </h2>
-              <div className="rounded-xl border border-border/50 bg-card divide-y divide-border/40 overflow-hidden">
+              <div className="rounded-xl border border-border/50 bg-card divide-y divide-border/40 overflow-hidden min-w-0">
                 {group.roots.map((node) => (
                   <TrashRow
                     key={`${node.kind}:${node.id}`}
@@ -406,6 +414,7 @@ export default function TrashPage() {
         }}
         onCancel={() => setConfirmState({ open: false, title: '' })}
       />
+      </div>
     </div>
   )
 }
@@ -452,7 +461,7 @@ function TrashRow({
   return (
     <>
       <div
-        className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3"
+        className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 min-w-0 w-full"
         style={{ paddingLeft: 8 + depth * isMobileDepthFactor }}
       >
         {/* Chevron / spacer. Folders with children get a chevron;
@@ -530,13 +539,17 @@ function TrashRow({
             )}
             <span className="hidden sm:inline">Restore</span>
           </Button>
+          {/* 1.3.1+: outlined Delete button so it reads as a real
+              action on phones — the previous ghost variant blended
+              into the dark row and looked invisible. */}
           <Button
             type="button"
             size="sm"
-            variant="ghost"
-            className="text-destructive hover:text-destructive"
+            variant="outline"
+            className="text-destructive hover:text-destructive border-destructive/40 hover:border-destructive hover:bg-destructive/10"
             disabled={busy}
             onClick={() => onPermanentDelete(node)}
+            aria-label="Delete permanently"
           >
             <X className="w-4 h-4" />
           </Button>

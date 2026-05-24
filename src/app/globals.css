@@ -166,6 +166,28 @@
   /* Smooth scrolling */
   html {
     scroll-behavior: smooth;
+    /* Hard guard against horizontal scroll bleed on mobile.
+       body has overflow-x-hidden already, but Chrome on Android can
+       still scroll the html element itself if any descendant breaks
+       out — which makes the whole page look misaligned. `clip` is
+       newer/safer (no programmatic scroll), with `hidden` as a
+       fallback for older engines. */
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
+
+  /* 1.3.1+: iOS Safari auto-zooms into text inputs whose font-size
+     is below 16px on focus. Forcing a 16px floor on every text-entry
+     control on phones prevents that without disabling pinch-zoom.
+     `!important` is required because component utility classes
+     (Tailwind's `text-sm` / `text-xs` on Textarea, Input, etc.) have
+     higher specificity than our element selectors. */
+  @media (max-width: 639px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
   }
 }
 

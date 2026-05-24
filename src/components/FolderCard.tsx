@@ -14,6 +14,7 @@ import {
   Share2,
   ArrowRight,
 } from 'lucide-react'
+import { computePopoverStyle } from '@/lib/popover-position'
 
 /**
  * Frame.io-style folder card used in the admin folder browser. A
@@ -150,6 +151,11 @@ export default function FolderCard({
   const [menuOpen, setMenuOpen] = useState(false)
   const [isHoveredDropTarget, setIsHoveredDropTarget] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 1.3.1+: Frame.io-style smart-positioned kebab popover. See VideoCard
+  // for the rationale — anchored to the kebab via viewport coords and
+  // clamped inside the screen edges.
+  const kebabRef = useRef<HTMLButtonElement>(null)
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({})
   // Inline-rename state (1.0.9+). Driven either by the auto-edit prop
   // (after "New Folder with Selection") or — eventually — by clicking
   // the name. We seed `draftName` from the live `name` so an in-flight
@@ -414,10 +420,17 @@ export default function FolderCard({
         {(showRename || showShare || onDelete || onMoveUp || showDownload || showNewFolder || showDuplicate) && (
         <div ref={menuRef} className="relative shrink-0 -mr-1 -mt-1">
           <button
+            ref={kebabRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              setMenuOpen((v) => !v)
+              if (menuOpen) {
+                setMenuOpen(false)
+                return
+              }
+              const rect = kebabRef.current?.getBoundingClientRect()
+              if (rect) setMenuStyle(computePopoverStyle(rect))
+              setMenuOpen(true)
             }}
             className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             aria-haspopup="menu"
@@ -430,7 +443,12 @@ export default function FolderCard({
           {menuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-full mt-1 z-30 min-w-[240px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+              // 1.3.1+: positioned via inline style (computed from
+              // kebab bounding rect on open) — Frame.io style smart
+              // popover that floats over adjacent cards and stays
+              // clamped inside the viewport.
+              style={menuStyle}
+              className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
               onClick={(e) => e.stopPropagation()}
             >
               {/* 1.1.0+ menu order:

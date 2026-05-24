@@ -25,14 +25,46 @@ function getEffectiveNetworkType(): string | undefined {
   return nav.connection?.effectiveType
 }
 
+function isMobileUserAgent(): boolean {
+  if (typeof navigator === 'undefined') return false
+  // Covers iPhone/iPad/Android phones and tablets. Catches the
+  // mobile-Safari, Chrome-Android, and Brave-mobile browsers we
+  // care about. Conservative on purpose — if we mis-detect a
+  // desktop as mobile the only consequence is slightly more
+  // PATCH requests, which is fine.
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+}
+
 export function getTusChunkSizeBytes(fileSize: number): number {
   const effectiveType = getEffectiveNetworkType()
+  const onMobile = isMobileUserAgent()
 
   // On slow connections keep chunks small so a stalled part doesn't block for too long
   if (effectiveType === 'slow-2g' || effectiveType === '2g') return 2 * MB
-  if (effectiveType === '3g') return 8 * MB
+  if (effectiveType === '3g') return onMobile ? 2 * MB : 8 * MB
 
-  // Scale with file size, capped at 25 MiB to stay well under Cloudflare's 100 MiB limit
+  // 1.3.1+: mobile browsers (especially iOS Safari and Chrome-Android)
+  // drop the XHR connection between TUS PATCH requests — the upload
+  // stalls right after the first chunk and never recovers because the
+  // client never sends PATCH #2. We work around this by uploading the
+  // whole file in a SINGLE PATCH on mobile (chunkSize >= fileSize).
+  // This guarantees there's only ever one PATCH, so the "between
+  // chunks" failure mode can't happen.
+  //
+  // For files bigger than 100 MiB we fall back to 8 MiB chunks because
+  // a 100+ MiB single PATCH risks memory pressure / proxy timeouts.
+  // 100 MiB is also under Cloudflare's 100 MiB body limit which we'd
+  // want to stay under for production deploys behind their proxy.
+  if (onMobile) {
+    if (fileSize >= 100 * MB) return 8 * MB
+    // Ensure a single PATCH carries the entire file by setting the
+    // chunk size to the file size itself. tus-js-client will then
+    // send one PATCH with `Content-Length: <fileSize>` and finish.
+    return Math.max(fileSize, MB)
+  }
+
+  // Desktop: scale with file size, capped at 25 MiB to stay well under
+  // Cloudflare's 100 MiB limit.
   if (fileSize >= 100 * MB) return 25 * MB
   return 10 * MB
 }

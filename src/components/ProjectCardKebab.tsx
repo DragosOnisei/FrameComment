@@ -15,6 +15,7 @@ import {
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { computePopoverStyle } from '@/lib/popover-position'
 
 /**
  * Kebab dropdown attached to each project card on the dashboard
@@ -64,6 +65,10 @@ export default function ProjectCardKebab({
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 1.3.1+: Frame.io-style smart-positioned popover. See VideoCard for
+  // rationale.
+  const kebabRef = useRef<HTMLButtonElement>(null)
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({})
   // 1.2.0+: pretty confirm dialogs in place of window.confirm() for
   // Archive / Unarchive / Delete. Each opens through its own state
   // toggle so they can't fight each other.
@@ -190,10 +195,17 @@ export default function ProjectCardKebab({
   return (
     <div ref={menuRef} className="relative" onClick={stop}>
       <button
+        ref={kebabRef}
         type="button"
         onClick={(e) => {
           stop(e)
-          setOpen((v) => !v)
+          if (open) {
+            setOpen(false)
+            return
+          }
+          const rect = kebabRef.current?.getBoundingClientRect()
+          if (rect) setMenuStyle(computePopoverStyle(rect))
+          setOpen(true)
         }}
         className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
         aria-haspopup="menu"
@@ -206,7 +218,9 @@ export default function ProjectCardKebab({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-1 z-30 min-w-[200px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+          // 1.3.1+: Frame.io-style smart popover (see VideoCard).
+          style={menuStyle}
+          className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
         >
           <button
             role="menuitem"

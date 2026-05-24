@@ -16,6 +16,7 @@ import {
   MessageSquare,
   Check,
 } from 'lucide-react'
+import { computePopoverStyle } from '@/lib/popover-position'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -301,6 +302,13 @@ export default function VideoCard({
   const [menuOpen, setMenuOpen] = useState(false)
   const [thumbErrored, setThumbErrored] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 1.3.1+: kebab popover uses smart fixed-positioning (Frame.io
+  // style) — we anchor the menu to the kebab button via viewport
+  // coordinates and clamp it inside the viewport edges so it never
+  // overflows on phones, regardless of whether the card sits in the
+  // left or right grid column.
+  const kebabRef = useRef<HTMLButtonElement>(null)
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({})
   // ─── hover-scrub state (1.0.6+) ───────────────────────────
   // `scrubFraction` ranges 0…1; null when not hovering. Driving the
   // preview <video> off this single number makes the playhead line
@@ -687,10 +695,24 @@ export default function VideoCard({
         {(showRename || onDelete || onMoveUp || showShare || showSplit || showNewFolder || showDownload || showDuplicate) && (
         <div ref={menuRef} className="relative">
           <button
+            ref={kebabRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              setMenuOpen((v) => !v)
+              if (menuOpen) {
+                setMenuOpen(false)
+                return
+              }
+              // 1.3.1+: compute fixed coordinates anchored to the
+              // kebab button. Right-align by default (menu's right
+              // edge sits flush with the kebab's right edge), then
+              // clamp so the menu never falls outside the visible
+              // viewport on either side. This is what gives Frame.io
+              // its phone-friendly popover that floats over adjacent
+              // cards instead of overflowing off-screen.
+              const rect = kebabRef.current?.getBoundingClientRect()
+              if (rect) setMenuStyle(computePopoverStyle(rect))
+              setMenuOpen(true)
             }}
             className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             aria-haspopup="menu"
@@ -703,11 +725,12 @@ export default function VideoCard({
           {menuOpen && (
             <div
               role="menu"
-              // 1.0.9+: bumped the min-width and added whitespace-
-              // nowrap on every menu item so bulk labels like
-              // "Move 3 up one folder" / "New Folder with 3 videos"
-              // sit on a single line.
-              className="absolute right-0 top-full mt-1 z-30 min-w-[240px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+              // 1.3.1+: positioned via inline style (computed from
+              // kebab bounding rect on open) so the menu can float
+              // freely over adjacent cards and stay clamped inside the
+              // viewport on phones — Frame.io style.
+              style={menuStyle}
+              className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
               onClick={(e) => e.stopPropagation()}
             >
               {/* 1.1.0+ menu order:

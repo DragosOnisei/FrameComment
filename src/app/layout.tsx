@@ -43,6 +43,7 @@ export const viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
+  viewportFit: 'cover' as const,
   themeColor: '#0a0a0a',
 }
 
@@ -76,8 +77,20 @@ export default async function RootLayout({
   const storageProvider = (process.env.STORAGE_PROVIDER === 's3' ? 's3' : 'local') as StorageProvider
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html lang={locale} data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
+        {/*
+          Explicit viewport meta as the very first <head> child.
+          Next.js `export const viewport` does emit a viewport tag, but
+          we've observed Chrome on Android occasionally falling back to
+          its 980px default for the first paint when the tag arrives
+          later in the head order. Putting it first guarantees the
+          browser sees device-width before any layout work begins.
+        */}
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"
+        />
         <script
           nonce={nonce}
           dangerouslySetInnerHTML={{

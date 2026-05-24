@@ -185,6 +185,30 @@ export default function CustomVideoControls({
   const [isDragging, setIsDragging] = useState(false)
   const [showVolume, setShowVolume] = useState(false)
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null)
+  // 1.3.1+: viewport-width tracker. Used to apply inline-style width
+  // on the timeline-comment tooltip on phones because Tailwind's
+  // arbitrary-value classes inside template literals can fail to
+  // generate at build time. Inline styles always win.
+  const [viewportWidth, setViewportWidth] = useState<number>(
+    typeof window !== 'undefined' ? window.innerWidth : 1024,
+  )
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  // 1.3.1+: when multiple comments share the same timestamp the
+  // timeline avatar shows them as a stack (badge "+N"). On the popover
+  // we used to render all of them concatenated, which made the card
+  // tall and noisy. Frame.io shows ONE at a time with a "1 / N"
+  // indicator + swipe-to-navigate. We track the index here keyed by
+  // the hovered marker so it resets when the user switches stacks.
+  const [stackIndex, setStackIndex] = useState(0)
+  const swipeStartXRef = useRef<number | null>(null)
+  useEffect(() => {
+    // Reset to the first comment any time the hovered group changes.
+    setStackIndex(0)
+  }, [hoveredMarkerId])
   const [hoveredTime, setHoveredTime] = useState<number | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const volumeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -490,14 +514,36 @@ export default function CustomVideoControls({
 
   const handleMarkerTouchStart = useCallback((markerId: string, e: React.TouchEvent) => {
     e.stopPropagation()
+    // 1.3.1+: no auto-dismiss timeout — the popover stays open until
+    // the user explicitly taps somewhere else (handled by the
+    // global click-outside listener below).
     if (touchTimeoutRef.current) {
       clearTimeout(touchTimeoutRef.current)
     }
     setHoveredMarkerId(markerId)
-    touchTimeoutRef.current = setTimeout(() => {
-      setHoveredMarkerId(null)
-    }, 3000)
   }, [])
+
+  // 1.3.1+: dismiss the timeline-comment popover when the user taps
+  // outside it (or any marker that owns one). Without this the
+  // popover would have no exit on touch devices once we removed the
+  // 3-second auto-close timer. We tag the popover and markers with
+  // data-comment-popover so a single document listener can decide
+  // whether the touch landed inside our UI.
+  useEffect(() => {
+    if (!hoveredMarkerId) return
+    const onPointerDown = (e: PointerEvent | MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      if (target.closest('[data-comment-popover]')) return
+      setHoveredMarkerId(null)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown, { passive: true })
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+    }
+  }, [hoveredMarkerId])
 
   const handleVolumeMouseEnter = useCallback(() => {
     if (volumeTimeoutRef.current) {
@@ -518,6 +564,17 @@ export default function CustomVideoControls({
     if (position < 20) return 'left-0'
     if (position > 80) return 'right-0'
     return 'left-1/2 -translate-x-1/2'
+  }
+
+  // 1.3.1+: desktop-only variant of `getTooltipAlignment`. Mobile gets
+  // a full-width centred tooltip, so we only want the marker-position
+  // alignment to kick in at sm:+. Tailwind needs literal class names
+  // in the source to JIT-compile them — we list each one explicitly
+  // here so they survive the build.
+  const getTooltipAlignmentDesktop = (position: number): string => {
+    if (position < 20) return 'sm:left-0'
+    if (position > 80) return 'sm:right-0'
+    return 'sm:left-1/2 sm:-translate-x-1/2'
   }
 
   return (
@@ -718,11 +775,18 @@ export default function CustomVideoControls({
             return (
               <div
                 key={`avatar-${primaryMarker.id}`}
-                className="absolute top-0 pointer-events-auto"
+                // 1.3.1+: z-30 lifts the marker AND its hover-popover
+                // above the video's annotation overlay (z-10) and
+                // interactive canvas (z-20). Without an explicit z
+                // here the wrapper sits at z-auto and the annotation
+                // overlay paints right on top of our popover even
+                // though the popover has its own z-[200] inside.
+                className="absolute top-0 pointer-events-auto z-30"
                 style={{
                   left: `${primaryMarker.position}%`,
                   transform: 'translateX(-50%)',
                 }}
+                data-comment-popover
               >
                 <button
                   type="button"
@@ -756,53 +820,157 @@ export default function CustomVideoControls({
                   )}
                 </button>
 
-                {/* Tooltip */}
-                {isHovered && (
+                {/* Tooltip.
+                    1.3.1+: on phones (`<sm`) the tooltip turns into a
+                    Frame.io-style card that rises ABOVE the avatar row
+                    (covering the timeline strip just above it) so it's
+                    visible between the video player and the timeline,
+                    matching what Frame.io does. Spans the full screen
+                    width minus a small gutter, shows the FULL comment
+                    body with no line-clamp.
+                    On desktop the original compact tooltip above the
+                    avatar is kept. */}
+                {isHovered && (() => {
+                  // 1.3.1+: on phones the card must be centred on the
+                  // VIEWPORT, not on the avatar marker. We compute the
+                  // marker's centre in viewport pixels and shift the
+                  // card by the inverse so the card sits dead-centre
+                  // regardless of where the marker is on the timeline.
+                  const avatarCenterX =
+                    12 + (primaryMarker.position / 100) * (viewportWidth - 24)
+                  const centeringShift = viewportWidth / 2 - avatarCenterX
+                  const isMobile = viewportWidth < 640
+                  return (
                   <div
+                    data-comment-popover
                     className={`
-                      absolute bottom-full mb-2 ${getTooltipAlignment(primaryMarker.position)}
-                      bg-black/95 text-white backdrop-blur-sm
-                      rounded-lg shadow-2xl
-                      p-2 w-[180px] sm:w-[220px] max-w-[calc(100vw-2rem)]
-                      z-50
+                      absolute z-[200]
+                      text-card-foreground ring-1 ring-border
+                      rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.55)]
+                      backdrop-blur-sm
+                      left-1/2 p-3
+                      sm:left-auto ${getTooltipAlignmentDesktop(primaryMarker.position)} sm:bg-black/95 sm:text-white sm:rounded-lg sm:ring-0 sm:shadow-2xl sm:p-2 sm:backdrop-blur-0
                       animate-in fade-in-0 slide-in-from-bottom-1 duration-150
                     `}
+                    style={
+                      isMobile
+                        ? {
+                            width: viewportWidth - 80,
+                            maxWidth: 360,
+                            bottom: 'calc(100% + 40px)',
+                            transform: `translateX(calc(-50% + ${centeringShift}px))`,
+                            // 1.3.1+: 50 % opacity on the card surface
+                            // so the video / annotations underneath stay
+                            // clearly visible behind the popover.
+                            backgroundColor: 'hsl(var(--card) / 0.5)',
+                          }
+                        : { width: 220, bottom: 'calc(100% + 8px)', transform: 'translateX(-50%)' }
+                    }
+                    // 1.3.1+: horizontal swipe navigation through the
+                    // stack. We track the touch start X and move to
+                    // the previous / next comment once the finger has
+                    // dragged more than 40 px in either direction.
+                    onTouchStart={(e) => {
+                      swipeStartXRef.current = e.touches[0]?.clientX ?? null
+                    }}
+                    onTouchEnd={(e) => {
+                      const start = swipeStartXRef.current
+                      swipeStartXRef.current = null
+                      if (start == null) return
+                      const end = e.changedTouches[0]?.clientX ?? start
+                      const delta = end - start
+                      if (Math.abs(delta) < 40) return
+                      const total = group.length
+                      if (total < 2) return
+                      if (delta < 0) {
+                        // Swiped left → next
+                        setStackIndex((i) => (i + 1) % total)
+                      } else {
+                        // Swiped right → previous
+                        setStackIndex((i) => (i - 1 + total) % total)
+                      }
+                    }}
                   >
-                    {group.slice(0, 3).map((marker, idx) => {
+                    {(() => {
+                      // 1.3.1+: render ONE comment at a time. The
+                      // current index is clamped against the group
+                      // size in case the stack shrinks while open.
+                      const safeIndex = Math.min(stackIndex, group.length - 1)
+                      const marker = group[safeIndex]
                       const markerColors = COLOR_MAP[marker.colorKey] || COLOR_MAP['border-gray-500']
                       return (
-                        <div
-                          key={marker.id}
-                          className={`${idx > 0 ? 'mt-2 pt-2 border-t border-white/20' : ''}`}
-                        >
-                          <div className="flex items-center gap-2 mb-1">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1.5 sm:mb-1">
                             <div
-                              className={`w-5 h-5 rounded-full ring-1 flex items-center justify-center text-[8px] font-semibold ${markerColors.bg} ${markerColors.ring} ${markerColors.text}`}
+                              className={`w-6 h-6 sm:w-5 sm:h-5 rounded-full ring-1 flex items-center justify-center text-[10px] sm:text-[8px] font-semibold shrink-0 ${markerColors.bg} ${markerColors.ring} ${markerColors.text}`}
                             >
                               {marker.initials}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold text-[10px] text-white truncate block">
+                              <span className="font-semibold text-xs sm:text-[10px] truncate block">
                                 {marker.authorName || tComments('anonymous')}
                               </span>
                             </div>
-                            <span className="text-[9px] text-white/70 font-mono">
+                            {/* Stacked count chip (only when the
+                                marker actually has siblings). Sits
+                                top-right next to the timestamp. */}
+                            {group.length > 1 && (
+                              <span className="inline-flex items-center justify-center min-w-[28px] h-[18px] sm:h-[16px] px-1.5 rounded-full bg-muted/80 sm:bg-white/15 text-foreground sm:text-white text-[10px] sm:text-[9px] font-semibold tabular-nums shrink-0">
+                                {safeIndex + 1}/{group.length}
+                              </span>
+                            )}
+                            <span className="sm:hidden inline-flex items-center px-1.5 py-0.5 rounded bg-warning/20 text-warning text-[10px] font-mono font-medium shrink-0">
+                              {formatTime(marker.timestamp)}
+                            </span>
+                            <span className="hidden sm:inline text-[9px] text-white/70 font-mono shrink-0">
                               {formatTime(marker.timestamp)}
                             </span>
                           </div>
-                          <p className="text-[10px] text-white/80 leading-relaxed line-clamp-2 pl-6">
+                          <p className="text-sm sm:text-[10px] sm:text-white/80 leading-relaxed sm:line-clamp-2 sm:pl-6 break-all sm:break-words whitespace-pre-wrap">
                             {marker.content || 'No content'}
                           </p>
+                          {/* Subtle swipe hint when a stack is
+                              actually present. Hidden on desktop
+                              because the prev/next arrows below take
+                              over there. */}
+                          {group.length > 1 && (
+                            <p className="sm:hidden text-[10px] text-muted-foreground mt-2 text-center">
+                              Swipe to see other comments
+                            </p>
+                          )}
+                          {/* Desktop prev/next arrows for stacks. */}
+                          {group.length > 1 && (
+                            <div className="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-white/15">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setStackIndex(
+                                    (i) => (i - 1 + group.length) % group.length,
+                                  )
+                                }
+                                className="px-2 py-0.5 rounded text-[10px] text-white/80 hover:bg-white/10"
+                                aria-label="Previous comment"
+                              >
+                                ← Prev
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setStackIndex((i) => (i + 1) % group.length)
+                                }
+                                className="px-2 py-0.5 rounded text-[10px] text-white/80 hover:bg-white/10"
+                                aria-label="Next comment"
+                              >
+                                Next →
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )
-                    })}
-                    {group.length > 3 && (
-                      <p className="text-[9px] text-white/60 mt-2 pt-2 border-t border-white/20">
-                        {t('moreComments', { count: group.length - 3 })}
-                      </p>
-                    )}
+                    })()}
                   </div>
-                )}
+                  )
+                })()}
               </div>
             )
           })}

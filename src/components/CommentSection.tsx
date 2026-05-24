@@ -555,11 +555,23 @@ export default function CommentSection({
     let attempts = 0
     const maxAttempts = 6
 
+    // 1.3.1+: on phones the comment list sits below the video, so
+    // scrolling to a comment shoves the video off-screen. Skip the
+    // scroll on mobile — the player already seeks to the comment's
+    // timestamp + an annotation overlay shows on the video itself,
+    // which is the Frame.io behaviour the user actually wants. The
+    // highlight effect still runs so it's obvious which comment
+    // matched once they scroll down manually.
+    const isMobile =
+      typeof window !== 'undefined' && window.innerWidth < 640
+
     const tryScroll = () => {
       attempts += 1
       const element = document.getElementById(`comment-${focusCommentId}`)
       if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        if (!isMobile) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
         element.style.transition = 'background-color 0.3s'
         element.style.backgroundColor = 'hsl(var(--primary) / 0.12)'
         setTimeout(() => {
