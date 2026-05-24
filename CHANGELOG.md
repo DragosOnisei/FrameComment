@@ -42,7 +42,13 @@ feel native on small screens.
   share a timestamp, the card shows one at a time with a 1/N
   indicator and swipe navigation (← / → buttons on desktop). The
   popover stays open until you tap outside it — no auto-dismiss
-  timer.
+  timer. The same translucent design now ships on desktop too, with
+  smart left/right/centre alignment that clamps the card inside the
+  viewport so a marker at the start of the timeline never pushes the
+  popover off-screen. A 220 ms close-debounce lets the mouse cross
+  the gap from the avatar to the popover without it disappearing
+  mid-flight, and the Prev/Next buttons are filled + ringed so they
+  read as real, clickable actions instead of dim text links.
 - **Smart-positioned kebab menus everywhere.** Video, folder, and
   project cards now compute the kebab's screen position when the
   menu opens and place the popover at the right offset so it never

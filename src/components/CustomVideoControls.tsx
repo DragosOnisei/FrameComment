@@ -504,12 +504,30 @@ export default function CustomVideoControls({
     }
   }, [onSeek, onMarkerClick])
 
+  // 1.3.1+: debounce the hover-close. The popover sits ~8 px above
+  // the marker — when the mouse traverses that gap on its way from
+  // the avatar to the popover, neither element is hovered for a
+  // frame or two. Without a delay, `mouseleave` fires immediately
+  // and the popover disappears before the mouse reaches it. Holding
+  // the close for 220 ms gives the cursor time to land on the
+  // popover and re-trigger `mouseenter`, which cancels the timer.
+  const hoverCloseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const handleMarkerMouseEnter = useCallback((markerId: string) => {
+    if (hoverCloseTimeoutRef.current) {
+      clearTimeout(hoverCloseTimeoutRef.current)
+      hoverCloseTimeoutRef.current = null
+    }
     setHoveredMarkerId(markerId)
   }, [])
 
   const handleMarkerMouseLeave = useCallback(() => {
-    setHoveredMarkerId(null)
+    if (hoverCloseTimeoutRef.current) {
+      clearTimeout(hoverCloseTimeoutRef.current)
+    }
+    hoverCloseTimeoutRef.current = setTimeout(() => {
+      setHoveredMarkerId(null)
+      hoverCloseTimeoutRef.current = null
+    }, 220)
   }, [])
 
   const handleMarkerTouchStart = useCallback((markerId: string, e: React.TouchEvent) => {
@@ -843,13 +861,20 @@ export default function CustomVideoControls({
                   return (
                   <div
                     data-comment-popover
+                    // 1.3.1+: keep the popover open while the mouse is
+                    // hovering it (so the user can reach the Prev/Next
+                    // buttons without it disappearing). Without these
+                    // handlers the popover would dismiss the moment
+                    // the mouse left the avatar marker.
+                    onMouseEnter={() => handleMarkerMouseEnter(primaryMarker.id)}
+                    onMouseLeave={handleMarkerMouseLeave}
                     className={`
                       absolute z-[200]
                       text-card-foreground ring-1 ring-border
                       rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.55)]
                       backdrop-blur-sm
                       left-1/2 p-3
-                      sm:left-auto ${getTooltipAlignmentDesktop(primaryMarker.position)} sm:bg-black/95 sm:text-white sm:rounded-lg sm:ring-0 sm:shadow-2xl sm:p-2 sm:backdrop-blur-0
+                      sm:left-auto sm:translate-x-0 ${getTooltipAlignmentDesktop(primaryMarker.position)}
                       animate-in fade-in-0 slide-in-from-bottom-1 duration-150
                     `}
                     style={
@@ -864,7 +889,20 @@ export default function CustomVideoControls({
                             // clearly visible behind the popover.
                             backgroundColor: 'hsl(var(--card) / 0.5)',
                           }
-                        : { width: 220, bottom: 'calc(100% + 8px)', transform: 'translateX(-50%)' }
+                        : {
+                            // 1.3.1+: same Frame.io-style transparent
+                            // card on desktop. We DO NOT set `transform`
+                            // here so the Tailwind alignment classes
+                            // (`sm:left-0` / `sm:right-0` /
+                            // `sm:left-1/2 sm:-translate-x-1/2`) take
+                            // over and clamp the card inside the
+                            // viewport instead of letting a marker at
+                            // the start of the timeline push half the
+                            // popover off-screen.
+                            width: 260,
+                            bottom: 'calc(100% + 8px)',
+                            backgroundColor: 'hsl(var(--card) / 0.5)',
+                          }
                     }
                     // 1.3.1+: horizontal swipe navigation through the
                     // stack. We track the touch start X and move to
@@ -915,18 +953,19 @@ export default function CustomVideoControls({
                                 marker actually has siblings). Sits
                                 top-right next to the timestamp. */}
                             {group.length > 1 && (
-                              <span className="inline-flex items-center justify-center min-w-[28px] h-[18px] sm:h-[16px] px-1.5 rounded-full bg-muted/80 sm:bg-white/15 text-foreground sm:text-white text-[10px] sm:text-[9px] font-semibold tabular-nums shrink-0">
+                              <span className="inline-flex items-center justify-center min-w-[28px] h-[18px] px-1.5 rounded-full bg-muted/80 text-foreground text-[10px] font-semibold tabular-nums shrink-0">
                                 {safeIndex + 1}/{group.length}
                               </span>
                             )}
-                            <span className="sm:hidden inline-flex items-center px-1.5 py-0.5 rounded bg-warning/20 text-warning text-[10px] font-mono font-medium shrink-0">
-                              {formatTime(marker.timestamp)}
-                            </span>
-                            <span className="hidden sm:inline text-[9px] text-white/70 font-mono shrink-0">
+                            {/* 1.3.1+: yellow Frame.io timestamp chip
+                                on every breakpoint — desktop tooltip
+                                now uses the same translucent card UI
+                                as mobile. */}
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-warning/20 text-warning text-[10px] font-mono font-medium shrink-0">
                               {formatTime(marker.timestamp)}
                             </span>
                           </div>
-                          <p className="text-sm sm:text-[10px] sm:text-white/80 leading-relaxed sm:line-clamp-2 sm:pl-6 break-all sm:break-words whitespace-pre-wrap">
+                          <p className="text-sm sm:text-xs leading-relaxed break-all sm:break-words whitespace-pre-wrap">
                             {marker.content || 'No content'}
                           </p>
                           {/* Subtle swipe hint when a stack is
@@ -938,9 +977,13 @@ export default function CustomVideoControls({
                               Swipe to see other comments
                             </p>
                           )}
-                          {/* Desktop prev/next arrows for stacks. */}
+                          {/* Desktop prev/next arrows for stacks.
+                              1.3.1+: more prominent buttons (filled
+                              background, ring, hover state) so they
+                              read as real, clickable actions instead
+                              of barely-visible text. */}
                           {group.length > 1 && (
-                            <div className="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-white/15">
+                            <div className="hidden sm:flex items-center justify-between gap-2 mt-3 pt-3 border-t border-border/50">
                               <button
                                 type="button"
                                 onClick={() =>
@@ -948,7 +991,7 @@ export default function CustomVideoControls({
                                     (i) => (i - 1 + group.length) % group.length,
                                   )
                                 }
-                                className="px-2 py-0.5 rounded text-[10px] text-white/80 hover:bg-white/10"
+                                className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-muted/60 text-foreground ring-1 ring-border hover:bg-muted hover:ring-foreground/30 transition-colors"
                                 aria-label="Previous comment"
                               >
                                 ← Prev
@@ -958,7 +1001,7 @@ export default function CustomVideoControls({
                                 onClick={() =>
                                   setStackIndex((i) => (i + 1) % group.length)
                                 }
-                                className="px-2 py-0.5 rounded text-[10px] text-white/80 hover:bg-white/10"
+                                className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-muted/60 text-foreground ring-1 ring-border hover:bg-muted hover:ring-foreground/30 transition-colors"
                                 aria-label="Next comment"
                               >
                                 Next →
