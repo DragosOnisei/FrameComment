@@ -76,6 +76,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const [sendingOtp, setSendingOtp] = useState(false)
   const [error, setError] = useState('')
   const [project, setProject] = useState<any>(null)
+  // 1.4.x+: when the API returns 410 Gone (share link past its
+  // expiration date) we land here. Renders a dedicated "link expired"
+  // notice instead of the password prompt / loading spinner.
+  const [linkExpired, setLinkExpired] = useState<{ at: string | null } | null>(
+    null,
+  )
 
   // Scoped videosByName (1.0.6+) — when a folderId param is present
   // the share player only shows the siblings inside THAT folder in
@@ -395,6 +401,16 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         if (response.status === 403 || response.status === 404) {
           // Server already validated slug exists, this shouldn't happen
           // but handle gracefully by showing project not found
+          return
+        }
+
+        if (response.status === 410) {
+          // 1.4.x+: share link has expired. Surface a friendly notice
+          // with the expiration timestamp the API sends back.
+          const body = await response.json().catch(() => ({}))
+          if (isMounted) {
+            setLinkExpired({ at: body?.expiredAt || null })
+          }
           return
         }
 
@@ -909,6 +925,45 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     }
   }
 
+  // 1.4.x+: link has expired — render a friendly notice (the API
+  // returned 410 Gone). We show the exact moment the link stopped
+  // working in the viewer's local TZ so they have something concrete
+  // to send back to the studio when asking for a refresh.
+  if (linkExpired) {
+    const when = linkExpired.at ? new Date(linkExpired.at) : null
+    return (
+      <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-6">
+        <div className="max-w-md text-center space-y-3">
+          <div className="mx-auto rounded-full bg-amber-500/10 p-3 w-fit">
+            <Lock className="w-6 h-6 text-amber-500" />
+          </div>
+          <h1 className="text-xl font-semibold">This share link has expired</h1>
+          <p className="text-sm text-muted-foreground">
+            {when ? (
+              <>
+                The link stopped working on{' '}
+                <span className="text-foreground font-medium">
+                  {when.toLocaleString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+                .
+              </>
+            ) : (
+              'The link is no longer active.'
+            )}{' '}
+            Ask the project owner for a fresh link.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   // Show loading state
   if (isPasswordProtected === null) {
     return (
@@ -1228,6 +1283,48 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           onToggleCommentPanel={() => setHideComments(!hideComments)}
           trailingAction={undefined}
         />
+
+        {/* 1.4.x+: share-link expiration countdown. Thin strip pinned
+            above the player + comments so the recipient sees how much
+            time is left on the link they're using. Hidden once we're
+            past the cut-off (the 410 branch above takes over). */}
+        {project.shareExpiresAt && (() => {
+          const expiry = new Date(project.shareExpiresAt)
+          const ms = expiry.getTime() - Date.now()
+          if (ms <= 0) return null
+          const days = Math.floor(ms / (24 * 60 * 60 * 1000))
+          const hours = Math.floor((ms % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+          const label =
+            days >= 1
+              ? `Expires in ${days} ${days === 1 ? 'day' : 'days'}`
+              : hours >= 1
+                ? `Expires in ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+                : 'Expires soon'
+          const accent =
+            ms <= 24 * 60 * 60 * 1000
+              ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              : 'border-border bg-muted/40 text-muted-foreground'
+          return (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`shrink-0 border-b px-3 sm:px-4 py-1.5 text-xs flex items-center gap-2 ${accent}`}
+            >
+              <Lock className="w-3.5 h-3.5 shrink-0" />
+              <span className="min-w-0 truncate">
+                {label}{' '}
+                <span className="text-foreground/80 font-medium">
+                  ({expiry.toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })})
+                </span>
+              </span>
+            </div>
+          )
+        })()}
 
       {/* Main Content Area — fills the remaining viewport from lg+. We
           also lay it out side-by-side (player left, comments right) from

@@ -167,7 +167,7 @@ export default function CommentSection({
   showShortcutsButton = false,
   timestampDisplayMode = 'TIMECODE',
   mobileCollapsible = false,
-  initialMobileCollapsed = true,
+  initialMobileCollapsed = false,
   authenticatedEmail = null,
   allowClientAssetUpload = false,
   maxCommentAttachments,
@@ -1231,27 +1231,26 @@ export default function CommentSection({
           </div>
         )}
 
-        {/* Collapsible header for messages (mobile only) - NOW includes "Feedback & Discussion" title */}
+        {/* Mobile-only header for the messages list.
+            1.4.x: dropped the collapse/expand chevron toggle that
+            used to hide all comments on tap — clients found it more
+            confusing than useful (most users expect comments to just
+            be there). Replaced with the same kebab menu (Copy /
+            Paste comments) that desktop uses, so the mobile header
+            now has feature parity with desktop. */}
         {mobileCollapsible && (
-          <button
-            onClick={() => {
-              const newCollapsed = !isMobileCollapsed
-              setIsMobileCollapsed(newCollapsed)
-              onMobileExpandedChange?.(!newCollapsed)
-            }}
-            className="order-2 lg:hidden w-full p-3 flex items-center justify-between bg-muted/30"
-          >
+          <div className="order-2 lg:hidden w-full px-3 py-2 flex items-center justify-between bg-muted/30">
             <span className="text-sm font-medium flex items-center gap-2">
               <MessageSquare className="w-4 h-4" />
               {t('feedbackAndDiscussion')} ({sortedComments.length})
             </span>
-            {/* 1.3.2+: dropped the "Xh ago" badge from the header — the
-                per-comment timestamp covers it and the title row now stays
-                clean (matches Frame.io's "All comments (N)" pattern). */}
-            <div className="flex items-center gap-2">
-              {isMobileCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-            </div>
-          </button>
+            <CommentsKebabMenu
+              commentCount={displayComments.length}
+              hasClipboard={hasClipboardForProject}
+              onCopy={handleCopyComments}
+              onPaste={handlePasteComments}
+            />
+          </div>
         )}
         {/*
           1.2.0+: same editable name row for guests on mobile. Sits

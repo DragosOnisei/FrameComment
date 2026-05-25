@@ -1,13 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
   Folder as FolderIcon,
   ChevronRight,
+  ChevronLeft,
   Lock,
   Loader2,
+  Download,
+  Clock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
@@ -46,6 +48,11 @@ interface FolderInfo {
   projectSlug: string
   companyName: string | null
   authMode: AuthMode
+  /** 1.4.x+: drives the "Download All" button on the public share. */
+  allowAssetDownload?: boolean
+  /** 1.4.x+: ISO datetime when the share link stops working. `null`
+   *  (or absent) = no expiration. Renders the countdown banner. */
+  shareExpiresAt?: string | null
 }
 
 interface SubfolderRow {
@@ -90,6 +97,11 @@ interface FolderShareResponse {
   folder: FolderInfo
   subfolders: SubfolderRow[]
   videos: VideoRow[]
+  /** 1.4.x+: in-scope breadcrumb (root → current). Server builds this
+   *  by walking parentFolderId from the current folder up to the
+   *  share root (the slug passed via `?root=`). When the page loads
+   *  at the share root directly, this is just `[{ current }]`. */
+  ancestry?: Array<{ slug: string; name: string }>
   shareToken?: string
   isAdmin?: boolean
 }
@@ -97,7 +109,14 @@ interface FolderShareResponse {
 export default function PublicFolderSharePage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const slug = params?.slug as string
+  // 1.4.x+: the share-root slug travels in the URL via `?root=...`.
+  // It identifies WHERE the user first entered the share, so the
+  // breadcrumb + Back button can stay within the share's subtree
+  // and never link out to the project root. On the very first load
+  // (no `?root=` query) the current folder IS the share root.
+  const rootSlug = searchParams?.get('root') || slug
 
   const [data, setData] = useState<FolderShareResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -107,13 +126,17 @@ export default function PublicFolderSharePage() {
   const [pwError, setPwError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [fatalError, setFatalError] = useState<string | null>(null)
+  const [expiredAt, setExpiredAt] = useState<string | null>(null)
   const [bearer, setBearer] = useState<string | null>(null)
 
   const fetchFolder = useCallback(
     async (withToken?: string) => {
       try {
         setLoading(true)
-        const res = await fetch(`/api/share/folder/${slug}`, {
+        const qs = rootSlug && rootSlug !== slug
+          ? `?root=${encodeURIComponent(rootSlug)}`
+          : ''
+        const res = await fetch(`/api/share/folder/${slug}${qs}`, {
           headers: withToken
             ? { Authorization: `Bearer ${withToken}` }
             : undefined,
@@ -154,6 +177,14 @@ export default function PublicFolderSharePage() {
           setFatalError('Folder not found.')
           return
         }
+        if (res.status === 410) {
+          // 1.4.x+: link has expired. Surface a clean notice with the
+          // expiry date if the API supplied it.
+          const body = await res.json().catch(() => ({}))
+          setExpiredAt(body?.expiredAt || null)
+          setFatalError(body?.error || 'This share link has expired.')
+          return
+        }
         if (!res.ok) {
           throw new Error(`Failed to load folder (HTTP ${res.status})`)
         }
@@ -171,12 +202,55 @@ export default function PublicFolderSharePage() {
         setLoading(false)
       }
     },
-    [slug],
+    [slug, rootSlug],
   )
 
   useEffect(() => {
     fetchFolder(bearer || undefined)
   }, [fetchFolder, bearer])
+
+  // 1.4.x+: "Download All" hits the new share-folder ZIP endpoint.
+  // The share token (in `bearer` state) is required for PASSWORD
+  // folders; NONE folders work even without one. We can't use an
+  // anchor tag because the share token has to ride in the
+  // `Authorization` header — anchor downloads only carry cookies.
+  // Instead we fetch the response, convert to a Blob, and trigger
+  // a normal browser download on the resulting object URL.
+  const [downloadingAll, setDownloadingAll] = useState(false)
+  const handleDownloadAll = useCallback(async () => {
+    if (downloadingAll) return
+    setDownloadingAll(true)
+    try {
+      // Note: the `?root=` query param is NOT needed for the download
+      // route — the server scopes the ZIP to the slug we hit, which
+      // is already the in-view folder.
+      const res = await fetch(`/api/share/folder/${slug}/download`, {
+        headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        alert(`Download failed: ${body?.error || `HTTP ${res.status}`}`)
+        return
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('content-disposition') || ''
+      const match = cd.match(/filename\*?="?([^";]+)"?/i)
+      const filename = match?.[1] || `${data?.folder?.name || 'folder'}.zip`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1500)
+    } catch (err) {
+      logError('[PublicFolderSharePage] download failed:', err)
+    } finally {
+      setDownloadingAll(false)
+    }
+  }, [slug, bearer, data, downloadingAll])
 
   const handleSubmitPassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -205,6 +279,36 @@ export default function PublicFolderSharePage() {
   }
 
   if (fatalError) {
+    // 1.4.x+: dedicated expired-link state when the API returned 410.
+    // We render the date the link expired in the viewer's local TZ so
+    // they have something concrete to send back to the studio.
+    if (expiredAt) {
+      const when = new Date(expiredAt)
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+          <div className="max-w-md text-center space-y-3">
+            <div className="mx-auto rounded-full bg-amber-500/10 p-3 w-fit">
+              <Clock className="w-6 h-6 text-amber-500" />
+            </div>
+            <h1 className="text-xl font-semibold">This share link has expired</h1>
+            <p className="text-sm text-muted-foreground">
+              The link stopped working on{' '}
+              <span className="text-foreground font-medium">
+                {when.toLocaleString(undefined, {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </span>
+              . Ask the project owner for a fresh link.
+            </p>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <div className="max-w-md text-center space-y-3">
@@ -274,6 +378,12 @@ export default function PublicFolderSharePage() {
   }
 
   const { folder, subfolders, videos } = data
+  // 1.4.x+: in-scope breadcrumb returned by the server (root → current).
+  // Falls back to a single entry when the API doesn't ship it yet so
+  // older deploys keep rendering a sane header.
+  const ancestry = data.ancestry?.length
+    ? data.ancestry
+    : [{ slug: folder.slug, name: folder.name }]
   const projectShareBase = `/share/${folder.projectSlug}`
 
   // Group videos by `name` so the public grid renders ONE card per
@@ -331,21 +441,116 @@ export default function PublicFolderSharePage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-screen-xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-5">
-        {/* Header: project + folder breadcrumb */}
+        {/* Header: in-scope breadcrumb + optional Back button.
+            1.4.x+: the project title used to be rendered above as a
+            hyperlink to /share/<projectSlug>, which let anyone with a
+            folder share link pivot to the project root and see all
+            the studio's other work. The breadcrumb is now built from
+            the server-provided `ancestry` array (root → current) and
+            never leaves the share's subtree. The first entry is the
+            share root the user originally received; clicking it takes
+            them back to that root. */}
         <header className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground min-w-0">
-          <Link
-            href={projectShareBase}
-            className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
-          >
-            <span className="truncate max-w-[200px]" title={folder.projectTitle}>
-              {folder.projectTitle}
-            </span>
-          </Link>
-          <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-          <span className="font-medium text-foreground truncate max-w-[260px]" title={folder.name}>
-            {folder.name}
-          </span>
+          {ancestry.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                // Go up one folder within the share scope. The parent
+                // is `ancestry[ancestry.length - 2]`; its href keeps
+                // the same `?root=` query so the breadcrumb stays
+                // consistent for the parent page too.
+                const parent = ancestry[ancestry.length - 2]
+                const qs = rootSlug && rootSlug !== parent.slug
+                  ? `?root=${encodeURIComponent(rootSlug)}`
+                  : ''
+                router.push(`/share/folder/${parent.slug}${qs}`)
+              }}
+              className="inline-flex items-center hover:text-foreground transition-colors shrink-0 p-1 -ml-1 rounded-md hover:bg-muted/50"
+              aria-label="Back to parent folder"
+              title="Back to parent folder"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          )}
+          {ancestry.map((crumb, idx) => {
+            const isLast = idx === ancestry.length - 1
+            const qs = rootSlug && rootSlug !== crumb.slug
+              ? `?root=${encodeURIComponent(rootSlug)}`
+              : ''
+            return (
+              <span
+                key={`${crumb.slug}-${idx}`}
+                className="inline-flex items-center gap-2 min-w-0"
+              >
+                {idx > 0 && <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
+                {isLast ? (
+                  <span
+                    className="font-medium text-foreground truncate max-w-[260px]"
+                    title={crumb.name}
+                  >
+                    {crumb.name}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(`/share/folder/${crumb.slug}${qs}`)
+                    }
+                    className="truncate max-w-[200px] hover:text-foreground transition-colors"
+                    title={crumb.name}
+                  >
+                    {crumb.name}
+                  </button>
+                )}
+              </span>
+            )
+          })}
         </header>
+
+        {/* 1.4.x+: countdown banner. We render it whenever the folder
+            ships a future `shareExpiresAt`, so the recipient knows
+            ahead of time when the link will go dark. Past dates would
+            have triggered the 410 above. */}
+        {folder.shareExpiresAt && (() => {
+          const expiry = new Date(folder.shareExpiresAt)
+          const now = Date.now()
+          const ms = expiry.getTime() - now
+          if (ms <= 0) return null
+          const days = Math.floor(ms / (24 * 60 * 60 * 1000))
+          const hours = Math.floor((ms % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+          const label =
+            days >= 1
+              ? `Expires in ${days} ${days === 1 ? 'day' : 'days'}`
+              : hours >= 1
+                ? `Expires in ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+                : 'Expires soon'
+          // Highlight the banner in amber once we're within 24h so the
+          // viewer knows time's running out; otherwise keep it muted.
+          const accent =
+            ms <= 24 * 60 * 60 * 1000
+              ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              : 'border-border bg-muted/40 text-muted-foreground'
+          return (
+            <div
+              className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs ${accent}`}
+              role="status"
+              aria-live="polite"
+            >
+              <Clock className="w-3.5 h-3.5 shrink-0" />
+              <span className="min-w-0 truncate">
+                {label}{' '}
+                <span className="text-foreground/80 font-medium">
+                  ({expiry.toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })})
+                </span>
+              </span>
+            </div>
+          )
+        })()}
 
         {/* Title row */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -353,11 +558,41 @@ export default function PublicFolderSharePage() {
             <FolderIcon className="w-5 h-5 text-primary shrink-0" />
             <span className="truncate">{folder.name}</span>
           </h1>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {subfolders.length + videos.length === 1
-              ? '1 item'
-              : `${subfolders.length + videos.length} items`}
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* 1.4.x+: Download All — streams a ZIP of the whole folder
+                tree (subfolders + latest-version videos) with original
+                filenames preserved. Only shows when the project has
+                client-downloads enabled AND there's at least one video
+                somewhere in the tree visible at the current level. */}
+            {folder.allowAssetDownload && videoGroups.length > 0 && (
+              <Button
+                size="sm"
+                onClick={handleDownloadAll}
+                disabled={downloadingAll}
+                className="gap-1.5"
+              >
+                {downloadingAll ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                <span>Download All</span>
+              </Button>
+            )}
+            {/* 1.4.x+: item count next to Download All counts UNIQUE
+                video cards (grouped by name) instead of raw version
+                rows from the DB. Otherwise a folder with 2 clips at
+                v2 would render "4 items" while only 2 cards show on
+                screen — and the actual ZIP only contains 2 files
+                (we download the latest version per name on the
+                server). Using `videoGroups.length` keeps the badge
+                in sync with both the visible grid and the download. */}
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {subfolders.length + videoGroups.length === 1
+                ? '1 item'
+                : `${subfolders.length + videoGroups.length} items`}
+            </span>
+          </div>
         </div>
 
         {/* Subfolders — public share now uses the SAME FolderCard
@@ -378,7 +613,15 @@ export default function PublicFolderSharePage() {
                   itemCount={f.itemCount}
                   slug={f.slug}
                   previewItems={f.previewItems}
-                  onOpen={() => router.push(`/share/folder/${f.slug}`)}
+                  onOpen={() => {
+                    // 1.4.x+: carry the share-root slug forward so the
+                    // child page can compute its own in-scope
+                    // breadcrumb back to the original share root.
+                    const qs = rootSlug && rootSlug !== f.slug
+                      ? `?root=${encodeURIComponent(rootSlug)}`
+                      : ''
+                    router.push(`/share/folder/${f.slug}${qs}`)
+                  }}
                 />
               ))}
             </div>

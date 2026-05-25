@@ -422,6 +422,17 @@ export async function PATCH(
       }
     }
 
+    // 1.4.x+: share-link expiration timestamp. ISO string to set,
+    // null to clear. Lives outside the auth-related branch above
+    // because expiration is independent of auth mode — a NONE-share
+    // can still have an expiry; a PASSWORD-share can still have no
+    // expiry.
+    if ('shareExpiresAt' in validatedBody) {
+      updateData.shareExpiresAt = validatedBody.shareExpiresAt
+        ? new Date(validatedBody.shareExpiresAt)
+        : null
+    }
+
     // Separate validation when only password is being cleared without authMode change
     if (validatedBody.sharePassword !== undefined && validatedBody.authMode === undefined) {
       const currentProject = await prisma.project.findUnique({

@@ -16,9 +16,19 @@
  * The caller controls the modal's open state. Bind `onConfirm` /
  * `onCancel` to your handler; the modal closes itself automatically
  * after each so the caller just toggles `open` for re-open.
+ *
+ * 1.4.x mobile polish — the layout used to feel cramped on phones:
+ *   - the default Radix X close button competed with the warning
+ *     glyph and the title in the same row
+ *   - the action buttons sat at the right edge in a thin justify-end
+ *     row, which read as squashed in a 360 px viewport
+ * Now the X is hidden (Cancel is the explicit close), the buttons
+ * stack full-width on phones and only revert to the side-by-side
+ * right-aligned row at `sm:+`, and the icon is always shown (default
+ * variant uses an info-tinted circle instead of an empty header).
  */
 
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { AlertTriangle, Info, Loader2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -69,20 +79,32 @@ export function ConfirmModal({
         if (!next) onCancel?.()
       }}
     >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      <DialogContent
+        className="sm:max-w-md p-5 sm:p-6 gap-0"
+        hideClose
+      >
+        <DialogHeader className="text-left">
           <div className="flex items-start gap-3">
-            {destructive && (
-              <div className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+            <div
+              className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                destructive
+                  ? 'bg-destructive/15 text-destructive'
+                  : 'bg-primary/15 text-primary'
+              }`}
+              aria-hidden="true"
+            >
+              {destructive ? (
                 <AlertTriangle className="h-5 w-5" />
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <DialogTitle className="text-base font-semibold leading-6">
+              ) : (
+                <Info className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <DialogTitle className="text-base sm:text-lg font-semibold leading-tight">
                 {title}
               </DialogTitle>
               {description && (
-                <div className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                <div className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
                   {description}
                 </div>
               )}
@@ -90,7 +112,11 @@ export function ConfirmModal({
           </div>
         </DialogHeader>
 
-        <div className="mt-2 flex items-center justify-end gap-2">
+        {/* Stack buttons full-width on phones; revert to side-by-side
+            right-aligned at sm+. Confirm sits on TOP on mobile so the
+            primary action is the easiest thumb-reach target — matches
+            standard iOS/Android sheet conventions. */}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button
             type="button"
             variant="outline"
@@ -99,6 +125,7 @@ export function ConfirmModal({
               onOpenChange(false)
               onCancel?.()
             }}
+            className="w-full sm:w-auto"
           >
             {cancelLabel}
           </Button>
@@ -109,8 +136,10 @@ export function ConfirmModal({
             onClick={async () => {
               await onConfirm()
             }}
+            className="w-full sm:w-auto"
+            autoFocus
           >
-            {busy && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {confirmLabel}
           </Button>
         </div>

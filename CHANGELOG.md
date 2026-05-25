@@ -17,6 +17,146 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.0] - 2026-05-25
+
+Share-link controls + admin-link hardening. The headline feature is a
+Frame.io-style share modal with auto-copy on open and an opt-in
+expiration date (1 day / 1 week / 1 month or a custom calendar
+picker) that enforces a hard cut-off on the public share routes,
+plus two important security fixes around how share URLs are minted
+and how a folder-share recipient is scoped.
+
+### Added
+
+- **Share-link expiration.** The folder/project/video share modal
+  now exposes a "No expiration date" toggle (ON by default — links
+  never expire unless you opt in). Flipping it OFF reveals quick
+  presets (1 day / 1 week / 1 month) plus a native date picker. The
+  chosen date is persisted as `Folder.shareExpiresAt` /
+  `Project.shareExpiresAt`; once past the cut-off the public share
+  routes return `410 Gone` for everyone except admins, and the
+  public page renders a friendly "This share link has expired"
+  notice with the exact moment it stopped working.
+- **Countdown banner on share pages.** Both `/share/[token]` and
+  `/share/folder/[slug]` render a thin banner above the player
+  showing "Expires in N days (Wed, Jun 3, 2026)" so the recipient
+  knows ahead of time when the link will go dark. The banner
+  switches to amber once the link is within 24 h.
+- **Auto-copy on share modal open.** Opening the share modal now
+  silently writes the share URL to the clipboard so the admin can
+  paste it straight into the chat they're about to send — the
+  Copy button flashes green ("Copied") for ~1.8 s as visual
+  confirmation. Falls back to the manual Copy button when the
+  clipboard API is blocked (Safari Private Mode, http://, etc.).
+- **Folder Download-All on public share.** Recipients of a folder
+  share can now bulk-download the whole folder tree as a ZIP that
+  preserves both folder structure and original filenames.
+  Gated behind the project's existing `allowAssetDownload` flag
+  and the folder's share auth.
+- **Admin Download-Folder kebab action.** Mirrors the public
+  Download All; same ZIP shape so the file the client receives
+  matches what the admin would download from the dashboard.
+
+### Changed
+
+- **Project share slugs are now random tokens.** Newly created
+  projects mint a base64url-encoded `crypto.randomBytes(9)` slug
+  instead of one derived from the project title. Old links
+  guessed by title (`/share/myproject`) no longer exist; existing
+  rows must be migrated through the one-off
+  `scripts/regenerate-project-share-slugs.ts` helper — run it
+  once after upgrading. **(Security)**
+- **Folder-share breadcrumb stays in scope.** A folder share now
+  carries the share-root slug through the URL via `?root=...` and
+  the breadcrumb is built server-side by walking the parent chain
+  from the current folder UP TO that root only. Recipients can no
+  longer pivot from a single shared subfolder to the parent
+  project's root and inventory the rest of the studio's work; the
+  back/breadcrumb buttons stop at the share root. **(Security)**
+- **ShareModal toggle is a real button.** The "No expiration date"
+  switch used to be a `<span role="switch">` plus a hidden
+  `<input type="checkbox">` inside the same `<label>`; a single
+  click fired both handlers in the same tick, the state flipped
+  twice, and the toggle felt "stuck" / needed multiple clicks.
+  Replaced with a single `<button role="switch">` — one click =
+  one flip, plus keyboard Space/Enter and a focus ring for free.
+- **Move Up refreshes the folder grid.** Right-clicking a video
+  or sub-folder and choosing "Move Up" used to leave the previous
+  folder rendering its cached contents — Next.js' router cache
+  held on to the old listing until a hard reload, so to the user
+  it looked as if the destination had been wiped (the test folder
+  vanished). The grid now dispatches `framecomment:folders-changed`
+  and calls `router.refresh()` after a successful move so every
+  open browser tab pulls fresh contents immediately.
+- **Mobile share grid uses kebab, not toggle.** The little
+  "All comments" toggle on mobile was replaced with the same
+  three-dot kebab menu desktop already uses (Copy / Paste /
+  Settings). Cleaner thumb-reachable target, fewer tap states.
+- **Copy/Paste comments removed from player top menu.** Those
+  actions already live in the comments-panel kebab; the player
+  top menu now keeps only Share / Approve / Delete-version.
+- **Themed delete-version + delete-asset dialogs.** Both used to
+  bounce a native `window.confirm("localhost:3000 says...")` —
+  now use the same ConfirmModal as the rest of the app
+  (translucent card, destructive red button, full-width buttons
+  stacked on mobile).
+- **Mobile yellow OUT-handle hit-zone enlarged.** The yellow ball
+  itself stays the same visual size, but an invisible hit-zone
+  child extends UP and to the sides on mobile only so thumbs land
+  on it cleanly without overlapping the white playhead. Hover
+  time tooltip is hidden on touch.
+- **Worker reads rotation metadata from ffprobe.** Portrait clips
+  shot on phones (notably 2160×3840 iPhone exports) used to render
+  letterboxed correctly on first paint but then stretched after a
+  scrub because the browser swapped to pre-rotation pixel
+  dimensions. The worker now reads the Display Matrix rotation
+  side-data (and the legacy `tags.rotate`) and swaps width/height
+  on the way INTO the DB, so every consumer (player, thumbnails,
+  storyboard, downloads) starts with the same display dimensions.
+  Also adds `-metadata:s:v:0 rotate=0` to the ffmpeg args so the
+  output containers don't carry a rotation flag that browsers
+  might re-apply.
+
+### Fixed
+
+- **Reply author label.** Inline replies posted by the admin used
+  to show "Admin" instead of the admin's real name (the request
+  body wasn't carrying `authorName` for the internal-reply
+  branch). Fixed in `useCommentManagement.submitInlineReply`.
+- **Next.js 16 `<script>` warning.** The bootstrap inline script
+  in `layout.tsx` is now a `next/script` `<Script id="...">` with
+  `strategy="beforeInteractive"`, silencing the framework's
+  "synchronous Scripts should not be used" console warning.
+- **Item count on public folder share.** "Download All" used to
+  badge "4 items" while only two cards were visible (it was
+  counting raw version rows, not grouped video cards). Now uses
+  `videoGroups.length + subfolders.length` so the count, the grid
+  and the actual ZIP all agree.
+
+### Migration notes
+
+The `Project.shareExpiresAt` and `Folder.shareExpiresAt` columns
+are added by a new Prisma migration. Run on the host before
+restarting the app:
+
+```bash
+npx prisma migrate deploy
+```
+
+Existing rows default to `NULL` (links never expire), so the
+upgrade is non-breaking for previously-shared content.
+
+After upgrading, the **one-off** project-slug rotation script
+re-keys any pre-1.5.0 projects from their title-derived slugs to
+random tokens. Run it once and only once:
+
+```bash
+npx tsx scripts/regenerate-project-share-slugs.ts
+```
+
+Old share URLs that used the title-derived slug will return 404
+after the rotation — re-send the new link from the project page.
+
 ## [1.4.0] - 2026-05-25
 
 Major UX release built around a Frame.io-style player toolkit:

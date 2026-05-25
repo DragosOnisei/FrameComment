@@ -229,6 +229,9 @@ export const updateFolderSchema = z.object({
   parentFolderId: cuidSchema.nullable().optional(),
   authMode: z.enum(['NONE', 'PASSWORD', 'OTP', 'BOTH']).optional(),
   sharePassword: z.string().min(1).max(255).nullable().optional(),
+  // 1.4.x+: optional share-link expiration timestamp. ISO datetime
+  // string to set, null to clear (link never expires).
+  shareExpiresAt: z.string().datetime().nullable().optional(),
 })
 
 export const createProjectSchema = z.object({
@@ -335,6 +338,10 @@ export const updateProjectSchema = z.object({
     .optional()
     .or(z.literal('')),
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
+
+  // 1.4.x+: Share-link expiration. ISO datetime string when set,
+  // null/empty to clear (link never expires).
+  shareExpiresAt: z.string().datetime().nullable().optional(),
 
   // Guest mode settings
   guestMode: z.boolean().optional(),

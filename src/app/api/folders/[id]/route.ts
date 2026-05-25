@@ -327,6 +327,13 @@ export async function PATCH(
         ? encrypt(data.sharePassword)
         : null
     }
+    // 1.4.x+: optional share-link expiration. ISO datetime string =
+    // set expiry. null = clear (link never expires).
+    if ('shareExpiresAt' in data) {
+      updateData.shareExpiresAt = data.shareExpiresAt
+        ? new Date(data.shareExpiresAt)
+        : null
+    }
 
     const folder = await prisma.folder.update({
       where: { id },

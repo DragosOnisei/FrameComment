@@ -989,25 +989,10 @@ export default function VideoPlayer({
             <div className="rounded-xl overflow-hidden bg-black flex flex-col w-full h-full min-h-0">
               <div
                 ref={videoWrapperRef}
-                className={`relative group w-full bg-black flex items-center justify-center
-                  aspect-[var(--video-ar)] max-h-[70vh]
+                className={`relative group w-full bg-black flex items-center justify-center overflow-hidden
+                  aspect-video max-h-[70vh]
                   lg:aspect-auto lg:max-h-none lg:flex-1 lg:min-h-0
                   ${isDrawingMode ? '' : ''}`}
-                style={{
-                  // Mobile-only: lock the wrapper to the video's NATURAL
-                  // aspect ratio (e.g. 9/16 for portrait clips). With
-                  // object-contain on the inner <video>, this means no
-                  // letterboxing and no crop — the player frame matches
-                  // the content exactly. `max-h-[70vh]` keeps a tall
-                  // vertical clip from monopolising the whole viewport
-                  // on small phones, leaving room for the controls and
-                  // a peek at the comments below the fold. On lg+ this
-                  // CSS variable is overridden by `lg:aspect-auto`.
-                  ['--video-ar' as any]:
-                    selectedVideo?.width && selectedVideo?.height
-                      ? `${selectedVideo.width} / ${selectedVideo.height}`
-                      : '16 / 9',
-                }}
               >
                 {(selectedVideo as any)?.mediaType === 'IMAGE' ? (
                   // 1.0.9+: image assets render as a plain <img>. The
@@ -1036,6 +1021,15 @@ export default function VideoPlayer({
                     src={videoUrl}
                     poster={(selectedVideo as any).thumbnailUrl || undefined}
                     className={`w-full h-full object-contain ${isDrawingMode ? 'pointer-events-none' : 'cursor-pointer'}`}
+                    // 1.4.x: belt-and-suspenders inline `object-fit:
+                    // contain`. Some iOS Safari builds drop the
+                    // Tailwind `object-contain` class after a seek on
+                    // clips with rotation metadata — the video then
+                    // stretches to fill the wrapper instead of
+                    // letterboxing. Re-asserting via inline style
+                    // survives that quirk because the runtime style
+                    // wins over any class-derived rule.
+                    style={{ objectFit: 'contain' }}
                     onTimeUpdate={handleTimeUpdate}
                     onLoadedMetadata={handleLoadedMetadata}
                     onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}

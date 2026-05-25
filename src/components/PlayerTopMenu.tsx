@@ -16,6 +16,7 @@ import {
 import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
 import { hasClippedComments } from '@/lib/comments-clipboard'
+import { ConfirmModal } from './ConfirmModal'
 
 /**
  * 1.3.2+: top-right "..." menu that lives on the admin share page only.
@@ -248,24 +249,25 @@ export default function PlayerTopMenu({
     }
   }
 
-  const handleDelete = async () => {
+  // 1.4.x: themed ConfirmModal state for the Delete action. Replaces
+  // the old `window.confirm()` (the OS-native gray "localhost:3000
+  // says…" prompt on Mac, and the equally ugly Safari sheet on
+  // mobile) with the same Frame.io-style modal we use on the project
+  // dashboard. Two-step flow: clicking "Delete v1" in the kebab opens
+  // the modal; clicking the modal's Delete button calls
+  // `performDelete()` which does the actual API call.
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const handleDelete = () => {
     if (busy) return
     if (!currentVideoId) {
       setToast({ kind: 'error', message: 'No video selected' })
       return
     }
     setOpen(false)
-    // Native confirm is fine here — the admin already lives with the
-    // same dialog pattern on the project dashboard's Delete actions and
-    // it survives keyboard-only flow.
-    const label = [currentVideoName, currentVersionLabel]
-      .filter(Boolean)
-      .join(' · ')
-    const confirmText = label
-      ? `Delete "${label}"? This cannot be undone.`
-      : 'Delete this video version? This cannot be undone.'
-    if (!window.confirm(confirmText)) return
-
+    setConfirmDeleteOpen(true)
+  }
+  const performDelete = async () => {
+    if (!currentVideoId) return
     setBusy('delete')
     try {
       const res = await apiFetch(`/api/videos/${currentVideoId}`, {
@@ -281,6 +283,7 @@ export default function PlayerTopMenu({
         }
         throw new Error(msg)
       }
+      setConfirmDeleteOpen(false)
       setToast({ kind: 'deleted' })
       if (onVideoDeleted) {
         onVideoDeleted(currentVideoId)
@@ -437,43 +440,12 @@ export default function PlayerTopMenu({
             </span>
           </button>
 
-          {/* ─── Divider ─── */}
-          <div className="h-px my-1 mx-1 bg-border/60" />
-
-          {/* ─── Copy / Paste comments (sidebar workflow) ─── */}
-          <button
-            role="menuitem"
-            type="button"
-            onClick={handleCopyComments}
-            disabled={!canCopy}
-            className={`
-              w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
-              transition-colors text-left whitespace-nowrap
-              ${canCopy ? 'hover:bg-muted' : 'opacity-40 cursor-not-allowed'}
-            `}
-          >
-            <ClipboardCopy className="w-4 h-4 shrink-0" />
-            <span className="flex-1 whitespace-nowrap">Copy comments</span>
-            {commentCount > 0 && (
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {commentCount}
-              </span>
-            )}
-          </button>
-          <button
-            role="menuitem"
-            type="button"
-            onClick={handlePasteComments}
-            disabled={!canPaste}
-            className={`
-              w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
-              transition-colors text-left whitespace-nowrap
-              ${canPaste ? 'hover:bg-muted' : 'opacity-40 cursor-not-allowed'}
-            `}
-          >
-            <ClipboardPaste className="w-4 h-4 shrink-0" />
-            <span className="flex-1 whitespace-nowrap">Paste comments</span>
-          </button>
+          {/* 1.4.x: Copy / Paste comments were dropped from the
+              top-right player kebab because the "All comments" kebab
+              just below the video carries the same two actions —
+              there's no reason to surface them twice. Keeping the
+              divider so Share / Delete stay visually grouped above
+              the theme toggle. */}
 
           {/* ─── Divider ─── */}
           <div className="h-px my-1 mx-1 bg-border/60" />
@@ -506,6 +478,25 @@ export default function PlayerTopMenu({
         </div>,
         document.body,
       )}
+      {/* 1.4.x: themed Delete confirmation. Same ConfirmModal used on
+          the project dashboard, so the admin sees one consistent
+          delete UX everywhere instead of the OS-native gray prompt
+          that used to fire from `window.confirm()`. */}
+      <ConfirmModal
+        open={confirmDeleteOpen}
+        onOpenChange={(next) => { if (!busy) setConfirmDeleteOpen(next) }}
+        variant="destructive"
+        title={
+          [currentVideoName, currentVersionLabel].filter(Boolean).length > 0
+            ? `Delete "${[currentVideoName, currentVersionLabel].filter(Boolean).join(' · ')}"?`
+            : 'Delete this video version?'
+        }
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        busy={busy === 'delete'}
+        onConfirm={performDelete}
+      />
     </div>
   )
 }

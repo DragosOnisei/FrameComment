@@ -146,10 +146,60 @@ export async function getVideoMetadata(inputPath: string): Promise<VideoMetadata
           fps = den ? num / den : undefined
         }
 
+        // 1.4.x: ffprobe reports `width` / `height` as the RAW STORED
+        // pixel dimensions of the frame, NOT what the player actually
+        // paints. iPhone clips shot in portrait routinely come through
+        // as 3840×2160 (landscape pixels) + a `rotate 90°` flag or an
+        // mp4 `displaymatrix` side-data entry telling the player
+        // "decode landscape, rotate 90° for display". If we trust the
+        // raw width/height here, the worker calls scale=1280:720
+        // (LANDSCAPE) on what is actually portrait content — ffmpeg
+        // auto-rotates the frame to 2160×3840 portrait first, then
+        // squishes it into the 1280×720 landscape canvas. The result
+        // is a horizontally stretched portrait video that fills the
+        // 16:9 player wrapper at playback time. Reading the rotation
+        // and swapping the dims here gives the worker the truth: the
+        // clip is portrait, calculate scale accordingly.
+        let w = videoStream.width || 0
+        let h = videoStream.height || 0
+        let rotation = 0
+        // Legacy `rotate` tag on the stream (most pre-2022 iPhone files
+        // and Android camera apps).
+        const legacyRotate = parseInt(
+          (videoStream.tags && (videoStream.tags.rotate || videoStream.tags.ROTATE)) || '0',
+          10,
+        )
+        if (Number.isFinite(legacyRotate) && legacyRotate !== 0) {
+          rotation = legacyRotate
+        }
+        // Modern `displaymatrix` side-data list (iOS 16+, modern Android,
+        // most camera apps from 2023 onwards). The matrix encodes the
+        // rotation; ffprobe exposes it directly as a `rotation` field.
+        if (Array.isArray(videoStream.side_data_list)) {
+          for (const sd of videoStream.side_data_list) {
+            if (
+              sd &&
+              (sd.side_data_type === 'Display Matrix' ||
+                sd.side_data_type === 'displaymatrix') &&
+              typeof sd.rotation === 'number'
+            ) {
+              // ffmpeg reports `rotation` as the angle CCW from upright
+              // (e.g. -90 for a 90° clockwise display rotation). Either
+              // ±90 / ±270 swap the painted dimensions.
+              rotation = sd.rotation
+              break
+            }
+          }
+        }
+        const normalized = ((rotation % 360) + 360) % 360
+        if (normalized === 90 || normalized === 270) {
+          ;[w, h] = [h, w]
+        }
+
         const result = {
           duration: parseFloat(metadata.format.duration) || 0,
-          width: videoStream.width || 0,
-          height: videoStream.height || 0,
+          width: w,
+          height: h,
           fps,
           codec: videoStream.codec_name,
         }
@@ -338,6 +388,25 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     '-ar', '48000', // Standard audio sample rate
     '-movflags', '+faststart', // Enable progressive download (moov atom at start)
     '-max_muxing_queue_size', '1024', // Prevent muxing errors on high-bitrate videos
+    // 1.4.x: BAKE THE ROTATION INTO THE OUTPUT PIXELS. Modern iPhone
+    // clips (notably 2160×3840) ship with rotation metadata — a legacy
+    // `rotate` tag and/or an mp4 `displaymatrix` side-data flag — that
+    // tells the player "decode landscape, then rotate 90° for display".
+    // ffmpeg's auto-rotate filter already applies the rotation when we
+    // decode and pass through `-vf scale=...`, so the OUTPUT pixels are
+    // already in the correct (portrait) orientation. But ffmpeg
+    // ALSO copies the legacy `rotate` tag into the output container
+    // unless we explicitly strip it. Some browsers then try to rotate
+    // the already-rotated frames a SECOND time, and worse, apply that
+    // double-rotation inconsistently between the initial paint and
+    // post-seek frames — the bug the user reported as "the video
+    // becomes stretched after I scrub". Stripping the tag forces every
+    // browser to paint the frames as-is, no rotation, no
+    // interpretation: the orientation baked in by ffmpeg is the only
+    // truth. The modern `displaymatrix` side-data is dropped
+    // automatically because we re-encode through `-vf`, not stream
+    // copy.
+    '-metadata:s:v:0', 'rotate=0',
     '-progress', 'pipe:2',
     '-y', // Overwrite output file
     outputPath

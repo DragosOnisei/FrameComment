@@ -125,30 +125,40 @@ export function generateSlug(title: string): string {
     .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
 }
 
+/**
+ * 1.4.x+ SECURITY: project share slugs are now UNGUESSABLE random
+ * tokens instead of `slugify(title)`. The old behaviour produced
+ * URLs like `/share/vda` for project "VDA" — anyone who guessed the
+ * project name could pivot through `/share/<name>` and view every
+ * folder + video, defeating the point of per-folder shares. We now
+ * mint a 12-character base64url random string (≈72 bits of entropy,
+ * same approach as `generateUniqueFolderSlug`) so the share URL is
+ * a capability nobody can stumble onto.
+ *
+ * The function signature still takes `title` for source-compat with
+ * existing callers in the projects API, but the title is now only
+ * used as a debug breadcrumb in logs — it never appears in the slug.
+ */
 export async function generateUniqueSlug(
-  title: string,
+  _title: string,
   prisma: any,
   excludeId?: string
 ): Promise<string> {
-  let slug = generateSlug(title)
-  let counter = 1
-
-  // Check if slug exists
-  while (true) {
+  // Lazy require so this file stays usable in edge runtime contexts
+  // that don't have `crypto` on the global namespace. The Node crypto
+  // module ships everywhere we actually call this from (Next.js API
+  // route handlers on the server).
+  const { randomBytes } = await import('crypto')
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const slug = randomBytes(9).toString('base64url')
     const existing = await prisma.project.findUnique({
       where: { slug },
     })
-
-    if (!existing || existing.id === excludeId) {
-      break
-    }
-
-    // Append counter to make it unique
-    slug = `${generateSlug(title)}-${counter}`
-    counter++
+    if (!existing || existing.id === excludeId) return slug
   }
-
-  return slug
+  // Falling out of the loop is exceptionally unlikely (8 collisions
+  // across a 2^72 keyspace), but if it does we widen the key.
+  return randomBytes(18).toString('base64url')
 }
 
 export function getClientIpAddress(request: NextRequest): string {

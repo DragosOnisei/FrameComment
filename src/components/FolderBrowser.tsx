@@ -282,11 +282,27 @@ function FolderBrowserInner(
     busy?: boolean
     onConfirm?: () => Promise<void> | void
   }>({ open: false, title: '' })
+  // 1.4.x+: shareState carries enough context for the ShareModal to
+  // both display the current expiration AND PATCH it to the right
+  // endpoint when the admin hits Done. `kind === 'folder'` PATCHes
+  // /api/folders/[id]; everything else (per-video / project root)
+  // PATCHes /api/projects/[id] because the public share gate lives on
+  // the project for those URLs.
   const [shareState, setShareState] = useState<{
     open: boolean
     title: string
     shareUrl: string
-  }>({ open: false, title: '', shareUrl: '' })
+    kind: 'folder' | 'project'
+    targetId: string | null
+    initialExpiresAt: string | null
+  }>({
+    open: false,
+    title: '',
+    shareUrl: '',
+    kind: 'folder',
+    targetId: null,
+    initialExpiresAt: null,
+  })
   // Split-versions modal state (1.0.8+) — surfaces every version in a
   // group so the admin can lift selected rows back out into their
   // own standalone cards. Opened from the VideoCard kebab.
@@ -525,11 +541,36 @@ function FolderBrowserInner(
       const folder = folders.find((f) => f.id === folderId)
       if (!folder) return
       const url = `${window.location.origin}/share/folder/${folder.slug}`
+      // 1.4.x+: also read the folder's current shareExpiresAt so the
+      // modal can pre-fill its toggle (ON when there's no expiry, OFF
+      // with the chosen date when one is set). Best-effort — if the
+      // fetch fails we just open with the default "no expiration".
+      let initialExpiresAt: string | null = null
+      try {
+        const res = await apiFetch(`/api/folders/${folderId}`)
+        if (res.ok) {
+          const data = await res.json()
+          const raw = data?.folder?.shareExpiresAt
+          if (raw) {
+            initialExpiresAt =
+              typeof raw === 'string' ? raw : new Date(raw).toISOString()
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
       // 1.0.8+: replace the OS alert with the Frame.io-style share
       // modal (Link copied + Copy button + Done). The modal itself
       // does the clipboard write so the user can re-copy without
       // dismissing first.
-      setShareState({ open: true, title: folder.name, shareUrl: url })
+      setShareState({
+        open: true,
+        title: folder.name,
+        shareUrl: url,
+        kind: 'folder',
+        targetId: folderId,
+        initialExpiresAt,
+      })
       return
     },
     [folders],
@@ -1075,6 +1116,58 @@ function FolderBrowserInner(
     }
   }, [])
 
+  // 1.4.x+: structured single-folder download. Hits the new
+  // /api/folders/[id]/download endpoint that streams a ZIP of the
+  // whole tree with folder names + original filenames preserved.
+  //
+  // We can't use a plain anchor tag here — admin auth in this app
+  // is Bearer-based (`Authorization: Bearer <admin-token>`), and
+  // `<a href="...">` only carries cookies. The endpoint would 401
+  // and the browser would save the JSON error body as
+  // `download.json`. Instead we go through `apiFetch` which adds
+  // the Bearer header, take the response as a Blob, and trigger the
+  // anchor-tag download on a generated object URL. The filename
+  // comes from the response's Content-Disposition header so a future
+  // server rename (e.g. unicode folder names) doesn't need a client
+  // change.
+  const handleDownloadFolder = useCallback(async (folderId: string) => {
+    setBulkBusy(true)
+    try {
+      const res = await apiFetch(`/api/folders/${folderId}/download`)
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try {
+          const body = await res.json()
+          if (body?.error) msg = body.error
+        } catch {
+          /* ignore parse errors */
+        }
+        alert(`Failed to download folder: ${msg}`)
+        return
+      }
+      const blob = await res.blob()
+      // Try to read filename from Content-Disposition; fall back to
+      // a generic name. The server-side route quotes the filename,
+      // so we strip the surrounding `"`.
+      const cd = res.headers.get('content-disposition') || ''
+      const match = cd.match(/filename\*?="?([^";]+)"?/i)
+      const filename = match?.[1] || 'folder.zip'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      // Give Safari a tick to actually start the save before we
+      // revoke; some engines flake if we revoke too early.
+      setTimeout(() => URL.revokeObjectURL(url), 1500)
+    } finally {
+      setBulkBusy(false)
+    }
+  }, [])
+
   const handleBulkDownload = useCallback(async () => {
     // 1.1.0+: bulk download spans both selected videos AND every
     // video found recursively inside each selected folder. We walk
@@ -1317,6 +1410,19 @@ function FolderBrowserInner(
         if (isBulk) clearSelection()
         await fetchFolders({ silent: true })
         onMutated?.()
+        // 1.4.x+: invalidate Next.js App Router cache. Without this the
+        // user could navigate UP to the parent folder and see a stale
+        // page that still reflects the pre-move state — notably, the
+        // parent's subfolders list wouldn't include the folder we just
+        // emptied (visible as "Test 2 disappeared after Move Up" in
+        // the bug report). router.refresh() forces a server re-render
+        // on the next nav so the parent gets fresh subfolders +
+        // videos data.
+        router.refresh()
+        // Same data-shape change concerns ANY sibling FolderBrowser
+        // listening for this event (rare but possible if the page
+        // embeds multiple instances).
+        window.dispatchEvent(new CustomEvent('framecomment:folders-changed'))
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move video')
       }
@@ -1330,6 +1436,7 @@ function FolderBrowserInner(
       selectedVideoIds,
       selectedFolderIds,
       clearSelection,
+      router,
     ],
   )
 
@@ -1340,6 +1447,26 @@ function FolderBrowserInner(
   const handleShareVideo = useCallback(
     async (_videoId: string, videoName: string) => {
       if (typeof window === 'undefined') return
+      // 1.4.x+: pre-load the project's current shareExpiresAt so the
+      // modal can seed its toggle. Per-video links go through the
+      // project's share-token gate, so expiration lives on the
+      // project. Best-effort — fall back to "no expiration" UI on any
+      // failure.
+      let initialExpiresAt: string | null = null
+      try {
+        const meta = await apiFetch(`/api/projects/${projectId}`)
+        if (meta.ok) {
+          const data = await meta.json()
+          const raw =
+            data?.project?.shareExpiresAt ?? data?.shareExpiresAt ?? null
+          if (raw) {
+            initialExpiresAt =
+              typeof raw === 'string' ? raw : new Date(raw).toISOString()
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
       // 1.2.0+: ask the server for an HMAC-signed URL that scopes the
       // share to this one video. Server-side filters lock the response
       // to this video name so a reviewer opening the link can't see
@@ -1359,7 +1486,14 @@ function FolderBrowserInner(
         if (res.ok) {
           const data = await res.json()
           if (data?.url) {
-            setShareState({ open: true, title: videoName, shareUrl: data.url })
+            setShareState({
+              open: true,
+              title: videoName,
+              shareUrl: data.url,
+              kind: 'project',
+              targetId: projectId,
+              initialExpiresAt,
+            })
             return
           }
         }
@@ -1370,7 +1504,14 @@ function FolderBrowserInner(
       const params = new URLSearchParams({ video: videoName })
       if (currentFolderId) params.set('folderId', currentFolderId)
       const url = `${origin}/share/${_projectSlug}?${params.toString()}`
-      setShareState({ open: true, title: videoName, shareUrl: url })
+      setShareState({
+        open: true,
+        title: videoName,
+        shareUrl: url,
+        kind: 'project',
+        targetId: projectId,
+        initialExpiresAt,
+      })
     },
     [_projectSlug, currentFolderId, projectId],
   )
@@ -1472,6 +1613,12 @@ function FolderBrowserInner(
         if (isBulk) clearSelection()
         await fetchFolders({ silent: true })
         onMutated?.()
+        // 1.4.x+: see handleMoveVideoUp for the same router.refresh()
+        // rationale — Next.js App Router cache would otherwise let
+        // the parent folder render stale subfolder data after a
+        // Move Up.
+        router.refresh()
+        window.dispatchEvent(new CustomEvent('framecomment:folders-changed'))
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to move folder')
       }
@@ -1479,7 +1626,7 @@ function FolderBrowserInner(
     // `videoGroups` / `clearSelection` are below in the component;
     // we read them via closure at click time. See `handleDelete`
     // for the same TDZ workaround. eslint-disable-next-line react-hooks/exhaustive-deps
-    [canMoveUp, parentFolderId, fetchFolders, onMutated, selectedVideoIds, selectedFolderIds],
+    [canMoveUp, parentFolderId, fetchFolders, onMutated, selectedVideoIds, selectedFolderIds, router],
   )
 
   // "New Folder with Selection" (1.0.9+). Creates a folder named
@@ -2250,6 +2397,7 @@ function FolderBrowserInner(
               onBulkDownload={handleBulkDownload}
               onNewFolderWithSelection={handleNewFolderWithSelection}
               onDuplicate={(fid) => void handleDuplicate(fid, 'folder')}
+              onDownloadFolder={handleDownloadFolder}
             />
           ))}
           {(() => {
@@ -2457,6 +2605,31 @@ function FolderBrowserInner(
         }
         title={shareState.title}
         shareUrl={shareState.shareUrl}
+        initialExpiresAt={shareState.initialExpiresAt}
+        onSaveExpiration={async (next) => {
+          if (!shareState.targetId) return
+          const url =
+            shareState.kind === 'folder'
+              ? `/api/folders/${shareState.targetId}`
+              : `/api/projects/${shareState.targetId}`
+          try {
+            const res = await apiFetch(url, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ shareExpiresAt: next }),
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              alert(err.error || 'Failed to save expiration')
+            }
+          } catch (err) {
+            alert(
+              err instanceof Error
+                ? err.message
+                : 'Failed to save expiration',
+            )
+          }
+        }}
       />
       <SplitVersionsModal
         open={splitState.open}

@@ -43,6 +43,14 @@ export async function GET(
 ) {
   try {
     const { slug } = await params
+    // 1.4.x+: optional `?root=<slug>` query param. The client passes
+    // this when navigating into a subfolder of the originally shared
+    // folder so we can return the in-scope breadcrumb (root → ... →
+    // current). The page uses it to render the breadcrumb without
+    // leaking a navigable link to the project share. If `root` is
+    // missing OR is the same as `slug`, the current folder IS the
+    // root and the breadcrumb is just one entry.
+    const rootSlug = request.nextUrl.searchParams.get('root')?.trim() || null
 
     // Light rate limit so a leaked URL can't be brute-forced via
     // metadata probes. The /verify route has a much stricter limit.
@@ -55,7 +63,14 @@ export async function GET(
 
     // Cheap lookup first so an invalid slug short-circuits before
     // we go fetching contents.
-    const folderMeta = await prisma.folder.findUnique({
+    //
+    // NOTE: cast to `any` because the folder schema's `shareExpiresAt`
+    // field (1.4.x+) is only present in the Prisma client AFTER
+    // `prisma generate` runs against the migrated DB. Doing the cast
+    // at the awaited-call boundary keeps consumer code working in both
+    // the pre-migrate (stale client) and post-migrate (fresh client)
+    // states.
+    const folderMeta = (await prisma.folder.findUnique({
       where: { slug },
       select: {
         id: true,
@@ -64,12 +79,43 @@ export async function GET(
         parentFolderId: true,
         sharePassword: true,
         authMode: true,
-        project: { select: { title: true, companyName: true, slug: true } },
-      },
-    })
+        // 1.4.x+: optional share-link expiration timestamp.
+        shareExpiresAt: true,
+        project: {
+          select: {
+            title: true,
+            companyName: true,
+            slug: true,
+            // 1.4.x+: expose the client-download flag so the public
+            // share page can show/hide the "Download All" button.
+            allowAssetDownload: true,
+          },
+        },
+      } as any,
+    })) as any
 
     if (!folderMeta) {
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
+    }
+
+    // 1.4.x+: hard-reject expired folder share links. Admin override
+    // below keeps admins able to inspect the folder regardless; for
+    // anonymous clients we return 410 Gone with the expiration time
+    // so the page renders a clean "link expired" notice.
+    if (
+      (folderMeta as any).shareExpiresAt &&
+      (folderMeta as any).shareExpiresAt.getTime() < Date.now()
+    ) {
+      const probe = await getCurrentUserFromRequest(request)
+      if (probe?.role !== 'ADMIN') {
+        return NextResponse.json(
+          {
+            error: 'This share link has expired.',
+            expiredAt: (folderMeta as any).shareExpiresAt.toISOString(),
+          },
+          { status: 410 },
+        )
+      }
     }
 
     if (folderMeta.authMode === 'OTP' || folderMeta.authMode === 'BOTH') {
@@ -275,6 +321,42 @@ export async function GET(
       }),
     )
 
+    // 1.4.x+: build the IN-SCOPE breadcrumb. Walks parentFolderId from
+    // the CURRENT folder up the tree, stopping when we hit the share
+    // root (the slug the client passed via `?root=`). Capped at 10
+    // levels so a malicious infinite-loop folder couldn't DoS the
+    // route. If `root` is missing or equals the current slug, the
+    // ancestry is a single entry (the current folder itself).
+    //
+    // We DO NOT walk above the share root — that's the whole point of
+    // folder shares being scoped. The client renders this list as the
+    // breadcrumb instead of using `projectTitle`, so the public share
+    // never surfaces a link back to the project root.
+    type Crumb = { slug: string; name: string }
+    const ancestry: Crumb[] = [{ slug, name: folderMeta.name }]
+    if (rootSlug && rootSlug !== slug) {
+      let cursorId: string | null = folderMeta.parentFolderId
+      const safetyLimit = 10
+      for (let i = 0; i < safetyLimit && cursorId; i++) {
+        const parent = await prisma.folder.findUnique({
+          where: { id: cursorId },
+          select: { id: true, slug: true, name: true, parentFolderId: true },
+        })
+        if (!parent) break
+        ancestry.unshift({ slug: parent.slug, name: parent.name })
+        if (parent.slug === rootSlug) break
+        cursorId = parent.parentFolderId
+      }
+      // If we never reached the declared root, drop everything above
+      // the current folder — the supplied root isn't actually an
+      // ancestor (defensive against a tampered query param).
+      const reachedRoot = ancestry.some((c) => c.slug === rootSlug)
+      if (!reachedRoot) {
+        ancestry.length = 0
+        ancestry.push({ slug, name: folderMeta.name })
+      }
+    }
+
     // Issue a fresh folder-scoped share token when one isn't already
     // attached (matches what /api/share/[token] does for project NONE).
     let issuedShareToken: string | undefined
@@ -303,6 +385,16 @@ export async function GET(
         projectSlug: folderMeta.project.slug,
         companyName: folderMeta.project.companyName,
         authMode: folderMeta.authMode,
+        // 1.4.x+: drive the "Download All" button in the public folder
+        // share UI. Falls back to false so older client builds that
+        // don't know about the flag stay safe by default.
+        allowAssetDownload: !!folderMeta.project.allowAssetDownload,
+        // 1.4.x+: expose the share expiration so the public page can
+        // render a countdown banner ("Expires in 5 days"). Sent as
+        // ISO string for easy client-side `new Date(...)` parsing.
+        shareExpiresAt: (folderMeta as any).shareExpiresAt
+          ? (folderMeta as any).shareExpiresAt.toISOString()
+          : null,
       },
       subfolders: await (async () => {
         // Mirror the admin folder grid (1.0.7+): mint Frame.io-style
@@ -332,6 +424,11 @@ export async function GET(
         }))
       })(),
       videos: videosWithThumb,
+      // 1.4.x+: in-scope breadcrumb (root → current). See the walk
+      // logic above. The page renders this instead of the old
+      // project-title link, so the share is fully scoped to the
+      // folder subtree.
+      ancestry,
       isAdmin,
       sessionId,
       shareToken: issuedShareToken,

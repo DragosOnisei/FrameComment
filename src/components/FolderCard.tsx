@@ -104,6 +104,11 @@ export interface FolderCardProps {
    *  the entire current selection when bulk) in the current location
    *  with a `(1)` / `(2)` suffix. */
   onDuplicate?: (folderId: string) => void
+  /** 1.4.x+: Single-folder structured download. Streams a ZIP of the
+   *  folder's full tree (subfolders + latest-version videos) with the
+   *  original names preserved. Different from `onBulkDownload` which
+   *  flat-downloads each video individually. */
+  onDownloadFolder?: (folderId: string) => void
 }
 
 // Custom MIME types — folders carry FOLDER_MIME, videos carry
@@ -140,6 +145,7 @@ export default function FolderCard({
   onBulkDownload,
   onNewFolderWithSelection,
   onDuplicate,
+  onDownloadFolder,
 }: FolderCardProps) {
   // 1.1.0+: bulk-aware kebab gating (mirror of VideoCard).
   const isBulk = bulkSelectionCount >= 2
@@ -147,6 +153,9 @@ export default function FolderCard({
   const showShare = !!onShare && !isBulk
   const showNewFolder = !!onNewFolderWithSelection && bulkSelectionCount >= 1
   const showDownload = !!onBulkDownload && bulkSelectionCount >= 1
+  // 1.4.x+: single-folder structured download is shown when there's
+  // no bulk active (otherwise the bulk Download takes over).
+  const showSingleDownload = !!onDownloadFolder && bulkSelectionCount < 1
   const showDuplicate = !!onDuplicate
   const [menuOpen, setMenuOpen] = useState(false)
   const [isHoveredDropTarget, setIsHoveredDropTarget] = useState(false)
@@ -417,7 +426,7 @@ export default function FolderCard({
             action wired. On the public client share we omit every
             action prop so this disappears and the card stays
             read-only (1.0.7+). */}
-        {(showRename || showShare || onDelete || onMoveUp || showDownload || showNewFolder || showDuplicate) && (
+        {(showRename || showShare || onDelete || onMoveUp || showDownload || showSingleDownload || showNewFolder || showDuplicate) && (
         <div ref={menuRef} className="relative shrink-0 -mr-1 -mt-1">
           <button
             ref={kebabRef}
@@ -472,6 +481,25 @@ export default function FolderCard({
                     : 'Download folder'}
                 </button>
               )}
+              {/* 1.4.x+: single-folder structured download — streams a
+                  ZIP from `/api/folders/[id]/download` that preserves
+                  the folder hierarchy + original filenames. Only
+                  rendered when there's NO bulk selection active (the
+                  bulk Download above takes over otherwise). */}
+              {showSingleDownload && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onDownloadFolder!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  Download folder
+                </button>
+              )}
               {showShare && (
                 <button
                   role="menuitem"
@@ -486,7 +514,7 @@ export default function FolderCard({
                   Share folder
                 </button>
               )}
-              {(showDownload || showShare) && (showDuplicate || showRename) && (
+              {(showDownload || showSingleDownload || showShare) && (showDuplicate || showRename) && (
                 <div className="my-1 h-px bg-border/50" role="separator" />
               )}
               {showDuplicate && (
@@ -552,7 +580,7 @@ export default function FolderCard({
                     : 'New Folder with selection'}
                 </button>
               )}
-              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showDownload || showShare) && (
+              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showDownload || showSingleDownload || showShare) && (
                 <div className="my-1 h-px bg-border/50" role="separator" />
               )}
               {onDelete && (

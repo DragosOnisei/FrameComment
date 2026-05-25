@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { AccentColorProvider } from "@/components/AccentColorProvider";
 import { ServiceWorkerProvider } from "@/components/ServiceWorkerProvider";
@@ -91,7 +92,19 @@ export default async function RootLayout({
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"
         />
-        <script
+        {/* 1.4.x+: switched from a raw `<script>` element to
+            `next/script` with strategy="beforeInteractive". Next.js 16
+            warns about inline `<script>` tags inside React component
+            trees ("Scripts inside React components are never executed
+            when rendering on the client") — even though SSR renders
+            them fine, the warning floods the dev console. `<Script>`
+            with the same nonce + early-execution strategy is the
+            officially supported way to keep the anti-FOUC theme +
+            accent initialiser running before hydration. The body of
+            the script is unchanged. */}
+        <Script
+          id="framecomment-bootstrap"
+          strategy="beforeInteractive"
           nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `window.__STORAGE_PROVIDER__=${JSON.stringify(storageProvider)};(function() {

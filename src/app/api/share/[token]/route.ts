@@ -36,7 +36,13 @@ export async function GET(
     }, `share-access:${token}`)
     if (rateLimitResult) return rateLimitResult
 
-    const projectMeta = await prisma.project.findFirst({
+    // NOTE: this entire result is cast to `any` because the project
+    // schema's `shareExpiresAt` field (1.4.x+) is only present in the
+    // Prisma client AFTER `prisma generate` runs against the migrated
+    // DB. Casting at the awaited-call boundary keeps consumer code
+    // working in both the pre-migrate (stale client) and post-migrate
+    // (fresh client) states.
+    const projectMeta = (await prisma.project.findFirst({
       // 1.2.0+: a soft-deleted project must look 404 to clients.
       where: { slug: token, deletedAt: null } as any,
       select: {
@@ -45,8 +51,11 @@ export async function GET(
         guestLatestOnly: true,
         sharePassword: true,
         authMode: true,
-      },
-    })
+        // 1.4.x+: read share expiration so we can hard-reject after
+        // the cut-off.
+        shareExpiresAt: true,
+      } as any,
+    })) as any
 
     if (!projectMeta) {
       // SECURITY: Return same response shape as auth-required projects
@@ -56,6 +65,26 @@ export async function GET(
         authMode: 'PASSWORD',
         guestMode: false,
       }, { status: 401 })
+    }
+
+    // 1.4.x+: hard-reject expired share links. Admin override below
+    // (after auth context is read) keeps admins able to inspect the
+    // project regardless. For everyone else, 410 Gone is the spec-
+    // correct status for a resource that used to exist but doesn't
+    // anymore — the public share page renders a clean "link expired"
+    // notice when it sees it.
+    const expiresAt = (projectMeta as any).shareExpiresAt as Date | null
+    if (expiresAt && expiresAt.getTime() < Date.now()) {
+      const adminUser = await getCurrentUserFromRequest(request)
+      if (adminUser?.role !== 'ADMIN') {
+        return NextResponse.json(
+          {
+            error: 'This share link has expired.',
+            expiredAt: expiresAt.toISOString(),
+          },
+          { status: 410 },
+        )
+      }
     }
 
     const shareContext = await getShareContext(request)
@@ -334,6 +363,13 @@ export async function GET(
       allowReverseShare: project.allowReverseShare,
       clientCanApprove: project.clientCanApprove,
       showClientTutorial: project.showClientTutorial ?? true,
+
+      // 1.4.x+: expose the share-link expiration so the public share
+      // page can render a countdown banner ("Expires in N days").
+      // Hard-rejected above for non-admin viewers if already past, so
+      // we only end up here when either there's no expiry, the
+      // expiry is in the future, or the viewer is an admin.
+      shareExpiresAt: expiresAt ? expiresAt.toISOString() : null,
 
       videos: sanitizedVideos,
       videosByName: sanitizedVideosByName,

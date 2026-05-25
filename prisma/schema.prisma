@@ -44,6 +44,11 @@ model Project {
   companyName     String? // Optional company/brand name (display priority: companyName → primary recipient → 'Client')
   sharePassword   String?
   authMode        String  @default("PASSWORD") // Authentication mode: PASSWORD, OTP, BOTH, or NONE
+  // 1.4.x+: optional share-link expiration. NULL = never expires
+  // (default). When set, public share routes return 410 Gone after
+  // this timestamp and the share page shows a "Expires in N days"
+  // banner so the client knows the cut-off date.
+  shareExpiresAt  DateTime?
   guestMode       Boolean @default(false) // Allow guest access with limited view (videos only, no comments/approval)
   guestLatestOnly Boolean @default(true) // Guests can only view latest version of each video
 
@@ -152,6 +157,10 @@ model Folder {
   slug          String  @unique
   sharePassword String?
   authMode      String  @default("NONE") // PASSWORD | OTP | BOTH | NONE
+  // 1.4.x+: optional share-link expiration on the folder share.
+  // NULL = never expires (default). After this timestamp, public
+  // /share/folder/[slug] returns 410 Gone.
+  shareExpiresAt DateTime?
 
   // Comment range / visibility settings will live on the project for
   // now; revisit per-folder overrides in a later release if needed.

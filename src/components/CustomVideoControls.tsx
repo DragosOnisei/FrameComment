@@ -973,7 +973,27 @@ export default function CustomVideoControls({
                   }}
                   title="Drag right to mark the comment's end point"
                   aria-label="Drag to set comment out point"
-                />
+                >
+                  {/* 1.4.x: invisible hit-zone extension for phones —
+                      makes the yellow ball easier to grab without
+                      changing the ball's visual size or position.
+                      Sits as an absolutely positioned overlay INSIDE
+                      the button (so taps on it bubble to the button's
+                      handlers), extending UPWARD only (so it never
+                      overlaps the white playhead just below). Hidden
+                      on `sm:+` (desktop), where the cursor doesn't
+                      need the extra margin. The negative offsets push
+                      the box out of the button's natural bounds; the
+                      child `pointer-events: auto` is implicit because
+                      the parent button isn't `pointer-events-none`. */}
+                  <span
+                    aria-hidden="true"
+                    className="
+                      sm:hidden absolute
+                      -top-5 -left-3 -right-3 bottom-0
+                    "
+                  />
+                </button>
               </>
             )
           })()}
@@ -989,10 +1009,15 @@ export default function CustomVideoControls({
             <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 border-primary -translate-x-1/2 group-hover:scale-110 transition-transform" />
           </div>
 
-          {/* Hover Time Indicator */}
+          {/* Hover Time Indicator — desktop only. On phones touch
+              events fire mousemove synthetically when grabbing the
+              yellow OUT handle, which would paint this badge in odd
+              spots near the user's finger. The hover-scrub UX it
+              serves doesn't translate to touch anyway, so we just
+              hide it below `sm:`. */}
           {hoveredTime !== null && !isDragging && (
             <div
-              className="absolute bottom-full mb-2 px-2 py-1 bg-black/90 text-white text-xs font-mono rounded border border-white/20 shadow-lg whitespace-nowrap pointer-events-none"
+              className="hidden sm:block absolute bottom-full mb-2 px-2 py-1 bg-black/90 text-white text-xs font-mono rounded border border-white/20 shadow-lg whitespace-nowrap pointer-events-none"
               style={{
                 left: `${(hoveredTime / videoDuration) * 100}%`,
                 transform: 'translateX(-50%)',
