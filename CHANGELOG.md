@@ -17,6 +17,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.3] - 2026-05-26
+
+Two paper-cuts on the upload modal: clicking Cancel/Remove now
+fully tears the upload down, and retrying the same file no longer
+gets stuck on a dead resume session.
+
+### Fixed
+
+- **Cancel on the video upload modal didn't actually cancel.** The
+  Cancel/Remove button used to call `tusUpload.abort(true)` and
+  that was it — the partial TUS chunk was deleted, but the
+  `Video` row stayed in the database with `status='UPLOADING'`.
+  If the upload had already finished server-side (or the worker
+  had picked up the job a moment before the click landed), the
+  worker kept marching toward READY: the user would refresh the
+  page later and find a thumbnail being generated for content
+  they thought they'd thrown away. Cancel now also DELETEs the
+  `Video` record so the worker job becomes a no-op.
+- **"Upload session expired. Please try again." on retry of a
+  cancelled file.** After cancelling, the TUS fingerprint +
+  upload metadata in `localStorage` were left behind. The next
+  attempt at the same file would have tus-js-client try to
+  RESUME the dead session — server returns 404/410 because the
+  staging file is gone — and the user got the cryptic "session
+  expired" error before the upload even started. Cancel now
+  also wipes both `localStorage` keys (`tus::…` fingerprint and
+  the upload-metadata blob) so retry starts a brand-new session.
+
+### Upgrade notes
+
+No DB migration, no env changes. Pure client + worker
+behaviour. Just redeploy.
+
 ## [1.5.2] - 2026-05-26
 
 Single-issue patch: large uploads no longer collapse to a crawl on

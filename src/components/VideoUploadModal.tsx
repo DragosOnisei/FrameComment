@@ -323,6 +323,25 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
   }, [isOpen])
 
   const handleRemove = (id: string) => {
+    // 1.5.x+: Cancel/Remove now performs a FULL teardown — not just
+    // "stop the TUS PATCH stream". The old version only aborted the
+    // TUS client, which left two orphans behind:
+    //
+    //   1. The DB row (`Video` with status='UPLOADING'). If the upload
+    //      had already completed server-side or the worker had already
+    //      picked it up off the queue, the row kept marching toward
+    //      READY — the user would later see a thumbnail being
+    //      generated for content they thought they'd thrown away.
+    //   2. The TUS fingerprint + upload metadata in localStorage. On
+    //      the next attempt with the SAME file, tus-js-client would
+    //      try to resume from the dead session → server returns 404 /
+    //      410 → user sees "Upload session expired. Please try again."
+    //
+    // We now: (a) abort TUS / S3, (b) DELETE the video record so the
+    // worker job becomes a no-op, and (c) wipe the localStorage
+    // resume state so the retry starts a clean upload.
+    const itemSnapshot = pendingUploads.find(u => u.id === id)
+
     const tusUpload = uploadRefs.current.get(id)
     if (tusUpload) {
       tusUpload.abort(true)
@@ -332,6 +351,20 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
     if (s3Key) {
       abortS3Upload(s3Key)
       s3UploadKeys.current.delete(id)
+    }
+    if (itemSnapshot) {
+      // Best-effort: clear localStorage so the next attempt starts
+      // a fresh session instead of trying to resume a dead one.
+      try { clearTUSFingerprint(itemSnapshot.file) } catch {}
+      try { clearUploadMetadata(itemSnapshot.file) } catch {}
+      // Best-effort: delete the DB record. Fire-and-forget — if it
+      // fails (network blip, race with worker), the cleanup job will
+      // catch it within 24 h via the UPLOADING-too-long sweep.
+      if (itemSnapshot.videoId) {
+        apiDelete(`/api/videos/${itemSnapshot.videoId}`).catch(() => {
+          /* silent — cleanup job will pick it up later */
+        })
+      }
     }
     setPendingUploads(prev => prev.filter(u => u.id !== id))
   }
