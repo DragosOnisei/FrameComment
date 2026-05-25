@@ -33,6 +33,18 @@ const config: Config = {
     'border-fuchsia-500',
     // Default
     'border-gray-500',
+    // 1.3.2+: stacked-comment swipe animation on the timeline popover.
+    // These are assembled as string literals inside CustomVideoControls
+    // (`'animate-in fade-in-0 slide-in-from-right-12 …'`) — JIT does
+    // pick them up, but listing them explicitly here makes the
+    // intent obvious and survives any future refactor where the
+    // string is assembled from variables.
+    'animate-in',
+    'fade-in-0',
+    'slide-in-from-right-12',
+    'slide-in-from-left-12',
+    'duration-300',
+    'ease-out',
   ],
   theme: {
     extend: {

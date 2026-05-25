@@ -28,6 +28,12 @@ interface ThumbnailReelProps {
   showLanguageToggle?: boolean
   // Optional slot rendered after ThemeToggle (e.g. tutorial help button)
   trailingAction?: React.ReactNode
+  /** 1.3.2+: when provided, replaces the standalone ThemeToggle in the
+   *  right-hand toolbar with this node. Used by the admin share page to
+   *  swap in a consolidated `PlayerTopMenu` (Share / Delete / Copy /
+   *  Paste / Switch theme). When omitted the toolbar keeps the original
+   *  ThemeToggle so the public share page is unchanged. */
+  topRightMenu?: React.ReactNode
   /** Currently-playing video id (one of videosByName[activeVideoName]).
    *  Used to highlight the active version in the dropdown. Optional —
    *  when missing, the first (latest) version is treated as active. */
@@ -47,6 +53,7 @@ export default function ThumbnailReel({
   onToggleCommentPanel,
   showLanguageToggle = true,
   trailingAction,
+  topRightMenu,
   activeVideoId,
 }: ThumbnailReelProps) {
   const tShare = useTranslations('share')
@@ -410,9 +417,14 @@ export default function ThumbnailReel({
               </Button>
             )}
 
-            {/* Language and theme toggles */}
+            {/* Language and theme toggles. 1.3.2+: when the host
+                provides a `topRightMenu` (admin share page) we render
+                that instead of the standalone ThemeToggle — the menu
+                already exposes a "Switch theme" entry alongside the
+                other admin actions, so two theme controls would be
+                redundant. */}
             {showLanguageToggle && <LanguageToggle />}
-            <ThemeToggle />
+            {topRightMenu ? topRightMenu : <ThemeToggle />}
             {trailingAction}
           </div>
         </div>

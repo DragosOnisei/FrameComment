@@ -64,7 +64,12 @@ export const ANNOTATION_COLORS = [
 
 export type AnnotationColor = (typeof ANNOTATION_COLORS)[number]
 
-export const DEFAULT_STROKE_WIDTH = 0.025
+// 1.3.2+: Frame.io-style thin strokes. Default is ~0.004 (≈ 5 px on
+// a 1280 px render width) so the pen / line / rectangle tools draw a
+// delicate mark instead of the old chunky 2.5 % stroke. Arrows keep
+// the dynamic scaling in `updateShape` so they still grow with drag
+// length, but their range was tightened to match.
+export const DEFAULT_STROKE_WIDTH = 0.004
 export const MIN_STROKE_WIDTH = 0.001
 export const MAX_STROKE_WIDTH = 0.05
 export const DEFAULT_OPACITY = 1

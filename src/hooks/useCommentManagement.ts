@@ -317,7 +317,17 @@ export function useCommentManagement({
     }
   }, [videos, captureTimestamp])
 
-  // Keep selectedTimestamp in sync when the user frame-steps while commenting
+  // Keep selectedTimestamp in sync when the user frame-steps while commenting.
+  //
+  // 1.3.2+: CRITICAL guard — do NOT re-sync IN when a range OUT has been
+  // set (selectedTimecodeEnd !== null). Otherwise, when the user drags the
+  // yellow OUT handle (which calls onSeek(safeOut) every move → fires a
+  // videoTimeUpdated event), this handler races with the setCommentRange
+  // listener and clobbers selectedTimestamp with the OUT time, collapsing
+  // the range into a single frame at OUT. The user observed this as
+  // "white ball jumps onto the yellow ball when I release the drag".
+  // The frame-step use case only applies to single-frame selections
+  // anyway, so this guard doesn't break the original intent.
   useEffect(() => {
     const handleVideoTimeUpdated = (e: CustomEvent) => {
       const time = e.detail?.time
@@ -326,6 +336,8 @@ export function useCommentManagement({
       if (typeof time !== 'number') return
       if (!videoId || videoId !== selectedVideoId) return
       if (!hasAutoFilledTimestamp || selectedTimestamp === null) return
+      // 1.3.2+: never touch IN once an OUT (range) is committed.
+      if (selectedTimecodeEnd !== null) return
 
       setSelectedTimestamp(time)
     }
@@ -334,7 +346,7 @@ export function useCommentManagement({
     return () => {
       window.removeEventListener('videoTimeUpdated', handleVideoTimeUpdated as EventListener)
     }
-  }, [hasAutoFilledTimestamp, selectedTimestamp, selectedVideoId])
+  }, [hasAutoFilledTimestamp, selectedTimestamp, selectedTimecodeEnd, selectedVideoId])
 
   // Broadcast the current pending in/out range so the timeline (which
   // lives several components away) can paint the IN bracket and the
@@ -377,6 +389,56 @@ export function useCommentManagement({
     }
   }, [selectedTimestamp, selectedVideoId, videos])
 
+  // 1.3.2+: atomic range setter — sets BOTH IN and OUT in one event.
+  // CustomVideoControls fires this when the user drags the always-on
+  // yellow OUT handle: the IN is snapshotted from where the white
+  // playhead was when the drag started, OUT follows the finger. We
+  // also accept `inTime: null` to clear the pending range (used when
+  // the user taps somewhere else on the timeline to start fresh).
+  useEffect(() => {
+    const handleSetRange = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const { inTime, outTime, videoId: evVideoId } = detail
+      // Null clears the range entirely (e.g. tap-elsewhere on
+      // timeline). We DON'T touch hasAutoFilledTimestamp so a
+      // subsequent input focus will still re-capture properly.
+      if (inTime === null) {
+        setSelectedTimestamp(null)
+        setSelectedTimecodeEnd(null)
+        return
+      }
+      if (typeof inTime !== 'number' || !Number.isFinite(inTime)) return
+      // Set videoId first if we don't have one yet — the OUT handle
+      // drag can start before the input is ever focused.
+      if (typeof evVideoId === 'string' && evVideoId.length > 0) {
+        setSelectedVideoId(evVideoId)
+      }
+      setSelectedTimestamp(inTime)
+      setHasAutoFilledTimestamp(true)
+      // OUT is optional; when omitted or equal to IN we leave it
+      // null (single-frame selection). Otherwise we snap to the
+      // active video's fps so the timecode is frame-quantized.
+      const targetVid = typeof evVideoId === 'string' ? evVideoId : selectedVideoId
+      const fps = videos.find((v: any) => v.id === targetVid)?.fps || 24
+      if (
+        typeof outTime === 'number' &&
+        Number.isFinite(outTime) &&
+        outTime > inTime + 1 / fps - 0.001
+      ) {
+        setSelectedTimecodeEnd(secondsToTimecode(outTime, fps))
+      } else {
+        setSelectedTimecodeEnd(null)
+      }
+    }
+    window.addEventListener('setCommentRange', handleSetRange as EventListener)
+    return () => {
+      window.removeEventListener(
+        'setCommentRange',
+        handleSetRange as EventListener,
+      )
+    }
+  }, [selectedVideoId, videos])
+
   // Auto-fill timestamp when user starts typing
   const handleCommentChange = (value: string) => {
     setNewComment(value)
@@ -408,6 +470,15 @@ export function useCommentManagement({
   // confusing than helpful — the orange handle takes ~1 second to
   // re-drag.
   const handleCommentInputFocus = useCallback(() => {
+    // 1.3.2+: only RE-capture IN + clear OUT on the FIRST focus (when
+    // there's no active comment range yet). If the user has already
+    // dropped an IN (and maybe dragged the orange OUT handle to make
+    // a range) and is just re-tapping the input to bring up the
+    // keyboard / type their comment, we MUST NOT touch the range.
+    // The previous behaviour wiped selectedTimecodeEnd on every focus
+    // and re-captured IN at the current playhead, killing the
+    // selection the user had just made.
+    if (selectedTimestamp !== null) return
     setSelectedTimecodeEnd(null)
     window.dispatchEvent(new CustomEvent('pauseVideoForComment'))
     window.dispatchEvent(
@@ -415,7 +486,7 @@ export function useCommentManagement({
         detail: { callback: captureTimestamp },
       })
     )
-  }, [captureTimestamp])
+  }, [captureTimestamp, selectedTimestamp])
 
   // Submit comment
   const handleSubmitComment = async () => {
@@ -680,8 +751,109 @@ export function useCommentManagement({
   }
 
   const handleReply = (commentId: string, videoId: string) => {
+    // 1.3.2+: toggle behaviour — tapping Reply on the comment that's
+    // already being replied to closes the inline input. Otherwise we
+    // open a fresh reply session against that comment.
+    if (replyingToCommentId === commentId) {
+      setReplyingToCommentId(null)
+      return
+    }
     setReplyingToCommentId(commentId)
     setSelectedVideoId(videoId)
+  }
+
+  // 1.3.2+: lightweight inline-reply submission. The MessageBubble
+  // renders its own little textarea + Submit/Cancel pair when the
+  // user opens a reply on it; this function does the API call without
+  // touching the global `newComment` / `selectedTimestamp` state so the
+  // user can keep typing a top-level comment in the main input
+  // simultaneously.
+  const submitInlineReply = async (
+    parentId: string,
+    videoId: string,
+    content: string,
+  ) => {
+    const text = content.trim()
+    if (!text) return
+
+    if (useAdminAuth && !adminUser) {
+      alert('Admin session not loaded yet. Please wait a moment and try again.')
+      return
+    }
+    if (!useAdminAuth && isPasswordProtected && namedRecipients.length > 0 && nameSource === 'none') {
+      alert('Please select your name from the dropdown or choose "Custom Name" before replying.')
+      return
+    }
+
+    const isInternalComment = useAdminAuth || !!adminUser
+    const targetVideo = videos.find((v) => v.id === videoId)
+    const fps = targetVideo?.fps || 24
+    // Replies inherit the parent comment's timecode (or default to
+    // 00:00:00:00 — the server will normalise either way).
+    const parent = mergedComments.find((c) => c.id === parentId)
+    const timecode = parent?.timecode || '00:00:00:00'
+
+    const requestBody: any = {
+      projectId,
+      videoId,
+      content: text,
+      timecode,
+      parentId,
+    }
+    if (targetVideo?.version) {
+      requestBody.videoVersion = targetVideo.version
+    }
+    if (isInternalComment) {
+      requestBody.isInternal = true
+      // 1.3.2+: mirror handleSubmitComment so admin replies carry the
+      // signed-in admin's display name instead of falling back to the
+      // raw User.name field (which may literally be "Admin" in the
+      // database). Without this the top-level comment renders as
+      // "Dragos" but the reply right under it renders as "Admin",
+      // which the user reads as a different person.
+      requestBody.authorName = adminUser?.name || 'Admin'
+    } else {
+      requestBody.authorName =
+        authorName?.trim() || (isPasswordProtected ? authorName : 'Client')
+    }
+
+    try {
+      let updatedComments: any = null
+      if (useAdminAuth) {
+        updatedComments = await apiPost('/api/comments', requestBody)
+      } else if (shareToken) {
+        const response = await fetch(`/api/share/${shareToken}/comments`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Framecomment-Client-Id': getClientId(),
+          },
+          body: JSON.stringify(requestBody),
+        })
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to submit reply')
+        }
+        updatedComments = await response.json()
+      } else {
+        throw new Error('Authentication required to submit reply')
+      }
+
+      // Tell CommentSection to splice the fresh comment list in.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('commentPosted', {
+            detail: { comments: updatedComments },
+          }),
+        )
+      }
+      router.refresh()
+      setReplyingToCommentId(null)
+    } catch (err) {
+      logError('[useCommentManagement] inline reply failed:', err)
+      const message = err instanceof Error ? err.message : 'Could not post reply. Please try again.'
+      alert(message)
+    }
   }
 
   const handleCancelReply = () => {
@@ -865,6 +1037,7 @@ export function useCommentManagement({
     handleCommentInputFocus,
     handleSubmitComment,
     handleReply,
+    submitInlineReply,
     handleCancelReply,
     handleClearTimestamp,
     handleDeleteComment,

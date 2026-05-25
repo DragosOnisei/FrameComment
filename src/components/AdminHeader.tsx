@@ -141,14 +141,15 @@ export default function AdminHeader() {
                     {Icon && (
                       <span className="relative inline-flex">
                         <Icon className="w-4 h-4" />
+                        {/* 1.3.2+: badge is only the corner red pill
+                            on phones (where the label is hidden).
+                            From sm: up we drop the corner pill in
+                            favour of an inline count after the label
+                            — see the chip rendered next to the label
+                            below. */}
                         {showBadge && (
-                          // Compact red pill that hugs the top-right
-                          // of the icon. Caps the display at 99+ so
-                          // it never overruns the chip; the title
-                          // attribute carries the exact number for
-                          // accessibility.
                           <span
-                            className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-[16px] font-semibold text-center shadow-sm"
+                            className="sm:hidden absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-[16px] font-semibold text-center shadow-sm"
                             aria-label={`${trashCount} items in Trash`}
                             title={`${trashCount} items in Trash`}
                           >
@@ -158,6 +159,19 @@ export default function AdminHeader() {
                       </span>
                     )}
                     {link.label && <span className="hidden sm:inline">{link.label}</span>}
+                    {/* 1.3.2+: inline count chip after the Trash label
+                        on sm:+ screens. Reads "Trash 2" with the count
+                        styled as a destructive pill so it pulls focus
+                        without overlapping the icon. */}
+                    {showBadge && (
+                      <span
+                        className="hidden sm:inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold tabular-nums"
+                        aria-label={`${trashCount} items in Trash`}
+                        title={`${trashCount} items in Trash`}
+                      >
+                        {trashCount! > 99 ? '99+' : trashCount}
+                      </span>
+                    )}
                   </Link>
                 )
               })}

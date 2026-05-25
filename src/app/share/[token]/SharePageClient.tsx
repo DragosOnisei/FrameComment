@@ -1210,7 +1210,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const showCommentPanel = !project.hideFeedback && !isGuest && !hideComments
 
   return (
-    <div className="min-h-screen lg:fixed lg:inset-0 bg-background flex flex-col lg:overflow-hidden">
+    <div
+      className="h-screen overflow-hidden lg:fixed lg:inset-0 bg-background flex flex-col"
+      style={{ height: '100dvh' }}
+    >
       {/* Thumbnail Reel - always visible, collapsible */}
         <ThumbnailReel
           videosByName={effectiveVideosByName ?? project.videosByName}
@@ -1232,7 +1235,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           viewports like Nest Hub (1024×600) the stacked layout left the
           comments eating most of the height and the player squeezed to
           ~70px. On mobile the page falls back to a natural-scroll column. */}
-      <div className="lg:flex-1 lg:min-h-0 flex flex-col lg:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
         {readyVideos.length === 0 ? (
           <div className="flex-1 flex items-center justify-center p-4">
             <Card className="bg-card border-border">
@@ -1247,8 +1250,14 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           <>
             {/* Video Player — natural height on mobile, fills space from
                 lg+. We use lg: thresholds (not xl:) so a typical laptop
-                window also locks the player to the visible area. */}
-            <div data-tutorial="video-player" className={`lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
+                window also locks the player to the visible area.
+                1.3.2+: `sticky top-0` on phones so the video frame +
+                timeline + controls stay pinned at the top of the
+                viewport while the comments scroll underneath. `bg-
+                background` keeps the comments from showing through.
+                From lg: up sticky becomes irrelevant (side-by-side
+                layout) so we let those classes pass through harmlessly. */}
+            <div data-tutorial="video-player" className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col bg-background ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
               <VideoPlayer
                 videos={readyVideos}
                 projectId={project.id}
@@ -1290,7 +1299,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 defaultWidth={360}
                 minWidth={280}
                 maxFraction={0.55}
-                className="max-h-[100vh] flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-xl bg-card"
+                className="flex-1 min-h-0 flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-xl bg-card"
               >
                 <CommentSection
                   projectId={project.id}

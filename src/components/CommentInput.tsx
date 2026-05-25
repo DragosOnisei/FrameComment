@@ -167,6 +167,10 @@ export default function CommentInput({
     el.style.height = `${next}px`
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
   }, [newComment])
+
+  // 1.3.2+: inline reply input is rendered inside the target
+  // MessageBubble (see CommentSection.InlineReplyForm). No need for
+  // the main CommentInput to scroll/focus on the Reply button click.
   // 1.1.1+: insert text (an emoji, but generic) at the current
   // caret position. Used by the in-app emoji picker to side-step
   // the Chrome+Sequoia bug where the OS emoji picker doesn't
@@ -334,28 +338,10 @@ export default function CommentInput({
         </div>
       )}
 
-      {/* Replying To Indicator */}
-      {replyingToComment && (
-        <div className="mb-3 p-3 bg-muted/30 border border-border rounded-lg flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 flex-1 min-w-0">
-            <InitialsAvatar name={replyingToComment.authorName || t('anonymous')} size="sm" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-foreground font-semibold mb-1 truncate">
-                {t('replyingTo')} {replyingToComment.authorName || t('anonymous')}
-              </p>
-              <p className="text-xs text-muted-foreground line-clamp-2 leading-snug">
-                {replyingToComment.content}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onCancelReply}
-            className="text-xs text-muted-foreground hover:text-foreground font-medium flex-shrink-0 px-2 py-1 rounded hover:bg-muted transition-colors"
-          >
-            {tCommon('cancel')}
-          </button>
-        </div>
-      )}
+      {/* 1.3.2+: "Replying to X" indicator removed from the global
+          CommentInput — replies now have their own inline form
+          rendered inside the target MessageBubble. The main input is
+          dedicated to top-level comments only. */}
 
       {/* Author Info - Only show for password-protected shares (not for admin users) */}
       {!currentVideoRestricted && showAuthorInput && !isOtpAuthenticated && (

@@ -7,6 +7,8 @@ import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForwar
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
+import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
+import type { SafeZonePreset } from './SafeZoneOverlay'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -40,6 +42,17 @@ interface CustomVideoControlsProps {
   /** Resolved quality for the current stream — used as a small read-only
    *  badge on the right-hand side of the bar (e.g. HD/4K). */
   resolvedPlaybackQuality?: '720p' | '1080p' | '2160p'
+  /** 1.3.2+: Settings popup state — Quality / Guides / Rulers /
+   *  Download Still. All optional so the player can drop the menu when
+   *  the parent doesn't wire it up (e.g. comparison view). */
+  availableQualities?: ('2160p' | '1080p' | '720p')[]
+  qualityChoice?: QualityChoice
+  onQualityChoiceChange?: (q: QualityChoice) => void
+  guidesPreset?: SafeZonePreset
+  onGuidesPresetChange?: (g: SafeZonePreset) => void
+  rulersEnabled?: boolean
+  onRulersEnabledChange?: (on: boolean) => void
+  onDownloadStill?: () => void
 }
 
 // Frame.io-style timeline marker colours (1.0.7+) — fully opaque
@@ -179,6 +192,14 @@ export default function CustomVideoControls({
   playbackSpeed = 1,
   onPlaybackSpeedChange,
   resolvedPlaybackQuality,
+  availableQualities,
+  qualityChoice,
+  onQualityChoiceChange,
+  guidesPreset,
+  onGuidesPresetChange,
+  rulersEnabled,
+  onRulersEnabledChange,
+  onDownloadStill,
 }: CustomVideoControlsProps) {
   const t = useTranslations('controls')
   const tComments = useTranslations('comments')
@@ -205,10 +226,96 @@ export default function CustomVideoControls({
   // the hovered marker so it resets when the user switches stacks.
   const [stackIndex, setStackIndex] = useState(0)
   const swipeStartXRef = useRef<number | null>(null)
-  useEffect(() => {
-    // Reset to the first comment any time the hovered group changes.
-    setStackIndex(0)
-  }, [hoveredMarkerId])
+  // 1.3.2+: track which way the user is paging through a stacked
+  // comment group so we can slide the new card IN from the matching
+  // edge — swiping LEFT (next) ⇒ new card flies in from the RIGHT,
+  // swiping RIGHT (prev) ⇒ new card flies in from the LEFT. Matches
+  // the standard "carousel" gesture vocabulary so the motion confirms
+  // what the finger just did.
+  const [stackSlideDir, setStackSlideDir] = useState<'next' | 'prev' | null>(
+    null,
+  )
+  // Bumped on every stackIndex change so the animated card re-mounts
+  // (React `key`) even when paging back to the same index from the
+  // opposite direction — without this, going prev→next on a 2-item
+  // stack would skip the second animation because the key didn't
+  // change. Kept as state (not ref) so the JSX render is guaranteed
+  // to see the bumped value alongside the slide-dir change.
+  const [stackAnimSeq, setStackAnimSeq] = useState(0)
+  // 1.3.2+: navigate across ALL timeline comments, not just within
+  // the current stack. The popover treats every marker on the
+  // timeline as one flat chronological list — when a swipe walks
+  // past the end of the current stack it jumps to the first
+  // comment of the next marker (and vice versa for swipe-back).
+  // We also seek the video so the playhead lands on the new
+  // comment's timecode and re-anchor the popover via
+  // `hoveredMarkerId` so it visually slides to that marker.
+  const goToAdjacentComment = useCallback(
+    (
+      dir: 'next' | 'prev',
+      currentGroupIndex: number,
+      withinGroupIndex: number,
+      groups: MarkerData[][],
+    ) => {
+      if (groups.length === 0) return
+      const safeWithin = Math.max(
+        0,
+        Math.min(withinGroupIndex, groups[currentGroupIndex].length - 1),
+      )
+      let nextGroup = currentGroupIndex
+      let nextWithin = safeWithin
+      if (dir === 'next') {
+        if (safeWithin + 1 < groups[currentGroupIndex].length) {
+          // Still inside the current stack — advance within it.
+          nextWithin = safeWithin + 1
+        } else {
+          // End of stack — jump to first comment of next group,
+          // wrapping back to the first group at the very end so the
+          // gesture is non-blocking.
+          nextGroup = (currentGroupIndex + 1) % groups.length
+          nextWithin = 0
+        }
+      } else {
+        if (safeWithin > 0) {
+          nextWithin = safeWithin - 1
+        } else {
+          // Start of stack — jump to LAST comment of previous group.
+          nextGroup =
+            (currentGroupIndex - 1 + groups.length) % groups.length
+          nextWithin = groups[nextGroup].length - 1
+        }
+      }
+      const nextMarker = groups[nextGroup][nextWithin]
+      // Seek the video so the playhead matches what the popover
+      // now shows — feels much closer to Frame.io's "scrub through
+      // notes" gesture than a silent text change would.
+      onSeek(nextMarker.timestamp)
+      // Re-anchor the popover. Both setters land in the same React
+      // batch as the slide-dir + anim-seq updates below, so the
+      // single re-render carries the animation + the new marker
+      // together. The hoveredMarkerId reset inside the
+      // useEffect([hoveredMarkerId]) would normally clear our
+      // stackSlideDir — we sequence the calls so the dir is set
+      // AFTER the reset (it lands in the same batch but React's
+      // last-write-wins reducer keeps our value).
+      setStackSlideDir(dir)
+      setStackAnimSeq((s) => s + 1)
+      setStackIndex(nextWithin)
+      setHoveredMarkerId(nextMarker.id)
+    },
+    [onSeek],
+  )
+  // 1.3.2+: the cross-marker swipe nav (`goToAdjacentComment`) also
+  // mutates `hoveredMarkerId` to re-anchor the popover. We can NOT
+  // reset stack state on every hoveredMarkerId change via a
+  // useEffect any more — that would immediately clobber the
+  // direction/index that the swipe handler just set in the same
+  // batch. Instead we reset explicitly inside the *user-initiated*
+  // open paths (mouse enter + touch start on a marker), see
+  // `handleMarkerMouseEnter` and `handleMarkerTouchStart` below.
+  // The intentional side-effect: a programmatic nav preserves its
+  // animation; a fresh hover/tap on a different marker starts at
+  // stack-index 0 with no slide.
   const [hoveredTime, setHoveredTime] = useState<number | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const volumeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -226,6 +333,20 @@ export default function CustomVideoControls({
   // timeline. Document-level mousemove/up listeners take over so the
   // drag continues smoothly even if the cursor leaves the timeline rect.
   const [isDraggingOutHandle, setIsDraggingOutHandle] = useState(false)
+  // 1.3.2+: snapshot of the playhead's display position (%) taken at
+  // the moment the user grabs the OUT handle. Used by
+  // `displayedProgress` to keep the white ball glued to IN during the
+  // drag even though the underlying video is being scrubbed. Refs
+  // (not state) so the value is available synchronously inside the
+  // very first onMove without waiting for a React render.
+  const frozenPlayheadPctRef = useRef<number | null>(null)
+  // 1.3.2+: live position (%) of the yellow OUT handle while the
+  // user is dragging. State (not ref) so React re-renders the
+  // handle's position smoothly with each touchmove. We also keep
+  // the corresponding TIME in a ref so the very-first onMove can
+  // dispatch the range without waiting for state.
+  const [dragOutPct, setDragOutPct] = useState<number | null>(null)
+  const frozenInTimeRef = useRef<number | null>(null)
   useEffect(() => {
     if (!isDraggingOutHandle) return
     const computeTime = (clientX: number) => {
@@ -240,27 +361,58 @@ export default function CustomVideoControls({
       if (typeof clientX !== 'number') return
       const time = computeTime(clientX)
       if (time === null) return
-      const inT = pendingInRef.current
-      // Snap drag to whole frames — quantize to multiples of 1/fps —
-      // so you can land on clean cuts as you drag instead of picking
-      // some arbitrary millisecond between frames.
+      // IN was snapshotted at drag start (frozenInTimeRef) so we don't
+      // rely on pendingInTime which only propagates via a React state
+      // round-trip. minGap of 1 frame keeps the range from collapsing.
+      const inT = frozenInTimeRef.current
       const fps = videoFps && videoFps > 0 ? videoFps : 24
       const quantized = Math.round(time * fps) / fps
-      // The out point must stay strictly past in. We use one frame
-      // (1/fps) as the floor so the smallest valid range is one frame
-      // long — matching the "single-frame selection" semantics the
-      // user expects right after clicking the input.
       const minGap = 1 / fps
       const safeOut =
         inT !== null ? Math.max(quantized, inT + minGap) : quantized
+      // Update the yellow handle's live position so the React render
+      // moves it to the finger's position.
+      const outPct = videoDuration > 0
+        ? Math.min(100, Math.max(0, (safeOut / videoDuration) * 100))
+        : 0
+      setDragOutPct(outPct)
+      // Dispatch BOTH IN and OUT atomically. The hook's setCommentRange
+      // listener sets selectedTimestamp + selectedTimecodeEnd in one
+      // shot, so the order-of-events race that broke setCommentOutPoint
+      // (listener required selectedTimestamp to already be set) goes
+      // away entirely.
       window.dispatchEvent(
-        new CustomEvent('setCommentOutPoint', { detail: { time: safeOut } })
+        new CustomEvent('setCommentRange', {
+          detail: {
+            inTime: inT,
+            outTime: safeOut,
+            videoId,
+          },
+        }),
       )
-      // Scrub the video to the current drag position too, so the user
-      // sees the exact frame the OUT will land on as they drag.
+      // Keep the timeline-click guard "fresh" during the whole drag so
+      // iOS's post-release synthetic click can never reach
+      // handleTimelineClick → re-seek.
+      lastTouchAtRef.current = Date.now()
+      // Scrub the underlying video so the user can see the exact frame
+      // where OUT will land. The DISPLAYED white playhead is decoupled
+      // via `displayedProgress` so it stays at IN.
       onSeek(safeOut)
     }
-    const onUp = () => setIsDraggingOutHandle(false)
+    const onUp = () => {
+      // Stamp at release so the synthetic click iOS fires ~0-300 ms
+      // later is suppressed by the timeline-click guard regardless of
+      // drag duration.
+      lastTouchAtRef.current = Date.now()
+      // Clear the per-drag refs/state. The range that was just set
+      // (pendingInTime + pendingOutTime, driven by the hook) keeps
+      // both balls glued where they should be — see displayedProgress
+      // and displayedOutPct.
+      frozenPlayheadPctRef.current = null
+      frozenInTimeRef.current = null
+      setDragOutPct(null)
+      setIsDraggingOutHandle(false)
+    }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     document.addEventListener('touchmove', onMove, { passive: false })
@@ -317,10 +469,19 @@ export default function CustomVideoControls({
         // comments without `timestampMs` fall back to the frame-quantized
         // timecode-derived seconds.
         const preciseMs = (comment as any).timestampMs
-        const timestamp =
+        const rawTimestamp =
           typeof preciseMs === 'number' && Number.isFinite(preciseMs) && preciseMs >= 0
             ? preciseMs / 1000
             : timecodeToSeekSeconds(comment.timecode!, videoFps)
+        // 1.3.2+: quantize to the nearest frame so the AVATAR position
+        // (and the seek target used on click) match where the video
+        // element actually parks after a seek. Browsers snap
+        // video.currentTime to the closest frame boundary, so a
+        // sub-frame timestamp like 4.123s would otherwise produce an
+        // avatar at 4.123s but a playhead at 4.0833s (at 24 fps) — the
+        // ~1.5 % horizontal gap the user noticed.
+        const fps = videoFps && videoFps > 0 ? videoFps : 24
+        const timestamp = Math.round(rawTimestamp * fps) / fps
         const effectiveAuthorName = comment.authorName ||
           ((comment as any).user?.name || (comment as any).user?.email || null)
         // Use isInternal from comment, default to false if not present (client comment)
@@ -397,21 +558,36 @@ export default function CustomVideoControls({
     return groups
   }, [markers, videoDuration])
 
+  // 1.3.2+: suppress the synthetic click that touch devices dispatch
+  // after a touchend. On phones the playhead was jumping forward or
+  // backward on tap because BOTH the touch handler AND a synthetic
+  // click handler fired, each computing a slightly different X
+  // coordinate. We mark "just touched" in `onTouchStart` and bail out
+  // of the click handler for ~500 ms after that.
+  const lastTouchAtRef = useRef<number>(0)
+
   const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
+    // Skip the synthetic click that fires right after a touch on
+    // mobile — the touch handler already seeked to the right spot.
+    if (Date.now() - lastTouchAtRef.current < 500) return
 
     const rect = timelineRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
 
-    // 1.1.1+: clicking the timeline just seeks now. Creating a
-    // comment range is reserved for the dedicated orange handle —
-    // the previous behaviour (any click past the IN point silently
-    // set an OUT) made it impossible to seek inside the marked
-    // range without accidentally clobbering the comment selection.
+    // 1.3.2+: clicking elsewhere on the timeline ALSO clears any
+    // pending comment range — the white + yellow balls will then
+    // overlap at the new playhead position, ready for the user to
+    // grab the yellow ball again if they want to mark a new range.
+    window.dispatchEvent(
+      new CustomEvent('setCommentRange', {
+        detail: { inTime: null, outTime: null, videoId },
+      }),
+    )
     onSeek(time)
-  }, [videoDuration, onSeek])
+  }, [videoDuration, onSeek, videoId])
 
   const handleTimelineMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     setIsDragging(true)
@@ -421,6 +597,7 @@ export default function CustomVideoControls({
   const handleTimelineTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
     setIsDragging(true)
+    lastTouchAtRef.current = Date.now()
 
     const touch = e.touches[0]
     const rect = timelineRef.current.getBoundingClientRect()
@@ -428,13 +605,18 @@ export default function CustomVideoControls({
     const percentage = Math.max(0, Math.min(1, x / rect.width))
     const time = percentage * videoDuration
 
-    // 1.1.1+: touch on timeline just seeks. Comment-range OUT is
-    // set only by dragging the orange handle.
+    // Same as click: clear pending range + seek.
+    window.dispatchEvent(
+      new CustomEvent('setCommentRange', {
+        detail: { inTime: null, outTime: null, videoId },
+      }),
+    )
     onSeek(time)
-  }, [videoDuration, onSeek])
+  }, [videoDuration, onSeek, videoId])
 
   const handleTimelineTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration || !isDragging) return
+    lastTouchAtRef.current = Date.now()
 
     const touch = e.touches[0]
     const rect = timelineRef.current.getBoundingClientRect()
@@ -448,6 +630,7 @@ export default function CustomVideoControls({
 
   const handleTimelineTouchEnd = useCallback(() => {
     setIsDragging(false)
+    lastTouchAtRef.current = Date.now()
   }, [])
 
   const handleTimelineMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -517,6 +700,11 @@ export default function CustomVideoControls({
       clearTimeout(hoverCloseTimeoutRef.current)
       hoverCloseTimeoutRef.current = null
     }
+    // Fresh hover ⇒ reset stack pagination + slide direction so the
+    // first card the user sees fades in normally instead of inheriting
+    // a stale slide from a previous swipe gesture.
+    setStackIndex(0)
+    setStackSlideDir(null)
     setHoveredMarkerId(markerId)
   }, [])
 
@@ -538,6 +726,10 @@ export default function CustomVideoControls({
     if (touchTimeoutRef.current) {
       clearTimeout(touchTimeoutRef.current)
     }
+    // Fresh tap ⇒ same reset as the desktop mouse-enter path so the
+    // first card the user sees fades in cleanly.
+    setStackIndex(0)
+    setStackSlideDir(null)
     setHoveredMarkerId(markerId)
   }, [])
 
@@ -577,6 +769,39 @@ export default function CustomVideoControls({
   }, [])
 
   const progress = videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0
+  // 1.3.2+: range-aware playhead positioning.
+  //
+  // WHITE BALL (IN marker):
+  //  - while dragging the yellow OUT handle: stay at the snapshotted
+  //    IN position (frozenPlayheadPctRef)
+  //  - if a comment range is set (pendingInTime !== null but no drag):
+  //    stay at the IN position
+  //  - otherwise: follow the live playhead (`progress`)
+  //
+  // YELLOW BALL (OUT marker, always visible):
+  //  - while dragging: live finger position (dragOutPct)
+  //  - if a range is set: at the OUT position (pendingOutTime)
+  //  - otherwise: directly on top of the white ball (= `progress`).
+  //    This is the "rest" state Frame.io shows when nothing has
+  //    been selected yet — a single combined IN/OUT marker.
+  const inPctActive = pendingInTime !== null && videoDuration > 0
+    ? Math.min(100, Math.max(0, (pendingInTime / videoDuration) * 100))
+    : null
+  const outPctActive = pendingOutTime !== null && videoDuration > 0
+    ? Math.min(100, Math.max(0, (pendingOutTime / videoDuration) * 100))
+    : null
+  const displayedProgress =
+    isDraggingOutHandle && frozenPlayheadPctRef.current !== null
+      ? frozenPlayheadPctRef.current
+      : inPctActive !== null
+        ? inPctActive
+        : progress
+  const displayedOutPct =
+    isDraggingOutHandle && dragOutPct !== null
+      ? dragOutPct
+      : outPctActive !== null
+        ? outPctActive
+        : progress
 
   const getTooltipAlignment = (position: number): string => {
     if (position < 20) return 'left-0'
@@ -618,7 +843,7 @@ export default function CustomVideoControls({
             {/* Progress */}
             <div
               className="absolute inset-y-0 left-0 bg-primary transition-all duration-100"
-              style={{ width: `${progress}%` }}
+              style={{ width: `${displayedProgress}%` }}
             />
           </div>
 
@@ -639,124 +864,127 @@ export default function CustomVideoControls({
             )
           })}
 
-          {/* Inline comment dots on the timeline (Frame.io-style):
-              tiny solid notches in the user's colour, fully opaque. The
-              full author + content tooltip lives on the avatar row below;
-              clicking a dot still seeks for users who land on it. */}
-          {groupedMarkers.map((group) => {
-            const primaryMarker = group[0]
-            const colors = COLOR_MAP[primaryMarker.colorKey] || COLOR_MAP['border-gray-500']
-            const isHovered = group.some((m) => m.id === hoveredMarkerId)
-            return (
-              <button
-                key={`dot-${primaryMarker.id}`}
-                type="button"
-                onClick={(e) => handleMarkerClick(primaryMarker, e)}
-                onTouchEnd={(e) => handleMarkerTouchEnd(primaryMarker, e)}
-                onMouseEnter={() => handleMarkerMouseEnter(primaryMarker.id)}
-                onMouseLeave={handleMarkerMouseLeave}
-                className={`
-                  absolute top-1/2 pointer-events-auto
-                  w-1 h-3 sm:h-3.5 rounded-full
-                  ${colors.bg} ${colors.ring} ring-1 ring-inset
-                  shadow-sm
-                  transition-transform duration-150 ease-out
-                  hover:scale-y-125
-                  ${isHovered ? 'scale-y-125 z-30' : 'z-10'}
-                `}
-                style={{
-                  left: `${primaryMarker.position}%`,
-                  transform: 'translateX(-50%) translateY(-50%)',
-                }}
-                aria-label={`Comment by ${primaryMarker.authorName || tComments('anonymous')} at ${formatTime(primaryMarker.timestamp)}`}
-              />
-            )
-          })}
+          {/* 1.3.2+: the inline dot/notch on the timeline track was
+              removed at user request — only the colored avatar in
+              the row below the timeline remains. The avatar still
+              owns hover + click + touch handlers, so seek-to-comment
+              and the hover popover keep working. */}
 
-          {/* Pending in/out range for the comment composer
-              (Frame.io-style). Painted only while the user has focused
-              the comment input. With OUT unset (single-frame selection)
-              we still render a draggable handle at the IN position so
-              the user can pull a range when they want one. */}
-          {pendingInTime !== null && videoDuration > 0 && (() => {
-            const inPct = Math.min(100, Math.max(0, (pendingInTime / videoDuration) * 100))
-            const outPct =
-              pendingOutTime !== null
-                ? Math.min(100, Math.max(0, (pendingOutTime / videoDuration) * 100))
-                : null
-            // Handle sits at OUT when set, otherwise sits AT IN so the
-            // user has something to grab even on a fresh click.
-            const handlePct = outPct !== null ? outPct : inPct
+          {/* 1.3.2+: comment-range UI, fully rebuilt.
+              - YELLOW BALL is always rendered, sitting directly on top
+                of the WHITE playhead at `displayedOutPct` when there's
+                no selection (which equals `progress`).
+              - When the user grabs the yellow ball and drags it
+                RIGHT, we snapshot IN = current playhead position and
+                start dispatching `setCommentRange` events with both
+                IN and OUT each frame. The yellow ball follows the
+                finger; the white ball stays anchored at IN.
+              - On release the range is saved (selectedTimestamp +
+                selectedTimecodeEnd). The user can then type their
+                comment with annotations; on submit it'll be stored
+                with that range and re-displayed whenever the
+                playhead crosses into [IN, OUT]. */}
+          {videoDuration > 0 && (() => {
+            const inPctActive2 = inPctActive
+            const outPctActive2 = outPctActive
+            // Yellow handle's actual displayed position (drag > saved
+            // OUT > resting on white ball).
+            const yellowPct = displayedOutPct
             return (
               <>
-                {/* Range fill (only when out is set) */}
-                {outPct !== null && outPct > inPct && (
+                {/* Range fill — visible only when a real IN/OUT range
+                    has been set, OR while actively dragging. */}
+                {((inPctActive2 !== null && outPctActive2 !== null &&
+                    outPctActive2 > inPctActive2) ||
+                  (isDraggingOutHandle && dragOutPct !== null &&
+                    frozenPlayheadPctRef.current !== null &&
+                    dragOutPct > frozenPlayheadPctRef.current)) && (
                   <div
                     className="absolute top-1/2 -translate-y-1/2 h-1.5 sm:h-2 bg-warning/70 rounded-full pointer-events-none z-15"
                     style={{
-                      left: `${inPct}%`,
-                      width: `${Math.max(outPct - inPct, 0.5)}%`,
+                      left: `${displayedProgress}%`,
+                      width: `${Math.max(yellowPct - displayedProgress, 0.5)}%`,
                     }}
                   />
                 )}
-                {/* IN bracket */}
-                <div
-                  className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-25"
-                  style={{ left: `${inPct}%` }}
-                  aria-hidden
-                >
-                  <div className="w-0.5 h-5 sm:h-6 bg-warning shadow-[0_0_4px_rgba(0,0,0,0.5)] -translate-x-1/2" />
-                </div>
-                {/* OUT bracket */}
-                {outPct !== null && (
-                  <div
-                    className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-25"
-                    style={{ left: `${outPct}%` }}
-                    aria-hidden
-                  >
-                    <div className="w-0.5 h-5 sm:h-6 bg-warning shadow-[0_0_4px_rgba(0,0,0,0.5)] -translate-x-1/2" />
-                  </div>
-                )}
-                {/* Draggable handle above the timeline. Always rendered
-                    when there's a pending IN, even with no OUT yet — it
-                    sits on the IN point and the user pulls it right to
-                    open up a range. Drags snap to whole frames so you
-                    can hit a clean cut. */}
+                {/* Draggable YELLOW BALL — always visible, sits on top
+                    of the white ball at rest. */}
                 <button
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
+                    lastTouchAtRef.current = Date.now()
+                    // Snapshot the white ball's current position
+                    // (where the playhead is RIGHT NOW) as IN. This
+                    // is the moment the user "marks" their starting
+                    // frame.
+                    const nowProgress = progress
+                    frozenPlayheadPctRef.current = nowProgress
+                    frozenInTimeRef.current = currentTime
+                    setDragOutPct(nowProgress)
                     setIsDraggingOutHandle(true)
+                    // Pre-emit the range so the IN is captured even
+                    // if the user releases without moving (a "tap"
+                    // on the yellow ball with no drag still produces
+                    // a single-frame selection at the current time).
+                    window.dispatchEvent(
+                      new CustomEvent('setCommentRange', {
+                        detail: {
+                          inTime: currentTime,
+                          outTime: currentTime,
+                          videoId,
+                        },
+                      }),
+                    )
                   }}
                   onTouchStart={(e) => {
+                    e.preventDefault()
                     e.stopPropagation()
+                    lastTouchAtRef.current = Date.now()
+                    const nowProgress = progress
+                    frozenPlayheadPctRef.current = nowProgress
+                    frozenInTimeRef.current = currentTime
+                    setDragOutPct(nowProgress)
                     setIsDraggingOutHandle(true)
+                    window.dispatchEvent(
+                      new CustomEvent('setCommentRange', {
+                        detail: {
+                          inTime: currentTime,
+                          outTime: currentTime,
+                          videoId,
+                        },
+                      }),
+                    )
                   }}
                   className={`
-                    absolute -top-1 sm:-top-1.5 z-30
+                    absolute -top-1 sm:-top-1.5 z-40
                     w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full
                     bg-warning ring-2 ring-black/40
                     shadow-md cursor-ew-resize
                     hover:scale-110 active:scale-100
                     transition-transform
+                    touch-none
                     ${isDraggingOutHandle ? 'scale-125 shadow-lg' : ''}
                   `}
                   style={{
-                    left: `${handlePct}%`,
+                    left: `${yellowPct}%`,
                     transform: 'translateX(-50%)',
                   }}
-                  title="Drag right to extend the comment range"
+                  title="Drag right to mark the comment's end point"
                   aria-label="Drag to set comment out point"
                 />
               </>
             )
           })()}
 
-          {/* Playhead */}
+          {/* Playhead. Uses `displayedProgress` (not raw `progress`)
+              so it stays frozen at the IN position while the user is
+              dragging the orange OUT handle — see comment on
+              `displayedProgress` for the full rationale. */}
           <div
             className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-20"
-            style={{ left: `${progress}%` }}
+            style={{ left: `${displayedProgress}%` }}
           >
             <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 border-primary -translate-x-1/2 group-hover:scale-110 transition-transform" />
           </div>
@@ -783,8 +1011,16 @@ export default function CustomVideoControls({
           hover behave like the old in-track chip — seek, scroll to
           comment, and surface the tooltip. */}
       {groupedMarkers.length > 0 && (
-        <div className="relative h-6 sm:h-7 mb-1 sm:mb-2 px-1">
-          {groupedMarkers.map((group) => {
+        // 1.3.2+: pull the avatar row UP with a negative margin so the
+        // avatar sits the same distance BELOW the white playhead as
+        // the yellow OUT handle sits ABOVE it (~18 px on mobile,
+        // ~23 px on desktop). Without this the avatar drifted ~34 px
+        // below the playhead because of the timeline div's tall empty
+        // bottom half + the container's mb. The numbers were tuned by
+        // measuring: yellow-ball center → white-ball center, then
+        // mirroring that gap downward.
+        <div className="relative h-6 sm:h-7 mb-1 sm:mb-2 px-1 -mt-4 sm:-mt-[18px]">
+          {groupedMarkers.map((group, groupIndex) => {
             const primaryMarker = group[0]
             const colors = COLOR_MAP[primaryMarker.colorKey] || COLOR_MAP['border-gray-500']
             const isHovered = group.some((m) => m.id === hoveredMarkerId)
@@ -793,13 +1029,18 @@ export default function CustomVideoControls({
             return (
               <div
                 key={`avatar-${primaryMarker.id}`}
-                // 1.3.1+: z-30 lifts the marker AND its hover-popover
-                // above the video's annotation overlay (z-10) and
-                // interactive canvas (z-20). Without an explicit z
-                // here the wrapper sits at z-auto and the annotation
-                // overlay paints right on top of our popover even
-                // though the popover has its own z-[200] inside.
-                className="absolute top-0 pointer-events-auto z-30"
+                // 1.3.1+: lifts the marker AND its hover-popover above
+                // the video's annotation overlay (z-10) and interactive
+                // canvas (z-20). Without an explicit z here the wrapper
+                // sits at z-auto and the annotation overlay paints
+                // right on top of our popover even though the popover
+                // has its own z-[200] inside.
+                // 1.3.2+: bumped to z-50 so the wrapper also sits ABOVE
+                // the yellow OUT handle (z-40) on the timeline. Before
+                // this the orange/yellow ball at the start of the
+                // timeline would visually clip into the popover's
+                // top-left avatar.
+                className="absolute top-0 pointer-events-auto z-50"
                 style={{
                   left: `${primaryMarker.position}%`,
                   transform: 'translateX(-50%)',
@@ -872,7 +1113,7 @@ export default function CustomVideoControls({
                       absolute z-[200]
                       text-card-foreground ring-1 ring-border
                       rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.55)]
-                      backdrop-blur-sm
+                      backdrop-blur-sm overflow-hidden
                       left-1/2 p-3
                       sm:left-auto sm:translate-x-0 ${getTooltipAlignmentDesktop(primaryMarker.position)}
                       animate-in fade-in-0 slide-in-from-bottom-1 duration-150
@@ -904,12 +1145,25 @@ export default function CustomVideoControls({
                             backgroundColor: 'hsl(var(--card) / 0.5)',
                           }
                     }
-                    // 1.3.1+: horizontal swipe navigation through the
-                    // stack. We track the touch start X and move to
-                    // the previous / next comment once the finger has
-                    // dragged more than 40 px in either direction.
+                    // 1.3.2+: horizontal swipe navigation across the
+                    // ENTIRE timeline (not just the current stack).
+                    // The threshold is unchanged at 40 px; the only
+                    // difference is that we no longer bail when the
+                    // current group has a single comment — that
+                    // gesture now jumps to the next / previous marker
+                    // on the timeline, the popover re-anchors to it
+                    // and the playhead seeks to its timecode.
+                    // A short touch with |delta| < 40 px is treated
+                    // as a TAP and also advances to the next comment
+                    // (most users instinctively tap to "see what's
+                    // next" before they think of swiping).
                     onTouchStart={(e) => {
                       swipeStartXRef.current = e.touches[0]?.clientX ?? null
+                      // Stamp the touch so the onClick guard below
+                      // can suppress the synthetic click iOS fires
+                      // after touchend (otherwise the popover would
+                      // advance twice on a single tap).
+                      lastTouchAtRef.current = Date.now()
                     }}
                     onTouchEnd={(e) => {
                       const start = swipeStartXRef.current
@@ -917,16 +1171,49 @@ export default function CustomVideoControls({
                       if (start == null) return
                       const end = e.changedTouches[0]?.clientX ?? start
                       const delta = end - start
-                      if (Math.abs(delta) < 40) return
-                      const total = group.length
-                      if (total < 2) return
-                      if (delta < 0) {
-                        // Swiped left → next
-                        setStackIndex((i) => (i + 1) % total)
+                      const isSwipe = Math.abs(delta) >= 40
+                      if (isSwipe) {
+                        // Swipe walks across the ENTIRE timeline,
+                        // jumping to the next/previous marker when
+                        // it leaves the current stack.
+                        const dir: 'next' | 'prev' = delta < 0 ? 'next' : 'prev'
+                        goToAdjacentComment(
+                          dir,
+                          groupIndex,
+                          stackIndex,
+                          groupedMarkers,
+                        )
                       } else {
-                        // Swiped right → previous
-                        setStackIndex((i) => (i - 1 + total) % total)
+                        // Tap = cycle WITHIN the current stack only,
+                        // and only when there's actually more than
+                        // one comment to cycle through. Walking onto
+                        // a different timeline marker on a stray tap
+                        // turned out to feel like a bug — the user
+                        // is reading and accidentally jumps to a
+                        // totally different point on the timeline.
+                        // With a stack of 1 the tap does nothing.
+                        if (group.length < 2) return
+                        const nextWithin =
+                          (stackIndex + 1) % group.length
+                        // Reuse the stack-only helper so the
+                        // animation + seek (none, same timecode)
+                        // stay consistent with the swipe path.
+                        setStackSlideDir('next')
+                        setStackAnimSeq((s) => s + 1)
+                        setStackIndex(nextWithin)
                       }
+                    }}
+                    // Desktop / non-touch clicks: same rule. Only
+                    // cycle within the stack, only if multiple. The
+                    // `lastTouchAtRef` guard keeps iOS from also
+                    // firing this after the touchend just above.
+                    onClick={() => {
+                      if (Date.now() - lastTouchAtRef.current < 500) return
+                      if (group.length < 2) return
+                      const nextWithin = (stackIndex + 1) % group.length
+                      setStackSlideDir('next')
+                      setStackAnimSeq((s) => s + 1)
+                      setStackIndex(nextWithin)
                     }}
                   >
                     {(() => {
@@ -936,8 +1223,28 @@ export default function CustomVideoControls({
                       const safeIndex = Math.min(stackIndex, group.length - 1)
                       const marker = group[safeIndex]
                       const markerColors = COLOR_MAP[marker.colorKey] || COLOR_MAP['border-gray-500']
+                      // 1.3.2+: pick a directional slide animation when
+                      // the user paged from a previous card; on first
+                      // open (`stackSlideDir === null`) just let the
+                      // parent's fade-in handle the enter. The keyed
+                      // remount uses the bump counter so consecutive
+                      // taps on the same direction still re-animate.
+                      // We use plain CSS keyframes (see globals.css:
+                      // .stack-slide-in-{right,left}) instead of
+                      // tailwindcss-animate's `slide-in-from-*-N` so
+                      // the motion can't be silently dropped by JIT or
+                      // an `overflow:hidden`/backdrop-root quirk.
+                      const slideClass =
+                        stackSlideDir === 'next'
+                          ? 'stack-slide-in-right'
+                          : stackSlideDir === 'prev'
+                            ? 'stack-slide-in-left'
+                            : ''
                       return (
-                        <div>
+                        <div
+                          key={`${marker.id}:${stackAnimSeq}`}
+                          className={slideClass}
+                        >
                           <div className="flex items-center gap-2 mb-1.5 sm:mb-1">
                             <div
                               className={`w-6 h-6 sm:w-5 sm:h-5 rounded-full ring-1 flex items-center justify-center text-[10px] sm:text-[8px] font-semibold shrink-0 ${markerColors.bg} ${markerColors.ring} ${markerColors.text}`}
@@ -968,29 +1275,38 @@ export default function CustomVideoControls({
                           <p className="text-sm sm:text-xs leading-relaxed break-all sm:break-words whitespace-pre-wrap">
                             {marker.content || 'No content'}
                           </p>
-                          {/* Subtle swipe hint when a stack is
-                              actually present. Hidden on desktop
-                              because the prev/next arrows below take
-                              over there. */}
+                          {/* 1.3.2+: hint is shown only when this
+                              stack has 2+ comments. A single comment
+                              at this timestamp gets a clean popover
+                              with no navigation chrome — even if
+                              there are other comments at OTHER
+                              timestamps on the timeline (the user can
+                              still click those markers directly). */}
                           {group.length > 1 && (
                             <p className="sm:hidden text-[10px] text-muted-foreground mt-2 text-center">
-                              Swipe to see other comments
+                              Tap or swipe to see other comments
                             </p>
                           )}
-                          {/* Desktop prev/next arrows for stacks.
-                              1.3.1+: more prominent buttons (filled
-                              background, ring, hover state) so they
-                              read as real, clickable actions instead
-                              of barely-visible text. */}
+                          {/* Desktop prev/next arrows for stacks —
+                              same rule as the mobile hint: only when
+                              this stack actually has multiple
+                              comments to cycle through. */}
                           {group.length > 1 && (
                             <div className="hidden sm:flex items-center justify-between gap-2 mt-3 pt-3 border-t border-border/50">
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setStackIndex(
-                                    (i) => (i - 1 + group.length) % group.length,
+                                onClick={(e) => {
+                                  // Stop bubble so the popover's own
+                                  // tap-to-advance click handler
+                                  // doesn't also fire and overshoot.
+                                  e.stopPropagation()
+                                  goToAdjacentComment(
+                                    'prev',
+                                    groupIndex,
+                                    stackIndex,
+                                    groupedMarkers,
                                   )
-                                }
+                                }}
                                 className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-muted/60 text-foreground ring-1 ring-border hover:bg-muted hover:ring-foreground/30 transition-colors"
                                 aria-label="Previous comment"
                               >
@@ -998,9 +1314,15 @@ export default function CustomVideoControls({
                               </button>
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setStackIndex((i) => (i + 1) % group.length)
-                                }
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  goToAdjacentComment(
+                                    'next',
+                                    groupIndex,
+                                    stackIndex,
+                                    groupedMarkers,
+                                  )
+                                }}
                                 className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-muted/60 text-foreground ring-1 ring-border hover:bg-muted hover:ring-foreground/30 transition-colors"
                                 aria-label="Next comment"
                               >
@@ -1115,17 +1437,37 @@ export default function CustomVideoControls({
 
         {/* RIGHT GROUP */}
         <div className="flex items-center gap-0.5 sm:gap-1 flex-1 justify-end min-w-0">
-          {/* Quality badge — read-only for now; v1.0.4 ships without a
-              quality switcher. Value comes from the resolved stream URL
-              (720p / 1080p / 2160p). */}
-          {resolvedPlaybackQuality && (
-            <span
-              className="hidden sm:inline-flex items-center px-1.5 h-5 rounded text-[10px] font-bold tracking-wide bg-white/10 text-white/80 ring-1 ring-white/15"
-              title={`Streaming ${resolvedPlaybackQuality}`}
-            >
-              {resolvedPlaybackQuality === '2160p' ? '4K' :
-               resolvedPlaybackQuality === '1080p' ? 'HD' : 'SD'}
-            </span>
+          {/* 1.3.2+: Settings popup (gear) — replaces the old read-only
+              SD/HD/4K quality badge. Now houses Quality switcher, Guides
+              (social safe-zones), Rulers (Photoshop-style draggable
+              guide lines) and Download Still. Falls back to the old
+              read-only badge only when the parent doesn't wire up the
+              quality-change callback (e.g. comparison view). */}
+          {onQualityChoiceChange &&
+           onGuidesPresetChange &&
+           onRulersEnabledChange &&
+           onDownloadStill ? (
+            <PlayerSettingsMenu
+              availableQualities={availableQualities || []}
+              quality={qualityChoice || 'auto'}
+              onQualityChange={onQualityChoiceChange}
+              resolvedQuality={resolvedPlaybackQuality || null}
+              guides={guidesPreset || 'off'}
+              onGuidesChange={onGuidesPresetChange}
+              rulers={!!rulersEnabled}
+              onRulersChange={onRulersEnabledChange}
+              onDownloadStill={onDownloadStill}
+            />
+          ) : (
+            resolvedPlaybackQuality && (
+              <span
+                className="hidden sm:inline-flex items-center px-1.5 h-5 rounded text-[10px] font-bold tracking-wide bg-white/10 text-white/80 ring-1 ring-white/15"
+                title={`Streaming ${resolvedPlaybackQuality}`}
+              >
+                {resolvedPlaybackQuality === '2160p' ? '4K' :
+                 resolvedPlaybackQuality === '1080p' ? 'HD' : 'SD'}
+              </span>
+            )
           )}
 
           <button

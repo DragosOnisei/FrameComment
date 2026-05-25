@@ -68,6 +68,12 @@ interface MessageBubbleProps {
    * removes their reaction (toggle semantics handled server-side).
    */
   onReact?: (commentId: string, emoji: string) => Promise<void> | void
+  /**
+   * 1.3.2+: when the user is currently replying to THIS comment the
+   * parent passes its `<CommentInput>` here so we can render it
+   * directly under the bubble's action row — Frame.io style.
+   */
+  inlineReplyInput?: React.ReactNode
 }
 
 /**
@@ -107,6 +113,7 @@ export default function MessageBubble({
   shareToken,
   onResolveToggle,
   onReact,
+  inlineReplyInput,
 }: MessageBubbleProps) {
   const t = useTranslations('comments')
 
@@ -579,6 +586,16 @@ export default function MessageBubble({
                   )}
                 </div>
               </div>
+            )}
+
+            {/* 1.3.2+: inline reply input — rendered directly under
+                the action row when the user clicks "Reply" on THIS
+                bubble. The parent (CommentSection) passes the actual
+                <CommentInput> only for the matched comment so the
+                reply lands in context instead of jumping to the
+                global input at the top / bottom of the screen. */}
+            {inlineReplyInput && (
+              <div className="mt-3">{inlineReplyInput}</div>
             )}
           </div>
 

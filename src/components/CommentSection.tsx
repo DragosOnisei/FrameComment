@@ -15,6 +15,7 @@ import { formatDate } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { getClientId } from '@/lib/client-id'
 import { formatCommentTimestamp, secondsToTimecode, timecodeToSeconds, timecodeToSeekSeconds } from '@/lib/timecode'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   getClippedComments,
   hasClippedComments,
@@ -53,6 +54,98 @@ interface CommentSectionProps {
   onMobileExpandedChange?: (expanded: boolean) => void
   /** Per-client session id used to authorise self-edit on the share page. */
   clientSessionId?: string | null
+}
+
+/**
+ * 1.3.2+: lightweight inline reply input rendered inside MessageBubble.
+ * Owns its own draft text + submit state so the user can keep typing a
+ * top-level comment in the global CommentInput without colliding.
+ */
+function InlineReplyForm({
+  placeholder,
+  onSubmit,
+  onCancel,
+}: {
+  placeholder: string
+  onSubmit: (text: string) => Promise<void> | void
+  onCancel: () => void
+}) {
+  const [text, setText] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Autofocus on mount so the keyboard pops up immediately on phones
+  // (and on desktop the cursor lands in the input straight away).
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    // Slight delay so iOS Safari doesn't fight us on focus.
+    const t = setTimeout(() => el.focus(), 50)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Auto-grow the textarea up to ~30 % of the viewport.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const maxHeight = Math.max(80, Math.floor(window.innerHeight * 0.3))
+    const next = Math.min(el.scrollHeight, maxHeight)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  }, [text])
+
+  const handleSend = async () => {
+    const trimmed = text.trim()
+    if (!trimmed || submitting) return
+    setSubmitting(true)
+    try {
+      await onSubmit(trimmed)
+      setText('')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg ring-1 ring-border bg-card/60 backdrop-blur-sm p-2">
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            void handleSend()
+          } else if (e.key === 'Escape') {
+            onCancel()
+          }
+        }}
+        placeholder={placeholder}
+        rows={1}
+        maxLength={6000}
+        className="w-full resize-none border-0 bg-transparent text-base sm:text-sm leading-snug placeholder:text-muted-foreground focus:outline-none px-1"
+      />
+      <div className="flex items-center justify-end gap-2 mt-1.5">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={submitting}
+          className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSend()}
+          disabled={submitting || !text.trim()}
+          className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {submitting ? 'Sending…' : 'Send'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export default function CommentSection({
@@ -108,6 +201,7 @@ export default function CommentSection({
     handleCommentInputFocus,
     handleSubmitComment,
     handleReply,
+    submitInlineReply,
     handleCancelReply,
     handleClearTimestamp,
     handleDeleteComment,
@@ -139,6 +233,45 @@ export default function CommentSection({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
+
+  // 1.3.2+: on mobile the comment input is `position: fixed bottom-0` so
+  // it's always flush with the device viewport edge (independent of the
+  // surrounding Card/padding chain). We measure its rendered height with
+  // a ResizeObserver and mirror it as bottom padding on the messages
+  // list, so the last comment never hides behind the input — and the
+  // padding grows naturally when the input wraps to multiple lines or
+  // an attachment/voice row appears. On lg+ we revert to the natural
+  // flex layout (desktop input is in the column) so the padding is not
+  // applied — tracked via a matchMedia listener.
+  const mobileInputWrapperRef = useRef<HTMLDivElement>(null)
+  const [mobileInputHeight, setMobileInputHeight] = useState(160)
+  const [isBelowLg, setIsBelowLg] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mql = window.matchMedia('(max-width: 1023.98px)')
+    const apply = (m: MediaQueryList | MediaQueryListEvent) =>
+      setIsBelowLg('matches' in m ? m.matches : (m as MediaQueryList).matches)
+    apply(mql)
+    mql.addEventListener('change', apply as (e: MediaQueryListEvent) => void)
+    return () =>
+      mql.removeEventListener('change', apply as (e: MediaQueryListEvent) => void)
+  }, [])
+  useEffect(() => {
+    if (!mobileCollapsible) return
+    const el = mobileInputWrapperRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      const h = el.getBoundingClientRect().height
+      if (h > 0) setMobileInputHeight(Math.round(h))
+    })
+    ro.observe(el)
+    // Also capture the initial size synchronously so the first paint
+    // already has the right padding (avoids a flash where the last
+    // comment sits under the input for ~1 frame).
+    const initial = el.getBoundingClientRect().height
+    if (initial > 0) setMobileInputHeight(Math.round(initial))
+    return () => ro.disconnect()
+  }, [mobileCollapsible])
 
   // ─────────────── Edit-mode range tracking ───────────────
   // When the user clicks Edit on a saved comment, MessageBubble fires
@@ -722,6 +855,18 @@ export default function CommentSection({
       window.dispatchEvent(new CustomEvent('seekToTime', {
         detail: { timestamp, videoId, videoVersion }
       }))
+
+      // 1.3.2+: on phones the comment list is fixed at the bottom of
+      // the viewport, so the video player is often off-screen when
+      // the user taps a comment. Scroll the player back into view
+      // so the user can actually see the playhead jump to where the
+      // comment was left — that's the whole point of tapping it.
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+        const videoEl = document.querySelector('video')
+        if (videoEl) {
+          videoEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }
     } else if (isAdminView) {
       // If in admin view without video player, navigate to admin share page with timestamp
       const video = videos.find(v => v.id === videoId)
@@ -771,6 +916,10 @@ export default function CommentSection({
   // onto a different version of the same project. The clipboard is
   // localStorage-backed and scoped per project.
   const [hasClipboardForProject, setHasClipboardForProject] = useState(false)
+  // 1.3.2+: replace the native window.confirm() for comment deletes
+  // with the same themed ConfirmDialog used elsewhere (project delete,
+  // archive, etc.) for visual consistency.
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
   useEffect(() => {
     setHasClipboardForProject(hasClippedComments(projectId))
     // React to other tabs (or our own clear() call) flipping the
@@ -846,7 +995,54 @@ export default function CommentSection({
     return { count: created }
   }, [projectId, selectedVideoId, isAdminView, shareToken, fetchComments])
 
+  // 1.3.2+: bridge between this section and the top-level PlayerTopMenu.
+  // The menu lives outside CommentSection (in the title bar) but Copy /
+  // Paste comments needs the local clipboard handlers + current video
+  // context. Custom window events keep the wiring tiny — the menu fires
+  // `commentClipboard:copy|paste`, we run the handler and reply with a
+  // `commentClipboard:result` event so the menu can show a toast.
+  useEffect(() => {
+    const reply = (
+      detail:
+        | { kind: 'copied' | 'pasted'; count: number }
+        | { kind: 'error'; message: string },
+    ) => {
+      window.dispatchEvent(
+        new CustomEvent('commentClipboard:result', { detail }),
+      )
+    }
+    const onCopy = async () => {
+      try {
+        const r = handleCopyComments()
+        reply({ kind: 'copied', count: r.count })
+      } catch (err) {
+        reply({
+          kind: 'error',
+          message: err instanceof Error ? err.message : 'Copy failed',
+        })
+      }
+    }
+    const onPaste = async () => {
+      try {
+        const r = await handlePasteComments()
+        reply({ kind: 'pasted', count: r.count })
+      } catch (err) {
+        reply({
+          kind: 'error',
+          message: err instanceof Error ? err.message : 'Paste failed',
+        })
+      }
+    }
+    window.addEventListener('commentClipboard:copy', onCopy as EventListener)
+    window.addEventListener('commentClipboard:paste', onPaste as EventListener)
+    return () => {
+      window.removeEventListener('commentClipboard:copy', onCopy as EventListener)
+      window.removeEventListener('commentClipboard:paste', onPaste as EventListener)
+    }
+  }, [handleCopyComments, handlePasteComments])
+
   return (
+    <>
     <Card className="bg-card border-0 flex flex-col h-full lg:max-h-full rounded-none lg:rounded-lg overflow-hidden" data-comment-section>
       {/* Desktop: Show header at top, Mobile: Hide header (will show below input) */}
       <CardHeader className={cn("flex-shrink-0 px-3 py-3 sm:px-4 sm:py-4", mobileCollapsible && "hidden lg:block")}>
@@ -973,9 +1169,22 @@ export default function CommentSection({
           </div>
         )}
 
-        {/* Comment Input - MOVED TO TOP on mobile when collapsible */}
+        {/* 1.3.2+: Comment Input pinned at the BOTTOM of the device
+            viewport via `fixed bottom-0`. The whole page on mobile is
+            already a fixed-height flex column (`h-[100dvh]` with
+            `overflow-hidden`), so the fixed input doesn't cause any
+            layout shift — it just floats above the (internally-
+            scrolling) comment list. We compensate with bottom padding
+            on the messages area further down so the last comment
+            isn't hidden behind it. The `inset-x-0` keeps the
+            shadow/border spanning the full device width even when
+            the comment card itself is offset from the edges by
+            outer padding/gap. */}
         {mobileCollapsible && (
-          <div className="order-1 lg:hidden">
+          <div
+            ref={mobileInputWrapperRef}
+            className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border shadow-[0_-4px_12px_rgba(0,0,0,0.25)] pb-[env(safe-area-inset-bottom)]"
+          >
             <CommentInput
               newComment={newComment}
               onCommentChange={handleCommentChange}
@@ -1036,10 +1245,10 @@ export default function CommentSection({
               <MessageSquare className="w-4 h-4" />
               {t('feedbackAndDiscussion')} ({sortedComments.length})
             </span>
+            {/* 1.3.2+: dropped the "Xh ago" badge from the header — the
+                per-comment timestamp covers it and the title row now stays
+                clean (matches Frame.io's "All comments (N)" pattern). */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                {sortedComments.length > 0 ? formatMessageTime(sortedComments[sortedComments.length - 1].createdAt) : ''}
-              </span>
               {isMobileCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
             </div>
           </button>
@@ -1108,7 +1317,12 @@ export default function CommentSection({
           </div>
         )}
 
-        {/* Messages Area - Threaded Conversations */}
+        {/* Messages Area - Threaded Conversations.
+            1.3.2+: on mobile we add bottom padding equal to the
+            fixed input wrapper's measured height (+ a small gutter)
+            so the last comment is never hidden behind the input.
+            Desktop keeps the natural p-4 (input lives in the flex
+            column there). */}
         <div
           ref={messagesContainerRef}
           className={cn(
@@ -1116,6 +1330,11 @@ export default function CommentSection({
             mobileCollapsible && "order-3 lg:order-1",
             mobileCollapsible && isMobileCollapsed && "hidden lg:block"
           )}
+          style={
+            mobileCollapsible && isBelowLg
+              ? { paddingBottom: `calc(${mobileInputHeight + 16}px + env(safe-area-inset-bottom))` }
+              : undefined
+          }
         >
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
@@ -1175,11 +1394,7 @@ export default function CommentSection({
                         // token session id via `isMyComment`. Server-side
                         // DELETE /api/comments/[id] enforces the same.
                         isAdminView || isMyComment(comment)
-                          ? () => {
-                              if (window.confirm(t('confirmDeleteComment') || 'Delete this comment?')) {
-                                handleDeleteComment(comment.id)
-                              }
-                            }
+                          ? () => setPendingDeleteCommentId(comment.id)
                           : undefined
                       }
                       onEdit={(newContent) => handleEditComment(comment.id, newContent)}
@@ -1195,9 +1410,7 @@ export default function CommentSection({
                         const canDeleteReply =
                           isAdminView || (!!reply && isMyComment(reply))
                         if (!canDeleteReply) return
-                        if (window.confirm(t('confirmDeleteComment') || 'Delete this comment?')) {
-                          handleDeleteComment(replyId)
-                        }
+                        setPendingDeleteCommentId(replyId)
                       }}
                       timestampLabel={timestampLabel}
                       timecodeEndLabel={timecodeEndLabel}
@@ -1205,6 +1418,22 @@ export default function CommentSection({
                       shareToken={shareToken}
                       onResolveToggle={handleResolveToggle}
                       onReact={handleReact}
+                      // 1.3.2+: inline reply input rendered DIRECTLY
+                      // under the action row of the comment being
+                      // replied to. The user types here, hits Send,
+                      // and the reply lands in context — no page jump,
+                      // no focus shift to a global input at the bottom.
+                      inlineReplyInput={
+                        replyingToCommentId === comment.id ? (
+                          <InlineReplyForm
+                            placeholder="Reply to comment..."
+                            onSubmit={(text) =>
+                              submitInlineReply(comment.id, comment.videoId, text)
+                            }
+                            onCancel={handleCancelReply}
+                          />
+                        ) : null
+                      }
                     />
                   </div>
                 )
@@ -1263,5 +1492,24 @@ export default function CommentSection({
         </div>
       </CardContent>
     </Card>
+    {/* 1.3.2+: themed confirm dialog for comment deletes — replaces the
+        old native window.confirm() ("localhost:3000 says...") so the
+        delete prompt matches the rest of the app's UI (same Radix
+        Dialog + theme tokens used for project delete, archive, etc.). */}
+    <ConfirmDialog
+      open={pendingDeleteCommentId !== null}
+      onOpenChange={(next) => { if (!next) setPendingDeleteCommentId(null) }}
+      variant="destructive"
+      title="Delete this comment?"
+      description="This cannot be undone."
+      confirmLabel={t('deleteComment')}
+      cancelLabel={t('cancel')}
+      onConfirm={async () => {
+        const id = pendingDeleteCommentId
+        if (!id) return
+        await handleDeleteComment(id)
+      }}
+    />
+    </>
   )
 }

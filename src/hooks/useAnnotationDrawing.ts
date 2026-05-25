@@ -166,16 +166,21 @@ export function useAnnotationDrawing() {
 
       if (prev.type === 'freehand') {
         updated = { ...prev, points: [...prev.points, point] }
-      } else if (prev.type === 'line' || prev.type === 'arrow' || prev.type === 'rectangle') {
-        // Grow the stroke as the user drags further out, so a tiny
-        // arrow stays delicate and a long arrow gets visibly thicker.
-        // Diagonal length in normalized [0..√2] space.
+      } else if (prev.type === 'arrow') {
+        // 1.3.2+: only arrows scale with drag length — a tiny arrow
+        // stays delicate, a long one gets visibly thicker, matching
+        // Frame.io. Range narrowed to 0.003..0.008 so even a fully
+        // dragged-out arrow stays slim.
         const dx = point.x - prev.start.x
         const dy = point.y - prev.start.y
         const length = Math.sqrt(dx * dx + dy * dy)
-        // Map length 0..0.5 → strokeWidth 0.003..0.012, then clamp.
-        const dynamicWidth = Math.min(0.012, Math.max(0.003, 0.003 + length * 0.018))
+        const dynamicWidth = Math.min(0.008, Math.max(0.003, 0.003 + length * 0.010))
         updated = { ...prev, end: point, strokeWidth: dynamicWidth }
+      } else if (prev.type === 'line' || prev.type === 'rectangle') {
+        // 1.3.2+: lines and rectangles use a constant thin stroke
+        // (the initial DEFAULT_STROKE_WIDTH the user picked from the
+        // toolbar). No dynamic scaling.
+        updated = { ...prev, end: point }
       }
 
       if (updated) {

@@ -10,6 +10,9 @@ import VideoComparison from './VideoComparison'
 import ProjectInfo from './ProjectInfo'
 import AnnotationOverlay from './AnnotationOverlay'
 import AnnotationCanvas from './AnnotationCanvas'
+import SafeZoneOverlay, { type SafeZonePreset } from './SafeZoneOverlay'
+import RulersOverlay from './RulersOverlay'
+import type { QualityChoice } from './PlayerSettingsMenu'
 import { useAnnotation } from '@/contexts/AnnotationContext'
 import { secondsToTimecode } from '@/lib/timecode'
 import { logError } from '@/lib/logging'
@@ -87,6 +90,40 @@ export default function VideoPlayer({
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
   const [resolvedPlaybackQuality, setResolvedPlaybackQuality] = useState<'720p' | '1080p' | '2160p'>(defaultQuality)
+  // 1.3.2+: User-chosen quality preference (Auto / 720p / 1080p / 2160p).
+  // Persisted per browser in localStorage so a user who picked 1080p
+  // doesn't have to re-pick on every video. Default 'auto' so first
+  // visits still get the snappy 720p experience driven by
+  // `defaultQuality`.
+  const [qualityChoice, setQualityChoice] = useState<QualityChoice>('auto')
+  // Safe-zone preset + rulers toggle. Session-only (no localStorage) —
+  // these are spot-check tools, not preferences you want sticky.
+  const [guidesPreset, setGuidesPreset] = useState<SafeZonePreset>('off')
+  const [rulersEnabled, setRulersEnabled] = useState<boolean>(false)
+  // Hydrate quality preference from localStorage on mount.
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('framecomment:playerQuality')
+      if (
+        stored === 'auto' ||
+        stored === '720p' ||
+        stored === '1080p' ||
+        stored === '2160p'
+      ) {
+        setQualityChoice(stored)
+      }
+    } catch {
+      // localStorage can throw in private-mode Safari etc. — ignore.
+    }
+  }, [])
+  const handleQualityChoiceChange = useCallback((q: QualityChoice) => {
+    setQualityChoice(q)
+    try {
+      window.localStorage.setItem('framecomment:playerQuality', q)
+    } catch {
+      // ignore
+    }
+  }, [])
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
   const [videoDuration, setVideoDuration] = useState(0)
   const [currentTimeState, setCurrentTimeState] = useState(0)
@@ -118,6 +155,63 @@ export default function VideoPlayer({
   // Safety check: ensure index is valid
   const safeIndex = Math.min(selectedVideoIndex, displayVideos.length - 1)
   const selectedVideo = displayVideos[safeIndex >= 0 ? safeIndex : 0]
+
+  // 1.3.2+: Which stream qualities does THIS clip actually have?
+  // We surface them to PlayerSettingsMenu so the Quality submenu only
+  // shows options the server can satisfy (no point listing 4K when the
+  // worker never produced a 2160p variant). Order is high → low so the
+  // menu reads top-down.
+  const availableQualities = useMemo(() => {
+    const out: ('2160p' | '1080p' | '720p')[] = []
+    const v: any = selectedVideo
+    if (v?.streamUrl2160p) out.push('2160p')
+    if (v?.streamUrl1080p) out.push('1080p')
+    if (v?.streamUrl720p) out.push('720p')
+    return out
+  }, [selectedVideo])
+
+  // 1.3.2+: Download Still — grab the current video frame at SOURCE
+  // resolution (videoWidth × videoHeight, not the rendered size) and
+  // save it as a PNG. Falls back gracefully on browsers that don't
+  // expose the canvas API or block tainted-canvas exports.
+  const handleDownloadStill = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    const w = video.videoWidth || (selectedVideo as any)?.width || 0
+    const h = video.videoHeight || (selectedVideo as any)?.height || 0
+    if (w <= 0 || h <= 0) return
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(video, 0, 0, w, h)
+      canvas.toBlob((blob) => {
+        if (!blob) return
+        const url = URL.createObjectURL(blob)
+        const baseName = ((selectedVideo as any)?.originalFilename ||
+          (selectedVideo as any)?.name ||
+          'frame'
+        ).replace(/\.[^./]+$/, '')
+        const tc = secondsToTimecode(
+          currentTimeRef.current,
+          (selectedVideo as any)?.fps || 24,
+        ).replace(/:/g, '-')
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${baseName}_${tc}.png`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        // Give the browser a tick to start the download before we
+        // revoke the blob URL.
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }, 'image/png')
+    } catch (err) {
+      logError('[VideoPlayer] download still failed:', err)
+    }
+  }, [selectedVideo])
 
   // Comparison mode state
   const [showComparison, setShowComparison] = useState(false)
@@ -218,11 +312,16 @@ export default function VideoPlayer({
 
         // Use token-based URLs from the video object
         // These are generated by the share API with secure tokens
-        // Respect the default quality setting from admin
+        // 1.3.2+: the EFFECTIVE quality is the user's explicit choice
+        // when set, falling back to the admin-configured defaultQuality
+        // when the user has chosen "Auto". The fallback ladder below
+        // is shared by both paths.
+        const effectiveQuality: '720p' | '1080p' | '2160p' =
+          qualityChoice === 'auto' ? defaultQuality : qualityChoice
         let url: string | undefined
-        let qualityUsed: '720p' | '1080p' | '2160p' = defaultQuality
+        let qualityUsed: '720p' | '1080p' | '2160p' = effectiveQuality
 
-        if (defaultQuality === '2160p') {
+        if (effectiveQuality === '2160p') {
           // Prefer 2160p, fallback to 1080p then 720p
           if ((selectedVideo as any).streamUrl2160p) {
             url = (selectedVideo as any).streamUrl2160p
@@ -234,7 +333,7 @@ export default function VideoPlayer({
             url = (selectedVideo as any).streamUrl720p
             qualityUsed = '720p'
           }
-        } else if (defaultQuality === '1080p') {
+        } else if (effectiveQuality === '1080p') {
           // Prefer 1080p, fallback to 720p
           if ((selectedVideo as any).streamUrl1080p) {
             url = (selectedVideo as any).streamUrl1080p
@@ -274,7 +373,7 @@ export default function VideoPlayer({
     }
 
     loadVideoUrl()
-  }, [selectedVideo, defaultQuality])
+  }, [selectedVideo, defaultQuality, qualityChoice])
 
   // Handle initial seek from URL parameters (only once on mount)
   useEffect(() => {
@@ -976,6 +1075,28 @@ export default function VideoPlayer({
                     onFinishShape={annotationDrawing.finishShape}
                   />
                 )}
+
+                {/* 1.3.2+: social safe-zone overlay. Renders inside the
+                    same positioned wrapper as the <video> so its lines
+                    sit exactly on top of what the user sees. */}
+                {(selectedVideo as any)?.mediaType !== 'IMAGE' && (
+                  <SafeZoneOverlay
+                    mode={guidesPreset}
+                    videoWidth={(selectedVideo as any)?.width}
+                    videoHeight={(selectedVideo as any)?.height}
+                    containerRef={videoWrapperRef}
+                  />
+                )}
+
+                {/* 1.3.2+: Premiere-style rulers + draggable guides. */}
+                {(selectedVideo as any)?.mediaType !== 'IMAGE' && (
+                  <RulersOverlay
+                    enabled={rulersEnabled}
+                    videoWidth={(selectedVideo as any)?.width}
+                    videoHeight={(selectedVideo as any)?.height}
+                    containerRef={videoWrapperRef}
+                  />
+                )}
               </div>
 
               {/* Frame.io-style control bar — rendered below the video,
@@ -1009,6 +1130,14 @@ export default function VideoPlayer({
                   playbackSpeed={playbackSpeed}
                   onPlaybackSpeedChange={setPlaybackSpeed}
                   resolvedPlaybackQuality={resolvedPlaybackQuality}
+                  availableQualities={availableQualities}
+                  qualityChoice={qualityChoice}
+                  onQualityChoiceChange={handleQualityChoiceChange}
+                  guidesPreset={guidesPreset}
+                  onGuidesPresetChange={setGuidesPreset}
+                  rulersEnabled={rulersEnabled}
+                  onRulersEnabledChange={setRulersEnabled}
+                  onDownloadStill={handleDownloadStill}
                 />
               </div>
               )}

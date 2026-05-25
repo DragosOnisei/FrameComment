@@ -783,7 +783,7 @@
     "tooManyThumbnailUpdateRequests": "Too many thumbnail update requests. Please slow down."
   },
   "comments": {
-    "feedbackAndDiscussion": "Feedback & Discussion",
+    "feedbackAndDiscussion": "All comments",
     "hideFeedback": "Hide Feedback Section",
     "showFeedback": "Show Feedback",
     "watchingApprovedVersion": "Watching approved version",

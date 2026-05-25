@@ -17,6 +17,158 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.4.0] - 2026-05-25
+
+Major UX release built around a Frame.io-style player toolkit:
+production-friendly comment range selection, an in-player settings
+menu with quality switching, social-media safe-zones, draggable
+rulers, and a one-click frame export. Plus a pile of polish work
+on comment threading and the timeline popover.
+
+### Added
+
+- **Player settings menu (gear icon).** The old read-only SD/HD/4K
+  badge is now a real gear button that opens a Frame.io-style popup.
+  Submenus open on hover (with a 180 ms grace period for cursor
+  travel) and slide in with a subtle 200 ms fade. Contains:
+  - **Quality switcher** — Auto / 1080p / 720p / 540p / 360p,
+    showing only the variants the worker actually produced for this
+    clip. The choice is persisted per browser in
+    `localStorage['framecomment:playerQuality']`, defaulting to
+    "Auto" (which honours the admin's `defaultQuality` setting).
+  - **Guides (social safe-zones)** — Off / 9:16 Shorts / 4:5 IG
+    Feed / 16:9 YouTube. Draws the platform's crop frame on top of
+    the video plus translucent red zones where the platform's own
+    UI (like / share / comment buttons, title strip, transport
+    overlay) sits — so you can immediately see if a title card or
+    important element collides with native UI.
+  - **Rulers** — toggle for a Premiere/Photoshop-style ruler strip
+    along the top + left of the video. Drag DOWN from the top ruler
+    to spawn a horizontal guide, RIGHT from the left ruler for a
+    vertical guide. Drag a guide back onto its ruler — or double-
+    click it — to delete it. Guide positions are stored as
+    fractions of the painted video rect, so they survive resizes,
+    aspect-ratio changes, and orientation flips.
+  - **Download Still** — captures the current frame at the SOURCE
+    resolution (`video.videoWidth × video.videoHeight`, not the
+    rendered size) and downloads a PNG named
+    `<clipname>_<HH-MM-SS-FF>.png`. Frame-accurate stills for
+    deliverables, contact sheets, or PSD comp work.
+- **Always-on yellow OUT handle.** The comment-range workflow was
+  rebuilt from scratch: a yellow ball is permanently visible on top
+  of the white playhead. Grabbing it snapshots the IN point at the
+  white ball's position and the yellow follows your finger /
+  cursor; the video scrubs underneath so you can see the exact OUT
+  frame; the white ball stays frozen at IN. Release saves the range
+  and the comment input picks it up via an atomic
+  `setCommentRange` event. Tapping anywhere else on the timeline
+  clears the range and snaps both balls back together.
+- **Themed delete-comment dialog.** Replaces the native
+  `window.confirm()` ("localhost:3000 says...") with the same
+  ConfirmDialog used for project/archive deletes — translucent
+  card + destructive red button + Cancel.
+
+### Changed
+
+- **Inline timeline notches removed.** The small coloured dots that
+  used to paint directly on the timeline track were dropped at user
+  request — only the avatar in the row below the timeline remains.
+  Hover + click + touch behaviour on the avatar is unchanged.
+- **Avatar row moved up.** The DR-style comment avatars now sit the
+  same distance BELOW the white playhead as the yellow OUT handle
+  sits ABOVE it (~18 px on mobile, ~23 px on desktop) — visually
+  mirrored, so the playhead anchor reads as a clean horizontal
+  three-point alignment.
+- **Marker positions snap to frames.** Comment markers (and the
+  seek target they fire on click) are now quantized to the
+  nearest video frame using the clip's fps. Before, sub-frame
+  `timestampMs` values produced an avatar at e.g. 4.123 s but a
+  playhead at 4.0833 s after seek (24 fps frame boundary); now the
+  two land on the same horizontal pixel.
+- **Stacked-comment popover slides.** When the user swipes (or
+  taps Prev/Next) through stacked comments at the same timestamp,
+  the new card now slides in from the matching edge (next →
+  right-edge, prev → left-edge) via custom CSS keyframes
+  (`stack-slide-in-right` / `-left`) instead of the tailwindcss-
+  animate fallback that was being silently dropped by
+  `overflow:hidden` and backdrop-root quirks.
+- **Cross-marker swipe navigation.** Horizontal swipe on the
+  timeline-comment popover now walks across the ENTIRE timeline,
+  not just the current stack — leaving the end of one marker's
+  comments jumps to the first comment of the next marker (and
+  vice versa), with the playhead seeking along.
+
+### Fixed
+
+- **Reply author label was wrong.** Admin-authored replies used to
+  render as "Admin" because `submitInlineReply` didn't set
+  `requestBody.authorName`, so the server stored `null` and the UI
+  fell back to `User.name` (which is literally "Admin" in many
+  installs). Replies now mirror `handleSubmitComment` and send
+  `adminUser?.name || 'Admin'`, matching what the top-level
+  comment shows for the same author.
+- **White playhead jumped onto yellow ball after drag.** A
+  long-standing race condition between `setCommentRange` and a
+  legacy `videoTimeUpdated` listener (used to keep IN synced when
+  frame-stepping a single-frame comment) was overwriting
+  `selectedTimestamp` with the OUT time during the drag, because
+  `onSeek(safeOut)` fires `videoTimeUpdated`. The listener now
+  bails when `selectedTimecodeEnd !== null` (range OUT is set),
+  preserving IN through the entire drag.
+- **Drawing annotations failed while Rulers were on.** The
+  RulersOverlay wrapper used the default `pointer-events: auto`,
+  so it captured every click in the middle of the video and the
+  AnnotationCanvas underneath never saw them. The wrapper is now
+  `pointer-events-none` and only the ruler strips + guide
+  hit-zones re-enable interactions.
+- **Yellow OUT handle clipped into the timeline-comment popover.**
+  The popover wrapper sat at `z-30` while the yellow handle was at
+  `z-40`, so a marker near the start of the timeline (where the
+  yellow ball lives) painted over the popover's avatar. Wrapper
+  bumped to `z-50`.
+- **Prev / Next showed for single-comment popovers.** The
+  navigation buttons and "Tap or swipe to see other comments"
+  hint used to appear whenever the timeline had more than one
+  comment, even for a stack of one. They now only render when
+  the current stack has 2+ comments — single-comment popovers
+  read as clean info cards.
+- **Re-focus on comment input cleared the range.** Clicking the
+  textarea after dropping IN + OUT used to wipe `selectedTimecodeEnd`
+  and re-capture IN at the live playhead, killing the selection
+  the user had just made. The focus handler now bails if a range
+  is already set, so re-focus is a no-op for users who already
+  chose their window.
+- **Mobile comment input drifted off the device bottom.** The
+  "Leave your comment" composer on phones is now `position: fixed`
+  pinned to the device bottom with safe-area inset padding, and
+  the messages list above gets `padding-bottom` equal to the
+  composer's measured height (tracked via `ResizeObserver`) so
+  comments never disappear under the keyboard.
+
+### Internal
+
+- New `SafeZoneOverlay` and `RulersOverlay` components mounted
+  inside `videoWrapperRef` (siblings of `AnnotationOverlay` /
+  `AnnotationCanvas`). Both compute the painted video rect on
+  every resize using a `ResizeObserver` so the overlays line up
+  with the letterboxed / pillarboxed video frame regardless of
+  wrapper aspect.
+- New `PlayerSettingsMenu` component, rendered via `createPortal`
+  to `document.body` to escape parent backdrop-root stacking so
+  the menu's own `backdrop-filter: blur(20px)` paints correctly
+  on iOS Safari (same pattern used for `PlayerTopMenu` and the
+  timeline-comment popover).
+- New `PlayerTopMenu` component (top-right kebab on the share
+  page) with Copy share link / Delete current version (red,
+  confirm-protected) / Copy & Paste comments / Switch theme.
+  Also portal-rendered so its own blur is unaffected by parent
+  backdrop-roots.
+- New atomic `setCommentRange` event wired through
+  `useCommentManagement` so IN + OUT are committed in a single
+  React batch — eliminates the order-of-events race that broke
+  the older two-event (`setCommentRange` → `setCommentOutPoint`)
+  flow on slow renders.
+
 ## [1.3.2] - 2026-05-24
 
 A small follow-up to 1.3.1 that brings the Frame.io-style timeline
