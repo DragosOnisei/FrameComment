@@ -17,6 +17,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.4] - 2026-05-26
+
+Follow-up to the 1.5.2 upload-staging fix. On HDD-backed TrueNAS
+datasets (no SSD ZIL/SLOG, no L2ARC) the upload would still
+collapse partway through — not because of tmpfs this time, but
+because the server was effectively writing the file twice.
+
+### Fixed
+
+- **Halve disk writes on upload finalize.** When the TUS upload
+  completed, the server used to STREAM-COPY the staging file at
+  `${STORAGE_ROOT}/.tus-uploads/<id>` into its final home at
+  `${STORAGE_ROOT}/projects/<id>/<videoId>/original.<ext>`. On
+  the same dataset that meant the 3 GB upload incurred 6 GB of
+  disk writes total (3 GB of TUS staging chunks + 3 GB of final
+  copy), plus the read of the staging file to drive the copy.
+  On an HDD without an SSD cache that's where throughput
+  collapsed — the user saw uploads start near line rate and
+  then drop to under 1 MB/s as the disk queue saturated.
+  We now `fs.rename` the staging file into the final path. Same
+  filesystem → instant metadata-only operation, no second pass
+  over the bytes. Falls back to the old stream-copy on `EXDEV`
+  (operator pointed `TUS_UPLOAD_DIR` at a different volume). S3
+  mode is unchanged — it has no local staging to rename FROM.
+
+### Upgrade notes
+
+No DB migration, no env changes. Just redeploy. The fix kicks in
+on the next upload.
+
 ## [1.5.3] - 2026-05-26
 
 Two paper-cuts on the upload modal: clicking Cancel/Remove now

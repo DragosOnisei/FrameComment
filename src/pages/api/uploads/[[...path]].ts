@@ -3,14 +3,13 @@ import { FileStore } from '@tus/file-store'
 import { prisma } from '@/lib/db'
 import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
-import { uploadFile, initStorage, getTusUploadDir } from '@/lib/storage'
+import { uploadFile, moveFile, initStorage, getTusUploadDir, isS3Mode } from '@/lib/storage'
 import path from 'path'
 import fs from 'fs'
 import { Readable } from 'stream'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { logError, logMessage } from '@/lib/logging'
 import { parseBearerToken, verifyAdminAccessToken, verifyShareToken } from '@/lib/auth'
-import { isS3Mode } from '@/lib/storage'
 import { handleReverseShareUploadNotification } from '@/lib/upload-notifications'
 
 
@@ -312,14 +311,24 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
 
   await initStorage()
 
-  const fileStream = (tusServer.datastore as any).read(upload.id)
-
-  await uploadFile(
-    video.originalStoragePath,
-    fileStream,
-    fileSize,
-    upload.metadata?.filetype as string || 'video/mp4'
-  )
+  // 1.5.x+: on local storage, rename the staging file into the final
+  // layout (instant — same FS) instead of streaming-copying it. The
+  // copy used to dominate disk I/O on HDD-backed TrueNAS datasets:
+  // a 3 GB upload meant 6 GB of writes (3 GB into staging, then
+  // another 3 GB into the final path). With rename we only write
+  // once. S3 still uses the streaming path because there's no
+  // server-side staging to rename FROM.
+  if (isS3Mode()) {
+    const fileStream = (tusServer.datastore as any).read(upload.id)
+    await uploadFile(
+      video.originalStoragePath,
+      fileStream,
+      fileSize,
+      upload.metadata?.filetype as string || 'video/mp4'
+    )
+  } else {
+    await moveFile(tusFilePath, video.originalStoragePath, fileSize)
+  }
 
   // 1.0.9+: image uploads share the same TUS pipeline as videos but
   // skip the worker entirely. There's nothing to transcode, and the
@@ -391,15 +400,20 @@ async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId
 
   await initStorage()
 
-  const fileStream = (tusServer.datastore as any).read(upload.id)
-
+  // 1.5.x+: rename staging → final on local storage. See
+  // handleVideoUploadFinish for the perf rationale.
   const actualFileType = upload.metadata?.filetype as string || 'application/octet-stream'
-  await uploadFile(
-    asset.storagePath,
-    fileStream,
-    fileSize,
-    actualFileType
-  )
+  if (isS3Mode()) {
+    const fileStream = (tusServer.datastore as any).read(upload.id)
+    await uploadFile(
+      asset.storagePath,
+      fileStream,
+      fileSize,
+      actualFileType
+    )
+  } else {
+    await moveFile(tusFilePath, asset.storagePath, fileSize)
+  }
 
   await prisma.videoAsset.update({
     where: { id: assetId },
@@ -443,10 +457,15 @@ async function handleProjectUploadFinish(tusFilePath: string, upload: any, proje
 
   await initStorage()
 
-  const fileStream = (tusServer.datastore as any).read(upload.id)
+  // 1.5.x+: rename staging → final on local storage. See
+  // handleVideoUploadFinish for the perf rationale.
   const actualFileType = upload.metadata?.filetype as string || 'application/octet-stream'
-
-  await uploadFile(projectUpload.storagePath, fileStream, fileSize, actualFileType)
+  if (isS3Mode()) {
+    const fileStream = (tusServer.datastore as any).read(upload.id)
+    await uploadFile(projectUpload.storagePath, fileStream, fileSize, actualFileType)
+  } else {
+    await moveFile(tusFilePath, projectUpload.storagePath, fileSize)
+  }
 
   await prisma.projectUpload.update({
     where: { id: projectUploadId },

@@ -113,6 +113,70 @@ export async function uploadFile(
   }
 }
 
+/**
+ * Move a file into the storage layout (1.5.x+).
+ *
+ * When the TUS staging dir lives on the SAME filesystem as the final
+ * STORAGE_ROOT (the default since 1.5.2 — both under `/app/uploads/`),
+ * `fs.rename` is an instant metadata-only operation regardless of file
+ * size. The old `uploadFile()` pipeline streamed the staging file
+ * through Node and re-wrote it at the destination — which doubled the
+ * disk write load (3 GB upload = 6 GB written) and was the dominant
+ * bottleneck on HDD-backed datasets without an SSD ZIL/SLOG.
+ *
+ * If the rename fails with `EXDEV` (cross-filesystem move — happens
+ * when an operator points `TUS_UPLOAD_DIR` at a separate volume), we
+ * fall back to the streaming copy + unlink behaviour. So this is a
+ * pure perf win, not a behaviour change.
+ *
+ * S3 mode is unaffected — it has its own multipart upload flow and
+ * never hits the local staging path.
+ */
+export async function moveFile(
+  srcAbsolutePath: string,
+  destRelativePath: string,
+  expectedSize: number,
+): Promise<void> {
+  if (isS3Mode()) {
+    // S3 mode shouldn't use this path — the upload route stays on the
+    // streaming `uploadFile()` API. Throw so callers don't silently
+    // skip the S3 upload.
+    throw new Error('moveFile() is not supported in S3 mode')
+  }
+
+  const destFullPath = validatePath(destRelativePath)
+  const destDir = path.dirname(destFullPath)
+  await mkdir(destDir, { recursive: true })
+
+  try {
+    await fs.promises.rename(srcAbsolutePath, destFullPath)
+  } catch (err: any) {
+    // Cross-device move — Node fails with EXDEV. Fall back to a
+    // stream copy then unlink the source. Same end state, just
+    // slower (one full read + one full write instead of a metadata
+    // flip).
+    if (err && err.code === 'EXDEV') {
+      const readStream = fs.createReadStream(srcAbsolutePath)
+      const writeStream = fs.createWriteStream(destFullPath)
+      await pipeline(readStream, writeStream)
+      await fs.promises.unlink(srcAbsolutePath).catch(() => {})
+    } else {
+      throw err
+    }
+  }
+
+  // Verify the destination has the expected size — guards against a
+  // partial rename / truncation. Mirrors the check `uploadFile()`
+  // does after streaming.
+  const stats = await fs.promises.stat(destFullPath)
+  if (stats.size !== expectedSize) {
+    await fs.promises.unlink(destFullPath).catch(() => {})
+    throw new Error(
+      `File size mismatch after move: expected ${expectedSize} bytes, got ${stats.size} bytes.`,
+    )
+  }
+}
+
 export async function downloadFile(filePath: string): Promise<Readable> {
   if (isS3Mode()) {
     return s3DownloadFile(filePath)
