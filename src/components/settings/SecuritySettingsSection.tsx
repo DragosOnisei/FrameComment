@@ -238,10 +238,13 @@ export function SecuritySettingsSection({
                   id="maxUploadSizeGB"
                   type="number"
                   min={1}
-                  max={1000}
+                  /* 1.5.x+: ceiling raised from 1000 → 10000 GB so the
+                     admin can dial the cap up for large 4K+ master
+                     uploads without touching the DB by hand. */
+                  max={10000}
                   value={maxUploadSizeGB}
                   onChange={(e) => setMaxUploadSizeGB(e.target.value)}
-                  placeholder="1"
+                  placeholder="1000"
                 />
                 <p className="text-xs text-muted-foreground">
                   {t('security.maxUploadSizeHint')}

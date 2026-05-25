@@ -162,7 +162,11 @@ const tusServer: Server = new Server({
         where: { id: 'default' },
         select: { maxUploadSizeGB: true },
       })
-      const maxUploadSizeGB = appSettings?.maxUploadSizeGB ?? 1
+      // 1.5.x+: fallback default lifted from 1 GB → 1000 GB (= 1 TB).
+      // Matches the new Prisma schema default; pre-1.5.x installs with
+      // the legacy default-1 row are migrated by
+      // 20260525_lift_max_upload_size_default.
+      const maxUploadSizeGB = appSettings?.maxUploadSizeGB ?? 1000
       const maxUploadSizeBytes = maxUploadSizeGB * 1024 * 1024 * 1024
       const requestedSize = Number(upload.size || 0)
 

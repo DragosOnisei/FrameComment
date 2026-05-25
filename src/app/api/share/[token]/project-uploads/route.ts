@@ -85,10 +85,12 @@ export async function POST(
       where: { id: 'default' },
       select: { maxUploadSizeGB: true },
     })
-    const maxBytes = (settings?.maxUploadSizeGB || 1) * 1024 * 1024 * 1024
+    // 1.5.x+: fallback default lifted 1 GB → 1000 GB (= 1 TB).
+    const maxUploadSizeGB = settings?.maxUploadSizeGB || 1000
+    const maxBytes = maxUploadSizeGB * 1024 * 1024 * 1024
     if (fileSize > maxBytes) {
       return NextResponse.json(
-        { error: `File exceeds maximum upload size of ${settings?.maxUploadSizeGB || 1} GB` },
+        { error: `File exceeds maximum upload size of ${maxUploadSizeGB} GB` },
         { status: 400 }
       )
     }

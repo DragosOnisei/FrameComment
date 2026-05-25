@@ -17,9 +17,18 @@ export const RESOLUTION_PRESETS = {
 } as const
 
 export const THUMBNAIL_CONFIG = {
-  percentage: 0.1,  // 10% into video
-  min: 0.5,         // Minimum 0.5 seconds
-  max: 10           // Maximum 10 seconds
+  // 1.5.x+: always grab the very first frame of the clip
+  // (`-ss 0`). The previous "10% into the video, clamped to 0.5–
+  // 10 s" formula produced inconsistent results — short clips
+  // (typical 9:16 phone exports) landed near 0.5 s and *looked*
+  // like the first frame, while longer 16:9 clips ended up at
+  // exactly 10 s, which for talking-head / b-roll content is
+  // often a totally different scene than the opening shot. Users
+  // expect "the thumbnail = the first frame they'd see if they
+  // hit play", so we honour that literally for every clip.
+  percentage: 0,    // 0% into video (first frame)
+  min: 0,           // No floor — first frame is fine
+  max: 0            // No ceiling — first frame is fine
 } as const
 
 export const PROGRESS_WEIGHTS = {

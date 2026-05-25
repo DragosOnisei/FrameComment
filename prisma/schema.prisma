@@ -514,7 +514,10 @@ model Settings {
   defaultWatermarkOpacity   Int     @default(30) // Opacity percentage (10-100)
   defaultWatermarkFontSize  String  @default("medium") // small, medium, large
   defaultApplyPreviewLut      Boolean @default(true) // Apply preview LUT during transcoding by default
-  maxUploadSizeGB          Int      @default(1) // Maximum file size per upload in GB (1-1000)
+  // 1.5.x+: default lifted from 1 GB → 1000 GB (= 1 TB) so video
+  // uploads aren't artificially capped on a fresh install; admin can
+  // still dial it down from Settings per-instance.
+  maxUploadSizeGB          Int      @default(1000) // Maximum file size per upload in GB (1-10000)
   maxCommentAttachments    Int      @default(10) // Maximum files per comment attachment batch (1-50)
   maxReverseShareFiles     Int      @default(10) // Maximum files per reverse share upload session (1-500)
 

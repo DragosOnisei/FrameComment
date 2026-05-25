@@ -17,6 +17,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.1] - 2026-05-25
+
+Two small but visible fixes on top of 1.5.0 — thumbnails finally
+reflect the actual opening frame of every clip, and the upload
+limit no longer pretends 1 GB is a sensible cap for video.
+
+### Changed
+
+- **Default upload cap raised 1 GB → 1000 GB (= 1 TB).** Fresh
+  installs no longer artificially reject anything over 1 GB.
+  Existing deployments still sitting on the legacy "1 GB" default
+  are auto-bumped to 1000 GB by
+  `20260525210000_lift_max_upload_size_default`. The Settings UI
+  ceiling is also raised from 1000 → 10000 GB so 4K+ master
+  uploads have headroom without DB surgery.
+
+### Fixed
+
+- **Thumbnail is now the literal first frame.** The worker used
+  to grab the frame at `clamp(duration * 10%, 0.5 s, 10 s)`,
+  which landed near the start for short 9:16 phone clips but at
+  *exactly* 10 s for longer 16:9 clips — producing thumbnails
+  that bore no relation to what the viewer saw when they hit
+  play (talking-head intros routinely landed on mid-roll b-roll).
+  Now we always grab `-ss 0`, so the card matches the opening
+  frame of the clip. Existing thumbnails are not regenerated
+  automatically; re-upload to rebuild old cards.
+
+### Migration notes
+
+One new migration ships with 1.5.1:
+
+- `20260525210000_lift_max_upload_size_default` — raises
+  `Settings.maxUploadSizeGB` column DEFAULT from `1` to `1000`
+  and auto-bumps any existing row still sitting at the legacy
+  default of 1.
+
+Apply with:
+
+```bash
+npx prisma migrate deploy
+```
+
 ## [1.5.0] - 2026-05-25
 
 Share-link controls + admin-link hardening. The headline feature is a
@@ -135,16 +178,14 @@ and how a folder-share recipient is scoped.
 
 ### Migration notes
 
-The `Project.shareExpiresAt` and `Folder.shareExpiresAt` columns
-are added by a new Prisma migration. Run on the host before
-restarting the app:
+`20260525201053_add_share_expiration` adds
+`Project.shareExpiresAt` and `Folder.shareExpiresAt`. Rows default
+to `NULL` (links never expire) so the upgrade is non-breaking for
+previously-shared content. Apply with:
 
 ```bash
 npx prisma migrate deploy
 ```
-
-Existing rows default to `NULL` (links never expire), so the
-upgrade is non-breaking for previously-shared content.
 
 After upgrading, the **one-off** project-slug rotation script
 re-keys any pre-1.5.0 projects from their title-derived slugs to

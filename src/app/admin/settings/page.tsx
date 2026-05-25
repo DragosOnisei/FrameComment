@@ -137,7 +137,7 @@ export default function GlobalSettingsPage() {
   const [defaultWatermarkOpacity, setDefaultWatermarkOpacity] = useState(30)
   const [defaultWatermarkFontSize, setDefaultWatermarkFontSize] = useState('medium')
   const [defaultApplyPreviewLut, setDefaultApplyPreviewLut] = useState(true)
-  const [maxUploadSizeGB, setMaxUploadSizeGB] = useState('1')
+  const [maxUploadSizeGB, setMaxUploadSizeGB] = useState('1000')
   const [maxCommentAttachments, setMaxCommentAttachments] = useState('10')
   const [maxReverseShareFiles, setMaxReverseShareFiles] = useState('10')
   const [defaultTimestampDisplay, setDefaultTimestampDisplay] = useState('TIMECODE')
@@ -220,7 +220,7 @@ export default function GlobalSettingsPage() {
     setDefaultWatermarkOpacity(data.defaultWatermarkOpacity ?? 30)
     setDefaultWatermarkFontSize(data.defaultWatermarkFontSize || 'medium')
     setDefaultApplyPreviewLut(data.defaultApplyPreviewLut ?? true)
-    setMaxUploadSizeGB(data.maxUploadSizeGB?.toString() || '1')
+    setMaxUploadSizeGB(data.maxUploadSizeGB?.toString() || '1000')
     setMaxCommentAttachments(data.maxCommentAttachments?.toString() || '10')
     setMaxReverseShareFiles(data.maxReverseShareFiles?.toString() || '10')
     setDefaultTimestampDisplay(data.defaultTimestampDisplay || 'TIMECODE')
@@ -537,7 +537,7 @@ export default function GlobalSettingsPage() {
         defaultWatermarkOpacity: defaultWatermarkOpacity,
         defaultWatermarkFontSize: defaultWatermarkFontSize || 'medium',
         defaultApplyPreviewLut,
-        maxUploadSizeGB: parseInt(maxUploadSizeGB, 10) || 1,
+        maxUploadSizeGB: parseInt(maxUploadSizeGB, 10) || 1000,
         maxCommentAttachments: parseInt(maxCommentAttachments, 10) || 10,
         maxReverseShareFiles: parseInt(maxReverseShareFiles, 10) || 10,
         defaultTimestampDisplay: defaultTimestampDisplay || 'TIMECODE',

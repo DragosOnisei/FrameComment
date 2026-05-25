@@ -317,9 +317,13 @@ export async function PATCH(request: NextRequest) {
 
     if (maxUploadSizeGB !== undefined && maxUploadSizeGB !== null) {
       const parsed = Number(maxUploadSizeGB)
-      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) {
+      // 1.5.x+: ceiling raised from 1000 GB → 10000 GB. The i18n
+      // string still mentions the old "1 and 1000 GB" range — we
+      // fall back to an inline message so we don't have to push a
+      // round of locale updates for a number tweak.
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10000) {
         return NextResponse.json(
-          { error: settingsMessages.maxUploadSizeMustBeIntegerBetween1And1000Gb || 'Max upload size must be an integer between 1 and 1000 GB.' },
+          { error: 'Max upload size must be an integer between 1 and 10000 GB.' },
           { status: 400 }
         )
       }
@@ -498,7 +502,7 @@ export async function PATCH(request: NextRequest) {
         appDomain,
         defaultPreviewResolution,
         defaultWatermarkText,
-        maxUploadSizeGB: maxUploadSizeGB !== undefined && maxUploadSizeGB !== null ? Number(maxUploadSizeGB) : 1,
+        maxUploadSizeGB: maxUploadSizeGB !== undefined && maxUploadSizeGB !== null ? Number(maxUploadSizeGB) : 1000,
         maxCommentAttachments: maxCommentAttachments !== undefined && maxCommentAttachments !== null ? Number(maxCommentAttachments) : 10,
         maxReverseShareFiles: maxReverseShareFiles !== undefined && maxReverseShareFiles !== null ? Number(maxReverseShareFiles) : 10,
         defaultTimestampDisplay: defaultTimestampDisplay || 'TIMECODE',
