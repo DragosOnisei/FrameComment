@@ -14,6 +14,37 @@ export function isS3Mode(): boolean {
 }
 
 /**
+ * Resolve the directory the TUS server should stage incoming chunks to
+ * (1.5.x+).
+ *
+ * The previous releases hardcoded `/tmp/framecomment-tus-uploads`. On
+ * Linux containers (Docker, TrueNAS SCALE, k8s pods) `/tmp` is almost
+ * always a small tmpfs — its default size is 50% of the pod's memory
+ * limit, so a 2 GB container has a ~1 GB `/tmp`. A 3 GB video upload
+ * would soak the tmpfs, the kernel would start writing to swap (or
+ * stalling), and the perceived throughput would collapse from
+ * line-speed to a trickle. Locally on macOS / a workstation with a
+ * roomy `/tmp` the bug was invisible.
+ *
+ * Resolution order:
+ *   1. `TUS_UPLOAD_DIR` env var if explicitly set (operator override).
+ *   2. `${STORAGE_ROOT}/.tus-uploads/` — same disk as the final
+ *      payload, so we move/rename instead of cross-FS copy, and we
+ *      inherit the user-provided dataset capacity. This is the
+ *      default for any deploy that sets STORAGE_ROOT (TrueNAS, etc.).
+ *   3. `/tmp/framecomment-tus-uploads` as a last-ditch fallback (only
+ *      hit when neither env var is set, i.e. someone running the dev
+ *      server with absolutely no env).
+ */
+export function getTusUploadDir(): string {
+  if (process.env.TUS_UPLOAD_DIR) return process.env.TUS_UPLOAD_DIR
+  if (process.env.STORAGE_ROOT) {
+    return path.join(process.env.STORAGE_ROOT, '.tus-uploads')
+  }
+  return '/tmp/framecomment-tus-uploads'
+}
+
+/**
  * Validate a relative storage path against STORAGE_ROOT.
  * Guards against null bytes, URL-encoded traversal, backslashes, and .. sequences.
  */

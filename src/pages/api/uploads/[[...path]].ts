@@ -3,7 +3,7 @@ import { FileStore } from '@tus/file-store'
 import { prisma } from '@/lib/db'
 import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
-import { uploadFile, initStorage } from '@/lib/storage'
+import { uploadFile, initStorage, getTusUploadDir } from '@/lib/storage'
 import path from 'path'
 import fs from 'fs'
 import { Readable } from 'stream'
@@ -14,7 +14,11 @@ import { isS3Mode } from '@/lib/storage'
 import { handleReverseShareUploadNotification } from '@/lib/upload-notifications'
 
 
-const TUS_UPLOAD_DIR = '/tmp/framecomment-tus-uploads'
+// 1.5.x+: TUS staging directory is now resolved via getTusUploadDir()
+// so multi-GB uploads land on the same dataset as final storage
+// instead of the container's small tmpfs `/tmp`. See storage.ts for
+// the resolution order + the perf bug that motivated this change.
+const TUS_UPLOAD_DIR = getTusUploadDir()
 const ABSOLUTE_MAX_UPLOAD_SIZE_BYTES = 1000 * 1024 * 1024 * 1024 // 1000 GB hard safety cap
 
 if (!fs.existsSync(TUS_UPLOAD_DIR)) {

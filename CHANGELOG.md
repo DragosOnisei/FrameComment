@@ -17,6 +17,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.2] - 2026-05-26
+
+Single-issue patch: large uploads no longer collapse to a crawl on
+memory-constrained containers (TrueNAS SCALE, Docker, k8s) because
+the TUS staging directory is no longer pinned to the pod's tmpfs.
+
+### Fixed
+
+- **Upload speed collapse on multi-GB files.** The TUS server
+  used to stage every PATCH chunk to `/tmp/framecomment-tus-
+  uploads`. On Linux containers `/tmp` is a tmpfs whose default
+  size is half the pod's memory limit — so a 2 GB container has
+  a ~1 GB `/tmp`. A 3 GB video filled the tmpfs partway through,
+  the kernel started thrashing to swap (or returned ENOSPC), and
+  the perceived throughput dropped from 50+ MB/s to well under
+  1 MB/s. Locally on macOS — where `/tmp` is on the disk — the
+  bug was invisible, which is why it survived this long.
+  TUS now stages chunks under `${STORAGE_ROOT}/.tus-uploads/`
+  (same dataset as the final payload, so the move-into-place
+  step becomes a rename instead of a cross-FS copy). Operators
+  can override the path with `TUS_UPLOAD_DIR=…` if they want to
+  keep staging on a separate volume.
+
+### Upgrade notes
+
+No DB migration. Pure code change. Just redeploy. The old
+`/tmp/framecomment-tus-uploads` directory can be left alone — it
+will simply stop receiving new chunks. The existing cleanup job
+(`runCleanup`) now looks at the new path automatically.
+
 ## [1.5.1] - 2026-05-25
 
 Two small but visible fixes on top of 1.5.0 — thumbnails finally

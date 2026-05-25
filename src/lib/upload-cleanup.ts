@@ -2,10 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { prisma } from './db'
 import { logError, logMessage } from './logging'
-import { isS3Mode } from './storage'
+import { isS3Mode, getTusUploadDir } from './storage'
 import { s3AbortIncompleteMultipartUploadsOlderThan } from './s3-storage'
 
-const TUS_UPLOAD_DIR = '/tmp/framecomment-tus-uploads'
+// 1.5.x+: cleanup must look at the SAME directory the TUS server is
+// writing to. See storage.ts → getTusUploadDir() for resolution order.
+const TUS_UPLOAD_DIR = getTusUploadDir()
 const MAX_AGE_HOURS = 24 // Remove files older than 24 hours
 const INCOMPLETE_S3_MULTIPART_MAX_AGE_HOURS = 24
 
