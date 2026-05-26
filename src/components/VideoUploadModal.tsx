@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
-import { Upload, Video, X, Plus, Pause, Play, CheckCircle2 } from 'lucide-react'
+import { Upload, Video, X, Plus, Pause, Play, CheckCircle2, Lightbulb } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import * as tus from 'tus-js-client'
 import { apiPost, apiDelete } from '@/lib/api-client'
@@ -75,6 +75,30 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
   const uploadRefs = useRef<Map<string, tus.Upload>>(new Map())
   // Tracks the S3 upload key per item ID so we can abort them on remove
   const s3UploadKeys = useRef<Map<string, string>>(new Map())
+
+  // 1.5.7: detects if the modal is being opened on a public hostname
+  // (i.e. likely behind a CDN / reverse proxy like Cloudflare). If so we
+  // surface a small hint about switching to the LAN URL over VPN for
+  // sustained-upload speed. Computed once on mount to avoid SSR window
+  // access.
+  const [isPublicHost, setIsPublicHost] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const host = window.location.hostname
+    // Treat localhost / loopback / mDNS / RFC1918 ranges as "on the LAN"
+    // and skip the hint in those cases.
+    const isLocal =
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host.endsWith('.local') ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      /^169\.254\./.test(host) ||
+      /^fc00:/.test(host) || /^fd[0-9a-f]{2}:/.test(host) || /^fe80:/.test(host)
+    setIsPublicHost(!isLocal)
+  }, [])
 
   // Maximum length for video names (fits comfortably in modal)
   const MAX_VIDEO_NAME_LENGTH = 50
@@ -714,6 +738,17 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
             onChange={handleFileSelect}
             className="hidden"
           />
+
+          {/* 1.5.7: VPN/LAN hint — shown only when the user is accessing
+              FrameComment via a public hostname (i.e. via a CDN/reverse
+              proxy that may throttle sustained uploads). Disappears once
+              an upload is active to avoid distracting from progress. */}
+          {isPublicHost && !hasActiveUploads && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-200/90">
+              <Lightbulb className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-400" />
+              <span className="leading-relaxed">{t('remoteHostHint')}</span>
+            </div>
+          )}
 
           {/* Drop zone - only show when no active uploads */}
           {!hasActiveUploads && (

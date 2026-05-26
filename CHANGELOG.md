@@ -17,6 +17,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.7] - 2026-05-26
+
+Small UX polish on top of the 1.5.5 / 1.5.6 upload investigation.
+After debugging a multi-hour 0.5 MB/s upload that turned out to be
+Cloudflare proxy throttling (not the disk, not the chunk size,
+not ZFS sync), we confirmed: same file uploaded at 100+ MB/s the
+moment we bypassed Cloudflare and hit the LAN IP directly.
+
+For self-hosted operators putting FrameComment behind a public
+reverse proxy / tunnel (Cloudflare, Caddy proxy, ngrok, etc.),
+sustained large uploads will be capped by the proxy regardless
+of what the app does. The right fix is to upload over the LAN —
+either physically on-site, or through a VPN (WireGuard,
+Tailscale) that drops the editor into the local network.
+
+### Added
+
+- **VPN/LAN hint in the upload modal.** When admins open the
+  Upload Video(s) dialog while accessing FrameComment via a
+  public hostname (anything that isn't `localhost`, `*.local`,
+  or an RFC1918 / link-local / ULA range), a small amber
+  "Tip" appears under the dialog header suggesting they switch
+  to the local network for fastest uploads. The hint vanishes
+  once an upload is already in flight to avoid distracting from
+  the progress UI, and never appears for admins who are already
+  on the LAN.
+
+### Operator notes
+
+If your editors are remote and you don't want to spin up a VPN,
+the upload speed they see is bottlenecked by your proxy /
+tunnel, not by FrameComment. For a more involved fix, the
+codebase has partial S3 multipart-upload support — editors
+could upload directly to S3 / R2 / B2 without traversing your
+proxy at all.
+
 ## [1.5.6] - 2026-05-26
 
 Hotfix for 1.5.5. The 256 MiB chunk size shipped in 1.5.5 cut

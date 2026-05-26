@@ -534,6 +534,7 @@
     "tooManyRequestsSlowDown": "Too many requests. Please slow down.",
     "uploadVideo": "Upload Video",
     "uploadVideos": "Upload Videos",
+    "remoteHostHint": "Tip: for the fastest uploads, connect to your VPN and access FrameComment via the local network instead of the public domain.",
     "uploadAssets": "Upload Assets",
     "uploadAdditionalAssets": "Upload Additional Assets",
     "uploadNewVersion": "Upload New Version",
