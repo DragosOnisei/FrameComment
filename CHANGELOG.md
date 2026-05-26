@@ -17,6 +17,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.6] - 2026-05-26
+
+Hotfix for 1.5.5. The 256 MiB chunk size shipped in 1.5.5 cut
+PATCH request count from ~123 to ~12 for a 3 GB upload, but it
+exceeded Cloudflare's free-plan 100 MB body limit so every PATCH
+returned `413 Payload Too Large` for users proxying the app
+through Cloudflare. Self-hosted users using direct exposure or a
+local-only ingress weren't affected, but anyone running behind CF
+saw uploads fail immediately with "File is too large".
+
+### Fixed
+
+- **Desktop chunk size lowered 256 MiB → 96 MiB for big uploads.**
+  Stays safely under Cloudflare's 100 MB free-plan body ceiling
+  and under nginx's default `client_max_body_size` of 100M, while
+  still cutting a 3 GB upload to ~32 PATCH requests (4x fewer
+  than the 1.5.0 baseline of 25 MiB chunks). Per-chunk overhead
+  is mostly amortized away at this size. Mobile chunk strategy is
+  unchanged.
+
+### Upgrade notes
+
+No DB migration, no env changes. Redeploy and the next desktop
+upload picks it up. If you're on an HDD-backed dataset, the
+`zfs set sync=disabled` recommendation from 1.5.5 still applies
+and the two changes compose well.
+
 ## [1.5.5] - 2026-05-26
 
 Third attempt at fixing multi-GB upload speed on self-hosted HDD

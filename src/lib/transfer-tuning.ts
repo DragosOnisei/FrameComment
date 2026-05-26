@@ -63,25 +63,28 @@ export function getTusChunkSizeBytes(fileSize: number): number {
     return Math.max(fileSize, MB)
   }
 
-  // Desktop (1.5.x+): we used to send 25 MiB chunks here, which meant a
-  // 3 GB upload became ~123 sequential PATCH requests. On HDD-backed
-  // self-hosted deploys (no SSD ZIL/SLOG) the per-chunk overhead
-  // dominated: lock acquire, `.json` read, fs.stat, createWriteStream
-  // teardown — they're cheap individually but compound badly with the
-  // disk's IOPS budget already split between postgres / redis / the
-  // upload itself. tus-js-client's own docs recommend NOT capping
-  // chunkSize when the server has no body-size limit: a single PATCH
-  // streams the file through Node without re-doing per-chunk work, and
-  // the request body uses bounded backpressure so memory stays flat.
+  // Desktop chunk-size history:
+  //   1.5.0  — 25 MiB. Worked, but a 3 GB upload meant ~123 sequential
+  //            PATCH requests and per-chunk overhead (lock acquire,
+  //            `.json` read, fs.stat, WriteStream teardown) dominated on
+  //            HDD-backed self-hosted deploys, dragging throughput down
+  //            to ~0.5 MB/s after the first few chunks.
+  //   1.5.5  — 256 MiB. Cut PATCH count to ~12 but a single chunk now
+  //            exceeded Cloudflare's 100 MB body limit (free plan) so
+  //            every PATCH returned 413 Payload Too Large for users
+  //            proxying through CF.
+  //   1.5.6+ — 96 MiB. The compromise: stays safely under CF's 100 MB
+  //            ceiling, still cuts a 3 GB upload to ~32 PATCH requests
+  //            (4x fewer than 1.5.0) so per-chunk overhead is mostly
+  //            amortized away. Pair with `zfs set sync=disabled` on
+  //            the uploads dataset for HDD deploys to drop fsync stalls.
   //
-  // We keep a healthy 256 MiB ceiling instead of Infinity so:
-  //   - a 3 GB upload still resumes from ~the last 250 MiB instead of
-  //     starting over from byte 0 on a network blip;
-  //   - the server never has to budget for an unbounded single request.
+  // 96 MiB is also under nginx's default `client_max_body_size` of 100M
+  // on most distros and under typical k3s ingress defaults.
   //
   // The desktop fallback for smaller files stays at 10 MiB — same
   // reasoning, the per-chunk overhead just doesn't matter there.
-  if (fileSize >= 100 * MB) return Math.min(fileSize, 256 * MB)
+  if (fileSize >= 100 * MB) return 96 * MB
   return 10 * MB
 }
 
