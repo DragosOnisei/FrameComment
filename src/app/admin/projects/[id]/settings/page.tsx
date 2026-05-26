@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,8 @@ import { PasswordInput } from '@/components/ui/password-input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
 import { ReprocessModal } from '@/components/ReprocessModal'
+import ProjectCoverImage from '@/components/ProjectCoverImage'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { RecipientManager } from '@/components/RecipientManager'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
@@ -20,7 +22,7 @@ import { sanitizeSlug, generateRandomSlug, generateSecurePassword } from '@/lib/
 import { apiPatch, apiPost } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 import Link from 'next/link'
-import { ArrowLeft, Save, RefreshCw, Copy, Check, Calendar, FileText, Users, Share2, Video, Shield } from 'lucide-react'
+import { ArrowLeft, Save, RefreshCw, Copy, Check, Calendar, FileText, Users, Share2, Video, Shield, Image as ImageIcon, Upload as UploadIcon, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTranslations } from 'next-intl'
 
@@ -116,6 +118,122 @@ export default function ProjectSettingsPage() {
   // Due date state
   const [dueDate, setDueDate] = useState('')
   const [dueReminder, setDueReminder] = useState<'NONE' | 'DAY_BEFORE' | 'WEEK_BEFORE'>('NONE')
+
+  // 1.5.8+: per-project cover image. The cover is shown on the
+  // Projects Dashboard tile and (when set) replaces the default
+  // deterministic gradient. We let admins edit it from here as a
+  // simple replace-the-existing-image flow.
+  //
+  // The admin GET endpoint requires a bearer token, so we render the
+  // preview via `<ProjectCoverImage>` (apiFetch + blob URL) instead
+  // of a naked <img src>. `coverCacheKey` bumps every time we mutate
+  // the cover so the component re-fetches.
+  const [coverExists, setCoverExists] = useState(false)
+  const [coverCacheKey, setCoverCacheKey] = useState<number>(Date.now())
+  const [coverUploading, setCoverUploading] = useState(false)
+  const [coverError, setCoverError] = useState('')
+  const coverInputRef = useRef<HTMLInputElement | null>(null)
+
+  // 1.5.8+: shared-folder list for the Security tab. Fetched on
+  // mount from a dedicated endpoint so the main project payload
+  // stays unchanged for everywhere else that uses it.
+  type SharedFolderRow = {
+    id: string
+    name: string
+    slug: string
+    authMode: string
+    shareExpiresAt: string | null
+    parentFolderId: string | null
+    hasPassword: boolean
+  }
+  const [sharedFolders, setSharedFolders] = useState<SharedFolderRow[]>([])
+  // 1.5.8+: per-row pending state so we can disable buttons + show a
+  // small "…" while a folder's share is being updated.
+  const [folderShareBusyId, setFolderShareBusyId] = useState<string | null>(null)
+  const [folderShareError, setFolderShareError] = useState<string | null>(null)
+  // 1.5.8+: rotate-share-link confirmation. Holds the row that the
+  // admin clicked "Delete link" on, then the ConfirmDialog renders
+  // against this and invokes the actual rotation on OK.
+  const [folderToRevoke, setFolderToRevoke] = useState<SharedFolderRow | null>(null)
+  // 1.5.8+: tiny success flag per row so the admin gets a visible
+  // "Link revoked" badge for a few seconds after a rotation — the
+  // raw slug change wasn't obvious enough on its own.
+  const [folderJustRevokedId, setFolderJustRevokedId] = useState<string | null>(null)
+
+  /**
+   * Update a single folder's share expiration. Pass a Date to set a
+   * future expiry, or `null` to clear it (link becomes unlimited).
+   * Optimistically updates the row in-place so the countdown chip
+   * reflects the change without a re-fetch.
+   */
+  async function patchFolderShareExpiry(
+    folderId: string,
+    expiresAt: Date | null,
+  ) {
+    setFolderShareBusyId(folderId)
+    setFolderShareError(null)
+    try {
+      const res = await apiFetch(`/api/folders/${folderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shareExpiresAt: expiresAt ? expiresAt.toISOString() : null,
+        }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        setFolderShareError(json?.error || 'Failed to update share link')
+        return
+      }
+      setSharedFolders((rows) =>
+        rows.map((r) =>
+          r.id === folderId
+            ? { ...r, shareExpiresAt: expiresAt ? expiresAt.toISOString() : null }
+            : r,
+        ),
+      )
+    } catch (err) {
+      logError('[ProjectSettings] patchFolderShareExpiry', err)
+      setFolderShareError('Failed to update share link')
+    } finally {
+      setFolderShareBusyId(null)
+    }
+  }
+
+  /**
+   * Rotate a folder's share slug so anyone holding the old URL is
+   * locked out. The folder content survives — only the public URL
+   * changes. The caller has already shown the ConfirmDialog and
+   * confirmed; this function does the actual network round-trip.
+   */
+  async function rotateFolderShareLink(folderId: string) {
+    setFolderShareBusyId(folderId)
+    setFolderShareError(null)
+    try {
+      const res = await apiFetch(`/api/folders/${folderId}/rotate-share-link`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        setFolderShareError(json?.error || 'Failed to rotate share link')
+        return
+      }
+      const json = await res.json()
+      if (json?.slug) {
+        // 1.5.8: drop the row immediately. The server also stamps
+        // shareExpiresAt to epoch 0 so subsequent reloads keep this
+        // folder out of the list until it's re-shared from
+        // FolderBrowser. Resharing sets a real expiration (or null)
+        // which makes the row reappear automatically.
+        setSharedFolders((rows) => rows.filter((r) => r.id !== folderId))
+      }
+    } catch (err) {
+      logError('[ProjectSettings] rotateFolderShareLink', err)
+      setFolderShareError('Failed to rotate share link')
+    } finally {
+      setFolderShareBusyId(null)
+    }
+  }
 
   // SMTP and recipients validation (for OTP)
   const [smtpConfigured, setSmtpConfigured] = useState(true)
@@ -243,6 +361,12 @@ export default function ProjectSettingsPage() {
         setClientNotificationTime(data.clientNotificationTime || '09:00')
         setClientNotificationDay(data.clientNotificationDay ?? 1)
 
+        // 1.5.8+: hydrate per-project cover image existence. The
+        // actual fetch is delegated to <ProjectCoverImage>, which
+        // handles the bearer-auth + blob-URL dance.
+        setCoverExists(!!data.coverImagePath)
+        setCoverCacheKey(Date.now())
+
         // Mark initial load as complete
         setInitialLoadComplete(true)
       } catch (err) {
@@ -255,6 +379,31 @@ export default function ProjectSettingsPage() {
     loadProject()
   }, [projectId, t])
 
+  // 1.5.8+: fetch the shared-folder list for the Security tab in
+  // parallel with the main project load. Failure here just leaves
+  // the list empty — the Security tab still renders, it just won't
+  // list any folders.
+  useEffect(() => {
+    let cancelled = false
+    async function loadSharedFolders() {
+      try {
+        const res = await apiFetch(`/api/projects/${projectId}/shared-folders`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        if (Array.isArray(data?.folders)) {
+          setSharedFolders(data.folders as SharedFolderRow[])
+        }
+      } catch {
+        // Non-fatal — silently skip the panel.
+      }
+    }
+    void loadSharedFolders()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
   // Track if initial load is complete
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
 
@@ -264,6 +413,76 @@ export default function ProjectSettingsPage() {
       setSharePassword('')
     }
   }, [authMode, initialLoadComplete])
+
+  /**
+   * 1.5.8+: Replace the per-project cover image. POSTs the raw file
+   * to `/api/projects/[id]/cover` (which writes to
+   * `projects/{id}/cover.{ext}` and updates the DB pointer), then
+   * refreshes the preview URL with a cache-buster so the new image
+   * shows up immediately on the settings page and the dashboard tile.
+   */
+  async function handleCoverUpload(file: File) {
+    setCoverError('')
+    setCoverUploading(true)
+    try {
+      // Client-side guardrails — server re-validates everything.
+      const allowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif']
+      if (!allowed.includes(file.type.toLowerCase())) {
+        setCoverError('Use PNG, JPEG, WEBP or GIF.')
+        return
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setCoverError('Image too large (max 5 MB).')
+        return
+      }
+
+      const form = new FormData()
+      form.append('file', file)
+      const res = await apiFetch(`/api/projects/${projectId}/cover`, {
+        method: 'POST',
+        body: form,
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        setCoverError(json?.error || 'Failed to upload image.')
+        return
+      }
+      setCoverExists(true)
+      setCoverCacheKey(Date.now())
+    } catch (err) {
+      logError('[ProjectSettings] handleCoverUpload', err)
+      setCoverError('Failed to upload image.')
+    } finally {
+      setCoverUploading(false)
+    }
+  }
+
+  /**
+   * 1.5.8+: Remove the cover image. After removal the dashboard tile
+   * falls back to the deterministic gradient. Idempotent on the
+   * server so a double-click is safe.
+   */
+  async function handleCoverRemove() {
+    setCoverError('')
+    setCoverUploading(true)
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/cover`, {
+        method: 'DELETE',
+      })
+      if (!res.ok && res.status !== 204) {
+        const json = await res.json().catch(() => null)
+        setCoverError(json?.error || 'Failed to remove image.')
+        return
+      }
+      setCoverExists(false)
+      setCoverCacheKey(Date.now())
+    } catch (err) {
+      logError('[ProjectSettings] handleCoverRemove', err)
+      setCoverError('Failed to remove image.')
+    } finally {
+      setCoverUploading(false)
+    }
+  }
 
   async function handleSave() {
     setSaving(true)
@@ -457,10 +676,16 @@ export default function ProjectSettingsPage() {
     )
   }
 
+  // 1.5.8: dropped "Client Information & Notifications" and
+  // "Client Share Page" from the sidebar entirely. The underlying
+  // state, content blocks, and CollapsibleSection renders below are
+  // gated on these IDs being present, so removing them here also
+  // takes those panes out of the desktop right pane (`activeSection`
+  // can never be 'client-info' or 'client-share' anymore) and out of
+  // the mobile collapsible list further down. To restore them, add
+  // their entries back to this array.
   const settingSections = [
     { id: 'project-details', label: t('projectDetails'), icon: FileText },
-    { id: 'client-info', label: t('clientInfoNotifications'), icon: Users },
-    { id: 'client-share', label: t('clientSharePage'), icon: Share2 },
     { id: 'video-processing', label: t('videoProcessing'), icon: Video },
     { id: 'security', label: t('security'), icon: Shield },
   ]
@@ -484,10 +709,10 @@ export default function ProjectSettingsPage() {
               </div>
             </div>
 
-            <Button onClick={handleSave} variant="default" disabled={saving} size="lg" className="w-full sm:w-auto">
-              <Save className="w-4 h-4 mr-2" />
-              {saving ? tc('saving') : tc('saveChanges')}
-            </Button>
+            {/* 1.5.8: top Save Changes button removed — the same
+                button at the bottom of the page is enough and keeps
+                the header clean. To restore, paste the matching
+                Button block from line ~1830 here. */}
           </div>
         </div>
 
@@ -537,6 +762,12 @@ export default function ProjectSettingsPage() {
                 </div>
               </div>
 
+              {/* 1.5.8: Custom Link + Share Link card hidden to declutter
+                  settings. Slug logic preserved — auto-generated slugs
+                  continue to work, custom slugs already saved keep
+                  resolving. Restore the UI by removing the `{false && `
+                  wrapper. */}
+              {false && (
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
@@ -601,7 +832,13 @@ export default function ProjectSettingsPage() {
 	                  </p>
 	                </div>
 	              </div>
+              )}
 
+              {/* 1.5.8: Revision Tracking section hidden to declutter
+                  settings. The feature still works (DB column + API
+                  endpoints unchanged); restore the UI by removing the
+                  `{false && ` wrapper. */}
+              {false && (
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
@@ -652,7 +889,13 @@ export default function ProjectSettingsPage() {
                   </div>
                 )}
               </div>
+              )}
 
+              {/* 1.5.8: Due Date section hidden to declutter settings.
+                  Logic preserved — projects with existing due dates keep
+                  them in the DB and reminders still fire. Restore the
+                  UI by removing the `{false && ` wrapper. */}
+              {false && (
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <Label htmlFor="dueDate" className="flex items-center gap-2">
                   <Calendar className="w-4 h-4" />
@@ -700,6 +943,84 @@ export default function ProjectSettingsPage() {
                     </Button>
                   )}
                 </div>
+              </div>
+              )}
+
+              {/* 1.5.8+: per-project cover image. Shown on the
+                  Projects Dashboard tile. Removing falls back to the
+                  deterministic gradient. */}
+              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                <div className="space-y-0.5">
+                  <Label className="flex items-center gap-2">
+                    <ImageIcon className="w-4 h-4" />
+                    Cover image
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Shown on this project&apos;s tile in the dashboard. Leave empty to use the auto-generated gradient. PNG, JPEG, WEBP or GIF up to 5 MB.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-background">
+                    {coverExists ? (
+                      <ProjectCoverImage
+                        projectId={projectId}
+                        cacheKey={coverCacheKey}
+                        alt="Cover preview"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <ImageIcon className="h-7 w-7 text-muted-foreground/50" />
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) handleCoverUpload(f)
+                        // Reset so the same file can be re-selected after
+                        // an error or removal.
+                        e.target.value = ''
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={coverUploading}
+                      onClick={() => coverInputRef.current?.click()}
+                      className="gap-2"
+                    >
+                      <UploadIcon className="h-4 w-4" />
+                      {coverExists ? 'Change image' : 'Upload image'}
+                    </Button>
+                    {coverExists && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={coverUploading}
+                        onClick={handleCoverRemove}
+                        className="gap-2 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {coverError && (
+                  <p className="text-xs text-destructive">{coverError}</p>
+                )}
+                {coverUploading && !coverError && (
+                  <p className="text-xs text-muted-foreground">Uploading…</p>
+                )}
               </div>
             </>
           )
@@ -900,6 +1221,14 @@ export default function ProjectSettingsPage() {
           // Video Processing content
           const videoProcessingContent = (
             <>
+              {/* 1.5.8: Skip Transcoding card hidden — operator never
+                  wants to expose this on a per-project basis (it lets
+                  the original file bypass our preview pipeline
+                  entirely, which is a one-way decision usually made
+                  at install time, not per project). State + handler
+                  preserved; remove `{false && ` to bring the toggle
+                  back. */}
+              {false && (
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -918,11 +1247,16 @@ export default function ProjectSettingsPage() {
                   <p className="text-xs text-warning">{t('skipTranscodingWarning')}</p>
                 )}
               </div>
+              )}
 
               {!skipTranscoding && (
 	              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
 	                <div className="space-y-2">
-	                  <Label>{t('previewResolution')}</Label>
+	                  {/* 1.5.8: relabelled "Preview Resolution" →
+	                      "Default Preview Resolution" so the page reads
+	                      cleanly with only this Video Processing field
+	                      remaining. */}
+	                  <Label>Default Preview Resolution</Label>
 	                  <Select value={previewResolution} onValueChange={setPreviewResolution}>
                     <SelectTrigger>
                       <SelectValue />
@@ -940,7 +1274,12 @@ export default function ProjectSettingsPage() {
               </div>
               )}
 
-              {!skipTranscoding && (
+              {/* 1.5.8: Watermark configuration card hidden. The
+                  per-project watermark settings (enable, custom text,
+                  positions, font size, opacity) are all preserved in
+                  state and DB; remove `{false && ` to bring them back
+                  to the UI when needed. */}
+              {false && !skipTranscoding && (
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -982,7 +1321,7 @@ export default function ProjectSettingsPage() {
                           maxLength={100}
                         />
                         <p className="text-xs text-muted-foreground">
-                          {t('watermarkDefaultHint', { title: project?.title })}
+                          {t('watermarkDefaultHint', { title: project?.title ?? '' })}
                           <br />
                           <span className="text-warning">{t('watermarkAllowedChars')}</span>
                         </p>
@@ -1060,7 +1399,11 @@ export default function ProjectSettingsPage() {
               </div>
               )}
 
-              {!skipTranscoding && (
+              {/* 1.5.8: Apply Preview LUT card hidden — operator
+                  uses the global setting from Admin Settings instead
+                  of overriding per project. State + DB column kept;
+                  remove `{false && ` to bring it back. */}
+              {false && !skipTranscoding && (
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -1077,6 +1420,12 @@ export default function ProjectSettingsPage() {
           // Security content
           const securityContent = (
             <>
+              {/* 1.5.8: Authentication Method card hidden. The
+                  `authMode` state still flows through save and the
+                  share routes enforce it, so existing per-project
+                  values are still honored — admins just don't change
+                  it from here. Remove `{false && ` to expose. */}
+              {false && (
 	              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
 	                <div className="space-y-2">
 	                  <Label>{t('authMethod')}</Label>
@@ -1122,7 +1471,13 @@ export default function ProjectSettingsPage() {
                   </div>
                 )}
               </div>
+              )}
 
+              {/* 1.5.8: Guest Mode card hidden. `guestMode` and
+                  `guestLatestOnly` state still apply via save and
+                  the share page; admins just don't toggle them from
+                  here anymore. */}
+              {false && (
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
@@ -1170,6 +1525,170 @@ export default function ProjectSettingsPage() {
                       {t('guestModeRecommendedWarning')}
                     </p>
                   </div>
+                )}
+              </div>
+              )}
+
+              {/* 1.5.8+: Shared folders panel — lists every folder in
+                  this project with the share link the client uses
+                  and a humanised countdown until the share expires.
+                  Folders without `shareExpiresAt` are tagged "Never
+                  expires" so the admin can see them too. The slug is
+                  shown as the share URL fragment (`/share/folder/…`)
+                  so admins can copy-paste it. Empty list = project
+                  has no folders yet — we show a small placeholder
+                  rather than rendering a blank card. */}
+              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                <div className="space-y-0.5">
+                  <Label className="flex items-center gap-2">
+                    <Share2 className="w-4 h-4" />
+                    Folder share links
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Folders that can be shared with clients and when their access expires.
+                  </p>
+                </div>
+
+                {folderShareError && (
+                  <p className="text-xs text-destructive">{folderShareError}</p>
+                )}
+
+                {sharedFolders.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    No folders in this project yet.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-border rounded-md border border-border bg-background">
+                    {sharedFolders.map((folder) => {
+                      const expires = folder.shareExpiresAt
+                        ? new Date(folder.shareExpiresAt)
+                        : null
+                      const now = Date.now()
+                      let expiryLabel = 'Never expires'
+                      let expiryTone: 'muted' | 'warning' | 'danger' = 'muted'
+                      if (expires) {
+                        const diffMs = expires.getTime() - now
+                        if (diffMs <= 0) {
+                          expiryLabel = 'Expired'
+                          expiryTone = 'danger'
+                        } else {
+                          const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+                          const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+                          if (days >= 1) {
+                            expiryLabel = `Expires in ${days} day${days === 1 ? '' : 's'}`
+                          } else {
+                            expiryLabel = `Expires in ${hours} hour${hours === 1 ? '' : 's'}`
+                          }
+                          expiryTone = days <= 1 ? 'warning' : 'muted'
+                        }
+                      }
+                      const toneClass =
+                        expiryTone === 'danger'
+                          ? 'text-destructive'
+                          : expiryTone === 'warning'
+                          ? 'text-warning'
+                          : 'text-muted-foreground'
+                      const isBusy = folderShareBusyId === folder.id
+                      const isLimited = !!folder.shareExpiresAt
+                      return (
+                        <li
+                          key={folder.id}
+                          className="flex flex-col gap-2 px-3 py-3"
+                        >
+                          {/* Top row — folder name, slug, current
+                              expiry status. */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 min-w-0">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">{folder.name}</p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                /share/folder/{folder.slug}
+                                {folder.hasPassword && ' · Password protected'}
+                                {folder.authMode === 'OTP' && ' · OTP'}
+                                {folder.authMode === 'BOTH' && ' · Password + OTP'}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 whitespace-nowrap">
+                              {folderJustRevokedId === folder.id && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-success-visible text-success font-medium">
+                                  ✓ Link revoked — new URL active
+                                </span>
+                              )}
+                              <span className={`text-xs ${toneClass}`}>
+                                {expiryLabel}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Controls — limit / unlimit / revoke. */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Select
+                              value={isLimited ? 'limited' : 'unlimited'}
+                              onValueChange={(v) => {
+                                if (v === 'unlimited') {
+                                  void patchFolderShareExpiry(folder.id, null)
+                                  return
+                                }
+                                // Default limited expiry: 7 days from now.
+                                // Admin can fine-tune via the date input
+                                // that appears once limited is selected.
+                                const inSevenDays = new Date(
+                                  Date.now() + 7 * 24 * 60 * 60 * 1000,
+                                )
+                                void patchFolderShareExpiry(folder.id, inSevenDays)
+                              }}
+                              disabled={isBusy}
+                            >
+                              <SelectTrigger className="h-8 w-[140px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unlimited">Unlimited</SelectItem>
+                                <SelectItem value="limited">Limited (date)</SelectItem>
+                              </SelectContent>
+                            </Select>
+
+                            {isLimited && (
+                              <Input
+                                type="date"
+                                value={
+                                  folder.shareExpiresAt
+                                    ? (() => {
+                                        const d = new Date(folder.shareExpiresAt)
+                                        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+                                      })()
+                                    : ''
+                                }
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  if (!val) return
+                                  // Anchor expiry at noon to dodge
+                                  // timezone-related "off by a day" edge
+                                  // cases for users near midnight.
+                                  void patchFolderShareExpiry(
+                                    folder.id,
+                                    new Date(`${val}T12:00:00.000Z`),
+                                  )
+                                }}
+                                disabled={isBusy}
+                                className="h-8 w-[160px] text-xs"
+                              />
+                            )}
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-xs text-destructive hover:text-destructive ml-auto"
+                              onClick={() => setFolderToRevoke(folder)}
+                              disabled={isBusy}
+                            >
+                              Delete link
+                            </Button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
                 )}
               </div>
 
@@ -1231,12 +1750,12 @@ export default function ProjectSettingsPage() {
                 <CollapsibleSection className="border-border" title={t('projectDetails')} description={t('projectDetailsDescription')} open={showProjectDetails} onOpenChange={setShowProjectDetails} contentClassName="space-y-4 border-t pt-4">
                   {projectDetailsContent}
                 </CollapsibleSection>
-                <CollapsibleSection className="border-border" title={t('clientInfoNotifications')} description={t('clientInfoNotificationsDescription')} open={showClientInfo} onOpenChange={setShowClientInfo} contentClassName="space-y-6 border-t pt-4">
-                  {clientInfoContent}
-                </CollapsibleSection>
-                <CollapsibleSection className="border-border" title={t('clientSharePage')} description={t('clientSharePageDescription')} open={showClientSharePage} onOpenChange={setShowClientSharePage} contentClassName="space-y-6 border-t pt-4">
-                  {clientShareContent}
-                </CollapsibleSection>
+                {/* 1.5.8: Client Information & Notifications and
+                    Client Share Page panes hidden from the mobile
+                    collapsible stack. The content blocks
+                    (`clientInfoContent`, `clientShareContent`) are
+                    still defined so existing state stays connected;
+                    just not rendered. Restore by un-commenting. */}
                 <CollapsibleSection className="border-border" title={t('videoProcessing')} description={t('videoProcessingDescription')} open={showVideoProcessing} onOpenChange={setShowVideoProcessing} contentClassName="space-y-6 border-t pt-4">
                   {videoProcessingContent}
                 </CollapsibleSection>
@@ -1273,16 +1792,15 @@ export default function ProjectSettingsPage() {
                       {projectDetailsContent}
                     </CollapsibleSection>
                   )}
-                  {activeSection === 'client-info' && (
-                    <CollapsibleSection className="border-border" title={t('clientInfoNotifications')} description={t('clientInfoNotificationsDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-6 border-t pt-4">
-                      {clientInfoContent}
-                    </CollapsibleSection>
-                  )}
-                  {activeSection === 'client-share' && (
-                    <CollapsibleSection className="border-border" title={t('clientSharePage')} description={t('clientSharePageDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-6 border-t pt-4">
-                      {clientShareContent}
-                    </CollapsibleSection>
-                  )}
+                  {/* 1.5.8: Client Info & Notifications and Client
+                      Share Page panes removed from the desktop right
+                      panel. They were unreachable anyway after we
+                      dropped their entries from `settingSections`,
+                      but cleaning them up here too keeps the file
+                      shorter and easier to read. Restore by adding
+                      the entries back to `settingSections` and the
+                      `activeSection === '…' && <CollapsibleSection>`
+                      blocks back here. */}
                   {activeSection === 'video-processing' && (
                     <CollapsibleSection className="border-border" title={t('videoProcessing')} description={t('videoProcessingDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-6 border-t pt-4">
                       {videoProcessingContent}
@@ -1306,12 +1824,10 @@ export default function ProjectSettingsPage() {
           </div>
         )}
 
-        {/* Success notification at bottom */}
-        {success && (
-          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-success font-medium">{t('settingsSaved')}</p>
-          </div>
-        )}
+        {/* 1.5.8: bottom success banner removed — it was duplicating
+            the top one for the same `success` flag. The top banner
+            (rendered above the form) is enough and stays in view
+            while users scroll back up to verify. */}
 
         {/* Save button at bottom */}
         <div className="mt-6 sm:mt-8 pb-20 lg:pb-24 flex justify-end">
@@ -1332,6 +1848,27 @@ export default function ProjectSettingsPage() {
           onSaveAndReprocess={() => saveSettings(pendingUpdates, true)}
           saving={saving}
           reprocessing={reprocessing}
+        />
+
+        {/* 1.5.8+: themed confirm dialog for the "Delete link"
+            action on the Security → Folder share links panel.
+            Replaces the native window.confirm() so the warning
+            uses the same dark Radix Dialog as the rest of the app. */}
+        <ConfirmDialog
+          open={!!folderToRevoke}
+          onOpenChange={(open) => {
+            if (!open) setFolderToRevoke(null)
+          }}
+          variant="destructive"
+          title={folderToRevoke ? `Delete share link for "${folderToRevoke.name}"?` : 'Delete share link?'}
+          description="Anyone with the current share link will lose access immediately. A new link will be generated for this folder — its content stays untouched."
+          confirmLabel="Delete link"
+          cancelLabel="Cancel"
+          onConfirm={async () => {
+            if (!folderToRevoke) return
+            await rotateFolderShareLink(folderToRevoke.id)
+            setFolderToRevoke(null)
+          }}
         />
       </div>
     </div>

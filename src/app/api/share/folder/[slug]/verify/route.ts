@@ -9,6 +9,7 @@ import { getRedis } from '@/lib/redis'
 import { signShareToken } from '@/lib/auth'
 import { safeParseBody } from '@/lib/validation'
 import { logError } from '@/lib/logging'
+import { lockoutDurationMs, nextConsecutiveLockouts, LOCKOUT_DECAY_MS, type LockoutEntry } from '@/lib/auth-lockout'
 
 export const runtime = 'nodejs'
 
@@ -24,7 +25,10 @@ export const runtime = 'nodejs'
  * and returns it. The client stashes the token in memory and sends
  * it as `Authorization: Bearer …` on subsequent calls.
  */
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000
+// 1.5.8: progressive backoff (15 min / 1h / 4h) — see
+// `@/lib/auth-lockout`. The attempt-counting window is the decay
+// window so consecutive-lockout history survives across all tiers.
+const ATTEMPT_WINDOW_MS = LOCKOUT_DECAY_MS
 
 function constantTimeCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a, 'utf8')
@@ -116,23 +120,44 @@ export async function POST(
     }
 
     if (!isValid) {
+      // 1.5.8: progressive backoff — see project share /verify for
+      // the long comment. Same shape, smaller log payload.
       const now = Date.now()
       const existing = await redis.get(key)
+      const prev: LockoutEntry | null = existing ? JSON.parse(existing) : null
+
       let count = 1
       let firstAttempt = now
-      if (existing) {
-        const data = JSON.parse(existing)
-        if (now - data.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+      let consecutiveLockouts = prev?.consecutiveLockouts ?? 0
+      let lastLockoutAt = prev?.lastLockoutAt
+
+      if (prev && now - prev.firstAttempt <= ATTEMPT_WINDOW_MS) {
+        const lockoutHasExpired = prev.lockoutUntil && now >= prev.lockoutUntil
+        if (lockoutHasExpired) {
           count = 1
           firstAttempt = now
         } else {
-          count = data.count + 1
-          firstAttempt = data.firstAttempt
+          count = (prev.count || 0) + 1
+          firstAttempt = prev.firstAttempt
         }
       }
-      const lockoutUntil = count >= MAX_FAILED ? now + RATE_LIMIT_WINDOW_MS : undefined
-      const entry = { count, firstAttempt, lastAttempt: now, lockoutUntil }
-      const ttl = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+
+      let lockoutUntil: number | undefined
+      if (count >= MAX_FAILED) {
+        consecutiveLockouts = nextConsecutiveLockouts(prev, now)
+        lockoutUntil = now + lockoutDurationMs(consecutiveLockouts)
+        lastLockoutAt = now
+      }
+
+      const entry: LockoutEntry = {
+        count,
+        firstAttempt,
+        lastAttempt: now,
+        lockoutUntil,
+        consecutiveLockouts,
+        lastLockoutAt,
+      }
+      const ttl = Math.ceil(ATTEMPT_WINDOW_MS / 1000)
       await redis.setex(key, ttl, JSON.stringify(entry))
 
       // Reuse the existing security-event log type — the share token
@@ -152,7 +177,8 @@ export async function POST(
       })
 
       if (count >= MAX_FAILED) {
-        const retryAfter = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+        // 1.5.8: retryAfter reflects the tier we just landed in.
+        const retryAfter = Math.ceil(((lockoutUntil ?? now) - now) / 1000)
         return NextResponse.json(
           { error: 'Too many failed password attempts. Please try again later.', retryAfter },
           { status: 429, headers: { 'Retry-After': String(retryAfter) } },

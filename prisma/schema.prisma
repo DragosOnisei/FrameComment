@@ -519,7 +519,7 @@ model Settings {
   // still dial it down from Settings per-instance.
   maxUploadSizeGB          Int      @default(1000) // Maximum file size per upload in GB (1-10000)
   maxCommentAttachments    Int      @default(10) // Maximum files per comment attachment batch (1-50)
-  maxReverseShareFiles     Int      @default(10) // Maximum files per reverse share upload session (1-500)
+  maxReverseShareFiles     Int      @default(99999) // 1.5.8+: pinned to the "unlimited" sentinel — the admin Security tab no longer surfaces a control for this and the operator wants reverse-share to be uncapped per session.
 
   // Default Comment Timestamp Display
   // TIMECODE = HH:MM:SS:FF (or DF), AUTO = MM:SS or HH:MM:SS based on video length

@@ -14,14 +14,19 @@ import { safeParseBody } from '@/lib/validation'
 import jwt from 'jsonwebtoken'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
+import { lockoutDurationMs, nextConsecutiveLockouts, LOCKOUT_DECAY_MS, type LockoutEntry } from '@/lib/auth-lockout'
 
 export const runtime = 'nodejs'
 
 
 
 
-// Rate limit configuration
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000 // 15 minutes
+// 1.5.8: replaced the flat 15-min window with progressive backoff
+// (15 min → 1h → 4h on consecutive lockouts inside 24h). The
+// attempt-counting "window" is now driven by the lockout decay
+// constant so consecutive-lockout tracking survives across the
+// full backoff range.
+const ATTEMPT_WINDOW_MS = LOCKOUT_DECAY_MS
 
 /**
  * Constant-time string comparison to prevent timing attacks
@@ -140,33 +145,59 @@ export async function POST(
     }
 
     if (!isValid) {
-      // FAILED attempt - increment rate limit counter
+      // FAILED attempt — progressive backoff.
+      // - track attempts in a 24h window
+      // - on 5th failure, start a lockout sized by `consecutiveLockouts`
+      //   (15 min → 1h → 4h)
+      // - consecutiveLockouts auto-resets after 24h of quiet
       const now = Date.now()
       const existingData = await redis.get(rateLimitKey)
+      const prev: LockoutEntry | null = existingData ? JSON.parse(existingData) : null
 
       let count = 1
       let firstAttempt = now
+      let consecutiveLockouts = prev?.consecutiveLockouts ?? 0
+      let lastLockoutAt = prev?.lastLockoutAt
 
-      if (existingData) {
-        const parsed = JSON.parse(existingData)
-        // Reset if window expired
-        if (now - parsed.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+      // Long-stale entry → start fresh (the 24h window for both
+      // attempt counting and consecutive-lockout decay).
+      if (prev && now - prev.firstAttempt <= ATTEMPT_WINDOW_MS) {
+        // If a lockout already expired, reset the count so the next
+        // 5 attempts start a new tier (1st window inside the
+        // backoff sequence). Otherwise just increment.
+        const lockoutHasExpired = prev.lockoutUntil && now >= prev.lockoutUntil
+        if (lockoutHasExpired) {
           count = 1
           firstAttempt = now
         } else {
-          count = parsed.count + 1
-          firstAttempt = parsed.firstAttempt
+          count = (prev.count || 0) + 1
+          firstAttempt = prev.firstAttempt
         }
       }
 
-      const rateLimitEntry = {
+      // Decide if this attempt crosses into a new lockout. Compute
+      // both lockoutUntil and the (possibly bumped) consecutive
+      // counter together so the entry stays consistent.
+      let lockoutUntil: number | undefined
+      if (count >= MAX_FAILED_ATTEMPTS) {
+        consecutiveLockouts = nextConsecutiveLockouts(prev, now)
+        lockoutUntil = now + lockoutDurationMs(consecutiveLockouts)
+        lastLockoutAt = now
+      }
+
+      const rateLimitEntry: LockoutEntry = {
         count,
         firstAttempt,
         lastAttempt: now,
-        lockoutUntil: count >= MAX_FAILED_ATTEMPTS ? now + RATE_LIMIT_WINDOW_MS : undefined
+        lockoutUntil,
+        consecutiveLockouts,
+        lastLockoutAt,
       }
 
-      const ttlSeconds = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+      // TTL covers the full decay window so we can resurrect
+      // consecutive-lockout history when an attacker comes back
+      // hours later.
+      const ttlSeconds = Math.ceil(ATTEMPT_WINDOW_MS / 1000)
       await redis.setex(rateLimitKey, ttlSeconds, JSON.stringify(rateLimitEntry))
 
       // Log security event for failed password attempt
@@ -185,9 +216,12 @@ export async function POST(
         wasBlocked: false,
       })
 
-      // If this was the 5th failed attempt, return rate limit error
+      // If this was the 5th failed attempt, return rate limit error.
+      // 1.5.8: lockout duration now varies by tier (15 min / 1h /
+      // 4h) — read it off the entry we just wrote instead of using
+      // a fixed window constant.
       if (count >= MAX_FAILED_ATTEMPTS) {
-        const retryAfter = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+        const retryAfter = Math.ceil(((lockoutUntil ?? now) - now) / 1000)
 
         // Log additional event for lockout
         await logSecurityEvent({

@@ -139,7 +139,13 @@ export default function GlobalSettingsPage() {
   const [defaultApplyPreviewLut, setDefaultApplyPreviewLut] = useState(true)
   const [maxUploadSizeGB, setMaxUploadSizeGB] = useState('1000')
   const [maxCommentAttachments, setMaxCommentAttachments] = useState('10')
-  const [maxReverseShareFiles, setMaxReverseShareFiles] = useState('10')
+  // 1.5.8: hard-pinned to the "unlimited" sentinel. The Security
+  // settings UI no longer surfaces this input — operator decision
+  // is to never cap reverse-share submissions per session. State
+  // stays around so the existing save payload + props pipeline
+  // keeps working without rewiring.
+  const REVERSE_SHARE_UNLIMITED = '99999'
+  const [maxReverseShareFiles, setMaxReverseShareFiles] = useState(REVERSE_SHARE_UNLIMITED)
   const [defaultTimestampDisplay, setDefaultTimestampDisplay] = useState('TIMECODE')
   const [autoApproveProject, setAutoApproveProject] = useState(true)
   const [defaultUsePreviewForApprovedPlayback, setDefaultUsePreviewForApprovedPlayback] = useState(false)
@@ -222,7 +228,10 @@ export default function GlobalSettingsPage() {
     setDefaultApplyPreviewLut(data.defaultApplyPreviewLut ?? true)
     setMaxUploadSizeGB(data.maxUploadSizeGB?.toString() || '1000')
     setMaxCommentAttachments(data.maxCommentAttachments?.toString() || '10')
-    setMaxReverseShareFiles(data.maxReverseShareFiles?.toString() || '10')
+    // 1.5.8: ignore whatever the server has stored — the operator
+    // wants this permanently unlimited, so we re-pin on every load.
+    // The save payload below also re-asserts the unlimited sentinel.
+    setMaxReverseShareFiles(REVERSE_SHARE_UNLIMITED)
     setDefaultTimestampDisplay(data.defaultTimestampDisplay || 'TIMECODE')
     setAutoApproveProject(data.autoApproveProject ?? true)
     setDefaultUsePreviewForApprovedPlayback(data.defaultUsePreviewForApprovedPlayback ?? false)
@@ -539,7 +548,11 @@ export default function GlobalSettingsPage() {
         defaultApplyPreviewLut,
         maxUploadSizeGB: parseInt(maxUploadSizeGB, 10) || 1000,
         maxCommentAttachments: parseInt(maxCommentAttachments, 10) || 10,
-        maxReverseShareFiles: parseInt(maxReverseShareFiles, 10) || 10,
+        // 1.5.8: always send the unlimited sentinel regardless of
+        // local state — guards against any code path that might
+        // have flipped state via legacy props before this file was
+        // refactored.
+        maxReverseShareFiles: parseInt(REVERSE_SHARE_UNLIMITED, 10),
         defaultTimestampDisplay: defaultTimestampDisplay || 'TIMECODE',
         autoApproveProject: autoApproveProject,
         defaultUsePreviewForApprovedPlayback: defaultUsePreviewForApprovedPlayback,
@@ -662,12 +675,17 @@ export default function GlobalSettingsPage() {
   }
 
   const settingSections = [
+    // 1.5.8: dropped "Project Defaults" from the sidebar. The
+    // `<ProjectDefaultsSection>` JSX renders below are gated by
+    // either the `showProjectDefaults` collapsible (mobile) or the
+    // `activeSection === 'project-defaults'` check (desktop), both
+    // unreachable now — left in place for an easy restore by adding
+    // this entry back here.
     { id: 'appearance', label: t('appearance.title'), icon: Palette },
     { id: 'branding', label: t('branding.title'), icon: Building2 },
     { id: 'privacy', label: t('privacy.title'), icon: ShieldCheck },
     { id: 'notifications', label: t('notifications.title'), icon: Mail },
     { id: 'video-processing', label: t('videoProcessing.title'), icon: Video },
-    { id: 'project-defaults', label: t('projectDefaults.title'), icon: FolderCog },
     { id: 'security', label: t('security.title'), icon: Shield },
     { id: 'blocklist', label: t('blocklist.title'), icon: Ban },
   ]
@@ -764,17 +782,11 @@ export default function GlobalSettingsPage() {
               </p>
             </div>
 
-            <Button
-              onClick={handleSave}
-              variant="default"
-              disabled={saving}
-              size="sm"
-              className="shrink-0 sm:h-10 sm:px-4"
-              aria-label={saving ? tc('saving') : tc('saveChanges')}
-            >
-              <Save className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
-            </Button>
+            {/* 1.5.8: top Save Changes button removed from Global
+                Settings — the same button at the bottom of the page
+                is the only one shown now, matching the Project
+                Settings clean-up. Paste the Button block back here
+                to restore. */}
           </div>
         </div>
 
@@ -797,7 +809,10 @@ export default function GlobalSettingsPage() {
           <PrivacySection {...privacyProps} show={showPrivacy} setShow={setShowPrivacy} />
           <NotificationsSection {...notificationsProps} show={showNotifications} setShow={setShowNotifications} />
           <VideoProcessingSettingsSection {...videoProcessingProps} show={showVideoProcessing} setShow={setShowVideoProcessing} />
-          <ProjectDefaultsSection {...projectDefaultsProps} show={showProjectDefaults} setShow={setShowProjectDefaults} />
+          {/* 1.5.8: <ProjectDefaultsSection> removed from the mobile
+              collapsible stack alongside the sidebar entry. Props +
+              state stay defined so a future re-enable just needs
+              to add the JSX back. */}
           <SecuritySettingsSection
             {...securityProps}
             showSecuritySettings={showSecuritySettings}
@@ -844,9 +859,11 @@ export default function GlobalSettingsPage() {
             {activeSection === 'video-processing' && (
               <VideoProcessingSettingsSection {...videoProcessingProps} show={true} setShow={() => {}} collapsible={false} />
             )}
-            {activeSection === 'project-defaults' && (
-              <ProjectDefaultsSection {...projectDefaultsProps} show={true} setShow={() => {}} collapsible={false} />
-            )}
+            {/* 1.5.8: Project Defaults pane removed from the
+                desktop right panel as well. activeSection can never
+                be 'project-defaults' anymore (it's gone from the
+                sidebar) so this block was unreachable — dropped it
+                to keep the file shorter. */}
             {activeSection === 'security' && (
               <SecuritySettingsSection {...securityProps} showSecuritySettings={true} setShowSecuritySettings={() => {}} collapsible={false} />
             )}

@@ -14,6 +14,7 @@ import { safeParseBody } from '@/lib/validation'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { logError } from '@/lib/logging'
+import { lockoutDurationMs, nextConsecutiveLockouts, LOCKOUT_DECAY_MS, type LockoutEntry } from '@/lib/auth-lockout'
 
 export const runtime = 'nodejs'
 
@@ -21,7 +22,10 @@ export const runtime = 'nodejs'
 
 
 // Rate limit configuration
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000 // 15 minutes
+// 1.5.8: progressive backoff (15 min / 1h / 4h) via the shared
+// auth-lockout helper. Attempt counter rolls over the same 24h
+// decay window so consecutive-lockout history is preserved.
+const ATTEMPT_WINDOW_MS = LOCKOUT_DECAY_MS
 
 function getIdentifier(request: NextRequest, token: string, email: string): string{
   const ip = getClientIpAddress(request)
@@ -167,32 +171,45 @@ export async function POST(
 
     if (!result.success) {
       // FAILED attempt - increment rate limit counter
+      // 1.5.8: progressive backoff — see project share /verify for
+      // the canonical version of this block.
       const now = Date.now()
       const existingData = await redisClient.get(rateLimitKey)
+      const prev: LockoutEntry | null = existingData ? JSON.parse(existingData) : null
 
       let count = 1
       let firstAttempt = now
+      let consecutiveLockouts = prev?.consecutiveLockouts ?? 0
+      let lastLockoutAt = prev?.lastLockoutAt
 
-      if (existingData) {
-        const parsed = JSON.parse(existingData)
-        // Reset if window expired
-        if (now - parsed.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+      if (prev && now - prev.firstAttempt <= ATTEMPT_WINDOW_MS) {
+        const lockoutHasExpired = prev.lockoutUntil && now >= prev.lockoutUntil
+        if (lockoutHasExpired) {
           count = 1
           firstAttempt = now
         } else {
-          count = parsed.count + 1
-          firstAttempt = parsed.firstAttempt
+          count = (prev.count || 0) + 1
+          firstAttempt = prev.firstAttempt
         }
       }
 
-      const rateLimitEntry = {
+      let lockoutUntil: number | undefined
+      if (count >= MAX_FAILED_ATTEMPTS) {
+        consecutiveLockouts = nextConsecutiveLockouts(prev, now)
+        lockoutUntil = now + lockoutDurationMs(consecutiveLockouts)
+        lastLockoutAt = now
+      }
+
+      const rateLimitEntry: LockoutEntry = {
         count,
         firstAttempt,
         lastAttempt: now,
-        lockoutUntil: count >= MAX_FAILED_ATTEMPTS ? now + RATE_LIMIT_WINDOW_MS : undefined
+        lockoutUntil,
+        consecutiveLockouts,
+        lastLockoutAt,
       }
 
-      const ttlSeconds = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+      const ttlSeconds = Math.ceil(ATTEMPT_WINDOW_MS / 1000)
       await redisClient.setex(rateLimitKey, ttlSeconds, JSON.stringify(rateLimitEntry))
 
       // Log security event for failed OTP verification

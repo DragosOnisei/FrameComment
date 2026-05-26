@@ -267,21 +267,13 @@ export function SecuritySettingsSection({
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="maxReverseShareFiles">{t('security.maxReverseShareFiles')}</Label>
-                <Input
-                  id="maxReverseShareFiles"
-                  type="number"
-                  min={1}
-                  max={500}
-                  value={maxReverseShareFiles}
-                  onChange={(e) => setMaxReverseShareFiles(e.target.value)}
-                  placeholder="10"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {t('security.maxReverseShareFilesHint')}
-                </p>
-              </div>
+              {/* 1.5.8: Max File Submissions per Session card hidden
+                  and the value is now pinned to "unlimited" — the
+                  operator wanted reverse-share to be open-ended so
+                  clients can keep submitting without hitting a cap.
+                  See the matching saveSettings override in
+                  admin/settings/page.tsx where this gets clamped on
+                  every save. */}
             </div>
           </div>
 

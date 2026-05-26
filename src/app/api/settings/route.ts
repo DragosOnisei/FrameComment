@@ -341,9 +341,14 @@ export async function PATCH(request: NextRequest) {
 
     if (maxReverseShareFiles !== undefined && maxReverseShareFiles !== null) {
       const parsed = Number(maxReverseShareFiles)
-      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 500) {
+      // 1.5.8: ceiling lifted from 500 → 1,000,000 so the new
+      // "unlimited" default (99999) sails through validation. No
+      // realistic client is going to submit a million files, so the
+      // upper bound stays in place as a sanity guard rather than a
+      // user-visible cap.
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1_000_000) {
         return NextResponse.json(
-          { error: settingsMessages.maxReverseShareFilesMustBeIntegerBetween1And500 || 'Max reverse share files must be an integer between 1 and 500.' },
+          { error: settingsMessages.maxReverseShareFilesMustBeIntegerBetween1And500 || 'Max reverse share files must be an integer between 1 and 1,000,000.' },
           { status: 400 }
         )
       }
@@ -504,7 +509,11 @@ export async function PATCH(request: NextRequest) {
         defaultWatermarkText,
         maxUploadSizeGB: maxUploadSizeGB !== undefined && maxUploadSizeGB !== null ? Number(maxUploadSizeGB) : 1000,
         maxCommentAttachments: maxCommentAttachments !== undefined && maxCommentAttachments !== null ? Number(maxCommentAttachments) : 10,
-        maxReverseShareFiles: maxReverseShareFiles !== undefined && maxReverseShareFiles !== null ? Number(maxReverseShareFiles) : 10,
+        // 1.5.8: bootstrap default for new installs is the
+        // "unlimited" sentinel (99999) — operator never wants this
+        // capped from the admin UI. Stays well under the 1M cap
+        // we keep as a sanity guard in PATCH validation above.
+        maxReverseShareFiles: maxReverseShareFiles !== undefined && maxReverseShareFiles !== null ? Number(maxReverseShareFiles) : 99999,
         defaultTimestampDisplay: defaultTimestampDisplay || 'TIMECODE',
         autoApproveProject,
         adminNotificationSchedule: adminNotificationSchedule || 'IMMEDIATE',

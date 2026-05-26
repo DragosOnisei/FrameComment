@@ -64,7 +64,12 @@ export function AppearanceSection({
       contentClassName="space-y-4 border-t pt-4"
       collapsible={collapsible}
     >
-      {/* Language */}
+      {/* 1.5.8: Application Language card hidden — only English is
+          shipped right now, so the dropdown was just visual noise.
+          `language` state + the GET/PATCH plumbing stay intact so a
+          future locale add can drop the wrapper to re-expose this
+          card without rewiring. */}
+      {false && (
       <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
         <Label className="flex items-center gap-2">
           <Globe className="w-4 h-4" />
@@ -86,6 +91,7 @@ export function AppearanceSection({
           {t('language.hint')}
         </p>
       </div>
+      )}
 
       {/* Theme Selection */}
       <div className="space-y-3 border p-4 rounded-lg bg-muted/30">

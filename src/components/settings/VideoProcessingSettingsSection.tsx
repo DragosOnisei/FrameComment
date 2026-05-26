@@ -76,6 +76,12 @@ export function VideoProcessingSettingsSection({
       contentClassName="space-y-4 border-t pt-4"
       collapsible={collapsible}
     >
+      {/* 1.5.8: Skip Transcoding global default hidden — same
+          reasoning as the per-project version: it's a one-way
+          deployment choice, not something operators flip from
+          settings. State + DB column kept; remove `{false && ` to
+          surface it again. */}
+      {false && (
       <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
@@ -94,10 +100,13 @@ export function VideoProcessingSettingsSection({
           <p className="text-xs text-warning">{t('videoProcessing.skipTranscodingWarning')}</p>
         )}
       </div>
+      )}
 
       {!defaultSkipTranscoding && (
       <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-        <Label>{t('videoProcessing.previewResolution')}</Label>
+        {/* 1.5.8: relabelled "Preview Resolution" → "Default Preview
+            Resolution" to match the Project Settings copy. */}
+        <Label>Default Preview Resolution</Label>
         <Select value={defaultPreviewResolution} onValueChange={setDefaultPreviewResolution}>
           <SelectTrigger>
             <SelectValue />
@@ -114,7 +123,9 @@ export function VideoProcessingSettingsSection({
       </div>
       )}
 
-      {!defaultSkipTranscoding && (
+      {/* 1.5.8: Apply Preview LUT global default hidden. State + DB
+          column kept; remove `{false && ` to expose. */}
+      {false && !defaultSkipTranscoding && (
       <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
@@ -126,7 +137,11 @@ export function VideoProcessingSettingsSection({
       </div>
       )}
 
-      {!defaultSkipTranscoding && (
+      {/* 1.5.8: Watermark defaults card hidden — enable toggle plus
+          its custom text, positions, font size, and opacity sub-
+          controls. All state + DB columns preserved; remove `{false &&`
+          to surface again. */}
+      {false && !defaultSkipTranscoding && (
       <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">

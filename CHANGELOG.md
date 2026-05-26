@@ -17,6 +17,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.8] - 2026-05-26
+
+Settings declutter across the whole app, plus a few user-visible
+upgrades (per-project cover image edit, folder share-link
+management, progressive-backoff lockout). Everything hidden in
+the UI stays wired through the data layer, so existing values
+keep being honored — the goal is "fewer knobs, same behavior."
+
+### Added
+
+- **Edit cover image from Project Settings.** New Cover Image
+  card under Project Details lets admins replace or remove the
+  dashboard tile image without going back through the New
+  Project modal. Preview uses `<ProjectCoverImage>` (bearer
+  auth + blob URL) so it stays visible on the admin-only GET
+  endpoint. `POST` and `DELETE` were added to
+  `/api/projects/[id]/cover`.
+- **Folder share-link management panel.** New "Folder share
+  links" card under the Security tab lists every shareable
+  folder in the project with its current share URL, auth-mode
+  badge, and humanised expiry countdown. Inline controls per
+  folder: switch Unlimited ↔ Limited (date picker), or Delete
+  link. Backed by a new `GET /api/projects/[id]/shared-folders`
+  endpoint and a new `POST /api/folders/[id]/rotate-share-link`
+  endpoint that rotates the slug and stamps `shareExpiresAt` to
+  epoch 0 as the "revoked" sentinel.
+- **Progressive-backoff lockout** on every share / folder / OTP
+  verify endpoint. Replaces the flat 15-min window with a tier
+  ladder: 1st lockout 15 min, 2nd consecutive 1 hour, 3rd+ 4
+  hours. Consecutive counter decays after 24h of quiet so a
+  forgotten-password incident next month doesn't carry forward.
+  All three verify routes share `@/lib/auth-lockout.ts` and the
+  existing security-event logging + admin notifications stay
+  intact.
+
+### Changed
+
+- **Project Settings sidebar trimmed** to Project Details,
+  Video Processing, and Security. "Client Information &
+  Notifications" and "Client Share Page" tabs hidden from both
+  the desktop sidebar and the mobile collapsible stack. State
+  and `clientInfoContent` / `clientShareContent` blocks stay
+  defined so existing per-project values continue to apply.
+- **Project Details declutter.** Hid the Custom Link toggle +
+  Share Link card, Enable Revision Tracking section, and the
+  Due Date section. Slug, revision tracking, and due-date logic
+  still run server-side for projects that already have them
+  configured.
+- **Video Processing simplified** to a single field renamed
+  *Default Preview Resolution*. Skip Transcoding, Enable
+  Watermarks (with all sub-controls), and Apply Preview LUT
+  cards hidden both at project level and at Global Settings.
+- **Security tab focused** on Folder share links. Authentication
+  Method and Guest Mode cards hidden — DB values still apply,
+  admins just don't toggle them from here anymore.
+- **Global Settings sidebar trimmed.** Dropped the "Project
+  Defaults" tab entirely and hid the Application Language card
+  (only English ships right now).
+- **Single Save button per page.** Removed the top-right Save
+  Changes button from both Project Settings and Global
+  Settings; the bottom-right button is the only one rendered.
+  Same for the duplicate "Settings saved successfully!" banner
+  on Project Settings — only the top one remains.
+- **Upload Security: Max File Submissions per Session is now
+  effectively unlimited.** Card hidden, state pinned to a
+  99999 sentinel on every load + save, server validation
+  ceiling lifted from 500 to 1,000,000 (sanity guard).
+  Migration backfills any row still on the legacy default of
+  10. Operator-side rationale: clients should never hit a cap
+  on reverse-share submissions.
+- **Native date inputs render legibly on dark theme.** Calendar
+  picker indicator now uses `filter: invert(1)` with
+  hover-opacity treatment, so the dark SVG that Chrome / Edge
+  ship by default doesn't disappear into `bg-background` cards
+  on the Folder share links panel.
+
+### Fixed
+
+- **"Delete link" now uses the themed Radix Dialog** instead of
+  the browser-native `window.confirm()` blob, matching the rest
+  of the app's destructive-action UX. Revoked rows drop out of
+  the list immediately and stay out across reloads (epoch-0
+  sentinel filter on the server).
+
+### Operator notes
+
+The hidden controls all carry a `1.5.8:` comment in source. To
+restore any of them, search for the comment and remove the
+`{false && (...)}` wrapper (or the entry that was dropped from
+the sidebar `settingSections`).
+
+The reverse-share unlimit ships with a one-time migration that
+sets `maxReverseShareFiles = 99999` on existing rows that still
+carry the legacy `10`. Custom values raised manually above 10
+are preserved.
+
 ## [1.5.7] - 2026-05-26
 
 Small UX polish on top of the 1.5.5 / 1.5.6 upload investigation.

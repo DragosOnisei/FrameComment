@@ -239,6 +239,21 @@
     text-align: left;
   }
 
+  /* 1.5.8: tint the native calendar picker icon so it stays
+     legible against the dark theme. The black SVG that Chrome /
+     Edge ship by default disappears on `bg-background` cards,
+     which made the date input on the Security tab's folder-share
+     panel look bugged. `invert(1)` flips it to white in dark
+     mode; under light mode we leave it alone. */
+  .dark input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.7;
+    cursor: pointer;
+  }
+  .dark input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+
   /* Driver.js tutorial overlay theming — uses theme CSS variables for accent/dark mode support */
   div.driver-popover {
     background-color: hsl(var(--card));
