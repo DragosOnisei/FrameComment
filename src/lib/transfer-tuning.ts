@@ -63,9 +63,25 @@ export function getTusChunkSizeBytes(fileSize: number): number {
     return Math.max(fileSize, MB)
   }
 
-  // Desktop: scale with file size, capped at 25 MiB to stay well under
-  // Cloudflare's 100 MiB limit.
-  if (fileSize >= 100 * MB) return 25 * MB
+  // Desktop (1.5.x+): we used to send 25 MiB chunks here, which meant a
+  // 3 GB upload became ~123 sequential PATCH requests. On HDD-backed
+  // self-hosted deploys (no SSD ZIL/SLOG) the per-chunk overhead
+  // dominated: lock acquire, `.json` read, fs.stat, createWriteStream
+  // teardown — they're cheap individually but compound badly with the
+  // disk's IOPS budget already split between postgres / redis / the
+  // upload itself. tus-js-client's own docs recommend NOT capping
+  // chunkSize when the server has no body-size limit: a single PATCH
+  // streams the file through Node without re-doing per-chunk work, and
+  // the request body uses bounded backpressure so memory stays flat.
+  //
+  // We keep a healthy 256 MiB ceiling instead of Infinity so:
+  //   - a 3 GB upload still resumes from ~the last 250 MiB instead of
+  //     starting over from byte 0 on a network blip;
+  //   - the server never has to budget for an unbounded single request.
+  //
+  // The desktop fallback for smaller files stays at 10 MiB — same
+  // reasoning, the per-chunk overhead just doesn't matter there.
+  if (fileSize >= 100 * MB) return Math.min(fileSize, 256 * MB)
   return 10 * MB
 }
 

@@ -17,6 +17,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.5.5] - 2026-05-26
+
+Third attempt at fixing multi-GB upload speed on self-hosted HDD
+deploys. 1.5.2 moved the staging dir off `/tmp`. 1.5.4 changed the
+finalize step from copy to rename. This release attacks the
+remaining bottleneck: the number of PATCH requests.
+
+### Changed
+
+- **Desktop chunk size raised 25 MiB → 256 MiB for big uploads.**
+  A 3 GB video used to upload as ~123 sequential PATCH requests at
+  25 MiB each. Per-chunk overhead (lock acquire, `.json` read, fs.stat,
+  WriteStream creation/teardown) is cheap individually but compounds
+  badly on HDD-backed deploys where IOPS are already split between
+  postgres / redis / the upload itself. tus-js-client's own docs
+  recommend NOT capping chunkSize when the server has no body-size
+  limit — a single PATCH streams the file through with bounded
+  backpressure, no per-chunk work to repeat. We keep a 256 MiB
+  ceiling (not Infinity) so a 3 GB upload still resumes from
+  approximately the last 250 MiB on a network blip instead of from
+  byte 0. Mobile chunk strategy is unchanged.
+
+### Upgrade notes
+
+No DB migration, no env changes. Pure client + server transport
+behaviour. Redeploy and the next desktop upload picks it up.
+
+### Suggested ZFS dataset tweaks (operator-side)
+
+If you're on TrueNAS SCALE with HDD-backed datasets and still see
+upload throttling after this release, the dataset's `sync` setting
+is worth checking. By default ZFS issues sync writes for any file
+that requests durability; without an SSD ZIL/SLOG those serialize
+on the HDD platter rotation:
+
+```bash
+# View current setting on your uploads dataset
+zfs get sync apps/ix-applications/framecomment/uploads
+
+# Lift it to async (writes return as soon as they're in ARC; the
+# downside is the last ~5 s of writes are lost if the box loses
+# power. For video uploads this is usually a fine trade — the user
+# just re-uploads.)
+zfs set sync=disabled apps/ix-applications/framecomment/uploads
+```
+
+Replace the dataset path with whatever your TrueNAS instance
+actually maps `/app/uploads` to. This is an operator decision, not
+something the app changes for you.
+
 ## [1.5.4] - 2026-05-26
 
 Follow-up to the 1.5.2 upload-staging fix. On HDD-backed TrueNAS
