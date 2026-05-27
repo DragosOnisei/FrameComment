@@ -384,8 +384,13 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
       // Best-effort: delete the DB record. Fire-and-forget — if it
       // fails (network blip, race with worker), the cleanup job will
       // catch it within 24 h via the UPLOADING-too-long sweep.
+      //
+      // 1.5.8: `?permanent=1` skips the Trash bucket. A canceled
+      // upload never produced anything the user wants to recover,
+      // so soft-deleting it would just clutter the Trash with
+      // half-finished rows the cleanup job has to sweep anyway.
       if (itemSnapshot.videoId) {
-        apiDelete(`/api/videos/${itemSnapshot.videoId}`).catch(() => {
+        apiDelete(`/api/videos/${itemSnapshot.videoId}?permanent=1`).catch(() => {
           /* silent — cleanup job will pick it up later */
         })
       }
@@ -522,7 +527,10 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
             },
             onError: async (err) => {
               if (createdVideoRecord) {
-                try { await apiDelete(`/api/videos/${videoId}`) } catch {}
+                // 1.5.8: permanent=1 — failed S3 multipart upload never
+                // produced a watchable video, no reason to push it into
+                // Trash and leak the orphan to the cleanup sweep.
+                try { await apiDelete(`/api/videos/${videoId}?permanent=1`) } catch {}
                 clearUploadMetadata(file)
               }
               s3UploadKeys.current.delete(id)
@@ -612,8 +620,10 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
             clearTUSFingerprint(file)
             errorMessage = t('uploadExpired')
           } else if (createdVideoRecord && videoId) {
+            // 1.5.8: permanent=1 — TUS upload errored out before
+            // finalize so there's nothing watchable to "trash".
             try {
-              await apiDelete(`/api/videos/${videoId}`)
+              await apiDelete(`/api/videos/${videoId}?permanent=1`)
             } catch {}
             clearUploadMetadata(file)
             clearTUSFingerprint(file)

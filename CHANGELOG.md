@@ -100,6 +100,12 @@ keep being honored — the goal is "fewer knobs, same behavior."
   of the app's destructive-action UX. Revoked rows drop out of
   the list immediately and stay out across reloads (epoch-0
   sentinel filter on the server).
+- **Canceled / failed uploads bypass Trash.** Hitting Remove on
+  a row in the Upload Videos modal, or a TUS / S3 error that
+  unwinds an in-flight upload, now calls
+  `DELETE /api/videos/[id]?permanent=1` instead of soft-delete.
+  Half-finished uploads never produced anything the user would
+  want to recover, so the Trash bin stays clean.
 
 ### Operator notes
 
