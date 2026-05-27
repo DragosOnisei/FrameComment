@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.7.5] - 2026-05-27
+
+Cumulative re-release on top of 1.7.4. 1.7.4 never made it to
+Docker Hub (the tag was prepared locally but not pushed), so
+1.7.5 ships every change accumulated since 1.7.3 as a single
+clean build:
+
+### Fixed
+- TrueNAS catalog `ix_values.yaml` pins `images.app.tag` to the
+  release version (`1.7.5`) so upgrading via the TrueNAS UI
+  actually pulls the matching container instead of falling back
+  to the legacy `1.2.0` default that lived on every prior
+  version directory.
+
 ## [1.7.4] - 2026-05-27
 
 ### Fixed
