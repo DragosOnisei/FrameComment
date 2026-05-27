@@ -17,13 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
-## [1.5.8] - 2026-05-26
+## [1.5.9] - 2026-05-26
 
 Settings declutter across the whole app, plus a few user-visible
 upgrades (per-project cover image edit, folder share-link
 management, progressive-backoff lockout). Everything hidden in
 the UI stays wired through the data layer, so existing values
 keep being honored — the goal is "fewer knobs, same behavior."
+Re-released as 1.5.9 because 1.5.8 was already tagged on the
+remote without these changes.
 
 ### Added
 
