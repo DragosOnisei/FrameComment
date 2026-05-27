@@ -106,8 +106,14 @@ export interface FolderBrowserProps {
    *  populated; the parent is responsible for re-creating the folder
    *  hierarchy and routing each video into the right sub-folder
    *  (1.0.6+). When omitted, folder drops fall back to a flat upload
-   *  into the current folder. */
-  onUploadFolderTree?: (entries: FileTreeEntry[]) => void
+   *  into the current folder. 1.7.1+: receives an optional
+   *  `extras.directoryPaths` listing every directory the walker saw,
+   *  including empty ones, so the parent can mint matching folders
+   *  even when no media file is inside. */
+  onUploadFolderTree?: (
+    entries: FileTreeEntry[],
+    extras?: { directoryPaths?: string[] },
+  ) => void
   /** Hide the inline Download-All / New-Folder buttons that sit next
    *  to the breadcrumb (1.0.9+). Use this when the parent page wants
    *  to render those actions in its own top bar and drive them
@@ -2105,8 +2111,16 @@ function FolderBrowserInner(
             const videoEntries = walked.entries.filter((entry) =>
               isAcceptedVideoFile(entry.file),
             )
-            if (videoEntries.length === 0) return
-            onUploadFolderTree?.(videoEntries)
+            // 1.7.1+: forward to the tree-upload handler even when
+            // there are zero media files — the parent still mints
+            // the matching FrameComment folders from
+            // `extras.directoryPaths` so empty drop folders survive.
+            if (videoEntries.length === 0 && walked.directoryPaths.length === 0) {
+              return
+            }
+            onUploadFolderTree?.(videoEntries, {
+              directoryPaths: walked.directoryPaths,
+            })
             return
           }
           // No directory was dropped — fall back to the flat-files

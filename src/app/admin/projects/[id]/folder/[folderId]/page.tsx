@@ -132,10 +132,21 @@ export default function ProjectFolderPage() {
   // Hidden files and non-video files were already filtered out by the
   // FolderBrowser walker.
   const handleUploadFolderTree = useCallback(
-    async (entries: FileTreeEntry[]) => {
-      if (entries.length === 0) return
+    async (
+      entries: FileTreeEntry[],
+      extras?: { directoryPaths?: string[] },
+    ) => {
+      // 1.7.1+: empty drop folders still mint a matching folder
+      // in FrameComment via `extras.directoryPaths`. Skip only
+      // when the whole drop produced no files AND no folders.
+      if (
+        entries.length === 0 &&
+        (extras?.directoryPaths?.length ?? 0) === 0
+      ) {
+        return
+      }
       try {
-        const paths = uniqueDirectoryPaths(entries)
+        const paths = uniqueDirectoryPaths(entries, extras?.directoryPaths)
         const pathToFolderId = await createFolderHierarchy(
           projectId,
           folderId,
@@ -149,6 +160,12 @@ export default function ProjectFolderPage() {
             : pathToFolderId.get(dir) || folderId
           return { file: entry.file, folderId: targetFolderId }
         })
+        if (seeded.length === 0) {
+          // Nothing to upload — just refresh so the new empty
+          // folders appear in the grid.
+          fetchFolder({ silent: true })
+          return
+        }
         videoManagerRef.current?.triggerUploadWithFolderTree(seeded)
         // Refresh in the background so the new folders show up in the
         // grid as soon as the upload begins.

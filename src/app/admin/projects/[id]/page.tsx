@@ -105,10 +105,22 @@ export default function ProjectPage() {
   // at the project root, then hand the upload modal a list of
   // `(file, folderId)` pairs so each video lands in the right place.
   const handleUploadFolderTree = useCallback(
-    async (entries: FileTreeEntry[]) => {
-      if (entries.length === 0 || !project?.id) return
+    async (
+      entries: FileTreeEntry[],
+      extras?: { directoryPaths?: string[] },
+    ) => {
+      // 1.7.1+: also accept extras.directoryPaths so empty drop
+      // folders still mint a matching FrameComment folder. Bail
+      // only when BOTH the file list and the directory list are
+      // empty.
+      if (
+        (entries.length === 0 && (extras?.directoryPaths?.length ?? 0) === 0) ||
+        !project?.id
+      ) {
+        return
+      }
       try {
-        const paths = uniqueDirectoryPaths(entries)
+        const paths = uniqueDirectoryPaths(entries, extras?.directoryPaths)
         const pathToFolderId = await createFolderHierarchy(
           project.id,
           null,

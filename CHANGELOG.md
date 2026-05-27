@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.7.2] - 2026-05-27
+
+### Fixed
+- **Empty folders survive drag-and-drop uploads.** The folder
+  walker now records every directory it visits (not just the
+  ones derived from file paths), and the project + folder upload
+  handlers route those into `createFolderHierarchy`. Dropping a
+  folder with no media inside now creates the matching
+  FrameComment folder instead of silently dropping it.
+
 ## [1.7.1] - 2026-05-27
 
 ### Fixed

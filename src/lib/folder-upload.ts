@@ -63,6 +63,7 @@ async function walkEntry(
   entry: FileSystemEntry,
   parentPath: string,
   output: FileTreeEntry[],
+  directoryPaths: Set<string>,
 ): Promise<void> {
   if (entry.isFile) {
     const fileEntry = entry as FileSystemFileEntry
@@ -82,6 +83,13 @@ async function walkEntry(
   }
   if (entry.isDirectory) {
     const dirEntry = entry as FileSystemDirectoryEntry
+    // 1.7.1+: record EVERY directory we discover, even empty ones,
+    // so the caller can mint the corresponding FrameComment folder
+    // before the file walk would otherwise filter it out. Previously
+    // an empty drop folder vanished entirely from the upload because
+    // `uniqueDirectoryPaths` only sees paths derived from files.
+    const dirPath = parentPath ? `${parentPath}/${entry.name}` : entry.name
+    directoryPaths.add(dirPath)
     const reader = dirEntry.createReader()
     // readEntries() may return results in batches; loop until empty.
     let done = false
@@ -96,9 +104,8 @@ async function walkEntry(
         done = true
         break
       }
-      const nextPath = parentPath ? `${parentPath}/${entry.name}` : entry.name
       for (const child of batch) {
-        await walkEntry(child, nextPath, output)
+        await walkEntry(child, dirPath, output, directoryPaths)
       }
     }
   }
@@ -140,14 +147,27 @@ export function snapshotDataTransferEntries(
  */
 export async function walkSnapshotEntries(
   rootEntries: FileSystemEntry[],
-): Promise<{ entries: FileTreeEntry[]; hadDirectory: boolean }> {
+): Promise<{
+  entries: FileTreeEntry[]
+  hadDirectory: boolean
+  /** 1.7.1+: every directory we visited during the walk, even ones
+   *  that ended up empty. Callers merge this into
+   *  `uniqueDirectoryPaths` so empty drop-folders still get a
+   *  matching FrameComment folder created. */
+  directoryPaths: string[]
+}> {
   const entries: FileTreeEntry[] = []
+  const directorySet = new Set<string>()
   let hadDirectory = false
   for (const root of rootEntries) {
     if (root.isDirectory) hadDirectory = true
-    await walkEntry(root, '', entries)
+    await walkEntry(root, '', entries, directorySet)
   }
-  return { entries, hadDirectory }
+  return {
+    entries,
+    hadDirectory,
+    directoryPaths: Array.from(directorySet),
+  }
 }
 
 /**
@@ -173,13 +193,30 @@ export function entriesFromInputFiles(files: File[]): FileTreeEntry[] {
  * shallowest to deepest so callers can create folders top-down (each
  * child can look up its parent's freshly-minted id in a single pass).
  */
-export function uniqueDirectoryPaths(entries: FileTreeEntry[]): string[] {
+export function uniqueDirectoryPaths(
+  entries: FileTreeEntry[],
+  /** 1.7.1+: optional list of directory paths the walker observed
+   *  directly (including empty ones). Merged with the directory
+   *  prefixes derived from file paths so empty drop-folders still
+   *  get a matching FrameComment folder minted. */
+  extraDirectoryPaths: string[] = [],
+): string[] {
   const set = new Set<string>()
   for (const entry of entries) {
     const dir = entry.relativePath.replace(/\/[^/]*$/, '')
     // No slash means file was at the top level — nothing to create.
     if (!dir || dir === entry.relativePath) continue
     // Collect every prefix so deep nests get every intermediate.
+    const parts = dir.split('/')
+    for (let i = 1; i <= parts.length; i++) {
+      set.add(parts.slice(0, i).join('/'))
+    }
+  }
+  // Include every directory the walker observed plus its prefixes,
+  // so an empty nested folder like "A/B/Empty" still creates "A",
+  // "A/B" and "A/B/Empty".
+  for (const dir of extraDirectoryPaths) {
+    if (!dir) continue
     const parts = dir.split('/')
     for (let i = 1; i <= parts.length; i++) {
       set.add(parts.slice(0, i).join('/'))
