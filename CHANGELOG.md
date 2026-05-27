@@ -17,6 +17,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.6.1] - 2026-05-26
+
+Share links now always point at the public domain.
+
+When an admin browses the dashboard over LAN
+(`http://192.168.x.x:port`, via WireGuard for fast uploads),
+copied share links used to be minted from `window.location.origin`
+— which meant the client on the other end got a `192.168.x.x`
+URL they couldn't reach. The fix reads `appDomain` from Admin
+Settings → Branding and uses it for every share / folder / video
+copy action. Falls back to `window.location.origin` only when
+the admin hasn't configured a domain yet.
+
+### Added
+
+- `@/lib/public-share-origin` helper + auto-refresh hook in
+  `AccentColorProvider` so the cached origin survives a page
+  reload and is available synchronously the moment the admin
+  clicks Share.
+- `appDomain` is now exposed on the public `/api/settings/theme`
+  endpoint so it can be cached client-side alongside theme +
+  accent color.
+
+### Changed
+
+- `FolderBrowser` folder-share and video-share copy actions, and
+  `ProjectCardKebab`'s "Copy share link" action, mint URLs via
+  the new helper instead of `window.location.origin`.
+
 ## [1.6.0] - 2026-05-26
 
 Folder size display. Each folder card on the admin dashboard

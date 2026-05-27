@@ -12,16 +12,27 @@ export async function GET() {
   try {
     const settings = await prisma.settings.findUnique({
       where: { id: 'default' },
-      select: { defaultTheme: true, accentColor: true, brandingLogoPath: true },
+      select: {
+        defaultTheme: true,
+        accentColor: true,
+        brandingLogoPath: true,
+        // 1.6.1+: expose `appDomain` here so the admin UI can mint
+        // share links that point to the public domain even when the
+        // operator is browsing over LAN (192.168…). Cloudflare-Tunnel
+        // setups need this — see `getPublicShareOrigin()` on the
+        // client for the lookup logic.
+        appDomain: true,
+      },
     })
 
     return NextResponse.json({
       defaultTheme: settings?.defaultTheme || 'auto',
       accentColor: settings?.accentColor || 'blue',
       brandingLogoPath: settings?.brandingLogoPath || null,
+      appDomain: settings?.appDomain || null,
     })
   } catch (error) {
     // Default values on error
-    return NextResponse.json({ defaultTheme: 'auto', accentColor: 'blue', brandingLogoPath: null })
+    return NextResponse.json({ defaultTheme: 'auto', accentColor: 'blue', brandingLogoPath: null, appDomain: null })
   }
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback } from 'react'
 import { ACCENT_COLORS, AccentColorKey } from '@/components/settings/AppearanceSection'
+import { setPublicShareOrigin } from '@/lib/public-share-origin'
 
 /**
  * Applies the accent color CSS variables and caches admin theme defaults
@@ -20,6 +21,15 @@ export function AccentColorProvider() {
         // Cache both values for faster loads on subsequent visits
         localStorage.setItem('adminAccentColor', colorKey)
         localStorage.setItem('adminDefaultTheme', defaultTheme)
+
+        // 1.6.1: piggy-back on the same fetch to refresh the cached
+        // public share origin. The theme endpoint is already hit on
+        // every admin page load, so this avoids a second roundtrip.
+        if (typeof data?.appDomain === 'string' && data.appDomain.trim()) {
+          setPublicShareOrigin(data.appDomain)
+        } else {
+          setPublicShareOrigin(null)
+        }
 
         // Apply the accent color
         applyColorVariables(colorKey)

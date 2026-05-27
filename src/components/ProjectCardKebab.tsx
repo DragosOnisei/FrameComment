@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
+import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { computePopoverStyle } from '@/lib/popover-position'
 
@@ -112,9 +113,11 @@ export default function ProjectCardKebab({
     try {
       const res = await apiFetch(`/api/share/url?slug=${projectSlug}`)
       const data = res.ok ? await res.json() : null
+      // 1.6.1: mint against the operator-configured public origin so
+      // a link copied from the LAN points at the public domain.
       const url =
         data?.shareUrl ||
-        `${window.location.origin}/share/${projectSlug}`
+        `${getPublicShareOrigin()}/share/${projectSlug}`
       await navigator.clipboard.writeText(url)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)

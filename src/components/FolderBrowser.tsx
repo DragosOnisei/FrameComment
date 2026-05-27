@@ -27,6 +27,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
+import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import FolderCard from './FolderCard'
 import VideoCard from './VideoCard'
 import NewFolderDialog from './NewFolderDialog'
@@ -552,7 +553,10 @@ function FolderBrowserInner(
     async (folderId: string) => {
       const folder = folders.find((f) => f.id === folderId)
       if (!folder) return
-      const url = `${window.location.origin}/share/folder/${folder.slug}`
+      // 1.6.1: mint against the public origin (admin's appDomain
+      // when configured) so editors on the LAN don't accidentally
+      // copy a 192.168.x.x link out to clients.
+      const url = `${getPublicShareOrigin()}/share/folder/${folder.slug}`
       // 1.4.x+: also read the folder's current shareExpiresAt so the
       // modal can pre-fill its toggle (ON when there's no expiry, OFF
       // with the chosen date when one is set). Best-effort — if the
@@ -1512,7 +1516,9 @@ function FolderBrowserInner(
       } catch {
         /* fall through to unsigned URL */
       }
-      const origin = window.location.origin
+      // 1.6.1: prefer the admin-configured public origin so videos
+      // share to the client domain even when we're browsing LAN.
+      const origin = getPublicShareOrigin()
       const params = new URLSearchParams({ video: videoName })
       if (currentFolderId) params.set('folderId', currentFolderId)
       const url = `${origin}/share/${_projectSlug}?${params.toString()}`
