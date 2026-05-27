@@ -1,18 +1,18 @@
 'use client'
 
 import { useAuth } from '@/components/AuthProvider'
-import { Button } from '@/components/ui/button'
-import { Bug, CircleHelp, Container, ExternalLink, FolderKanban, Github, Heart, LogOut, Search, Settings, Shield, Trash2, User, Users } from 'lucide-react'
+import { FolderKanban, LogOut, Search, Settings, Shield, Trash2, User, Users } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useTranslations } from 'next-intl'
 import GlobalSearchOverlay from '@/components/GlobalSearchOverlay'
 import ViewModeToggle from '@/components/ViewModeToggle'
+import SortModeToggle from '@/components/SortModeToggle'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
+import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 
 export default function AdminHeader() {
   const { user, logout } = useAuth()
@@ -34,10 +34,14 @@ export default function AdminHeader() {
   // pages); on Settings / Users / Trash etc. the toggle would be
   // meaningless so we hide it.
   const [adminView, setAdminView] = useAdminViewMode()
+  const [adminSort, setAdminSort] = useAdminSortMode()
   const showViewToggle =
     !!pathname &&
     (pathname === '/admin/projects' ||
       pathname.startsWith('/admin/projects/'))
+  // Sort only applies to the projects dashboard listing — it's
+  // meaningless inside a single project, so we hide it there.
+  const showSortToggle = pathname === '/admin/projects'
   const t = useTranslations('nav')
   const ta = useTranslations('auth')
 
@@ -125,11 +129,6 @@ export default function AdminHeader() {
   }, [user])
 
   if (!user) return null
-
-  const repoUrl = 'https://github.com/DragosOnisei/FrameComment'
-  const websiteUrl = repoUrl
-  const upstreamUrl = 'https://github.com/MansiVisuals/ViTransfer'
-  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION
 
   const navLinks: Array<{ href: string; label: string; icon: typeof FolderKanban; title?: string }> = [
     { href: '/admin/projects', label: t('projects'), icon: FolderKanban },
@@ -226,9 +225,16 @@ export default function AdminHeader() {
               the user-menu cluster on the right. The wrapper
               always renders so the grid columns stay aligned even
               on pages that don't show the toggle. */}
-          <div className="flex items-center justify-center">
+          <div className="flex items-center justify-center gap-2">
             {showViewToggle && (
               <ViewModeToggle value={adminView} onChange={setAdminView} />
+            )}
+            {/* 1.7.2+: A-Z / Z-A sort toggle, sibling of the view
+                toggle and visually identical (segmented pill).
+                Limited to the dashboard route where ordering
+                actually matters. */}
+            {showSortToggle && (
+              <SortModeToggle value={adminSort} onChange={setAdminSort} />
             )}
           </div>
 
@@ -247,72 +253,10 @@ export default function AdminHeader() {
               <Search className="h-5 w-5 text-foreground" />
             </button>
             <ThemeToggle />
-            <Dialog>
-              <DialogTrigger asChild>
-                <button
-                  className="p-2 rounded-lg border border-border bg-background hover:bg-accent transition-colors shadow-sm"
-                  aria-label={t('aboutFrameComment')}
-                  title={t('about')}
-                >
-                  <CircleHelp className="h-5 w-5 text-foreground" />
-                </button>
-              </DialogTrigger>
-              <DialogContent className="max-w-[95vw] sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <CircleHelp className="w-5 h-5 text-primary" />
-                    {t('aboutFrameComment')}
-                  </DialogTitle>
-                </DialogHeader>
-
-                <div className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    {t('aboutDescription')}
-                  </p>
-
-                  {appVersion && (
-                    <div className="p-3 bg-muted rounded-md">
-                      <p className="text-sm font-medium">Version {appVersion}</p>
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Button asChild variant="outline" className="w-full justify-start">
-                      <a href={websiteUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        {t('website')}
-                      </a>
-                    </Button>
-                    <Button asChild variant="outline" className="w-full justify-start">
-                      <a href={repoUrl} target="_blank" rel="noopener noreferrer">
-                        <Github className="w-4 h-4 mr-2" />
-                        {t('githubRepo')}
-                      </a>
-                    </Button>
-                    <Button asChild variant="outline" className="w-full justify-start">
-                      <a href={`${repoUrl}/issues`} target="_blank" rel="noopener noreferrer">
-                        <Bug className="w-4 h-4 mr-2" />
-                        {t('reportIssue')}
-                      </a>
-                    </Button>
-                    <Button asChild variant="outline" className="w-full justify-start">
-                      <a href="https://hub.docker.com/r/dragosonisei/framecomment" target="_blank" rel="noopener noreferrer">
-                        <Container className="w-4 h-4 mr-2" />
-                        {t('dockerHub')}
-                      </a>
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-4 leading-relaxed">
-                    <Heart className="w-3 h-3 inline mr-1 align-text-top" />
-                    Based on{' '}
-                    <a href={upstreamUrl} target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
-                      ViTransfer
-                    </a>{' '}
-                    by MansiVisuals, licensed under AGPL-3.0.
-                  </p>
-                </div>
-              </DialogContent>
-            </Dialog>
+            {/* 1.7.3+: Help/About dialog removed from the header
+                to keep the right cluster tight (Search · Theme ·
+                User). The About info still lives on the public
+                README + repo page. */}
             <div ref={userMenuRef} className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}

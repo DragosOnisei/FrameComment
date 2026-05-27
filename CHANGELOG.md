@@ -17,6 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.7.3] - 2026-05-27
+
+### Changed
+- **A-Z / Z-A sort toggle moved to AdminHeader.** Lives in the
+  centered cluster next to the Grid / Table view toggle so both
+  layout controls sit together and stay one click away from any
+  admin page. Restyled as a segmented pill so it mirrors the
+  view toggle visually. New `useAdminSortMode` hook keeps the
+  preference per-admin in `admin_sort_mode:<userId>` with cross-
+  component + cross-tab broadcast (same pattern as
+  `useAdminViewMode`). Only visible on the projects dashboard
+  route where sorting actually applies.
+- **AdminHeader trimmed.** The Help / About dialog is removed
+  from the right cluster — the same info still lives on the
+  public README and repo page. Right cluster is now just
+  Search · Theme · User.
+
 ## [1.7.2] - 2026-05-27
 
 ### Fixed

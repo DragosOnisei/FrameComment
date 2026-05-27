@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { Plus, ArrowUpDown, Lock } from 'lucide-react'
 import { type ViewMode } from '@/components/ViewModeToggle'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
+import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import ProjectCardKebab from '@/components/ProjectCardKebab'
 import { formatDate } from '@/lib/utils'
 import { projectGradient, formatBytes, formatRelativeTime } from '@/lib/project-gradient'
@@ -53,16 +54,12 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
   const tc = useTranslations('common')
   const tn = useTranslations('nav')
   const locale = useLocale()
-  const [sortMode, setSortMode] = useState<'status' | 'alphabetical' | 'alphabetical-reverse' | 'dueDate'>(() => {
-    // Load sort mode from localStorage
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('admin_projects_sort_mode')
-      if (stored === 'status' || stored === 'alphabetical' || stored === 'alphabetical-reverse' || stored === 'dueDate') {
-        return stored
-      }
-    }
-    return 'alphabetical'
-  })
+  // 1.7.2+: sort mode now comes from the shared admin sort store
+  // (useAdminSortMode). The toggle UI lives in AdminHeader, next
+  // to the view-mode toggle. We narrow the union to the two
+  // alphabetical variants because the dashboard no longer offers
+  // status / dueDate sorts.
+  const [sortMode] = useAdminSortMode()
   // 1.7.0+: view mode now lives in a single shared store
   // (useAdminViewMode) instead of a component-local state. The
   // canonical setter lives in AdminHeader; this component just
@@ -77,18 +74,8 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
   const _setViewMode = (_: ViewMode) => {}
   void _setViewMode
 
-  // Save sort mode to localStorage
-  useEffect(() => {
-    localStorage.setItem('admin_projects_sort_mode', sortMode)
-  }, [sortMode])
-
-  // If the user previously selected status/dueDate, snap back to A-Z
-  // so the visible button label always matches the actual order.
-  useEffect(() => {
-    if (sortMode !== 'alphabetical' && sortMode !== 'alphabetical-reverse') {
-      setSortMode('alphabetical')
-    }
-  }, [sortMode])
+  // 1.7.2+: persistence + status/dueDate migration moved into
+  // the useAdminSortMode hook. Nothing to do here.
 
   function getDueDateColor(dueDate: string, status: string): string {
     // Completed projects (approved, archived, share-only) should never show overdue styling
@@ -129,28 +116,10 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
 
   return (
     <>
-      {projects.length > 0 && (
-        <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
-          {/* 1.7.0+: Grid / Table toggle relocated to AdminHeader
-              so the same control flips both this dashboard and the
-              folder browser. Only the A-Z sort button remains here. */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              setSortMode(
-                sortMode === 'alphabetical' ? 'alphabetical-reverse' : 'alphabetical',
-              )
-            }
-            title={sortMode === 'alphabetical' ? t('zToA') : t('aToZ')}
-          >
-            <ArrowUpDown className="w-4 h-4" />
-            <span className="hidden sm:inline ml-2">
-              {sortMode === 'alphabetical' ? t('aToZ') : t('zToA')}
-            </span>
-          </Button>
-        </div>
-      )}
+      {/* 1.7.2+: Grid/Table and A-Z toggles both live in
+          AdminHeader's center cluster now — the dashboard body
+          stays clean and the controls are reachable from any
+          admin page. */}
 
       {projects.length === 0 ? (
         <Card>
