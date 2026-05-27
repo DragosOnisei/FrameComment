@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
-import { rateLimit } from '@/lib/rate-limit'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -20,16 +19,10 @@ export async function PATCH(request: NextRequest) {
     return authResult
   }
 
-  // Rate limiting: 60 requests per minute for batch operations
-  const rateLimitResult = await rateLimit(request, {
-    windowMs: 60 * 1000,
-    maxRequests: 60,
-    message: videoMessages.tooManyBatchOperations || 'Too many batch operations. Please slow down.'
-  }, 'admin-batch-ops')
-
-  if (rateLimitResult) {
-    return rateLimitResult
-  }
+  // 1.7.1+: rate limit removed — batch ops are admin-only and the
+  // legitimate use case (bulk-creating folders for a 200-file
+  // upload) blew past 60/min. `requireApiAdmin` above is the only
+  // gate we need here.
 
   try {
     const body = await request.json()

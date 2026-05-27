@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
-import { rateLimit } from '@/lib/rate-limit'
 import {
   isImageExtension,
   isImageMime,
@@ -30,13 +29,13 @@ export async function POST(request: NextRequest) {
   }
   const admin = authResult
 
-  // Rate limiting: Max 50 video uploads per hour
-  const rateLimitResult = await rateLimit(request, {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 50,
-    message: videoMessages.tooManyVideoUploads || 'Too many video uploads. Please try again later.'
-  }, 'upload-video')
-  if (rateLimitResult) return rateLimitResult
+  // 1.7.1+: rate limit removed for admin uploads. Editors routinely
+  // dump 50–200 files into a project in one go (e.g. a full episode
+  // export folder); the old 50/hour cap turned every bulk upload
+  // into "Too many video uploads. Please try again later." after
+  // the first batch. Authentication via `requireApiAdmin` above
+  // already gates the route to logged-in admins, so trust the
+  // caller and don't second-guess the volume.
 
   try {
     const body = await request.json()

@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.7.1] - 2026-05-27
+
+### Fixed
+- **Admin upload rate limits removed.** The 50-uploads-per-hour
+  cap on `POST /api/videos` and the 60-batch-ops-per-minute cap
+  on `POST /api/videos/batch` were breaking legitimate bulk
+  uploads (50–200 files at a time when dropping a whole export
+  folder). Both routes are already gated by `requireApiAdmin`,
+  so editors no longer hit "Too many video uploads. Please try
+  again later." mid-upload.
+
 ## [1.7.0] - 2026-05-27
 
 A big quality-of-life release focused on global navigation,
