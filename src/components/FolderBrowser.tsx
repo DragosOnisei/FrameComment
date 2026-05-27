@@ -137,6 +137,10 @@ interface FolderRow {
     | { kind: 'video'; videoId: string; thumbnailUrl: string }
     | { kind: 'folder'; folderId: string }
   >
+  /** 1.6.0+: recursive byte total (as a stringified BigInt from the
+   *  API). Rendered as "· X GB" in the FolderCard subtitle when
+   *  greater than zero. */
+  totalSize?: string | null
 }
 
 /** A single video row exactly as returned by /api/folders/[id]. */
@@ -397,6 +401,11 @@ function FolderBrowserInner(
                 ? f.itemCount
                 : (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
             previewItems: Array.isArray(f.previewItems) ? f.previewItems : [],
+            // 1.6.0: copy the recursive byte total through so
+            // FolderCard can render "N items · X GB". Stays as the
+            // raw string from the API — FolderCard converts via
+            // `formatBytes()` which accepts string/number/BigInt.
+            totalSize: f.totalSize ?? null,
           })),
         )
         // Root-level videos (1.0.7+) — videos parked at the project
@@ -419,6 +428,9 @@ function FolderBrowserInner(
                 ? f.itemCount
                 : (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
             previewItems: Array.isArray(f.previewItems) ? f.previewItems : [],
+            // 1.6.0: same totalSize pass-through for nested-folder
+            // views as for the project root above.
+            totalSize: f.totalSize ?? null,
           })),
         )
       } else {
@@ -2366,6 +2378,7 @@ function FolderBrowserInner(
               id={f.id}
               name={f.name}
               itemCount={f.itemCount}
+              totalSize={(f as any).totalSize}
               slug={f.slug}
               previewItems={f.previewItems}
               onOpen={handleOpenFolder}

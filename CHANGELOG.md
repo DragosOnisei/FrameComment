@@ -17,6 +17,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.6.0] - 2026-05-26
+
+Folder size display. Each folder card on the admin dashboard
+now shows its recursive byte total next to the item count, the
+same way the project tile does in the project list. A new
+`computeFolderSizesByProject()` helper runs one tree-walk per
+project to back this, exposed through `totalSize` on
+`GET /api/folders` and `GET /api/folders/[id]`. The FolderCard
+gains an optional `totalSize` prop — public client-share folder
+lists pass through with the existing fallback to just "N items".
+
+### Added
+
+- **Folder cards now show storage size.** `FolderCard` renders
+  the subtitle as "N items · X GB" when an admin-visible
+  `totalSize` is supplied. Falls back to plain item count on the
+  public client share page (no admin endpoint there).
+
+### Changed
+
+- `GET /api/folders` and `GET /api/folders/[id]` include a
+  stringified `totalSize` for every folder + subfolder they
+  return. Computed once per request via a new
+  `@/lib/folder-sizes` helper and cached only in memory for that
+  request.
+
 ## [1.5.9] - 2026-05-26
 
 Settings declutter across the whole app, plus a few user-visible

@@ -6,6 +6,7 @@ import { createFolderSchema, safeParseBody } from '@/lib/validation'
 import { generateUniqueFolderSlug } from '@/lib/folder-helpers'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
 import { enrichVideosForAdmin } from '@/lib/folder-video-enrichment'
+import { computeFolderSizesByProject } from '@/lib/folder-sizes'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -161,12 +162,27 @@ export async function GET(request: NextRequest) {
     } catch (err) {
       logError('[GET /api/folders] preview fetch failed:', err)
     }
+    // 1.5.9: compute recursive byte totals per folder so the
+    // FolderCard can render a "N items · X GB" subtitle. One project-
+    // scoped query, walked in memory.
+    let sizesByFolder = new Map<string, bigint>()
+    try {
+      sizesByFolder = await computeFolderSizesByProject(projectId)
+    } catch (err) {
+      logError('[GET /api/folders] folder-size compute failed:', err)
+    }
+
     const enriched = folders.map((f) => ({
       ...f,
       previewItems: previewsByFolder.get(f.id) ?? [],
       itemCount:
         itemCountByFolder.get(f.id) ??
         (f._count?.subfolders ?? 0) + (f._count?.videos ?? 0),
+      // Stringified BigInt so it survives JSON; the client parses it
+      // back to a Number for `formatBytes()`. Sizes fit in
+      // Number.MAX_SAFE_INTEGER for libraries up to ~8 PB so the
+      // precision loss isn't a concern in practice.
+      totalSize: (sizesByFolder.get(f.id) ?? BigInt(0)).toString(),
     }))
 
     // 1.0.7+: when the caller is listing the project root we also

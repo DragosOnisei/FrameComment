@@ -11,6 +11,7 @@ import { encrypt } from '@/lib/encryption'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
+import { computeFolderSizesByProject } from '@/lib/folder-sizes'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -207,12 +208,23 @@ export async function GET(
     } catch (err) {
       logError('[GET /api/folders/[id]] subfolder preview failed:', err)
     }
+    // 1.5.9: recursive byte totals per subfolder, mirrored from
+    // GET /api/folders. Soft-fails to an empty map so a slow query
+    // doesn't block the folder page itself.
+    let folderSizes = new Map<string, bigint>()
+    try {
+      folderSizes = await computeFolderSizesByProject(folder.projectId)
+    } catch (err) {
+      logError('[GET /api/folders/[id]] folder-size compute failed:', err)
+    }
+
     const subfoldersWithPreviews = folder.subfolders.map((s: any) => ({
       ...s,
       previewItems: subfolderPreviews.get(s.id) ?? [],
       itemCount:
         subfolderItemCounts.get(s.id) ??
         (s._count?.subfolders ?? 0) + (s._count?.videos ?? 0),
+      totalSize: (folderSizes.get(s.id) ?? BigInt(0)).toString(),
     }))
 
     const safeFolder = {

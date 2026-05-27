@@ -15,6 +15,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
+import { formatBytes } from '@/lib/project-gradient'
 
 /**
  * Frame.io-style folder card used in the admin folder browser. A
@@ -35,6 +36,14 @@ export interface FolderCardProps {
   id: string
   name: string
   itemCount: number
+  /**
+   * 1.5.9+: recursive byte total for this folder (children + grand-
+   * children). Shown next to the item count as "N items · X GB" to
+   * match the project tile copy in ProjectsList. Optional because
+   * the public share page doesn't have admin-only byte sums and
+   * the cleanest fallback is to just skip the segment.
+   */
+  totalSize?: string | number | null
   /** Slug of the folder share — opens an external preview link */
   slug: string
   /** Up to four mosaic tiles to render in the cover area (1.0.7+).
@@ -121,6 +130,7 @@ export default function FolderCard({
   id,
   name,
   itemCount,
+  totalSize,
   slug,
   previewItems,
   onOpen,
@@ -418,8 +428,16 @@ export default function FolderCard({
               {name}
             </div>
           )}
+          {/* 1.5.9: append the recursive byte total when available so
+              the subtitle matches the "N folders · X GB" affordance
+              from the Projects Dashboard. Falls back to just the
+              count on the public client share page (no admin
+              endpoint there). */}
           <div className="text-xs text-muted-foreground mt-1 tabular-nums">
             {itemCount === 1 ? '1 item' : `${itemCount} items`}
+            {totalSize != null && Number(totalSize) > 0 && (
+              <> · {formatBytes(totalSize)}</>
+            )}
           </div>
         </div>
         {/* Kebab — only renders when the card has at least one
