@@ -6,7 +6,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Plus, ArrowUpDown, Lock } from 'lucide-react'
-import ViewModeToggle, { type ViewMode } from '@/components/ViewModeToggle'
+import { type ViewMode } from '@/components/ViewModeToggle'
+import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 import ProjectCardKebab from '@/components/ProjectCardKebab'
 import { formatDate } from '@/lib/utils'
 import { projectGradient, formatBytes, formatRelativeTime } from '@/lib/project-gradient'
@@ -62,24 +63,19 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
     }
     return 'alphabetical'
   })
-  // 1.2.0+: lazy initial value so the first render already reflects
-  // the saved preference. Previously the initial state was hard-coded
-  // to 'grid' and a useEffect synced FROM localStorage on mount — but
-  // a sibling effect then SYNCED BACK 'grid' to localStorage before
-  // the read effect committed, wiping the saved preference on every
-  // reload. Both effects collapse into the lazy init below.
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    if (typeof window === 'undefined') return 'grid'
-    const stored = localStorage.getItem('admin_projects_view')
-    if (stored === 'grid' || stored === 'table') return stored
-    // Migrate the old 'list' preference to 'table'.
-    if (stored === 'list') return 'table'
-    return 'grid'
-  })
-
-  useEffect(() => {
-    localStorage.setItem('admin_projects_view', viewMode)
-  }, [viewMode])
+  // 1.7.0+: view mode now lives in a single shared store
+  // (useAdminViewMode) instead of a component-local state. The
+  // canonical setter lives in AdminHeader; this component just
+  // reads the live value and renders accordingly. The previous
+  // `admin_projects_view` localStorage key is left untouched —
+  // we don't migrate it because new installs start with the
+  // shared key, and existing users will set their preference once
+  // from the header on first interaction.
+  const [viewMode] = useAdminViewMode()
+  // No-op setter kept for the legacy local toggle which we've
+  // removed from the JSX below.
+  const _setViewMode = (_: ViewMode) => {}
+  void _setViewMode
 
   // Save sort mode to localStorage
   useEffect(() => {
@@ -135,7 +131,9 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
     <>
       {projects.length > 0 && (
         <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
-          <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          {/* 1.7.0+: Grid / Table toggle relocated to AdminHeader
+              so the same control flips both this dashboard and the
+              folder browser. Only the A-Z sort button remains here. */}
           <Button
             variant="outline"
             size="sm"

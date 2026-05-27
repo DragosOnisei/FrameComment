@@ -19,6 +19,7 @@ import FolderBrowser, {
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
+import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 import {
   createFolderHierarchy,
   uniqueDirectoryPaths,
@@ -57,8 +58,27 @@ export default function ProjectFolderPage() {
   // browser's New-Folder dialog and Download-All flow from buttons
   // we render up in the top toolbar, alongside Upload + Settings.
   const folderBrowserRef = useRef<FolderBrowserHandle | null>(null)
+  // 1.7.0+: grid/table preference comes from the shared admin
+  // view-mode store; the actual toggle UI lives in AdminHeader.
+  const [folderView] = useAdminViewMode()
+
+  // 1.7.0+: stale-fetch guard. The user can navigate between
+  // folders quickly (back, forward, into a sibling) and each
+  // navigation kicks off a fresh fetchFolder. Without this seq
+  // tag the older fetch can resolve last and either show the
+  // wrong folder or flip the page into an error state ("Failed
+  // to load project") that's no longer relevant.
+  const fetchSeqRef = useRef(0)
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+    }
+  }, [])
 
   const fetchFolder = useCallback(async (opts?: { silent?: boolean }) => {
+    const seq = ++fetchSeqRef.current
     try {
       // Don't flash the full-screen "Loading…" view on background
       // polls — only on the first ever fetch / explicit refresh.
@@ -67,6 +87,7 @@ export default function ProjectFolderPage() {
         apiFetch(`/api/folders/${folderId}`),
         apiFetch(`/api/projects/${projectId}`),
       ])
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
       if (folderRes.status === 404) {
         router.push(`/admin/projects/${projectId}`)
         return
@@ -80,16 +101,23 @@ export default function ProjectFolderPage() {
       if (!projectRes.ok) throw new Error('Failed to load project')
       const folderData = await folderRes.json()
       const projectData = await projectRes.json()
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
       setFolder(folderData.folder)
       setBreadcrumb(folderData.breadcrumb || [])
       setProject(projectData)
       setVideos(folderData.folder?.videos || [])
       setError(null)
     } catch (err) {
+      // A newer fetch already ran — drop this stale error so it
+      // doesn't render an obsolete "Failed to load project" card
+      // over a page the user has already moved past.
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
       logError('[ProjectFolderPage] fetch failed:', err)
       setError(err instanceof Error ? err.message : 'Failed to load folder')
     } finally {
-      if (!opts?.silent) setLoading(false)
+      if (!opts?.silent && seq === fetchSeqRef.current && aliveRef.current) {
+        setLoading(false)
+      }
     }
   }, [projectId, folderId, router])
 
@@ -242,6 +270,10 @@ export default function ProjectFolderPage() {
               <Download className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">Download All</span>
             </Button>
+            {/* 1.7.0+: the Grid / Table toggle moved to AdminHeader
+                so the same control flips both the dashboard and the
+                folder browser. We still read folderView via
+                useAdminViewMode below to pick the right layout. */}
             <Button
               variant="outline"
               size="sm"
@@ -286,6 +318,7 @@ export default function ProjectFolderPage() {
             videos={videos}
             hideHeaderActions
             stretch
+            viewMode={folderView}
           />
 
           {/* AdminVideoManager stays mounted but invisible — its

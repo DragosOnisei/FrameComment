@@ -50,6 +50,18 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
         const data = await response.json()
         if (data.authenticated && data.user) {
           setUser(data.user)
+          // 1.7.0+: persist the user id in localStorage so per-
+          // user UI preferences (folder grid/table view, etc.)
+          // can be read SYNCHRONOUSLY by lazy `useState` inits on
+          // the very first render — without this they'd flash the
+          // default while waiting for the auth fetch to resolve.
+          try {
+            if (typeof window !== 'undefined' && data.user?.id) {
+              window.localStorage.setItem('last_admin_user_id', data.user.id)
+            }
+          } catch {
+            /* localStorage disabled — fall through */
+          }
           return
         }
       }

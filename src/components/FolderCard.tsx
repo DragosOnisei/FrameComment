@@ -257,18 +257,24 @@ export default function FolderCard({
 
   return (
     <div
+      // 1.7.0+: single-click toggles selection, double-click drills
+      // in. Matches Finder / Frame.io and stays consistent with
+      // VideoCard. We still fall back to `onOpen` when the host
+      // didn't wire a select handler.
       onClick={() => {
         // While the title is being edited, clicking the card MUST
         // NOT drill into the folder — the user is just trying to
         // dismiss the input or click elsewhere. The input itself
         // already swallows clicks via stopPropagation below.
         if (isEditing) return
-        // 1.1.0+: in selection mode a click toggles selection
-        // instead of drilling into the folder (mirrors VideoCard).
-        if (selectionMode && onToggleSelect) {
+        if (onToggleSelect) {
           onToggleSelect(id)
           return
         }
+        onOpen(id)
+      }}
+      onDoubleClick={() => {
+        if (isEditing) return
         onOpen(id)
       }}
       role="button"
@@ -334,10 +340,11 @@ export default function FolderCard({
       }}
       onKeyDown={(e) => {
         if (isEditing) return
-        if (e.key === 'Enter' || e.key === ' ') {
+        // 1.7.0+: Enter drills into the folder; Space is reserved
+        // for the parent's Quick Preview overlay.
+        if (e.key === 'Enter') {
           e.preventDefault()
-          if (selectionMode && onToggleSelect) onToggleSelect(id)
-          else onOpen(id)
+          onOpen(id)
         }
       }}
       className={`
@@ -684,7 +691,13 @@ function FolderCover({
           src={t.thumbnailUrl}
           alt=""
           draggable={false}
-          className="w-full h-full object-cover"
+          // 1.7.0+: `object-contain` so vertical clips (9:16, 4:5,
+          // etc.) show their full frame letter-boxed inside the
+          // mosaic tile, rather than being cropped to a horizontal
+          // strip. Matches the behaviour we use in the Quick
+          // Preview overlay for the same kind of preview real
+          // estate.
+          className="w-full h-full object-contain"
           loading="lazy"
         />
       )

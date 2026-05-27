@@ -269,12 +269,11 @@ export default function ThumbnailReel({
                 )}
                 title={isExpanded ? 'Hide video thumbnails' : 'Show video thumbnails'}
               >
-                <CheckCircle2
-                  className={cn(
-                    'w-4 h-4 shrink-0',
-                    hasApprovedCurrent ? 'text-success' : 'text-muted-foreground/50'
-                  )}
-                />
+                {/* 1.7.0+: removed the CheckCircle2 approval glyph
+                    that used to sit in front of the filename — the
+                    same approval state is already surfaced on the
+                    Approve button below the title bar, so a second
+                    indicator here just crowded the line. */}
                 {/*
                   1.2.0+: title + upload-date stack. The date sits
                   directly under the title (centered) with a compact
@@ -314,12 +313,18 @@ export default function ThumbnailReel({
                   aria-haspopup={currentVersions.length > 1 ? 'menu' : undefined}
                   aria-expanded={versionMenuOpen}
                   className={cn(
-                    'inline-flex items-center gap-0.5 shrink-0 h-6 pl-2 pr-1 rounded-full',
-                    'text-[11px] font-mono font-medium tabular-nums',
-                    'bg-muted/60 text-foreground/80',
+                    // 1.7.0+: bigger primary-blue pill so the
+                    // active version reads as a clear status
+                    // badge instead of a muted secondary chip.
+                    // Height jumps to 7, font goes uppercase +
+                    // wider tracking + bold, and we use the
+                    // theme primary tokens for the fill.
+                    'inline-flex items-center gap-1 shrink-0 h-7 pl-2.5 pr-1.5 rounded-full',
+                    'text-xs font-semibold uppercase tracking-wider tabular-nums',
+                    'bg-primary text-primary-foreground shadow-sm',
                     'transition-colors',
-                    currentVersions.length > 1 && 'hover:bg-muted active:scale-95 cursor-pointer',
-                    currentVersions.length < 2 && 'cursor-default opacity-70'
+                    currentVersions.length > 1 && 'hover:bg-primary/90 active:scale-95 cursor-pointer',
+                    currentVersions.length < 2 && 'cursor-default'
                   )}
                   title={
                     currentVersions.length > 1
@@ -328,7 +333,7 @@ export default function ThumbnailReel({
                   }
                 >
                   <span>{activeVersionLabel}</span>
-                  {currentVersions.length > 1 && <ChevronDown className="w-3 h-3" />}
+                  {currentVersions.length > 1 && <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
               )}
 

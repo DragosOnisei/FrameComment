@@ -15,6 +15,7 @@ import { ArrowLeft, FolderPlus, Settings, FolderUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
+import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 import {
   createFolderHierarchy,
   uniqueDirectoryPaths,
@@ -35,15 +36,41 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
   const videoManagerRef = useRef<AdminVideoManagerHandle | null>(null)
+  // 1.7.0+: grid/table preference comes from the shared admin
+  // view-mode store; the actual toggle UI lives in AdminHeader.
+  // The hook keeps every consumer (dashboard, project page, folder
+  // page) in lockstep via a window custom event.
+  const [folderView] = useAdminViewMode()
   // FolderBrowser imperative handle (1.0.9+) — lets the top action
   // bar drive the New-Folder dialog so the button can sit alongside
   // Project settings instead of inline next to the breadcrumb.
   const folderBrowserRef = useRef<FolderBrowserHandle | null>(null)
 
+  // 1.7.0+: monotonically-increasing fetch "generation" tag.
+  // Every fetch increments it; only the LATEST fetch is allowed
+  // to commit its result to state. When the user clicks rapidly
+  // between folders the project page can fire 2-3 fetches back
+  // to back; without this guard an older fetch that resolves
+  // last would clobber the newer one's result (or worse, flip
+  // loading=false with project=null, which renders the "Project
+  // not found" screen).
+  const fetchSeqRef = useRef(0)
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+    }
+  }, [])
+
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
+    const seq = ++fetchSeqRef.current
     try {
       const response = await apiFetch(`/api/projects/${id}`)
+      // A newer fetch (or a route change that unmounted us) has
+      // already started — drop this result on the floor.
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
       if (!response.ok) {
         if (response.status === 404) {
           router.push('/admin/projects')
@@ -52,11 +79,18 @@ export default function ProjectPage() {
         throw new Error('Failed to fetch project')
       }
       const data = await response.json()
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
       setProject(data)
     } catch (error) {
+      // Swallow stale errors so a rapid back/forward doesn't
+      // surface "Project not found" from a request that was
+      // already superseded.
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
       logError('Error fetching project:', error)
     } finally {
-      setLoading(false)
+      if (seq === fetchSeqRef.current && aliveRef.current) {
+        setLoading(false)
+      }
     }
   }, [id, router])
 
@@ -223,6 +257,9 @@ export default function ProjectPage() {
             </Button>
           </Link>
           <div className="flex items-center gap-2">
+            {/* 1.7.0+: the Grid / Table toggle that lived here was
+                moved to AdminHeader so the same control flips both
+                this view and the projects dashboard. */}
             {/* New Folder hoisted up here (1.0.9+) so it sits alongside
                 Project settings instead of inline next to the
                 breadcrumb. Driven through the FolderBrowser ref. */}
@@ -275,6 +312,7 @@ export default function ProjectPage() {
             onUploadFolderTree={handleUploadFolderTree}
             hideHeaderActions
             stretch
+            viewMode={folderView}
           />
 
           {/* AdminVideoManager mounted invisibly so the folder-tree

@@ -440,20 +440,29 @@ export default function VideoCard({
 
   return (
     <div
+      // 1.7.0+: single-click ALWAYS toggles selection; the player
+      // only opens on double-click. This mirrors how Finder /
+      // Frame.io behave — single-click for selection state,
+      // double-click to drill in. Falls back to `onOpen` only when
+      // the card doesn't expose a select handler at all (legacy
+      // call sites that don't wire multi-select).
       onClick={() => {
-        if (selectionMode && onToggleSelect) {
+        if (onToggleSelect) {
           onToggleSelect(id)
         } else {
           onOpen(name)
         }
       }}
+      onDoubleClick={() => onOpen(name)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        // Enter on a focused card opens the video (keyboard
+        // shortcut for "drill in"). Space is reserved for the
+        // FolderBrowser-level Quick Preview overlay.
+        if (e.key === 'Enter') {
           e.preventDefault()
-          if (selectionMode && onToggleSelect) onToggleSelect(id)
-          else onOpen(name)
+          onOpen(name)
         }
       }}
       // Drag SOURCE. 1.0.9+: drag is now always armed (was disabled

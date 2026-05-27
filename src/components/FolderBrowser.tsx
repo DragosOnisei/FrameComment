@@ -35,6 +35,8 @@ import FolderContextMenu from './FolderContextMenu'
 import { ConfirmModal } from './ConfirmModal'
 import { ShareModal } from './ShareModal'
 import { SplitVersionsModal, type SplitVersionRow } from './SplitVersionsModal'
+import QuickPreviewOverlay, { type QuickPreviewTarget } from './QuickPreviewOverlay'
+import FolderBrowserTable from './FolderBrowserTable'
 import {
   snapshotDataTransferEntries,
   walkSnapshotEntries,
@@ -111,6 +113,11 @@ export interface FolderBrowserProps {
    *  to render those actions in its own top bar and drive them
    *  through the imperative ref handle below. */
   hideHeaderActions?: boolean
+  /** 1.7.0+: switch between the Frame.io-style card grid (default)
+   *  and a compact table layout with Name / Type / Duration / Size
+   *  columns. The parent page owns the toggle UI + persistence so
+   *  FolderBrowser stays presentational. */
+  viewMode?: 'grid' | 'table'
 }
 
 /**
@@ -227,6 +234,7 @@ function FolderBrowserInner(
     onUploadFiles,
     onUploadFolderTree,
     hideHeaderActions = false,
+    viewMode = 'grid',
   }: FolderBrowserProps,
   ref: React.Ref<FolderBrowserHandle>,
 ) {
@@ -349,6 +357,10 @@ function FolderBrowserInner(
     () => new Set(),
   )
   const [bulkBusy, setBulkBusy] = useState(false)
+  // 1.7.0+: macOS Quick Look-style preview. When non-null, the
+  // QuickPreviewOverlay is open with the embedded video/folder.
+  // Triggered by Space while exactly one item is selected.
+  const [quickPreview, setQuickPreview] = useState<QuickPreviewTarget>(null)
   // Drag-to-stack state (1.0.6+). When non-null, a video card is
   // mid-drag — sibling cards render with the "potential target"
   // affordance, the source card is ghosted.
@@ -2118,6 +2130,109 @@ function FolderBrowserInner(
 
   const hasItems = folders.length > 0 || videoGroups.length > 0
 
+  // 1.7.0+: Space opens a macOS Quick Look-style preview for the
+  // single currently-selected item. Mirrors the system shortcut
+  // users already know from Finder.
+  //
+  // Tricky bit: after the user clicks the selection checkbox the
+  // browser parks focus on that <button>. Native button behaviour
+  // dispatches a synthetic `click` when Space is pressed/released,
+  // which would re-toggle the selection. We defend against that by:
+  //   1. Registering the listener in the CAPTURE phase so we win
+  //      over any element-level handler.
+  //   2. Calling `e.preventDefault()` AND `e.stopPropagation()` on
+  //      both keydown AND keyup to suppress the button's space
+  //      activation entirely.
+  //   3. Blurring the active element so even if a click slips
+  //      through (e.g. another listener swallowed our preventDefault)
+  //      it won't land on the selection button.
+  //
+  // Bail out when typing in an input/textarea or when modifier keys
+  // are held so we don't hijack form interactions or shortcuts like
+  // Cmd+Space.
+  useEffect(() => {
+    const isSpace = (e: KeyboardEvent) => e.code === 'Space' || e.key === ' '
+
+    const shouldHandle = (e: KeyboardEvent): boolean => {
+      if (!isSpace(e)) return false
+      if (e.metaKey || e.ctrlKey || e.altKey) return false
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return false
+      if ((e.target as HTMLElement | null)?.isContentEditable) return false
+      if (quickPreview) return false
+      const totalSelected = selectedVideoIds.size + selectedFolderIds.size
+      return totalSelected === 1
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!shouldHandle(e)) return
+      e.preventDefault()
+      e.stopPropagation()
+      // Drop focus from the selection checkbox so the button's
+      // own keyup-triggered click can't toggle the selection.
+      const active = document.activeElement as HTMLElement | null
+      if (active && typeof active.blur === 'function') active.blur()
+
+      if (selectedVideoIds.size === 1) {
+        const id = Array.from(selectedVideoIds)[0]
+        const group = videoGroups.find((g) => g.id === id)
+        if (!group) return
+        const found = (videos as any[])
+          .concat(rootVideos as any[])
+          .find((v: any) => v.id === group.id)
+        setQuickPreview({
+          kind: 'video',
+          id: group.id,
+          name: group.name,
+          duration: group.duration ?? null,
+          width: found?.width ?? null,
+          height: found?.height ?? null,
+          mediaType: group.mediaType,
+          thumbnailUrl: group.thumbnailUrl ?? null,
+          previewUrl: group.previewUrl ?? null,
+          versionLabel: group.versionLabel ?? null,
+          uploaderName: group.uploaderName ?? null,
+          createdAt: group.createdAt ?? null,
+        })
+      } else if (selectedFolderIds.size === 1) {
+        const id = Array.from(selectedFolderIds)[0]
+        const folder = folders.find((f) => f.id === id)
+        if (!folder) return
+        setQuickPreview({
+          kind: 'folder',
+          id: folder.id,
+          name: folder.name,
+          itemCount: folder.itemCount,
+          totalSize: folder.totalSize ?? null,
+        })
+      }
+    }
+
+    // Keyup belt-and-braces: even if some other listener swallowed
+    // our keydown preventDefault, the same suppression on keyup
+    // stops the synthetic click on focused buttons.
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!shouldHandle(e)) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    document.addEventListener('keydown', onKeyDown, true) // capture
+    document.addEventListener('keyup', onKeyUp, true) // capture
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.removeEventListener('keyup', onKeyUp, true)
+    }
+  }, [
+    quickPreview,
+    selectedVideoIds,
+    selectedFolderIds,
+    videoGroups,
+    folders,
+    videos,
+    rootVideos,
+  ])
+
   return (
     <div
       className={`relative space-y-3${stretch ? ' min-h-[calc(100vh-9rem)]' : ''}`}
@@ -2266,44 +2381,57 @@ function FolderBrowserInner(
       {totalSelected > 0 && (
         <div
           data-selection-toolbar
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full bg-popover text-popover-foreground border border-border shadow-2xl pl-2 pr-2 py-1.5"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-1.5"
         >
-          <button
-            type="button"
-            onClick={clearSelection}
-            className="rounded-full p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-            title="Clear selection"
-            aria-label="Clear selection"
-          >
-            <X className="w-4 h-4" />
-          </button>
-          <span className="text-sm font-medium px-1 select-none">
-            {totalSelected}{' '}
-            {totalSelected === 1 ? 'item' : 'items'} selected
-          </span>
-          <div className="h-5 w-px bg-border" aria-hidden />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleBulkDownload}
-            disabled={bulkBusy}
-            className="rounded-full"
-          >
-            <Download className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Download</span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleBulkDelete}
-            disabled={bulkBusy}
-            className="rounded-full text-destructive hover:text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Delete</span>
-          </Button>
+          <div className="flex items-center gap-3 rounded-full bg-popover text-popover-foreground border border-border shadow-2xl pl-2 pr-2 py-1.5">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-full p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              title="Clear selection"
+              aria-label="Clear selection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <span className="text-sm font-medium px-1 select-none">
+              {totalSelected}{' '}
+              {totalSelected === 1 ? 'item' : 'items'} selected
+            </span>
+            <div className="h-5 w-px bg-border" aria-hidden />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleBulkDownload}
+              disabled={bulkBusy}
+              className="rounded-full"
+            >
+              <Download className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Download</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleBulkDelete}
+              disabled={bulkBusy}
+              className="rounded-full text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Delete</span>
+            </Button>
+          </div>
+          {/* 1.7.0+: discoverability hint for the Quick Preview
+              shortcut — editors don't know Space works as a peek
+              unless we tell them. Only shown when exactly one
+              item is selected (the only case where Space does
+              anything); fades in below the action pill so it
+              doesn't crowd the toolbar itself. */}
+          {totalSelected === 1 && (
+            <span className="text-[11px] text-muted-foreground bg-popover/80 border border-border/60 rounded-full px-2.5 py-0.5 shadow-sm select-none">
+              Press <kbd className="px-1 py-px rounded bg-muted text-foreground font-mono text-[10px]">Space</kbd> for quick preview
+            </span>
+          )}
         </div>
       )}
 
@@ -2372,7 +2500,19 @@ function FolderBrowserInner(
         }}
       />
 
-      {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && (
+      {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode === 'table' && (
+        <FolderBrowserTable
+          folders={folders}
+          videoGroups={videoGroups}
+          selectedFolderIds={selectedFolderIds}
+          selectedVideoIds={selectedVideoIds}
+          onToggleFolder={handleToggleFolderSelect}
+          onToggleVideo={handleToggleVideoSelect}
+          onOpenFolder={handleOpenFolder}
+          onOpenVideo={handleOpenVideo}
+        />
+      )}
+      {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode !== 'table' && (
         // 1.3.0+: start at 2 columns on phones (used to be 1) so the
         // cards don't fill the entire screen each. 2 fits a 360-414px
         // viewport comfortably; we step up to 3 → 4 → 5 → 6 on bigger
@@ -2658,6 +2798,11 @@ function FolderBrowserInner(
         groupName={splitState.groupName}
         versions={splitState.versions}
         onSubmit={submitSplit}
+      />
+      <QuickPreviewOverlay
+        target={quickPreview}
+        onClose={() => setQuickPreview(null)}
+        projectId={projectId}
       />
     </div>
   )

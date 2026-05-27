@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { Bug, CircleHelp, Container, ExternalLink, FolderKanban, Github, Heart, LogOut, Settings, Shield, Trash2, User, Users } from 'lucide-react'
+import { Bug, CircleHelp, Container, ExternalLink, FolderKanban, Github, Heart, LogOut, Search, Settings, Shield, Trash2, User, Users } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -10,6 +10,9 @@ import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useTranslations } from 'next-intl'
+import GlobalSearchOverlay from '@/components/GlobalSearchOverlay'
+import ViewModeToggle from '@/components/ViewModeToggle'
+import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 
 export default function AdminHeader() {
   const { user, logout } = useAuth()
@@ -22,6 +25,19 @@ export default function AdminHeader() {
   // on window focus + whenever a delete-side component fires a
   // `trash:changed` window event.
   const [trashCount, setTrashCount] = useState<number | null>(null)
+  // 1.7.0+: global search overlay state. Opens via the magnifier
+  // button or Cmd/Ctrl+K from anywhere in the admin app.
+  const [searchOpen, setSearchOpen] = useState(false)
+  // 1.7.0+: unified Grid / Table view toggle, synced via
+  // useAdminViewMode. Only shown on screens where the toggle has
+  // an effect (Projects dashboard + individual project / folder
+  // pages); on Settings / Users / Trash etc. the toggle would be
+  // meaningless so we hide it.
+  const [adminView, setAdminView] = useAdminViewMode()
+  const showViewToggle =
+    !!pathname &&
+    (pathname === '/admin/projects' ||
+      pathname.startsWith('/admin/projects/'))
   const t = useTranslations('nav')
   const ta = useTranslations('auth')
 
@@ -91,6 +107,23 @@ export default function AdminHeader() {
     }
   }, [showUserMenu])
 
+  // 1.7.0+: Cmd/Ctrl+K opens the global search overlay from
+  // anywhere in the admin app. Bound at the header (which is
+  // mounted on every admin page) so the binding survives route
+  // changes without leaking listeners.
+  useEffect(() => {
+    if (!user) return
+    const onKey = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey
+      if (isMod && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [user])
+
   if (!user) return null
 
   const repoUrl = 'https://github.com/DragosOnisei/FrameComment'
@@ -111,10 +144,18 @@ export default function AdminHeader() {
   }
 
   return (
+    <>
     <div className="relative z-50 bg-card border-b border-border/50 shadow-elevation-sm backdrop-blur-sm">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 sm:gap-6 flex-1 min-w-0">
+        {/* 1.7.0+: 3-section grid layout. Nav links live on the
+            LEFT, the Grid/Table view toggle in the CENTER (so the
+            switch reads as a global control unrelated to user /
+            theme), and Search + Theme + Help + User cluster on the
+            RIGHT. Outer columns are `1fr` so the center column is
+            mathematically centered against the page, not just
+            centered within the leftover space. */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-6 min-w-0">
             <nav className="flex gap-1 sm:gap-2 overflow-x-auto">
               {navLinks.map((link) => {
                 const Icon = link.icon
@@ -178,7 +219,33 @@ export default function AdminHeader() {
             </nav>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* 1.7.0+: CENTER column — Grid / Table toggle lives
+              here so the switch reads as a top-level navigation
+              concern (alongside the global Projects / Trash /
+              Users / Settings rail), not as a setting bolted onto
+              the user-menu cluster on the right. The wrapper
+              always renders so the grid columns stay aligned even
+              on pages that don't show the toggle. */}
+          <div className="flex items-center justify-center">
+            {showViewToggle && (
+              <ViewModeToggle value={adminView} onChange={setAdminView} />
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-2 sm:gap-3">
+            {/* 1.7.0+: global video search. Same styling as the
+                neighbouring round-corner icon buttons so it sits
+                naturally next to the theme toggle / help / user
+                menu cluster. Keyboard hint shown on sm:+ screens. */}
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className="p-2 rounded-lg border border-border bg-background hover:bg-accent transition-colors shadow-sm"
+              aria-label="Search videos"
+              title="Search videos (⌘K)"
+            >
+              <Search className="h-5 w-5 text-foreground" />
+            </button>
             <ThemeToggle />
             <Dialog>
               <DialogTrigger asChild>
@@ -278,5 +345,7 @@ export default function AdminHeader() {
         </div>
       </div>
     </div>
+    <GlobalSearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
+    </>
   )
 }

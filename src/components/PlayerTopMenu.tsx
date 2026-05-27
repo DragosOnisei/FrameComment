@@ -8,10 +8,9 @@ import {
   Trash2,
   ClipboardCopy,
   ClipboardPaste,
-  Moon,
-  Sun,
   Check,
   Loader2,
+  Download,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
@@ -85,24 +84,13 @@ export default function PlayerTopMenu({
   const popoverRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
-  const [busy, setBusy] = useState<null | 'share' | 'delete' | 'copy' | 'paste'>(null)
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
-  const [mounted, setMounted] = useState(false)
+  const [busy, setBusy] = useState<null | 'share' | 'delete' | 'copy' | 'paste' | 'download'>(null)
   // 1.3.2+: viewport-anchored position for the portalled popover. We
   // render the popover at document.body level (escaping the toolbar's
   // backdrop-root so backdrop-blur actually samples the video pixels
   // behind it), and lay it out as `position: fixed` next to the kebab
   // trigger's bounding rect. Recomputed on open + on scroll/resize.
   const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
-
-  // ── Theme — same logic as ThemeToggle, inlined so the menu owns it.
-  useEffect(() => {
-    setMounted(true)
-    const initial = document.documentElement.classList.contains('dark')
-      ? 'dark'
-      : 'light'
-    setTheme(initial)
-  }, [])
 
   // ── Track Copy/Paste clipboard locally so the menu can self-derive
   // whether "Paste comments" is enabled, without forcing the page to
@@ -128,21 +116,6 @@ export default function PlayerTopMenu({
       )
     }
   }, [projectId])
-
-  const toggleTheme = useCallback(() => {
-    const next = theme === 'light' ? 'dark' : 'light'
-    setTheme(next)
-    try {
-      localStorage.setItem('theme', next)
-    } catch {
-      /* ignore */
-    }
-    if (next === 'dark') {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }, [theme])
 
   // ── Close on outside click / Escape. With the popover portalled to
   // body it's no longer a DOM child of the trigger wrapper, so we have
@@ -243,6 +216,36 @@ export default function PlayerTopMenu({
       setToast({
         kind: 'error',
         message: err instanceof Error ? err.message : 'Failed to copy share link',
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // 1.7.0+: download the active version's original file. Same
+  // pattern as the search overlay's Download button — mint a one-
+  // shot signed token then open the URL in a new tab. Admins skip
+  // the project-level "allowAssetDownload" gate (we trust them).
+  const handleDownload = async () => {
+    if (busy) return
+    if (!currentVideoId) {
+      setToast({ kind: 'error', message: 'No video selected' })
+      return
+    }
+    setOpen(false)
+    setBusy('download')
+    try {
+      const res = await apiFetch(`/api/videos/${currentVideoId}/download-token`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as { url?: string }
+      if (!data.url) throw new Error('No download URL returned')
+      window.open(data.url, '_blank', 'noopener,noreferrer')
+    } catch (err) {
+      setToast({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Failed to download',
       })
     } finally {
       setBusy(null)
@@ -373,7 +376,7 @@ export default function PlayerTopMenu({
         </span>
       )}
 
-      {open && anchor && mounted && typeof document !== 'undefined' &&
+      {open && anchor && typeof document !== 'undefined' &&
         createPortal(
         <div
           role="menu"
@@ -417,7 +420,28 @@ export default function PlayerTopMenu({
             "
           >
             <Link2 className="w-4 h-4 shrink-0" />
-            <span className="flex-1 whitespace-nowrap">Copy share link</span>
+            <span className="flex-1 whitespace-nowrap">Share Video</span>
+          </button>
+          {/* 1.7.0+: download the active version's original file.
+              Disabled while a request is in flight; the spinner
+              swaps in so the user knows the click registered. */}
+          <button
+            role="menuitem"
+            type="button"
+            onClick={handleDownload}
+            disabled={!currentVideoId || busy === 'download'}
+            className="
+              w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
+              hover:bg-muted transition-colors text-left whitespace-nowrap
+              disabled:opacity-40 disabled:cursor-not-allowed
+            "
+          >
+            {busy === 'download' ? (
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 shrink-0" />
+            )}
+            <span className="flex-1 whitespace-nowrap">Download</span>
           </button>
           <button
             role="menuitem"
@@ -433,48 +457,18 @@ export default function PlayerTopMenu({
             `}
           >
             <Trash2 className="w-4 h-4 shrink-0" />
-            <span className="flex-1 whitespace-nowrap">
-              {currentVersionLabel
-                ? `Delete ${currentVersionLabel}`
-                : 'Delete version'}
-            </span>
+            {/* 1.7.0+: the version label was dropped from the
+                button copy. It lives in the title bar already and
+                the confirm dialog still spells it out explicitly,
+                so "Delete" on its own keeps the menu clean. */}
+            <span className="flex-1 whitespace-nowrap">Delete</span>
           </button>
 
-          {/* 1.4.x: Copy / Paste comments were dropped from the
-              top-right player kebab because the "All comments" kebab
-              just below the video carries the same two actions —
-              there's no reason to surface them twice. Keeping the
-              divider so Share / Delete stay visually grouped above
-              the theme toggle. */}
-
-          {/* ─── Divider ─── */}
-          <div className="h-px my-1 mx-1 bg-border/60" />
-
-          {/* ─── Theme — moved here from the standalone ThemeToggle so the
-                title-bar stays clean. ─── */}
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              toggleTheme()
-              setOpen(false)
-            }}
-            disabled={!mounted}
-            className="
-              w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
-              hover:bg-muted transition-colors text-left whitespace-nowrap
-              disabled:opacity-40 disabled:cursor-not-allowed
-            "
-          >
-            {theme === 'light' ? (
-              <Moon className="w-4 h-4 shrink-0" />
-            ) : (
-              <Sun className="w-4 h-4 shrink-0" />
-            )}
-            <span className="flex-1 whitespace-nowrap">
-              {theme === 'light' ? 'Switch to dark' : 'Switch to light'}
-            </span>
-          </button>
+          {/* 1.7.0+: theme toggle was removed from this kebab —
+              the global AdminHeader already exposes Light/Dark in
+              the right cluster, so duplicating it here just made
+              the menu longer. Comment Copy/Paste also lives in
+              the "All comments" kebab below the video. */}
         </div>,
         document.body,
       )}

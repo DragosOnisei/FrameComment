@@ -17,6 +17,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.7.0] - 2026-05-27
+
+A big quality-of-life release focused on global navigation,
+discoverability, and Frame.io-feel polish across the admin app.
+
+### Added
+- **Global video search.** Magnifier in the admin header (or
+  `Cmd/Ctrl+K`) opens a full-screen overlay. 3+ characters runs an
+  admin-only search over every video name across every project,
+  with a resizable split between the scrollable result list (up to
+  200 matches) and a live preview panel — real `<video>` player at
+  the source's native aspect ratio, plus Copy URL / Download /
+  View in Project actions. Copy URL rewrites the LAN origin to the
+  admin-configured public domain so links work for remote clients.
+  New `/api/search?q=...&limit=N` endpoint backs it, with stack
+  dedupe so versioned uploads don't surface every sibling.
+- **Quick Preview (macOS-style Quick Look).** Select exactly one
+  folder or video and press `Space` to open a centered preview
+  overlay. Videos play with native controls at the real aspect
+  ratio; folders show their contents as a fluid 1/2/3-column grid
+  of Frame.io mosaic tiles with hover-scrub on video thumbnails.
+  Double-click any tile inside the preview to drill into the
+  sub-folder or open the video player. Space or Esc dismisses.
+- **Unified Grid / Table view toggle in the admin header.** Lives
+  centered between the nav rail and the utility cluster so it's
+  always one click away. Flipping it instantly updates the
+  projects dashboard AND every open folder browser (cross-tab too,
+  via storage events). Preference is persisted per-admin
+  (`admin_view_mode:<userId>`) with synchronous hydration so there
+  is no grid → table flash on navigation.
+- **Folder browser table view.** Compact rows with thumbnail,
+  Name, Type, Duration and Size columns. Selection, double-click
+  open and right-click context menu still work.
+- **"Press Space for quick preview" hint** below the selection
+  toolbar when exactly one item is selected — surfaces the new
+  shortcut to editors who'd otherwise never find it.
+- **Player kebab — Share Video / Download / Delete.** New
+  Download action (mints a one-shot token and opens the original
+  in a new tab); Share Video replaces "Copy share link" copy;
+  Delete drops the version suffix (label still appears in the
+  confirm dialog and title bar).
+
+### Changed
+- **Single-click selects, double-click opens** on both video and
+  folder cards. Matches Finder / Frame.io and clears the path for
+  the Space-to-preview shortcut.
+- **Player title bar:** removed the small CheckCircle in front of
+  the filename; the active version chip is now a bigger primary-
+  blue pill so it reads as a clear status badge.
+- **Folder mosaic thumbnails** use `object-contain` everywhere
+  (cards + Quick Preview) so vertical 9:16 clips show their full
+  frame instead of being cropped to a horizontal slice.
+- Player kebab no longer carries a duplicate theme toggle — the
+  global one in AdminHeader covers it.
+
+### Fixed
+- Race condition that flashed "Project not found" / "Failed to
+  load project" when navigating rapidly between folders. Both the
+  project page and folder page now tag every fetch with a
+  monotonically-increasing seq number; stale results are
+  discarded so they can't clobber the live state.
+- Race between `router.push` and overlay close in the search
+  overlay's "View in Project" — onClose is now deferred by a
+  frame so the destination resolves before the overlay unmounts.
+- Copy URL in the search overlay built `framecomment.com:3000`
+  when the admin was browsing LAN — host swap now uses `hostname`
+  + `port` separately so the LAN port is dropped cleanly.
+
 ## [1.6.1] - 2026-05-26
 
 Share links now always point at the public domain.
