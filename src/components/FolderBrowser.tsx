@@ -37,6 +37,7 @@ import { ShareModal } from './ShareModal'
 import { SplitVersionsModal, type SplitVersionRow } from './SplitVersionsModal'
 import QuickPreviewOverlay, { type QuickPreviewTarget } from './QuickPreviewOverlay'
 import FolderBrowserTable from './FolderBrowserTable'
+import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import {
   snapshotDataTransferEntries,
   walkSnapshotEntries,
@@ -848,6 +849,18 @@ function FolderBrowserInner(
     [folders, fetchFolders, onMutated, selectedVideoIds, selectedFolderIds],
   )
 
+  // 1.7.8+: pull the shared admin A-Z / Z-A sort preference. It
+  // drives both the folder card order (sortedFolders below) and
+  // the video group order so the entire grid flips together.
+  const [sortMode] = useAdminSortMode()
+  const sortedFolders = useMemo(() => {
+    // Server already returns folders ordered name-asc; we only
+    // reverse for Z-A. Cheap operation, no allocation cost on the
+    // common A-Z path.
+    if (sortMode !== 'alphabetical-reverse') return folders
+    return [...folders].sort((a, b) => b.name.localeCompare(a.name))
+  }, [folders, sortMode])
+
   // ─── video helpers ─────────────────────────────────────────
   // Group videos by name so multiple versions of the same asset
   // collapse into a single card (the latest version drives the
@@ -900,9 +913,11 @@ function FolderBrowserInner(
       })
     }
     // Folders are ordered by name asc on the server; mirror that for
-    // videos so the unified grid reads alphabetically.
-    return groups.sort((a, b) => a.name.localeCompare(b.name))
-  }, [videos, rootVideos])
+    // videos so the unified grid reads alphabetically. 1.7.8+: the
+    // A-Z / Z-A direction comes from the shared admin sort mode.
+    const sorted = groups.sort((a, b) => a.name.localeCompare(b.name))
+    return sortMode === 'alphabetical-reverse' ? sorted.reverse() : sorted
+  }, [videos, rootVideos, sortMode])
 
   const handleOpenVideo = useCallback(
     (videoName: string) => {
@@ -2516,7 +2531,7 @@ function FolderBrowserInner(
 
       {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode === 'table' && (
         <FolderBrowserTable
-          folders={folders}
+          folders={sortedFolders}
           videoGroups={videoGroups}
           selectedFolderIds={selectedFolderIds}
           selectedVideoIds={selectedVideoIds}
@@ -2532,7 +2547,7 @@ function FolderBrowserInner(
         // viewport comfortably; we step up to 3 → 4 → 5 → 6 on bigger
         // viewports.
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4">
-          {folders.map((f) => (
+          {sortedFolders.map((f) => (
             <FolderCard
               key={`folder:${f.id}`}
               id={f.id}

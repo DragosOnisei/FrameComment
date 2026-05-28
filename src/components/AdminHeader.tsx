@@ -39,9 +39,14 @@ export default function AdminHeader() {
     !!pathname &&
     (pathname === '/admin/projects' ||
       pathname.startsWith('/admin/projects/'))
-  // Sort only applies to the projects dashboard listing — it's
-  // meaningless inside a single project, so we hide it there.
-  const showSortToggle = pathname === '/admin/projects'
+  // 1.7.8+: sort toggle stays visible on every projects-related
+  // page. On the dashboard it orders the project tiles; inside a
+  // project the FolderBrowser respects it for the folder + video
+  // grid as well. Same scope as the Grid/Table view toggle.
+  const showSortToggle =
+    !!pathname &&
+    (pathname === '/admin/projects' ||
+      pathname.startsWith('/admin/projects/'))
   const t = useTranslations('nav')
   const ta = useTranslations('auth')
 

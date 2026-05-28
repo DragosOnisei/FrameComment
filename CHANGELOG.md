@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.7.9] - 2026-05-27
+
+### Changed
+- **A-Z / Z-A sort toggle stays visible inside projects.** It
+  was hidden once the user navigated past the dashboard; now the
+  same toggle drives the FolderBrowser folder + video order
+  (sub-folder pages too), so flipping it in the header re-orders
+  whatever is on screen — projects, folders, or videos.
+
 ## [1.7.8] - 2026-05-27
 
 ### Changed
