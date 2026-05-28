@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import {
   MoreVertical,
@@ -11,9 +12,11 @@ import {
   Trash2,
   Pencil,
   ImageIcon,
+  Loader2,
 } from 'lucide-react'
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { RenameDialog } from '@/components/ui/rename-dialog'
 import { computePopoverStyle } from '@/lib/popover-position'
 
 /**
@@ -72,6 +75,12 @@ export default function ProjectCardKebab({
   // toggle so they can't fight each other.
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState(false)
+  // 1.7.9+: themed rename dialog (replaces window.prompt).
+  const [renameOpen, setRenameOpen] = useState(false)
+  // 1.7.10+: spinner state for "Change Logo" while the OS file
+  // dialog is opening. Cold macOS Finder + mounted network drives
+  // can take ~1s before the picker visibly appears.
+  const [openingPicker, setOpeningPicker] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -130,26 +139,27 @@ export default function ProjectCardKebab({
     }
   }
 
-  // 1.7.5+: Rename action. Uses window.prompt for now (matches
-  // the rename UX on Video / Folder cards) — a themed modal can
-  // come later if the prompt feels jarring. Empty / unchanged
-  // input is a no-op.
+  // 1.7.9+: Rename action opens a themed dialog (RenameDialog)
+  // instead of the browser's native window.prompt. The kebab item
+  // just toggles the dialog's open state; the actual PATCH runs
+  // from the dialog's onSubmit callback below.
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const handleRename = async (e: React.MouseEvent) => {
+  const handleRename = (e: React.MouseEvent) => {
     stop(e)
     if (busy) return
     setOpen(false)
-    const next = window.prompt('Rename project to:', projectTitle)
-    if (!next || !next.trim() || next.trim() === projectTitle) return
-    setBusy(true)
+    setRenameOpen(true)
+  }
+  const submitRename = async (next: string) => {
     try {
-      await apiPatch(`/api/projects/${projectId}`, { title: next.trim() })
+      await apiPatch(`/api/projects/${projectId}`, { title: next })
       onMutated?.()
       router.refresh()
+      return true
     } catch (err) {
+      // Keep the dialog open so the user can fix typos / retry.
       alert(err instanceof Error ? err.message : 'Failed to rename project')
-    } finally {
-      setBusy(false)
+      return false
     }
   }
 
@@ -157,17 +167,56 @@ export default function ProjectCardKebab({
   // input; on selection we POST FormData to /api/projects/[id]/cover
   // which replaces the project's cover and deletes the old file on
   // disk. Same endpoint used by the Settings page cover card.
+  //
+  // 1.7.10+: keep the kebab open and show a spinner on the menu
+  // item while the OS file dialog is loading — silent click with
+  // a 1s wait felt broken. Menu auto-closes via the focus listener
+  // below as soon as the picker is dismissed.
   const handleChangeLogoClick = (e: React.MouseEvent) => {
     stop(e)
-    if (busy) return
-    setOpen(false)
+    if (busy || openingPicker) return
+    setOpeningPicker(true)
+    // Synchronous click preserves user activation; the picker
+    // begins opening immediately while the menu re-renders with
+    // the spinner state in the same microtask.
     fileInputRef.current?.click()
   }
+  // 1.7.10+: detect the picker closing. The OS dialog steals
+  // focus when it opens (window blurs) and the browser regains
+  // focus when the dialog is dismissed (cancel or file selected).
+  // We only treat a focus event as "picker closed" if we saw a
+  // blur first — otherwise a spurious focus event could collapse
+  // the menu before the picker has even rendered. The
+  // `document.hasFocus()` check covers the rare case where the
+  // OS picker opens faster than React's render can attach the
+  // listener.
+  useEffect(() => {
+    if (!openingPicker) return
+    let blurred = !document.hasFocus()
+    const onBlur = () => { blurred = true }
+    const onFocus = () => {
+      if (!blurred) return
+      // Small delay so a fired onChange (happy path) wins the
+      // race and the upload actually starts before the menu
+      // collapses.
+      window.setTimeout(() => {
+        setOpeningPicker(false)
+        setOpen(false)
+      }, 150)
+    }
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [openingPicker])
   const handleLogoFileSelected = async (
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = e.target.files?.[0]
     e.target.value = '' // reset so re-selecting the same file fires onChange
+    setOpeningPicker(false)
     if (!file) return
     setBusy(true)
     try {
@@ -283,11 +332,15 @@ export default function ProjectCardKebab({
             role="menuitem"
             type="button"
             onClick={handleChangeLogoClick}
-            disabled={busy}
+            disabled={busy || openingPicker}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50"
           >
-            <ImageIcon className="w-4 h-4 shrink-0" />
-            Change Logo
+            {openingPicker ? (
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+            ) : (
+              <ImageIcon className="w-4 h-4 shrink-0" />
+            )}
+            {openingPicker ? 'Opening picker…' : 'Change Logo'}
           </button>
           <div className="my-1 h-px bg-border/50" role="separator" />
           <button
@@ -352,17 +405,47 @@ export default function ProjectCardKebab({
         cancelLabel="Cancel"
         onConfirm={runDelete}
       />
-      {/* Hidden file input that the "Change logo" menu item
-          triggers. Lives at the bottom of the kebab wrapper so a
-          stray click anywhere on the card doesn't accidentally
-          activate it. */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
-        className="hidden"
-        onChange={handleLogoFileSelected}
+      {/* 1.7.9+: themed rename dialog. Opens via the Rename
+          menu item and submits the new title back to the project
+          PATCH endpoint. */}
+      <RenameDialog
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        title="Rename project"
+        initialValue={projectTitle}
+        placeholder="Project name"
+        onSubmit={submitRename}
       />
+      {/* 1.7.10+: Hidden file input that the "Change Logo" menu
+          item triggers. Two things are needed to make this work:
+
+          1. createPortal renders it at <body> — escapes the
+             kebab wrapper's DOM subtree (cosmetic/z-index).
+          2. onClick={(e) => e.stopPropagation()} on the input
+             itself — THIS is the actual fix. React synthetic
+             events bubble through the React tree, not the DOM
+             tree, so a portal alone is NOT enough: the synthetic
+             click from `fileInputRef.current.click()` would
+             still reach the kebab wrapper's `onClick={stop}`
+             (which calls `e.preventDefault()` to block the
+             parent card's <Link>), which in turn cancels the
+             file picker's default action and leaves the user
+             with a dead button. stopPropagation on the input
+             halts the synthetic event before it can reach the
+             wrapper, so no `preventDefault()` is ever called
+             on the click event that should open the picker. */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onClick={(e) => e.stopPropagation()}
+            onChange={handleLogoFileSelected}
+          />,
+          document.body,
+        )}
     </div>
   )
 }

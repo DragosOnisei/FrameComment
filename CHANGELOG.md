@@ -17,6 +17,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.8.0] - 2026-05-28
+
+### Fixed
+- **Change Logo button now actually opens the file picker.** The
+  hidden `<input type="file">` lives inside the kebab wrapper,
+  which calls `e.preventDefault()` on every click (to block the
+  parent card's `<Link>` from navigating). The synthetic click
+  from `fileInputRef.current.click()` bubbled up through the
+  React tree to that wrapper and got its default action
+  cancelled — so picking "Change Logo" did nothing. Fix: render
+  the input via a portal at `<body>` AND add
+  `onClick={e => e.stopPropagation()}` directly on the input so
+  the synthetic event halts before it can reach the wrapper's
+  `preventDefault()`. (React synthetic events propagate through
+  the React tree, so a portal alone is not enough — the
+  stopPropagation on the input itself is the actual fix.)
+
+### Changed
+- **Spinner on "Change Logo" while the OS picker loads.** Cold
+  file dialogs (macOS Finder with mounted network drives) take
+  ~1s to render, which used to make the menu item feel dead.
+  Now the kebab stays open and the icon swaps to a spinning
+  loader with "Opening picker…" until the dialog closes
+  (detected via `blur` → `focus` round-trip on `window`), at
+  which point the menu collapses on its own.
+- **Rename uses a themed dialog instead of `window.prompt`.** A
+  new `RenameDialog` component (built on the project's Dialog +
+  Input primitives) replaces the browser's gray native prompt
+  when renaming a project. Auto-focus + auto-select, Enter to
+  submit, spinner while the PATCH is in flight, and validation
+  errors keep the dialog open so the user can fix typos without
+  retyping the whole name.
+
 ## [1.7.9] - 2026-05-27
 
 ### Changed
