@@ -6,7 +6,6 @@ import {
   MoreVertical,
   Settings,
   BarChart3,
-  Copy,
   Archive,
   ArchiveRestore,
   Trash2,
@@ -14,10 +13,7 @@ import {
   ImageIcon,
 } from 'lucide-react'
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
-import { logError } from '@/lib/logging'
-import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { ShareModal } from '@/components/ShareModal'
 import { computePopoverStyle } from '@/lib/popover-position'
 
 /**
@@ -76,11 +72,6 @@ export default function ProjectCardKebab({
   // toggle so they can't fight each other.
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState(false)
-  // 1.7.7+: ShareModal state for the "Share Project" action.
-  // We pre-resolve the share URL when the menu item is clicked
-  // so the modal opens with the right link on first paint.
-  const [shareOpen, setShareOpen] = useState(false)
-  const [shareUrl, setShareUrl] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -112,41 +103,6 @@ export default function ProjectCardKebab({
     stop(e)
     setOpen(false)
     router.push(href)
-  }
-
-  // 1.7.7+: Share Project now opens the same ShareModal used by
-  // folder / single-video shares — consistent UX everywhere. We
-  // resolve the share URL up front (server endpoint → public
-  // origin fallback) so the modal mounts with the link ready.
-  const handleCopyLink = async (e: React.MouseEvent) => {
-    stop(e)
-    setOpen(false)
-    let url = `${getPublicShareOrigin()}/share/${projectSlug}`
-    try {
-      const res = await apiFetch(`/api/share/url?slug=${projectSlug}`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data?.shareUrl) {
-          // Override the origin with the public share origin so a
-          // link copied from LAN still points at the operator's
-          // public domain (1.6.1 behaviour).
-          try {
-            const u = new URL(data.shareUrl)
-            const pub = new URL(getPublicShareOrigin())
-            u.protocol = pub.protocol
-            u.hostname = pub.hostname
-            u.port = pub.port
-            url = u.toString()
-          } catch {
-            url = data.shareUrl
-          }
-        }
-      }
-    } catch (err) {
-      logError('[ProjectCardKebab] resolve share URL failed:', err)
-    }
-    setShareUrl(url)
-    setShareOpen(true)
   }
 
   const isArchived = projectStatus === 'ARCHIVED'
@@ -337,15 +293,6 @@ export default function ProjectCardKebab({
           <button
             role="menuitem"
             type="button"
-            onClick={handleCopyLink}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
-          >
-            <Copy className="w-4 h-4 shrink-0" />
-            Share Project
-          </button>
-          <button
-            role="menuitem"
-            type="button"
             onClick={goto(`/admin/projects/${projectId}/settings`)}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
           >
@@ -404,16 +351,6 @@ export default function ProjectCardKebab({
         confirmLabel="Move to Trash"
         cancelLabel="Cancel"
         onConfirm={runDelete}
-      />
-      {/* 1.7.7+: Share Project opens the same themed ShareModal
-          everything else uses, so the user gets one consistent
-          UX (auto-copy + manual copy fallback for insecure
-          contexts). */}
-      <ShareModal
-        open={shareOpen}
-        onOpenChange={setShareOpen}
-        title={projectTitle}
-        shareUrl={shareUrl}
       />
       {/* Hidden file input that the "Change logo" menu item
           triggers. Lives at the bottom of the kebab wrapper so a

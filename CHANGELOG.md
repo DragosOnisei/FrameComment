@@ -17,22 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
-## [1.7.7] - 2026-05-27
+## [1.7.8] - 2026-05-27
+
+### Changed
+- **Share Project removed from the project card kebab.** Sharing
+  an entire project at the card level is no longer offered; the
+  user-facing flow goes via folder share / single-video share
+  instead. Menu is now Rename · Change Logo · Settings · Delete.
 
 ### Fixed
-- **Share Project from the project card kebab opens the themed
-  ShareModal** instead of silently copying. The kebab item used
-  to set a 1.5s "Link copied" tooltip and bail; on LAN HTTP
-  (TrueNAS) the underlying `navigator.clipboard.writeText`
-  rejected with NotAllowedError and the user saw nothing happen.
-  Now the modal opens with the share URL + auto-copy +
-  expiration controls, same UX as folder / single-video share.
 - **ShareModal no longer falls back to `window.prompt` on
   insecure contexts.** When the clipboard API rejects (HTTP
-  origin), auto-copy AND the manual Copy button switch to a
-  hidden `document.execCommand('copy')` path via a temporary
-  textarea. Copy stays silent and lands the link on the
-  clipboard whether the user clicks once or five times.
+  origin — TrueNAS over LAN), both auto-copy on open AND the
+  manual Copy button fall through to a hidden
+  `document.execCommand('copy')` path via a temporary textarea.
+  Copy stays silent and lands the link on the clipboard whether
+  the user clicks once or five times.
 
 ## [1.7.6] - 2026-05-27
 
