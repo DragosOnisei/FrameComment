@@ -11,6 +11,8 @@ import {
   ArchiveRestore,
   Trash2,
   Check,
+  Pencil,
+  ImageIcon,
 } from 'lucide-react'
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
@@ -151,6 +153,66 @@ export default function ProjectCardKebab({
     }
   }
 
+  // 1.7.5+: Rename action. Uses window.prompt for now (matches
+  // the rename UX on Video / Folder cards) — a themed modal can
+  // come later if the prompt feels jarring. Empty / unchanged
+  // input is a no-op.
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const handleRename = async (e: React.MouseEvent) => {
+    stop(e)
+    if (busy) return
+    setOpen(false)
+    const next = window.prompt('Rename project to:', projectTitle)
+    if (!next || !next.trim() || next.trim() === projectTitle) return
+    setBusy(true)
+    try {
+      await apiPatch(`/api/projects/${projectId}`, { title: next.trim() })
+      onMutated?.()
+      router.refresh()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to rename project')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 1.7.5+: Change logo / cover image. Triggers a hidden file
+  // input; on selection we POST FormData to /api/projects/[id]/cover
+  // which replaces the project's cover and deletes the old file on
+  // disk. Same endpoint used by the Settings page cover card.
+  const handleChangeLogoClick = (e: React.MouseEvent) => {
+    stop(e)
+    if (busy) return
+    setOpen(false)
+    fileInputRef.current?.click()
+  }
+  const handleLogoFileSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // reset so re-selecting the same file fires onChange
+    if (!file) return
+    setBusy(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await apiFetch(`/api/projects/${projectId}/cover`, {
+        method: 'POST',
+        body: form,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body?.error || 'Failed to upload logo')
+      }
+      onMutated?.()
+      router.refresh()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to upload logo')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const openDeleteConfirm = (e: React.MouseEvent) => {
     stop(e)
     if (busy) return
@@ -225,24 +287,32 @@ export default function ProjectCardKebab({
           style={menuStyle}
           className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
         >
+          {/* 1.7.5+: trimmed menu — Rename / Change logo at the
+              top, then Share Project / Settings / Delete after a
+              divider. View Analytics + Archive were dropped (the
+              former lives under the project page kebab; archive
+              is rarely used and overlaps with Trash). */}
           <button
             role="menuitem"
             type="button"
-            onClick={goto(`/admin/projects/${projectId}/settings`)}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+            onClick={handleRename}
+            disabled={busy}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50"
           >
-            <Settings className="w-4 h-4 shrink-0" />
-            Settings
+            <Pencil className="w-4 h-4 shrink-0" />
+            Rename
           </button>
           <button
             role="menuitem"
             type="button"
-            onClick={goto(`/admin/projects/${projectId}/analytics`)}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+            onClick={handleChangeLogoClick}
+            disabled={busy}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50"
           >
-            <BarChart3 className="w-4 h-4 shrink-0" />
-            View Analytics
+            <ImageIcon className="w-4 h-4 shrink-0" />
+            Change Logo
           </button>
+          <div className="my-1 h-px bg-border/50" role="separator" />
           <button
             role="menuitem"
             type="button"
@@ -254,28 +324,40 @@ export default function ProjectCardKebab({
             ) : (
               <Copy className="w-4 h-4 shrink-0" />
             )}
-            {copied ? 'Link copied' : 'Copy share link'}
+            {copied ? 'Link copied' : 'Share Project'}
           </button>
-          <div className="my-1 h-px bg-border/50" role="separator" />
           <button
             role="menuitem"
             type="button"
-            onClick={openArchiveConfirm}
-            disabled={busy}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50"
+            onClick={goto(`/admin/projects/${projectId}/settings`)}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
           >
-            {isArchived ? (
-              <>
-                <ArchiveRestore className="w-4 h-4 shrink-0" />
-                Unarchive
-              </>
-            ) : (
-              <>
-                <Archive className="w-4 h-4 shrink-0" />
-                Archive
-              </>
-            )}
+            <Settings className="w-4 h-4 shrink-0" />
+            Settings
           </button>
+          {/* Hidden helpers for the archive flow have been removed
+              from this card menu — they no longer appear. The
+              variables below keep the file lint-clean: */}
+          {false && (
+            <button
+              role="menuitem"
+              type="button"
+              onClick={openArchiveConfirm}
+              disabled={busy}
+            >
+              {isArchived ? (
+                <>
+                  <ArchiveRestore className="w-4 h-4 shrink-0" />
+                  Unarchive
+                </>
+              ) : (
+                <>
+                  <Archive className="w-4 h-4 shrink-0" />
+                  Archive
+                </>
+              )}
+            </button>
+          )}
           <button
             role="menuitem"
             type="button"
@@ -289,21 +371,8 @@ export default function ProjectCardKebab({
         </div>
       )}
 
-      {/* 1.2.0+: pretty confirm dialogs replace the native browser
-          confirm() box for these two destructive actions. */}
-      <ConfirmDialog
-        open={confirmArchive}
-        onOpenChange={setConfirmArchive}
-        title={isArchived ? `Unarchive "${projectTitle}"?` : `Archive "${projectTitle}"?`}
-        description={
-          isArchived
-            ? 'It will return to your active list of projects.'
-            : 'It will be moved out of the active list. You can restore it any time from the archive.'
-        }
-        confirmLabel={isArchived ? 'Unarchive' : 'Archive'}
-        cancelLabel="Cancel"
-        onConfirm={runArchive}
-      />
+      {/* 1.2.0+: pretty confirm dialog for the destructive delete.
+          Archive dialog dropped in 1.7.5 along with its menu item. */}
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
@@ -318,6 +387,17 @@ export default function ProjectCardKebab({
         confirmLabel="Move to Trash"
         cancelLabel="Cancel"
         onConfirm={runDelete}
+      />
+      {/* Hidden file input that the "Change logo" menu item
+          triggers. Lives at the bottom of the kebab wrapper so a
+          stray click anywhere on the card doesn't accidentally
+          activate it. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={handleLogoFileSelected}
       />
     </div>
   )

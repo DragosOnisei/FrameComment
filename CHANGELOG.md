@@ -17,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.7.6] - 2026-05-27
+
+### Added
+- **Rename + Change Logo on the project card kebab.** Two new
+  quick actions at the top of the menu: Rename opens a prompt
+  pre-filled with the current title and PATCHes
+  `/api/projects/[id]`, Change Logo triggers a hidden file input
+  and uploads via the existing `/api/projects/[id]/cover` route.
+
+### Changed
+- **Project card kebab trimmed and reordered.** New flow:
+  Rename · Change Logo · *divider* · Share Project · Settings
+  · Delete. View Analytics and Archive (plus its confirm dialog)
+  were dropped — Analytics already lives on the project page
+  kebab, and Archive overlaps with Trash.
+
+### Fixed
+- **Table view selection corners.** Selecting the last row in
+  FolderBrowserTable used to leave the bottom-left/right
+  corners visually clipped because the outer container's
+  `rounded-lg` + `overflow-hidden` chopped the row's selection
+  ring flat. Each row now opts into `rounded-b-lg` when it sits
+  at the bottom of the list so the highlight follows the curve.
+
 ## [1.7.5] - 2026-05-27
 
 Cumulative re-release on top of 1.7.4. 1.7.4 never made it to

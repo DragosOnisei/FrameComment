@@ -78,7 +78,11 @@ export default function FolderBrowserTable({
               onClick={() => onToggleFolder(f.id)}
               onDoubleClick={() => onOpenFolder(f.id)}
               aria-selected={selected}
-              className={`w-full grid grid-cols-[minmax(0,1fr)_120px_120px_140px] gap-3 px-3 sm:px-4 py-2 text-left text-sm transition-colors ${
+              // 1.7.5+: round the bottom-left/right corners on the
+              // last row in the list so the selection ring follows
+              // the outer container's `rounded-lg` curve instead
+              // of being clipped flat against the bottom edge.
+              className={`w-full grid grid-cols-[minmax(0,1fr)_120px_120px_140px] gap-3 px-3 sm:px-4 py-2 text-left text-sm transition-colors [&:last-child]:rounded-b-lg ${
                 selected
                   ? 'bg-primary/10 ring-1 ring-inset ring-primary/40'
                   : 'hover:bg-accent/40'
@@ -111,7 +115,7 @@ export default function FolderBrowserTable({
               onClick={() => onToggleVideo(v.id)}
               onDoubleClick={() => onOpenVideo(v.name)}
               aria-selected={selected}
-              className={`w-full grid grid-cols-[minmax(0,1fr)_120px_120px_140px] gap-3 px-3 sm:px-4 py-2 text-left text-sm transition-colors ${
+              className={`w-full grid grid-cols-[minmax(0,1fr)_120px_120px_140px] gap-3 px-3 sm:px-4 py-2 text-left text-sm transition-colors [&:last-child]:rounded-b-lg ${
                 selected
                   ? 'bg-primary/10 ring-1 ring-inset ring-primary/40'
                   : 'hover:bg-accent/40'
