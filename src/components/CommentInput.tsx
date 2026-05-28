@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { isRangeEditActive, toggleRangeEdit, setRangeEditActive } from '@/lib/comment-range-edit'
 import { Comment } from '@prisma/client'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
@@ -269,8 +270,62 @@ export default function CommentInput({
     return () => window.removeEventListener('videoTimeUpdated', onTime as EventListener)
   }, [selectedVideoIdProp])
 
+  // 1.9.0+: range-edit mode (click the chip → arrow keys move the
+  // yellow OUT handle frame-by-frame instead of stepping the playhead).
+  // We mirror the module-level state into local React state so the
+  // chip can re-style itself. The shared event is the source of
+  // truth — other components (VideoPlayer / CustomVideoControls)
+  // listen for the same event independently.
+  const [rangeEditing, setRangeEditing] = useState(false)
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { active?: boolean; videoId?: string | null }
+        | undefined
+      setRangeEditing(Boolean(detail?.active))
+    }
+    setRangeEditing(isRangeEditActive())
+    window.addEventListener('commentRangeEditChanged', onChange as EventListener)
+    return () =>
+      window.removeEventListener('commentRangeEditChanged', onChange as EventListener)
+  }, [])
+
+  // Deactivate the moment the user clicks anything that isn't the
+  // chip itself or the timeline. Per spec: clicking the video, the
+  // comment textarea, or anywhere else in the page exits range-edit.
+  useEffect(() => {
+    if (!rangeEditing) return
+    const onDocPointer = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      if (target.closest('[data-comment-range-chip]')) return
+      if (target.closest('[data-timeline-track]')) return
+      setRangeEditActive(false)
+    }
+    document.addEventListener('mousedown', onDocPointer)
+    document.addEventListener('touchstart', onDocPointer, { passive: true })
+    return () => {
+      document.removeEventListener('mousedown', onDocPointer)
+      document.removeEventListener('touchstart', onDocPointer)
+    }
+  }, [rangeEditing])
+
+  // 1.9.0+: any time the captured IN point goes away (X click,
+  // successful submit, parent-side reset, anything) the dimmed-
+  // playhead UI no longer matches reality — auto-exit range-edit
+  // mode. Idempotent: setRangeEditActive(false) when already
+  // inactive is a no-op (module returns early).
+
   const hasCapturedTimestamp =
     selectedTimestamp !== null && selectedTimestamp !== undefined
+  // 1.9.0+: see comment above — kill range-edit whenever the
+  // captured IN goes away. Covers Enter-submit, X-clear, and any
+  // future parent-side reset path.
+  useEffect(() => {
+    if (!hasCapturedTimestamp) {
+      setRangeEditActive(false)
+    }
+  }, [hasCapturedTimestamp])
   const chipSeconds = hasCapturedTimestamp ? selectedTimestamp! : livePlayheadSeconds
   const timestampLabel = formatCommentTimestamp({
     timecode: secondsToTimecode(Math.max(0, chipSeconds), selectedVideoFps),
@@ -476,7 +531,52 @@ export default function CommentInput({
                 // The X button only appears once the user has actually
                 // captured an IN point, since clearing a non-existent
                 // selection is a no-op.
-                <div className="self-start inline-flex items-center gap-1 rounded-md bg-warning-visible px-1.5 py-0.5 text-[11px] font-mono font-semibold text-warning shrink-0 mt-[2px]">
+                //
+                // 1.9.0+: Clicking the chip activates "range-edit"
+                // mode: the white playhead dims, ←/→ arrow keys move
+                // the yellow OUT handle frame-by-frame, and Escape /
+                // a click on the video / a click outside the timeline
+                // exits. data-comment-range-chip lets the document
+                // click-outside handler skip the chip itself.
+                <div
+                  role="button"
+                  tabIndex={0}
+                  data-comment-range-chip
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    // If the user hasn't captured an IN point yet,
+                    // focusing the textarea triggers the existing
+                    // onInputFocus capture path; we toggle right
+                    // after so the very first click both captures
+                    // and enters edit mode.
+                    if (!hasCapturedTimestamp) {
+                      textareaRef.current?.focus({ preventScroll: true })
+                      onInputFocus?.()
+                    } else {
+                      // Already captured — pull focus off the
+                      // textarea so ←/→ don't move the caret.
+                      textareaRef.current?.blur()
+                    }
+                    toggleRangeEdit(selectedVideoIdProp ?? null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      toggleRangeEdit(selectedVideoIdProp ?? null)
+                    }
+                  }}
+                  title={
+                    rangeEditing
+                      ? 'Range edit mode — ←/→ moves the yellow handle. Esc to exit.'
+                      : 'Click to adjust range with ←/→ arrow keys'
+                  }
+                  className={`self-start inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-mono font-semibold shrink-0 mt-[2px] cursor-pointer select-none transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-warning ${
+                    rangeEditing
+                      ? 'bg-warning text-black ring-2 ring-warning shadow-sm'
+                      : 'bg-warning-visible text-warning hover:bg-warning/30'
+                  }`}
+                >
                   <span className="tabular-nums">
                     {timestampLabel}
                     {timecodeEndLabel ? ` - ${timecodeEndLabel}` : ''}
@@ -484,8 +584,20 @@ export default function CommentInput({
                   {hasCapturedTimestamp && (
                     <button
                       type="button"
-                      onClick={onClearTimestamp}
-                      className="ml-0.5 -mr-0.5 p-0.5 rounded hover:bg-warning/20 opacity-70 hover:opacity-100 transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        // 1.9.0+: clearing the timestamp also exits
+                        // range-edit mode — the range no longer
+                        // exists, so the dimmed-playhead UI would
+                        // just look broken.
+                        setRangeEditActive(false)
+                        onClearTimestamp?.()
+                      }}
+                      className={`ml-0.5 -mr-0.5 p-0.5 rounded transition-opacity ${
+                        rangeEditing
+                          ? 'hover:bg-black/20 opacity-80 hover:opacity-100'
+                          : 'hover:bg-warning/20 opacity-70 hover:opacity-100'
+                      }`}
                       title={t('clearTimestamp')}
                       aria-label={t('clearTimestamp')}
                     >

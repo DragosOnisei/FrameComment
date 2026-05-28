@@ -16,6 +16,10 @@ import type { QualityChoice } from './PlayerSettingsMenu'
 import { useAnnotation } from '@/contexts/AnnotationContext'
 import { secondsToTimecode } from '@/lib/timecode'
 import { logError } from '@/lib/logging'
+import {
+  isRangeEditActive,
+  setRangeEditActive,
+} from '@/lib/comment-range-edit'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -142,6 +146,14 @@ export default function VideoPlayer({
   const previousVideoNameRef = useRef<string | null>(null)
   const currentTimeRef = useRef(0)
   const selectedVideoIdRef = useRef<string | null>(null)
+  // 1.9.0+: refs that mirror the range-edit module state and the
+  // pending comment IN/OUT range. The arrow-key handler reads them
+  // synchronously to decide between stepping the playhead (normal
+  // mode) and moving the yellow OUT handle frame-by-frame (range-
+  // edit mode).
+  const rangeEditingRef = useRef(false)
+  const pendingInTimeRef = useRef<number | null>(null)
+  const pendingOutTimeRef = useRef<number | null>(null)
 
   // If ANY video is approved, only show approved videos (for both admin and client)
   // Memoize to prevent infinite loops with onVideoStateChange callback
@@ -587,15 +599,26 @@ export default function VideoPlayer({
         return
       }
 
+      // 1.9.0+: Escape exits range-edit mode (any focus context).
+      if (e.code === 'Escape' && rangeEditingRef.current) {
+        e.preventDefault()
+        e.stopPropagation()
+        setRangeEditActive(false)
+        return
+      }
+
       // ArrowLeft / ArrowRight: step one frame (1.0.7+). Same
       // behaviour as Ctrl+J / Ctrl+L but without the modifier so it
       // matches Frame.io / DaVinci Resolve muscle memory. We skip the
       // shortcut when the user is typing in an input / textarea /
-      // contenteditable so it doesn't fight with caret movement.
+      // contenteditable so it doesn't fight with caret movement —
+      // EXCEPT in range-edit mode, where ←/→ is intentionally
+      // hijacked to move the yellow OUT handle.
       if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
         if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+        const rangeEditing = rangeEditingRef.current
         const target = e.target as HTMLElement | null
-        if (target) {
+        if (target && !rangeEditing) {
           const tag = target.tagName
           if (
             tag === 'INPUT' ||
@@ -620,6 +643,46 @@ export default function VideoPlayer({
         const fps = selectedVideo?.fps && selectedVideo.fps > 0 ? selectedVideo.fps : 30
         const frameDuration = 1 / fps
         const direction = e.code === 'ArrowLeft' ? -1 : 1
+
+        // 1.9.0+: range-edit branch. Instead of stepping the
+        // playhead, we move the YELLOW OUT handle. The IN point is
+        // pinned at pendingInTimeRef (captured the moment the user
+        // focused the input). The first arrow press in this mode
+        // seeds OUT at IN + 1 frame. Subsequent presses extend or
+        // contract OUT by one frame, clamped to [IN + 1 frame,
+        // duration]. We also scrub the video to OUT so the user
+        // sees the exact frame they're marking.
+        if (rangeEditing) {
+          const inTime = pendingInTimeRef.current ?? video.currentTime
+          const currentOut = pendingOutTimeRef.current ?? inTime + frameDuration
+          // Quantise to whole frames so repeated taps land cleanly.
+          const quantize = (t: number) => Math.round(t * fps) / fps
+          const minOut = quantize(inTime + frameDuration)
+          const proposedOut = quantize(currentOut + direction * frameDuration)
+          const duration = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY
+          const nextOut = Math.max(minOut, Math.min(duration, proposedOut))
+          // Scrub video to the new OUT frame for visual feedback.
+          video.currentTime = nextOut
+          currentTimeRef.current = nextOut
+          window.dispatchEvent(
+            new CustomEvent('videoTimeUpdated', {
+              detail: { time: nextOut, videoId: selectedVideoIdRef.current },
+            }),
+          )
+          // Push the new range so the yellow handle + chip update.
+          window.dispatchEvent(
+            new CustomEvent('setCommentRange', {
+              detail: {
+                inTime,
+                outTime: nextOut,
+                videoId: selectedVideoIdRef.current,
+              },
+            }),
+          )
+          return
+        }
+
+        // Normal-mode behaviour (unchanged).
         const next = video.currentTime + direction * frameDuration
         const duration = Number.isFinite(video.duration) ? video.duration : undefined
         video.currentTime = duration
@@ -686,6 +749,76 @@ export default function VideoPlayer({
       }
     }
   }
+
+  // 1.9.0+: keep refs in sync with the range-edit module + the
+  // pending comment range. The arrow handler below reads these
+  // synchronously, so the refs need to update the moment the chip
+  // is clicked or the range hook recomputes its in/out times.
+  useEffect(() => {
+    rangeEditingRef.current = isRangeEditActive()
+    const onEdit = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { active?: boolean } | undefined
+      rangeEditingRef.current = Boolean(detail?.active)
+    }
+    const onRange = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { inTime?: number | null; outTime?: number | null; videoId?: string }
+        | undefined
+      if (!detail) return
+      // Filter by video so cross-clip events don't poison our refs.
+      if (
+        detail.videoId &&
+        selectedVideoIdRef.current &&
+        detail.videoId !== selectedVideoIdRef.current
+      ) {
+        return
+      }
+      pendingInTimeRef.current =
+        typeof detail.inTime === 'number' ? detail.inTime : null
+      pendingOutTimeRef.current =
+        typeof detail.outTime === 'number' ? detail.outTime : null
+    }
+    window.addEventListener('commentRangeEditChanged', onEdit as EventListener)
+    window.addEventListener('commentRangeStateChanged', onRange as EventListener)
+    return () => {
+      window.removeEventListener('commentRangeEditChanged', onEdit as EventListener)
+      window.removeEventListener('commentRangeStateChanged', onRange as EventListener)
+    }
+  }, [])
+
+  // 1.8.2+: Frame.io / YouTube-style Space-to-play/pause. Listens
+  // on document so it works whether the user clicked the video
+  // first or not. Critical guard: never trigger when the focus is
+  // in an editable element — the comment input is right next to
+  // the player and stealing Space mid-sentence would be terrible.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Ignore when the user is typing somewhere: <input>,
+      // <textarea>, <select>, or any element with contentEditable.
+      const target = e.target as HTMLElement | null
+      const isEditable =
+        !!target?.isContentEditable ||
+        (target instanceof HTMLElement &&
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      if (isEditable) return
+      // Ignore when a modifier is held — we don't want to hijack
+      // the browser's Ctrl/Cmd-Space shortcuts.
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.code !== 'Space' && e.key !== ' ') return
+      e.preventDefault()
+      const video = videoRef.current
+      if (!video) return
+      if (video.paused) {
+        void video.play()
+        setIsPlaying(true)
+      } else {
+        video.pause()
+        setIsPlaying(false)
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const handleVolumeChange = (newVolume: number) => {
     if (videoRef.current) {
@@ -1033,7 +1166,21 @@ export default function VideoPlayer({
                     onTimeUpdate={handleTimeUpdate}
                     onLoadedMetadata={handleLoadedMetadata}
                     onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
-                    onClick={isDrawingMode ? undefined : handlePlayPause}
+                    // 1.9.0+: while range-edit mode is active, a
+                    // click on the <video> exits the mode and is
+                    // consumed (no play/pause toggle). Second click
+                    // resumes normal play/pause behaviour.
+                    onClick={
+                      isDrawingMode
+                        ? undefined
+                        : () => {
+                            if (isRangeEditActive()) {
+                              setRangeEditActive(false)
+                              return
+                            }
+                            handlePlayPause()
+                          }
+                    }
                     crossOrigin="anonymous"
                     playsInline
                     preload="metadata"

@@ -6,6 +6,7 @@ import { Comment } from '@prisma/client'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward } from 'lucide-react'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
+import { isRangeEditActive } from '@/lib/comment-range-edit'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
 import type { SafeZonePreset } from './SafeZoneOverlay'
@@ -347,6 +348,23 @@ export default function CustomVideoControls({
   // dispatch the range without waiting for state.
   const [dragOutPct, setDragOutPct] = useState<number | null>(null)
   const frozenInTimeRef = useRef<number | null>(null)
+  // 1.9.0+: range-edit mode mirror (driven by the chip in
+  // CommentInput). When active the white playhead handle dims to
+  // signal that ←/→ now moves the yellow OUT handle, not the
+  // playhead.
+  const [rangeEditing, setRangeEditing] = useState(false)
+  useEffect(() => {
+    setRangeEditing(isRangeEditActive())
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { active?: boolean }
+        | undefined
+      setRangeEditing(Boolean(detail?.active))
+    }
+    window.addEventListener('commentRangeEditChanged', onChange as EventListener)
+    return () =>
+      window.removeEventListener('commentRangeEditChanged', onChange as EventListener)
+  }, [])
   useEffect(() => {
     if (!isDraggingOutHandle) return
     const computeTime = (clientX: number) => {
@@ -568,6 +586,12 @@ export default function CustomVideoControls({
 
   const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
+    // 1.9.0+: in range-edit mode the white playhead is locked —
+    // only the yellow OUT handle responds to ←/→. Clicking the
+    // timeline track must NOT scrub the video / move the white
+    // ball. The yellow handle's own button has stopPropagation
+    // on its mousedown, so dragging the yellow handle still works.
+    if (isRangeEditActive()) return
     // Skip the synthetic click that fires right after a touch on
     // mobile — the touch handler already seeked to the right spot.
     if (Date.now() - lastTouchAtRef.current < 500) return
@@ -590,12 +614,17 @@ export default function CustomVideoControls({
   }, [videoDuration, onSeek, videoId])
 
   const handleTimelineMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // 1.9.0+: same guard as handleTimelineClick — no scrubbing
+    // while range-edit mode is active.
+    if (isRangeEditActive()) return
     setIsDragging(true)
     handleTimelineClick(e)
   }, [handleTimelineClick])
 
   const handleTimelineTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
+    // 1.9.0+: lock the white playhead in range-edit mode.
+    if (isRangeEditActive()) return
     setIsDragging(true)
     lastTouchAtRef.current = Date.now()
 
@@ -826,6 +855,11 @@ export default function CustomVideoControls({
       <div className="mb-1.5 sm:mb-2 px-1">
         <div
           ref={timelineRef}
+          // 1.9.0+: data-timeline-track lets the CommentInput's
+          // click-outside detector skip the timeline (clicking the
+          // timeline while in range-edit mode shouldn't exit it —
+          // the user might be clicking to seek IN/OUT).
+          data-timeline-track
           className="relative h-10 sm:h-12 group cursor-pointer touch-none"
           onMouseDown={handleTimelineMouseDown}
           onClick={handleTimelineClick}
@@ -1001,9 +1035,14 @@ export default function CustomVideoControls({
           {/* Playhead. Uses `displayedProgress` (not raw `progress`)
               so it stays frozen at the IN position while the user is
               dragging the orange OUT handle — see comment on
-              `displayedProgress` for the full rationale. */}
+              `displayedProgress` for the full rationale.
+              1.9.0+: dims (opacity 40 %) while range-edit mode is
+              active to signal that ←/→ now drives the yellow OUT
+              handle, not the white playhead. */}
           <div
-            className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-20"
+            className={`absolute top-1/2 -translate-y-1/2 pointer-events-none z-20 transition-opacity duration-150 ${
+              rangeEditing ? 'opacity-40' : 'opacity-100'
+            }`}
             style={{ left: `${displayedProgress}%` }}
           >
             <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 border-primary -translate-x-1/2 group-hover:scale-110 transition-transform" />

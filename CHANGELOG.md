@@ -17,6 +17,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.9.0] - 2026-05-28
+
+### Added
+- **Range-edit mode for the comment composer.** Click the timestamp
+  chip ("00:13") in "Leave your comment" and the player drops into
+  a Frame.io-style frame-by-frame range editor: the white playhead
+  handle dims to ~40 %, the ←/→ arrow keys now move the YELLOW
+  OUT handle (not the playhead) one frame at a time, and the video
+  scrubs to the new OUT frame for visual confirmation. The IN
+  point stays pinned wherever it was captured on input focus, so
+  every arrow press grows or shrinks the existing selection.
+  Quantises to whole frames so repeated taps land cleanly even on
+  weird FPS values.
+
+  Exits cleanly when the user:
+  - clicks the chip again (toggle),
+  - presses Escape,
+  - clicks the `<video>` (first click is consumed as "exit"; the
+    next click resumes normal play/pause),
+  - clicks the X on the timestamp chip,
+  - submits the comment with Enter,
+  - clicks anywhere else outside the timeline / chip.
+
+  Timeline scrubbing (mouse + touch) is hard-blocked while
+  range-edit is active so the white playhead can't drift — the
+  user can ONLY move the yellow OUT handle via ←/→ or its own
+  drag handle.
+
+  Internals: module-level state in `src/lib/comment-range-edit.ts`
+  broadcasts changes via a `commentRangeEditChanged` window event.
+  CommentInput renders the chip + visual toggle, CustomVideoControls
+  dims the white ball, VideoPlayer's global keydown handler reads
+  the state from a ref to swap the arrow behaviour. New
+  `data-comment-range-chip` + `data-timeline-track` attributes keep
+  the document-level click-outside detector honest.
+- **Space-to-play/pause on the video player** (carried over from
+  1.8.2 dev). Global document keydown listener with a strict guard
+  that skips when focus is inside an editable element (so writing
+  a comment with spaces in it never accidentally pauses the
+  video).
+
 ## [1.8.1] - 2026-05-28
 
 ### Fixed
