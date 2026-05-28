@@ -101,6 +101,17 @@ export function RenameDialog({
           )}
         </DialogHeader>
         <form
+          // 1.8.0+: stopPropagation on every click inside the dialog
+          // form. The dialog is rendered as a React child of the
+          // caller (e.g. ProjectCardKebab's wrapper, which calls
+          // e.preventDefault() on every click to block the parent
+          // card's <Link>). React synthetic events bubble through
+          // the React tree even though Radix portals the dialog to
+          // <body> in the DOM — so without this guard the wrapper's
+          // preventDefault() would cancel the default action of the
+          // type="submit" button (i.e. cancel the form submission)
+          // and "Rename" would silently do nothing.
+          onClick={(e) => e.stopPropagation()}
           onSubmit={(e) => {
             e.preventDefault()
             void handleSubmit()

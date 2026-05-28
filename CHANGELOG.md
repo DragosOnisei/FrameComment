@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.8.1] - 2026-05-28
+
+### Fixed
+- **Rename project actually renames now.** The themed RenameDialog
+  shipped in 1.8.0 was a no-op: pressing Enter or clicking "Rename"
+  did nothing. Same root cause as the Change Logo bug — the
+  dialog is rendered as a React child of `ProjectCardKebab`'s
+  wrapper `<div onClick={stop}>`, and React synthetic events
+  bubble through the React tree (not the DOM tree) even though
+  Radix portals the dialog to `<body>`. The wrapper's
+  `preventDefault()` was cancelling the default action of the
+  `type="submit"` button → form never submitted. Added
+  `onClick={(e) => e.stopPropagation()}` on the dialog form so
+  clicks inside the dialog don't reach the wrapper.
+
 ## [1.8.0] - 2026-05-28
 
 ### Fixed
