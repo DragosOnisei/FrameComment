@@ -117,6 +117,39 @@ export function ShareModal({
   // happens inside a click handler so we're fine. If the API is
   // unavailable (Safari Private Mode, http://, etc.) we silently fall
   // back — the user can still hit the Copy button manually.
+  // 1.7.7+: clipboard write that survives insecure contexts.
+  // `navigator.clipboard.writeText` requires a secure origin
+  // (HTTPS or localhost); on TrueNAS LAN over plain HTTP it
+  // rejects with NotAllowedError. We fall back to the legacy
+  // `document.execCommand('copy')` path so the share URL still
+  // lands on the clipboard, instead of forcing the user through
+  // a `window.prompt('Copy this share link:', …)` dialog.
+  const writeClipboard = useCallback(async (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text)
+        return true
+      } catch {
+        /* fall through to legacy path */
+      }
+    }
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.top = '-9999px'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }, [])
+
   const autoCopiedRef = useRef(false)
   useEffect(() => {
     if (!open) {
@@ -125,15 +158,10 @@ export function ShareModal({
     }
     if (autoCopiedRef.current) return
     autoCopiedRef.current = true
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      navigator.clipboard
-        .writeText(shareUrl)
-        .then(() => setCopied(true))
-        .catch(() => {
-          // Silent fail — clipboard API blocked. Manual button works.
-        })
-    }
-  }, [open, shareUrl])
+    void writeClipboard(shareUrl).then((ok) => {
+      if (ok) setCopied(true)
+    })
+  }, [open, shareUrl, writeClipboard])
 
   // Reset the green check after a couple of seconds so the user can
   // re-copy without the modal needing to be re-opened.
@@ -155,15 +183,13 @@ export function ShareModal({
   }, [open, initialExpiresDate])
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(shareUrl)
-      setCopied(true)
-    } catch {
-      // clipboard API blocked — fall back to a plain prompt so the
-      // user can still copy manually.
-      window.prompt('Copy this share link:', shareUrl)
-    }
-  }, [shareUrl])
+    // 1.7.7+: same insecure-context-safe write as the auto-copy
+    // on open. No more native `window.prompt` fallback when the
+    // clipboard API is blocked — the legacy textarea+execCommand
+    // path runs invisibly instead.
+    const ok = await writeClipboard(shareUrl)
+    if (ok) setCopied(true)
+  }, [shareUrl, writeClipboard])
 
   const pickPreset = useCallback((p: Preset) => {
     const now = new Date()
