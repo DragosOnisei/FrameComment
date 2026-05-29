@@ -299,19 +299,28 @@ export default function MessageBubble({
   const hasReplies = threadReplies.length > 0
 
   return (
-    // Frame.io-style flat list item — no card wrapper, no border around the
-    // whole comment, no shadow. Hover reveals the right-side action cluster
-    // (emoji react / kebab / mark as done). When the comment is resolved
-    // we dim the whole row and stamp a green ✓ where the sequence number
-    // used to sit.
-    <div className="w-full" id={`comment-${comment.id}`}>
+    // 1.9.1+: Frame.io-style cards. Each comment sits inside its own
+    // rounded card (bg-card/50 + thin border) with breathing space
+    // between cards (mb-2). Replies keep the flat-list look so the
+    // thread reads as nested inside the parent card. Hover bumps the
+    // card brightness one notch; the `comment-focused-glass` class
+    // (toggled from CommentSection on avatar click) bumps it harder
+    // with a frosted-glass feel — replaces the old box-shadow ring.
+    <div
+      className="w-full"
+      id={`comment-${comment.id}`}
+    >
       <div
         onClick={handleBubbleClick}
-        className={`group relative cursor-pointer transition-colors py-2 pl-3 pr-1 -mx-2 rounded-md ${
+        className={`group relative cursor-pointer transition-colors py-3 px-3 ${
+          isReply
+            ? 'rounded-md hover:bg-muted/30'
+            : 'rounded-lg border border-border bg-card/50 hover:bg-card/70'
+        } ${
           isAnnotationFocused
-            ? 'bg-primary/5 ring-1 ring-primary/30'
-            : 'hover:bg-muted/30'
-        } ${isResolved ? 'opacity-70' : ''}`}
+            ? 'bg-primary/10 ring-1 ring-primary/30'
+            : ''
+        } ${isResolved ? 'opacity-70' : ''} comment-card`}
       >
         {hasReplies && (
           <div className="absolute left-[18px] top-9 bottom-9 w-px bg-border/50" aria-hidden="true" />

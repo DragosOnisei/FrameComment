@@ -206,6 +206,11 @@ export default function CustomVideoControls({
   const tComments = useTranslations('comments')
   const [isDragging, setIsDragging] = useState(false)
   const [showVolume, setShowVolume] = useState(false)
+  // 1.9.1+: custom volume slider state. Native <input type=range>
+  // doesn't let us transition the thumb position, so we replace it
+  // with a div-based slider that mirrors the timeline pattern.
+  const volumeTrackRef = useRef<HTMLDivElement>(null)
+  const [isDraggingVolume, setIsDraggingVolume] = useState(false)
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null)
   // 1.3.1+: viewport-width tracker. Used to apply inline-style width
   // on the timeline-comment tooltip on phones because Tailwind's
@@ -537,7 +542,23 @@ export default function CustomVideoControls({
         return true
       })
       .map((comment) => {
-        const start = timecodeToSeconds(comment.timecode!, videoFps)
+        // 1.9.1+: mirror the EXACT same start-time computation the
+        // marker (avatar) uses — prefer the precise `timestampMs`
+        // when present, fall back to seek-seconds, then quantize to
+        // the nearest frame. Without this, the range bar's left
+        // edge can drift a fraction of a percent away from the
+        // avatar's center because `timecodeToSeconds` and
+        // `timecodeToSeekSeconds` round timecodes differently, and
+        // legacy comments only have `timestampMs` set. The visual
+        // result was a tiny gap between the avatar and the start
+        // of the yellow strip — the user noticed it immediately.
+        const fps = videoFps && videoFps > 0 ? videoFps : 24
+        const preciseMs = (comment as any).timestampMs
+        const rawStart =
+          typeof preciseMs === 'number' && Number.isFinite(preciseMs) && preciseMs >= 0
+            ? preciseMs / 1000
+            : timecodeToSeekSeconds(comment.timecode!, videoFps)
+        const start = Math.round(rawStart * fps) / fps
         const end = timecodeToSeconds((comment as any).timecodeEnd!, videoFps)
         const effectiveAuthorName = comment.authorName ||
           ((comment as any).user?.name || (comment as any).user?.email || null)
@@ -797,6 +818,39 @@ export default function CustomVideoControls({
     }, 500)
   }, [])
 
+  // 1.9.1+: custom volume slider — drag/click handlers. Mirrors
+  // the timeline pattern: clientX → % → onVolumeChange. Click +
+  // drag are unified through the same path so dragging continues
+  // smoothly even if the cursor leaves the track rect.
+  const computeVolumeFromClientX = useCallback((clientX: number): number | null => {
+    const rect = volumeTrackRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0) return null
+    const x = clientX - rect.left
+    return Math.max(0, Math.min(1, x / rect.width))
+  }, [])
+
+  const handleVolumePointerDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const v = computeVolumeFromClientX(e.clientX)
+    if (v !== null) onVolumeChange(v)
+    setIsDraggingVolume(true)
+  }, [computeVolumeFromClientX, onVolumeChange])
+
+  useEffect(() => {
+    if (!isDraggingVolume) return
+    const onMove = (e: MouseEvent) => {
+      const v = computeVolumeFromClientX(e.clientX)
+      if (v !== null) onVolumeChange(v)
+    }
+    const onUp = () => setIsDraggingVolume(false)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [isDraggingVolume, computeVolumeFromClientX, onVolumeChange])
+
   const progress = videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0
   // 1.3.2+: range-aware playhead positioning.
   //
@@ -851,8 +905,20 @@ export default function CustomVideoControls({
 
   return (
     <div className="bg-black px-2 sm:px-3 py-2">
-      {/* Timeline Container */}
-      <div className="mb-1.5 sm:mb-2 px-1">
+      {/* Timeline Container.
+          1.9.1+: dropped the `px-1` that used to be here. The
+          avatar row below already has `px-1`, but the avatar's
+          containing block for `left: X%` is the FULL padding box
+          (= row width), while the range-bar's containing block is
+          `timelineRef`, which sits INSIDE the px-1 — so its width
+          was 8 px less. Same X% ended up at different absolute
+          positions, drifting up to 4 px at the timeline edges
+          (avatar/range-bar misalignment the user noticed). By
+          dropping px-1 here, timelineRef now spans the same width
+          as the avatar row's padding box, and X% maps to the
+          same absolute X on both. The outer container's
+          `px-2 sm:px-3` still provides edge breathing room. */}
+      <div className="mb-1.5 sm:mb-2">
         <div
           ref={timelineRef}
           // 1.9.0+: data-timeline-track lets the CommentInput's
@@ -869,30 +935,80 @@ export default function CustomVideoControls({
           onTouchMove={handleTimelineTouchMove}
           onTouchEnd={handleTimelineTouchEnd}
         >
-          {/* Background Track */}
-          <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-1.5 sm:h-2 bg-white/20 rounded-full overflow-hidden">
+          {/* Background Track.
+              1.9.1+: Frame.io-style thin timeline — 3 px at rest,
+              thickens to 6/8 px on hover so the bar reads as a
+              hairline strip when the user isn't interacting with it
+              and grows into a usable target on hover. The parent
+              `group` is the tall click-area div above; `group-hover`
+              cascades to every sibling, so the buffered fill,
+              progress, range bars, pending range fill, and yellow
+              handle all thicken in sync. transition-[height] keeps
+              the change smooth. */}
+          <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-[3px] group-hover:h-1.5 sm:group-hover:h-2 bg-white/20 rounded-full overflow-hidden transition-[height] duration-150">
             {/* Buffered/Loaded (could be enhanced with actual buffer info) */}
             <div className="absolute inset-0 bg-white/30" />
-            
-            {/* Progress */}
+
+            {/* Progress.
+                1.9.1+: 200 ms linear transition matches the
+                videoTimeUpdated throttle window in VideoPlayer
+                (also 200 ms), so the blue fill interpolates
+                continuously between samples instead of jumping in
+                frame chunks. Linear (not ease) keeps the visual
+                speed constant — anything cubic would look like the
+                playback was speeding up/slowing down between
+                samples. */}
             <div
-              className="absolute inset-y-0 left-0 bg-primary transition-all duration-100"
-              style={{ width: `${displayedProgress}%` }}
+              className="absolute inset-y-0 left-0 bg-primary"
+              style={{
+                width: `${displayedProgress}%`,
+                transition: 'width 200ms linear',
+              }}
             />
           </div>
 
-          {/* Range Bars for comments with timecodeEnd */}
+          {/* Range Bars for comments with timecodeEnd.
+              1.9.1+: positioned at the exact vertical level of the
+              avatar centers in the row below, so the yellow strip
+              runs THROUGH the avatar circles like a thread through
+              beads — Frame.io convention. The avatars sit on top
+              (z-50 vs the bar's default z-auto + later DOM order
+              of the avatar row means avatars naturally render
+              above).
+
+              Y math: outer has py-2 (8 px top pad). timelineRef is
+              h-10 / h-12 (40/48 px tall) immediately under that.
+              Avatar row sits after with mb-1.5/2 + -mt-4/-18 so its
+              top edge lands 38 px / 46 px below outer top
+              (= 30/38 px below timelineRef top). Avatar is
+              w-4 h-4 / w-[18px] h-[18px] (16/18 px) at top: 0 of
+              the row, so its CENTER is at 38/47 px below
+              timelineRef top.
+
+              -translate-y-1/2 anchors the bar's center at the
+              specified `top`, so the bar stays centred on the
+              avatar even as its height transitions on hover. The
+              bar will overflow timelineRef's bottom edge by design
+              — that's the whole point.
+
+              Uniformly yellow (warning), thin idle + slight
+              thicken on group hover for symmetry with the track. */}
           {rangeBars.map((bar) => {
-            const colors = COLOR_MAP[bar.colorKey] || COLOR_MAP['border-gray-500']
             const width = bar.endPosition - bar.startPosition
             return (
               <div
                 key={`range-${bar.id}`}
-                className={`absolute top-1/2 -translate-y-1/2 h-1.5 sm:h-2 rounded-full pointer-events-none ${colors.bg}`}
+                // 1.9.1+: stay HAIRLINE thin always — these are
+                // comment markers, not part of the playback track,
+                // so they shouldn't thicken when the user hovers
+                // the timeline. (Earlier draft had group-hover
+                // here so they grew with the main track; user
+                // flagged it as noise.)
+                className="absolute top-[38px] sm:top-[47px] -translate-y-1/2 h-[2px] rounded-full pointer-events-none bg-warning"
                 style={{
                   left: `${bar.startPosition}%`,
                   width: `${Math.max(width, 0.5)}%`,
-                  opacity: 0.85,
+                  opacity: 0.9,
                 }}
               />
             )
@@ -934,10 +1050,21 @@ export default function CustomVideoControls({
                     frozenPlayheadPctRef.current !== null &&
                     dragOutPct > frozenPlayheadPctRef.current)) && (
                   <div
-                    className="absolute top-1/2 -translate-y-1/2 h-1.5 sm:h-2 bg-warning/70 rounded-full pointer-events-none z-15"
+                    // 1.9.1+: same thin-by-default + thicken-on-
+                    // hover treatment as the background track and
+                    // saved range bars. PLUS the 200 ms linear
+                    // left/width transition so the live yellow
+                    // fill glides during playback / range-edit
+                    // arrow steps. Disabled during active drag
+                    // (same reasoning as the yellow ball above:
+                    // drag wants 1:1 cursor tracking).
+                    className="absolute top-1/2 -translate-y-1/2 h-[3px] group-hover:h-1.5 sm:group-hover:h-2 bg-warning/70 rounded-full pointer-events-none z-15"
                     style={{
                       left: `${displayedProgress}%`,
                       width: `${Math.max(yellowPct - displayedProgress, 0.5)}%`,
+                      transition: isDraggingOutHandle
+                        ? 'height 150ms ease'
+                        : 'left 200ms linear, width 200ms linear, height 150ms ease',
                     }}
                   />
                 )}
@@ -997,13 +1124,24 @@ export default function CustomVideoControls({
                     bg-warning ring-2 ring-black/40
                     shadow-md cursor-ew-resize
                     hover:scale-110 active:scale-100
-                    transition-transform
                     touch-none
                     ${isDraggingOutHandle ? 'scale-125 shadow-lg' : ''}
                   `}
+                  // 1.9.1+: same 200ms linear `left` transition as
+                  // the white playhead so the yellow handle glides
+                  // smoothly during playback / range-edit arrow
+                  // steps instead of jumping in frame chunks.
+                  // IMPORTANT: disabled while the user is actively
+                  // dragging — drag needs immediate 1:1 finger-
+                  // tracking, the transition would feel like lag.
+                  // Transform transition kept on a separate channel
+                  // for the hover/drag scale effect.
                   style={{
                     left: `${yellowPct}%`,
                     transform: 'translateX(-50%)',
+                    transition: isDraggingOutHandle
+                      ? 'transform 150ms ease'
+                      : 'left 200ms linear, transform 150ms ease',
                   }}
                   title="Drag right to mark the comment's end point"
                   aria-label="Drag to set comment out point"
@@ -1038,14 +1176,31 @@ export default function CustomVideoControls({
               `displayedProgress` for the full rationale.
               1.9.0+: dims (opacity 40 %) while range-edit mode is
               active to signal that ←/→ now drives the yellow OUT
-              handle, not the white playhead. */}
+              handle, not the white playhead.
+              1.9.1+: white circle replaced with a Frame.io-style
+              thin vertical tick — 2 px wide, height matches the
+              timeline track (3 px idle, 6/8 px on group hover) so
+              the playhead reads as a clean hairline marker instead
+              of a chunky disc. -translate-x-1/2 keeps the line
+              centred on the playhead's exact X position. */}
           <div
-            className={`absolute top-1/2 -translate-y-1/2 pointer-events-none z-20 transition-opacity duration-150 ${
+            className={`absolute top-1/2 -translate-y-1/2 pointer-events-none z-20 ${
               rangeEditing ? 'opacity-40' : 'opacity-100'
             }`}
-            style={{ left: `${displayedProgress}%` }}
+            // 1.9.1+: 200 ms linear transition on `left` so the
+            // tick interpolates smoothly between videoTimeUpdated
+            // samples (also throttled to 200 ms in VideoPlayer).
+            // Without this, the playhead jumped 5-6 frames at a
+            // time on shorter clips — visible as a tick that
+            // "stutters" instead of tracking the playback head.
+            // Opacity transition stays at 150 ms ease so the dim
+            // when range-edit toggles still feels punchy.
+            style={{
+              left: `${displayedProgress}%`,
+              transition: 'left 200ms linear, opacity 150ms ease',
+            }}
           >
-            <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 border-primary -translate-x-1/2 group-hover:scale-110 transition-transform" />
+            <div className="w-[2px] h-[3px] group-hover:h-1.5 sm:group-hover:h-2 bg-white -translate-x-1/2 transition-[height] duration-150" />
           </div>
 
           {/* Hover Time Indicator — desktop only. On phones touch
@@ -1477,18 +1632,55 @@ export default function CustomVideoControls({
                 <Volume2 className="w-4 h-4 text-white" />
               )}
             </button>
-            {showVolume && (
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={isMuted ? 0 : volume}
-                onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-                className="hidden sm:block h-1 w-20 cursor-pointer accent-primary"
-                aria-label="Volume"
+            {/* 1.9.1+: custom div-based volume slider. Replaces the
+                old native <input type=range> because native sliders
+                don't let us transition the thumb position, and the
+                user wanted the same smooth glide as the playhead.
+                Track + fill + thumb mirror the timeline pattern;
+                drag/click handlers route through onVolumeChange so
+                the audio updates exactly like before. The wrapper
+                fades + slides on showVolume just like the previous
+                input did. Hidden on mobile — tap icon mutes. */}
+            <div
+              ref={volumeTrackRef}
+              role="slider"
+              aria-valuemin={0}
+              aria-valuemax={1}
+              aria-valuenow={isMuted ? 0 : volume}
+              aria-label="Volume"
+              tabIndex={showVolume ? 0 : -1}
+              onMouseDown={handleVolumePointerDown}
+              className={`hidden sm:block relative h-1 rounded-full bg-white/20 cursor-pointer transition-[width,opacity,margin] duration-200 ease-out ${
+                showVolume
+                  ? 'w-20 opacity-100 pointer-events-auto ml-1'
+                  : 'w-0 opacity-0 pointer-events-none ml-0'
+              }`}
+            >
+              {/* Filled portion (blue line up to current volume). */}
+              <div
+                className="absolute inset-y-0 left-0 bg-primary rounded-full pointer-events-none"
+                style={{
+                  width: `${(isMuted ? 0 : volume) * 100}%`,
+                  transition: isDraggingVolume
+                    ? 'none'
+                    : 'width 200ms linear',
+                }}
               />
-            )}
+              {/* Thumb (blue ball). Same 200ms linear transition on
+                  `left` as the timeline playhead, disabled during
+                  active drag so it tracks the cursor 1:1. */}
+              <div
+                className="absolute top-1/2 w-3 h-3 bg-primary rounded-full shadow-sm pointer-events-none"
+                style={{
+                  left: `${(isMuted ? 0 : volume) * 100}%`,
+                  transform: 'translate(-50%, -50%)',
+                  transition: isDraggingVolume
+                    ? 'none'
+                    : 'left 200ms linear',
+                }}
+              />
+            </div>
+
           </div>
         </div>
 

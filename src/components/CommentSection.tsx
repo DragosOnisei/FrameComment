@@ -705,11 +705,19 @@ export default function CommentSection({
         if (!isMobile) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' })
         }
-        element.style.transition = 'background-color 0.3s'
-        element.style.backgroundColor = 'hsl(var(--primary) / 0.12)'
-        setTimeout(() => {
-          element.style.backgroundColor = 'transparent'
-        }, 1000)
+        // 1.9.1+: PERSISTENT glossy lift. Add .is-selected to the
+        // clicked comment's card and clear it from every other one
+        // — so the selection sticks until the user clicks another
+        // comment, or anywhere outside the comment list. The
+        // document mousedown listener installed in the effect
+        // below handles those cases. .is-selected is a pure CSS
+        // class with transition-colors, so the bg + border fade
+        // smoothly in/out.
+        document
+          .querySelectorAll('.comment-card.is-selected')
+          .forEach((el) => el.classList.remove('is-selected'))
+        const card = element.querySelector<HTMLElement>('.comment-card')
+        if (card) card.classList.add('is-selected')
         return
       }
 
@@ -720,6 +728,57 @@ export default function CommentSection({
 
     setTimeout(tryScroll, 100)
   }, [focusCommentId, localComments.length])
+
+  // 1.9.1+: persistent selection management for comment cards.
+  // - Click on any .comment-card → marks THAT card as selected,
+  //   removes selection from the others. The user gets a sticky
+  //   glossy lift on the comment they're reading.
+  // - Click anywhere else (outside any card) → clears selection.
+  // We attach at document level so the listener catches clicks
+  // regardless of which subtree they happen in (admin view, share
+  // view, etc.).
+  useEffect(() => {
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const card = target.closest<HTMLElement>('.comment-card')
+      if (card) {
+        // Skip if the user is interacting with form-ish controls
+        // INSIDE the card (replying, reacting, kebab menu) —
+        // they have their own click semantics and shouldn't
+        // re-trigger the selection animation. The card still
+        // ends up selected because it's already focused, just
+        // without re-running the transition.
+        const interactive = target.closest('button, a, input, textarea, select')
+        if (interactive && card.contains(interactive)) {
+          // Still set selection on the card we clicked into,
+          // but only if it isn't already selected (avoids
+          // class churn → reflowed transitions).
+          if (!card.classList.contains('is-selected')) {
+            document
+              .querySelectorAll('.comment-card.is-selected')
+              .forEach((el) => el.classList.remove('is-selected'))
+            card.classList.add('is-selected')
+          }
+          return
+        }
+        // Normal card click → make THIS one the selected one.
+        if (!card.classList.contains('is-selected')) {
+          document
+            .querySelectorAll('.comment-card.is-selected')
+            .forEach((el) => el.classList.remove('is-selected'))
+          card.classList.add('is-selected')
+        }
+        return
+      }
+      // Click landed OUTSIDE every comment card → clear selection.
+      document
+        .querySelectorAll('.comment-card.is-selected')
+        .forEach((el) => el.classList.remove('is-selected'))
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [])
 
   // Listen for immediate comment updates (delete, approve, post, etc.)
   useEffect(() => {
@@ -1325,7 +1384,11 @@ export default function CommentSection({
         <div
           ref={messagesContainerRef}
           className={cn(
-            "flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 min-h-0 bg-muted/20",
+            // 1.9.1+: space-y-3 (12px) between comment cards — about
+            // half of the old space-y-6 (24px). 4 px was too tight,
+            // 24 px too airy; 12 px reads as deliberate separation
+            // without wasting vertical space in the list.
+            "flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-3 min-h-0 bg-muted/20",
             mobileCollapsible && "order-3 lg:order-1",
             mobileCollapsible && isMobileCollapsed && "hidden lg:block"
           )}

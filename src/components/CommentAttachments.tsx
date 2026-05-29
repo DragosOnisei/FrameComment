@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { FileText, Image as ImageIcon, Music, Film, Download, Loader2, X } from 'lucide-react'
+import { FileText, Image as ImageIcon, Music, Film, Download, Loader2, X, Play, Pause } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
 
@@ -360,24 +360,226 @@ function AudioAttachment({
   }, [asset.id, videoId, shareToken])
 
   return (
-    // Inline voice/audio attachment — just the native player. The music
-    // icon and file-size label were removed (they were noise once the
-    // player itself made the medium obvious). The player gets the full
-    // width of the bubble so Chrome doesn't collapse the play button
-    // on narrow sidebars.
-    <div className="px-1 py-0.5">
+    // 1.9.1+: themed custom player instead of the native <audio
+    // controls> (which was an ugly white pill on our dark UI).
+    // Mirrors the VoiceRecorderButton preview: bg-muted/40 chip
+    // with a play/pause circle, a continuous track + fill + thumb,
+    // driven by rAF at 60fps + click/drag-to-scrub.
+    <div className="py-0.5 w-full">
       {loading && (
         <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin" />
       )}
       {error && <span className="text-xs text-destructive">{error}</span>}
-      {audioUrl && (
-        <audio
-          src={audioUrl}
-          controls
-          preload="metadata"
-          className="h-9 w-full"
-        />
-      )}
+      {audioUrl && <ThemedAudioPlayer src={audioUrl} />}
+    </div>
+  )
+}
+
+/**
+ * 1.9.1+: themed inline audio player used for voice-message
+ * comment attachments. Mirrors the VoiceRecorderButton preview UI
+ * exactly so a voice comment looks the same whether it's about to
+ * be sent or already saved. Play/pause + continuous-line scrubber
+ * + draggable thumb + rAF-driven smoothness.
+ */
+function ThemedAudioPlayer({ src }: { src: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const trackRef = useRef<HTMLDivElement | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [progress, setProgress] = useState(0) // 0..1
+  const [audioDuration, setAudioDuration] = useState(0)
+  const [isScrubbing, setIsScrubbing] = useState(false)
+
+  const INSET = 8 // matches px-2 on the outer chip, keeps the thumb in bounds
+
+  // 1.9.1+: resolve duration BEFORE play, while the audio is
+  // paused. Chrome's MediaRecorder webm blobs report
+  // `audio.duration === Infinity` until you seek past the end —
+  // but if we do that seek while the audio is PLAYING it races
+  // to the end, fires `ended`, and forces the user to click Play
+  // again (the original "thumb jumps to end → start → play" bug).
+  // Doing it while paused, the seek just updates metadata; no
+  // `ended` fires because the audio isn't advancing.
+  const togglePlay = useCallback(() => {
+    const a = audioRef.current
+    if (!a) return
+    if (!a.paused) {
+      a.pause()
+      return
+    }
+    const needsResolve =
+      !Number.isFinite(a.duration) || a.duration <= 0
+    if (!needsResolve) {
+      void a.play()
+      return
+    }
+    // First play on a webm with no embedded duration: force-seek
+    // past the end while paused, wait for durationchange, then
+    // rewind to 0 and play.
+    const onResolved = () => {
+      a.removeEventListener('durationchange', onResolved)
+      try {
+        a.currentTime = 0
+      } catch {}
+      void a.play()
+    }
+    a.addEventListener('durationchange', onResolved)
+    try {
+      a.currentTime = 1e10
+    } catch {
+      a.removeEventListener('durationchange', onResolved)
+      void a.play()
+    }
+  }, [])
+
+  // Just record the duration whenever the browser tells us about
+  // it — no seek trick here. The seek-to-resolve only happens in
+  // togglePlay above, while paused.
+  const handleLoadedMetadata = useCallback(() => {
+    const a = audioRef.current
+    if (a && Number.isFinite(a.duration) && a.duration > 0) {
+      setAudioDuration(a.duration)
+    }
+  }, [])
+  const handleDurationChange = useCallback(() => {
+    const a = audioRef.current
+    if (a && Number.isFinite(a.duration) && a.duration > 0) {
+      setAudioDuration(a.duration)
+    }
+  }, [])
+
+  const seekFromClientX = useCallback(
+    (clientX: number) => {
+      const a = audioRef.current
+      const rect = trackRef.current?.getBoundingClientRect()
+      if (!a || !rect) return
+      const trackWidth = rect.width - INSET * 2
+      if (trackWidth <= 0) return
+      const x = clientX - rect.left - INSET
+      const pct = Math.max(0, Math.min(1, x / trackWidth))
+      const total =
+        Number.isFinite(a.duration) && a.duration > 0
+          ? a.duration
+          : audioDuration
+      if (total <= 0) return
+      try {
+        a.currentTime = pct * total
+      } catch {}
+      setProgress(pct)
+    },
+    [audioDuration],
+  )
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      seekFromClientX(e.clientX)
+      setIsScrubbing(true)
+    },
+    [seekFromClientX],
+  )
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      const t = e.touches[0]
+      if (!t) return
+      seekFromClientX(t.clientX)
+      setIsScrubbing(true)
+    },
+    [seekFromClientX],
+  )
+  useEffect(() => {
+    if (!isScrubbing) return
+    const onMouseMove = (e: MouseEvent) => seekFromClientX(e.clientX)
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (t) seekFromClientX(t.clientX)
+    }
+    const onUp = () => setIsScrubbing(false)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('touchmove', onTouchMove, { passive: true })
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchend', onUp)
+    window.addEventListener('touchcancel', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchend', onUp)
+      window.removeEventListener('touchcancel', onUp)
+    }
+  }, [isScrubbing, seekFromClientX])
+
+  // 60 fps progress updates via rAF — onTimeUpdate fires only
+  // 4–6 Hz so the thumb stuttered.
+  useEffect(() => {
+    if (!isPlaying || isScrubbing) return
+    let raf = 0
+    const tick = () => {
+      const a = audioRef.current
+      if (a) {
+        const total =
+          Number.isFinite(a.duration) && a.duration > 0
+            ? a.duration
+            : audioDuration
+        if (total > 0) {
+          setProgress(Math.min(1, a.currentTime / total))
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [isPlaying, isScrubbing, audioDuration])
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/40 border border-border min-w-0 w-full">
+      <button
+        type="button"
+        onClick={togglePlay}
+        className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 text-foreground transition-colors"
+        title={isPlaying ? 'Pause' : 'Play'}
+        aria-label={isPlaying ? 'Pause' : 'Play'}
+      >
+        {isPlaying ? (
+          <Pause className="w-3 h-3" fill="currentColor" />
+        ) : (
+          <Play className="w-3 h-3 ml-[1px]" fill="currentColor" />
+        )}
+      </button>
+      <div
+        ref={trackRef}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        className="relative h-5 flex-1 min-w-0 cursor-pointer touch-none flex items-center px-2"
+      >
+        <div className="relative w-full h-[3px] rounded-full bg-muted-foreground/40">
+          <div
+            className="absolute inset-y-0 left-0 bg-primary rounded-full"
+            style={{ width: `${progress * 100}%` }}
+          />
+          <div
+            className="absolute top-1/2 w-3 h-3 rounded-full bg-primary shadow-md ring-2 ring-background pointer-events-none"
+            style={{
+              left: `${progress * 100}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+          />
+        </div>
+      </div>
+      <audio
+        ref={audioRef}
+        src={src}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onLoadedMetadata={handleLoadedMetadata}
+        onDurationChange={handleDurationChange}
+        onEnded={() => {
+          setIsPlaying(false)
+          setProgress(0)
+          if (audioRef.current) audioRef.current.currentTime = 0
+        }}
+        className="hidden"
+        preload="metadata"
+      />
     </div>
   )
 }

@@ -614,8 +614,16 @@ export default function VideoPlayer({
       // contenteditable so it doesn't fight with caret movement —
       // EXCEPT in range-edit mode, where ←/→ is intentionally
       // hijacked to move the yellow OUT handle.
+      //
+      // 1.9.1+: Shift + ←/→ jumps 1 second instead of 1 frame.
+      // Frame.io / DaVinci convention for fast scrubbing. The
+      // range-edit branch uses the same step size so the yellow
+      // OUT handle also jumps 1 second at a time when Shift is
+      // held — convenient for marking longer selections.
       if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-        if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+        // Still block other modifiers — those are browser / OS
+        // shortcuts we shouldn't hijack.
+        if (e.ctrlKey || e.metaKey || e.altKey) return
         const rangeEditing = rangeEditingRef.current
         const target = e.target as HTMLElement | null
         if (target && !rangeEditing) {
@@ -642,23 +650,28 @@ export default function VideoPlayer({
         // press while the metadata is still loading.
         const fps = selectedVideo?.fps && selectedVideo.fps > 0 ? selectedVideo.fps : 30
         const frameDuration = 1 / fps
+        // 1.9.1+: Shift = 1 second jump; no Shift = 1 frame step.
+        const stepSize = e.shiftKey ? 1 : frameDuration
         const direction = e.code === 'ArrowLeft' ? -1 : 1
 
         // 1.9.0+: range-edit branch. Instead of stepping the
         // playhead, we move the YELLOW OUT handle. The IN point is
         // pinned at pendingInTimeRef (captured the moment the user
         // focused the input). The first arrow press in this mode
-        // seeds OUT at IN + 1 frame. Subsequent presses extend or
-        // contract OUT by one frame, clamped to [IN + 1 frame,
-        // duration]. We also scrub the video to OUT so the user
-        // sees the exact frame they're marking.
+        // seeds OUT at IN + 1 step. Subsequent presses extend or
+        // contract OUT by one step (frame or second depending on
+        // Shift), clamped to [IN + 1 frame, duration]. We also
+        // scrub the video to OUT so the user sees the exact frame
+        // they're marking.
         if (rangeEditing) {
           const inTime = pendingInTimeRef.current ?? video.currentTime
-          const currentOut = pendingOutTimeRef.current ?? inTime + frameDuration
-          // Quantise to whole frames so repeated taps land cleanly.
+          const currentOut = pendingOutTimeRef.current ?? inTime + stepSize
+          // Quantise to whole frames so repeated taps land cleanly
+          // even when Shift is held (1 second is rarely a whole
+          // number of frames at 23.976/29.97 etc).
           const quantize = (t: number) => Math.round(t * fps) / fps
           const minOut = quantize(inTime + frameDuration)
-          const proposedOut = quantize(currentOut + direction * frameDuration)
+          const proposedOut = quantize(currentOut + direction * stepSize)
           const duration = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY
           const nextOut = Math.max(minOut, Math.min(duration, proposedOut))
           // Scrub video to the new OUT frame for visual feedback.
@@ -682,8 +695,8 @@ export default function VideoPlayer({
           return
         }
 
-        // Normal-mode behaviour (unchanged).
-        const next = video.currentTime + direction * frameDuration
+        // Normal-mode behaviour.
+        const next = video.currentTime + direction * stepSize
         const duration = Number.isFinite(video.duration) ? video.duration : undefined
         video.currentTime = duration
           ? Math.max(0, Math.min(duration, next))

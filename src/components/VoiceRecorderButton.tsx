@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Mic, Square, Trash2, Check, Loader2 } from 'lucide-react'
+import { Mic, Square, Trash2, Check, Loader2, ChevronDown, Play, Pause, Send } from 'lucide-react'
 import * as tus from 'tus-js-client'
 import {
   createTusAfterResponseHandler,
@@ -12,6 +12,7 @@ import { getTusChunkSizeBytes, TUS_RETRY_DELAYS_MS } from '@/lib/transfer-tuning
 import { ensureFreshUploadOnContextChange } from '@/lib/tus-context'
 import { useS3MultipartUpload } from '@/hooks/useS3MultipartUpload'
 import { useStorageProvider } from '@/components/StorageConfigProvider'
+import { getAccessToken } from '@/lib/token-store'
 
 interface PendingAttachment {
   assetId: string
@@ -32,6 +33,11 @@ interface VoiceRecorderButtonProps {
    *  The parent (CommentInput) uses this to hide sibling icons so the
    *  recorder UI gets the whole input row to itself. */
   onActiveChange?: (active: boolean) => void
+  /** 1.9.1+: exposes uploadRecording() to the parent while a voice
+   *  message is in preview, and null otherwise. The parent's own
+   *  Send button calls this so we don't have to render a duplicate
+   *  send icon inside the recorder. */
+  onReadyToSendChange?: (send: (() => void) | null) => void
 }
 
 const MAX_DURATION_SECONDS = 300 // 5 minutes
@@ -88,6 +94,7 @@ export default function VoiceRecorderButton({
   onAttachmentAdded,
   disabled = false,
   onActiveChange,
+  onReadyToSendChange,
 }: VoiceRecorderButtonProps) {
   const storageProvider = useStorageProvider()
   const { startUpload: startS3Upload } = useS3MultipartUpload()
@@ -111,9 +118,151 @@ export default function VoiceRecorderButton({
   // Available audio input devices and the user's selected one. Empty until
   // permission has been granted at least once (browsers hide labels otherwise).
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('')
+  // 1.9.1+: persist selected mic to localStorage so the user's pick survives
+  // page reloads and tab restarts. Lazy init reads on mount; the next effect
+  // writes on every change.
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>(() => {
+    if (typeof window === 'undefined') return ''
+    try {
+      return window.localStorage.getItem('framecomment.preferred-mic-id') || ''
+    } catch {
+      return ''
+    }
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (selectedDeviceId) {
+        window.localStorage.setItem('framecomment.preferred-mic-id', selectedDeviceId)
+      }
+    } catch {
+      // localStorage can throw in private mode / disabled — non-fatal.
+    }
+  }, [selectedDeviceId])
+  // 1.9.1+: device picker popover open state + outside-click ref.
+  const [showDevicePicker, setShowDevicePicker] = useState(false)
+  const devicePickerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!showDevicePicker) return
+    const onDown = (e: MouseEvent) => {
+      if (!devicePickerRef.current?.contains(e.target as Node)) {
+        setShowDevicePicker(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [showDevicePicker])
   // Live waveform: a small ring of recent volume samples (0..1) for animation.
   const [waveSamples, setWaveSamples] = useState<number[]>(Array(24).fill(0.05))
+
+  // 1.9.1+: preview-mode playback state for the in-app waveform
+  // player. We don't show native <audio controls> any more — the
+  // theme-styled play/pause + wave bars take care of the UX.
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [playbackProgress, setPlaybackProgress] = useState(0) // 0..1
+  const [isScrubbingPreview, setIsScrubbingPreview] = useState(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const previewBarsRef = useRef<HTMLDivElement | null>(null)
+  const togglePlayback = useCallback(() => {
+    const a = audioRef.current
+    if (!a) return
+    if (a.paused) {
+      void a.play()
+    } else {
+      a.pause()
+    }
+  }, [])
+  // 1.9.1+: scrub helper. Chrome's MediaRecorder webm blobs have no
+  // duration metadata so `audio.duration` is often `Infinity` —
+  // we fall back to the recorded `duration` state captured at
+  // record-time. This is shared by click-to-seek and the drag
+  // handler so both paths agree on total length.
+  // PREVIEW_TRACK_INSET (px) matches the `px-2` on the outer
+  // container so the thumb's full 12 px circle stays visible at
+  // both 0 % and 100 % without overlapping the play button or the
+  // delete/send icons. seek math subtracts the inset on both sides.
+  const PREVIEW_TRACK_INSET = 8
+  const seekFromClientX = useCallback(
+    (clientX: number) => {
+      const a = audioRef.current
+      const rect = previewBarsRef.current?.getBoundingClientRect()
+      if (!a || !rect) return
+      const trackWidth = rect.width - PREVIEW_TRACK_INSET * 2
+      if (trackWidth <= 0) return
+      const x = clientX - rect.left - PREVIEW_TRACK_INSET
+      const pct = Math.max(0, Math.min(1, x / trackWidth))
+      const total =
+        Number.isFinite(a.duration) && a.duration > 0 ? a.duration : duration
+      if (total <= 0) return
+      try {
+        a.currentTime = pct * total
+      } catch {
+        // Some browsers throw on seek-while-loading; ignore.
+      }
+      setPlaybackProgress(pct)
+    },
+    [duration],
+  )
+  // 1.9.1+: drive playbackProgress at 60fps via rAF while playing
+  // instead of relying on the audio element's onTimeUpdate (which
+  // fires only 4-6 times/sec → visibly choppy thumb motion).
+  // Pauses cleanly when isPlaying flips false or the user starts
+  // scrubbing (so we don't fight a finger drag).
+  useEffect(() => {
+    if (!isPlaying || isScrubbingPreview) return
+    let raf = 0
+    const tick = () => {
+      const a = audioRef.current
+      if (a) {
+        const total =
+          Number.isFinite(a.duration) && a.duration > 0 ? a.duration : duration
+        if (total > 0) {
+          setPlaybackProgress(Math.min(1, a.currentTime / total))
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [isPlaying, isScrubbingPreview, duration])
+  const handlePreviewMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      seekFromClientX(e.clientX)
+      setIsScrubbingPreview(true)
+    },
+    [seekFromClientX],
+  )
+  const handlePreviewTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      const t = e.touches[0]
+      if (!t) return
+      seekFromClientX(t.clientX)
+      setIsScrubbingPreview(true)
+    },
+    [seekFromClientX],
+  )
+  useEffect(() => {
+    if (!isScrubbingPreview) return
+    const onMouseMove = (e: MouseEvent) => seekFromClientX(e.clientX)
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (t) seekFromClientX(t.clientX)
+    }
+    const onUp = () => setIsScrubbingPreview(false)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('touchmove', onTouchMove, { passive: true })
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchend', onUp)
+    window.addEventListener('touchcancel', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchend', onUp)
+      window.removeEventListener('touchcancel', onUp)
+    }
+  }, [isScrubbingPreview, seekFromClientX])
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -239,22 +388,47 @@ export default function VoiceRecorderButton({
       // Set up an analyser for the live waveform
       try {
         const ctx = new AudioContext()
+        // 1.9.1+: resume the context if it landed in `suspended` (some
+        // browsers create AudioContexts paused until the next user
+        // gesture — without resuming the analyser gets no samples).
+        if (ctx.state === 'suspended') {
+          await ctx.resume().catch(() => {})
+        }
         const source = ctx.createMediaStreamSource(stream)
         const analyser = ctx.createAnalyser()
         analyser.fftSize = 256
         source.connect(analyser)
+        // 1.9.1+: route the analyser into a MUTED gain that connects
+        // to destination. Without ANY connection to destination, the
+        // Web Audio graph is treated as inactive in Chromium and the
+        // analyser stops pulling samples → flat-line visualiser. The
+        // gain at 0 ensures nothing is actually audible (no feedback).
+        const sinkGain = ctx.createGain()
+        sinkGain.gain.value = 0
+        analyser.connect(sinkGain)
+        sinkGain.connect(ctx.destination)
         audioContextRef.current = ctx
         analyserRef.current = analyser
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+        // Use the time-domain data (waveform) instead of frequency
+        // bins — voice tracks RMS amplitude over time and gives a
+        // far more reactive bar height than averaging FFT bins.
+        const dataArray = new Uint8Array(analyser.fftSize)
         const tick = () => {
           if (!analyserRef.current) return
-          analyserRef.current.getByteFrequencyData(dataArray)
-          // Average amplitude in 0..1
-          let sum = 0
-          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]
-          const avg = sum / dataArray.length / 255
-          setWaveSamples((prev) => [...prev.slice(1), Math.max(0.05, avg)])
+          analyserRef.current.getByteTimeDomainData(dataArray)
+          // Compute RMS of the centred waveform (samples are 0..255
+          // with 128 as silence midpoint).
+          let sumSq = 0
+          for (let i = 0; i < dataArray.length; i++) {
+            const v = (dataArray[i] - 128) / 128
+            sumSq += v * v
+          }
+          const rms = Math.sqrt(sumSq / dataArray.length)
+          // Boost a bit so quiet voice still moves the bars visibly,
+          // clamp to [0.05, 1].
+          const level = Math.max(0.05, Math.min(1, rms * 2.5))
+          setWaveSamples((prev) => [...prev.slice(1), level])
           animationFrameRef.current = requestAnimationFrame(tick)
         }
         animationFrameRef.current = requestAnimationFrame(tick)
@@ -321,6 +495,11 @@ export default function VoiceRecorderButton({
 
   const cancel = useCallback(() => {
     cleanupStream()
+    // 1.9.1+: stop preview playback if it's running.
+    const a = audioRef.current
+    if (a && !a.paused) a.pause()
+    setIsPlaying(false)
+    setPlaybackProgress(0)
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setPreviewUrl(null)
     setRecordedBlob(null)
@@ -332,6 +511,10 @@ export default function VoiceRecorderButton({
 
   const uploadRecording = useCallback(async () => {
     if (!recordedBlob) return
+    // 1.9.1+: idempotency guard. The parent's Send button now
+    // calls this directly; without the guard, double-tapping
+    // could fire two concurrent uploads.
+    if (isUploading) return
     setIsUploading(true)
     setError(null)
 
@@ -339,7 +522,11 @@ export default function VoiceRecorderButton({
       const fileName = `voice-${Date.now()}.${recordedExt}`
       const file = new File([recordedBlob], fileName, { type: recordedBlob.type || 'audio/webm' })
 
-      // Step 1: register the asset to get an assetId
+      // Step 1: register the asset to get an assetId.
+      // 1.9.1+: pick the right bearer based on context — shareToken
+      // for client/guest viewers, admin access token for admin view.
+      // Without this, admin uploads went out unauthenticated → 401
+      // "Authentication failed" once attachments were enabled.
       const createUrl = `/api/videos/${videoId}/client-assets`
       const createBody = JSON.stringify({
         fileName: file.name,
@@ -347,20 +534,21 @@ export default function VoiceRecorderButton({
         fileType: file.type || 'audio/webm',
         category: 'audio',
       })
-      const createRes = shareToken
-        ? await fetch(createUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${shareToken}`,
-            },
-            body: createBody,
-          })
-        : await fetch(createUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: createBody,
-          })
+      const adminAccessToken = getAccessToken()
+      const createHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+      }
+      if (shareToken) {
+        createHeaders.Authorization = `Bearer ${shareToken}`
+      } else if (adminAccessToken) {
+        createHeaders.Authorization = `Bearer ${adminAccessToken}`
+      }
+      const createRes = await fetch(createUrl, {
+        method: 'POST',
+        headers: createHeaders,
+        body: createBody,
+        credentials: 'include',
+      })
       if (!createRes.ok) {
         const err = await createRes.json().catch(() => ({}))
         throw new Error(err.error || 'Failed to create voice asset')
@@ -403,8 +591,18 @@ export default function VoiceRecorderButton({
             onBeforeRequest: (req) => {
               const xhr = req.getUnderlyingObject() as XMLHttpRequest
               xhr.withCredentials = true
+              // 1.9.1+: same fallback path as the create-asset call —
+              // shareToken when a client/guest is uploading, else the
+              // admin's in-memory access token. Without this the TUS
+              // PATCHes hit the server unauthenticated and the user
+              // saw "Authentication failed" mid-upload.
               if (shareToken) {
                 xhr.setRequestHeader('Authorization', `Bearer ${shareToken}`)
+              } else {
+                const adminToken = getAccessToken()
+                if (adminToken) {
+                  xhr.setRequestHeader('Authorization', `Bearer ${adminToken}`)
+                }
               }
             },
             onError: (err) => {
@@ -417,14 +615,22 @@ export default function VoiceRecorderButton({
         })
       }
 
-      onAttachmentAdded({
+      const attachment = {
         assetId,
         videoId,
         fileName: file.name,
         fileSize: String(file.size),
         fileType: file.type || 'audio/webm',
         category: 'audio',
-      })
+      }
+      onAttachmentAdded(attachment)
+
+      // 1.9.1+: auto-post is handled in CommentInput via a
+      // pendingAttachments watcher + a "user just sent voice"
+      // ref flag. No event needed — that pattern had stale-closure
+      // problems where the listener fired before React had
+      // committed the new attachment to state, so the auto-submit
+      // saw an empty pendingAttachments and bailed out.
 
       // Reset the local UI state so the user can record another one.
       cancel()
@@ -442,7 +648,21 @@ export default function VoiceRecorderButton({
     startS3Upload,
     onAttachmentAdded,
     cancel,
+    isUploading,
   ])
+
+  // 1.9.1+: expose uploadRecording to the parent while we have a
+  // recorded blob in preview (and aren't already uploading). The
+  // parent's official Send button calls this directly so the user
+  // sees a single send icon — no in-recorder duplicate.
+  useEffect(() => {
+    if (!onReadyToSendChange) return
+    if (recordedBlob && !isUploading) {
+      onReadyToSendChange(uploadRecording)
+      return () => onReadyToSendChange(null)
+    }
+    onReadyToSendChange(null)
+  }, [recordedBlob, isUploading, uploadRecording, onReadyToSendChange])
 
   // ---------- Render ----------
 
@@ -451,42 +671,83 @@ export default function VoiceRecorderButton({
   // before in this session), show a tiny dropdown next to the mic button so
   // they can pick a different one without going to system settings.
   if (!isRecording && !recordedBlob) {
+    const selectedLabel = cleanDeviceLabel(
+      audioDevices.find((d) => d.deviceId === selectedDeviceId)?.label,
+    )
     return (
       <>
-        <div className="relative inline-flex items-center gap-1">
+        <div
+          ref={devicePickerRef}
+          className="relative inline-flex items-center"
+        >
           <button
             type="button"
             onClick={startRecording}
             disabled={disabled || isUploading}
             className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Record voice message"
+            title={
+              selectedLabel
+                ? `Record voice message (${selectedLabel})`
+                : 'Record voice message'
+            }
             aria-label="Record voice message"
           >
             <Mic className="w-4 h-4" />
           </button>
-          {/* Inline device picker hidden by default — it dwarfs the
-              comment input on a 280-300px sidebar. Modern review tools
-              (Frame.io, Slack) put the mic switch in OS / settings,
-              not on the comment row. The selected device is still set
-              via system audio defaults. */}
-          {false && audioDevices.length > 1 && (
-            <select
-              value={selectedDeviceId}
-              onChange={(e) => setSelectedDeviceId(e.target.value)}
-              className="text-xs bg-background border border-border rounded-md px-2 py-1 min-w-0 max-w-[140px] sm:max-w-[180px] xl:max-w-[220px] truncate"
-              title={
-                cleanDeviceLabel(
-                  audioDevices.find((d) => d.deviceId === selectedDeviceId)?.label
-                ) || 'Select microphone'
-              }
-              aria-label="Select microphone"
+          {/* 1.9.1+: Google Meet-style chevron next to the mic. Click
+              opens a tiny popover with the available audio inputs;
+              the chosen device is persisted to localStorage so the
+              user's pick survives reloads + tab restarts. Shows only
+              when more than one device exists (or one is detected by
+              label) — first-time users get the OS default and won't
+              see clutter. */}
+          {audioDevices.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setShowDevicePicker((v) => !v)}
+              disabled={disabled || isUploading}
+              className="p-1 -ml-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+              title="Choose microphone"
+              aria-label="Choose microphone"
+              aria-haspopup="menu"
+              aria-expanded={showDevicePicker}
             >
-              {audioDevices.map((d, i) => (
-                <option key={d.deviceId || `dev-${i}`} value={d.deviceId}>
-                  {cleanDeviceLabel(d.label) || `Microphone ${i + 1}`}
-                </option>
-              ))}
-            </select>
+              <ChevronDown className="w-3 h-3" />
+            </button>
+          )}
+          {showDevicePicker && audioDevices.length > 0 && (
+            <div
+              role="menu"
+              className="absolute bottom-full left-0 mb-1 min-w-[220px] max-w-[280px] rounded-lg border border-border bg-popover text-popover-foreground shadow-xl p-1 z-50"
+            >
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                Microphone
+              </div>
+              {audioDevices.map((d, i) => {
+                const isSelected = d.deviceId === selectedDeviceId
+                const label = cleanDeviceLabel(d.label) || `Microphone ${i + 1}`
+                return (
+                  <button
+                    key={d.deviceId || `dev-${i}`}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={isSelected}
+                    onClick={() => {
+                      setSelectedDeviceId(d.deviceId)
+                      setShowDevicePicker(false)
+                    }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left hover:bg-accent transition-colors ${
+                      isSelected ? 'text-foreground' : 'text-muted-foreground'
+                    }`}
+                  >
+                    <span className="w-4 h-4 shrink-0 flex items-center justify-center">
+                      {isSelected && <Check className="w-3.5 h-3.5" />}
+                    </span>
+                    <span className="truncate">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
           )}
           {error && (
             <span className="ml-2 text-xs text-destructive">{error}</span>
@@ -540,20 +801,60 @@ export default function VoiceRecorderButton({
     )
   }
 
-  // Preview / confirm state — fills the available width of the input
-  // row so the controls never clip out of the sidebar. The audio
-  // element is the flexible part; the surrounding mic + cancel + send
-  // icons keep their natural size.
+  // 1.9.1+: Preview UI. Mirrors the recording UI's layout
+  // (container, gap, bar row) so the transition feels seamless —
+  // the red recording chip turns into a neutral preview chip, the
+  // red dot + duration become a play/pause button, and the stop
+  // button is replaced by Discard + Send. No native <audio
+  // controls> any more (those drag in browser styling + a volume
+  // icon we didn't ask for). A hidden <audio> drives playback;
+  // the bars dye left-to-right with `bg-primary` as it plays.
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-muted border border-border min-w-0 flex-1">
-      <Mic className="w-4 h-4 text-muted-foreground shrink-0" />
-      {previewUrl && (
-        <audio
-          src={previewUrl}
-          controls
-          className="h-8 flex-1 min-w-0 max-w-full"
-        />
-      )}
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/40 border border-border min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={togglePlayback}
+        disabled={isUploading || !previewUrl}
+        className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 text-foreground transition-colors disabled:opacity-50"
+        title={isPlaying ? 'Pause' : 'Play'}
+        aria-label={isPlaying ? 'Pause' : 'Play'}
+      >
+        {isPlaying ? (
+          <Pause className="w-3 h-3" fill="currentColor" />
+        ) : (
+          <Play className="w-3 h-3 ml-[1px]" fill="currentColor" />
+        )}
+      </button>
+      {/* 1.9.1+: continuous-line scrubber instead of bars (per user
+          request). Outer container is the full click/touch target
+          with px-2 inset so the thumb's 12 px circle never gets
+          clipped at the ends. Inner relative wrapper hosts the
+          background track, the filled portion, and the draggable
+          thumb. rAF drives playbackProgress at 60 fps while
+          playing, so no CSS transition is needed — the thumb glides
+          smoothly without the choppy stop/start that the 4-6 Hz
+          onTimeUpdate produced. Transition is also omitted during
+          active scrub so the thumb tracks the cursor 1:1. */}
+      <div
+        ref={previewBarsRef}
+        onMouseDown={handlePreviewMouseDown}
+        onTouchStart={handlePreviewTouchStart}
+        className="relative h-5 flex-1 min-w-0 cursor-pointer touch-none flex items-center px-2"
+      >
+        <div className="relative w-full h-[3px] rounded-full bg-muted-foreground/40">
+          <div
+            className="absolute inset-y-0 left-0 bg-primary rounded-full"
+            style={{ width: `${playbackProgress * 100}%` }}
+          />
+          <div
+            className="absolute top-1/2 w-3 h-3 rounded-full bg-primary shadow-md ring-2 ring-background pointer-events-none"
+            style={{
+              left: `${playbackProgress * 100}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+          />
+        </div>
+      </div>
       <button
         type="button"
         onClick={cancel}
@@ -564,20 +865,45 @@ export default function VoiceRecorderButton({
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
-      <button
-        type="button"
-        onClick={uploadRecording}
-        disabled={isUploading}
-        className="p-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1 shrink-0"
-        title="Attach voice message"
-        aria-label="Attach voice message"
-      >
-        {isUploading ? (
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        ) : (
-          <Check className="w-3.5 h-3.5" />
-        )}
-      </button>
+      {/* 1.9.1+: no in-recorder send button. The parent
+          (CommentInput) wires its OWN paper-plane Send to
+          uploadRecording via the onReadyToSendChange prop below,
+          so there's a single "official" send icon on the comment
+          row. While the upload is in flight we just show a
+          spinner here as a status indicator. */}
+      {isUploading && (
+        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground shrink-0" />
+      )}
+      {previewUrl && (
+        <audio
+          ref={audioRef}
+          src={previewUrl}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onTimeUpdate={(e) => {
+            const a = e.currentTarget
+            // 1.9.1+: webm blobs from MediaRecorder often have
+            // duration === Infinity (no metadata embedded by Chrome).
+            // Fall back to the recorded `duration` captured during
+            // the recording session — otherwise the bars never
+            // colour in and progress stays stuck at 0.
+            const total =
+              Number.isFinite(a.duration) && a.duration > 0
+                ? a.duration
+                : duration
+            if (total > 0) {
+              setPlaybackProgress(Math.min(1, a.currentTime / total))
+            }
+          }}
+          onEnded={() => {
+            setIsPlaying(false)
+            setPlaybackProgress(0)
+            if (audioRef.current) audioRef.current.currentTime = 0
+          }}
+          className="hidden"
+          preload="metadata"
+        />
+      )}
       {error && (
         <span className="ml-1 text-xs text-destructive">{error}</span>
       )}

@@ -94,7 +94,7 @@ model Project {
 
   // Client share page settings
   allowAssetDownload     Boolean @default(true) // Allow clients to download video assets when project is approved
-  allowClientAssetUpload Boolean @default(false) // Allow clients to upload file attachments on comments
+  allowClientAssetUpload Boolean @default(true) // Allow clients to upload file attachments on comments (1.9.1+: default true; admin can disable per project)
   clientCanApprove       Boolean @default(true) // Allow clients to approve videos (false = admin only)
   allowReverseShare      Boolean @default(false) // Allow clients to upload files directly to the project (reverse share)
 

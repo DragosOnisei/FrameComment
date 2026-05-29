@@ -17,6 +17,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.9.1] - 2026-05-29
+
+### Added
+- **Shift + ←/→ jumps 1 second** in the player (vs 1 frame without
+  Shift). Works in both normal mode and range-edit mode (so the
+  yellow OUT handle can also be extended in 1-second increments
+  for longer selections).
+- **Google Meet-style mic picker.** A small chevron next to the mic
+  icon opens a popover with all detected audio inputs; click one
+  to select it. The choice persists to `localStorage` so it
+  survives reloads and tab restarts. `getUserMedia` is called with
+  `{ deviceId: { exact: ... } }` so the chosen mic is used reliably.
+- **Voice messages auto-post.** Recording + clicking the official
+  paper-plane Send button uploads the audio AND posts the
+  comment in one step. No need to also type text or click again.
+- **Themed inline audio player.** Saved voice attachments in
+  comments now use a custom play/pause + continuous-line scrubber
+  + draggable thumb in our theme colours — replacing the native
+  `<audio controls>` white pill that didn't fit the dark UI.
+
+### Changed
+- **Timeline overhaul, Frame.io-style.** Hairline-thin (3 px) at
+  rest, thickens to 6/8 px on hover via group-hover transitions.
+  Range comments (with timecodeEnd) render as a separate thin
+  yellow strip BELOW the main track, passing THROUGH the avatar
+  circles like a thread — the avatars sit on top.
+- **Playhead is now a thin vertical tick** (2 × 3/6/8 px white)
+  instead of the chunky disc with a primary border. Matches the
+  hairline aesthetic of the rest of the timeline.
+- **Smooth motion for everything on the timeline.** Playhead,
+  yellow OUT handle, and live range fill all glide via 200 ms
+  linear `left`/`width` transitions (matched to the 200 ms
+  `videoTimeUpdated` throttle). Transitions are disabled while
+  actively dragging the yellow handle so it tracks the cursor 1:1.
+- **Volume slider redesigned.** Custom div-based slider mirroring
+  the timeline pattern — track + filled portion + thumb, drag or
+  click to seek, 200 ms smooth glide between updates. Fade-in +
+  slide-out animation on hover of the volume icon. Native
+  `<input type=range>` was replaced because browsers don't let
+  CSS transitions move its thumb position.
+- **Comments rendered as cards.** Each top-level comment sits in
+  its own rounded `bg-card/50 border` card with breathing space
+  between (`space-y-3` in the list). Replies keep the flat-list
+  look so threads read as nested inside the parent.
+- **Persistent glossy selection on the focused comment.** Clicking
+  an avatar in the timeline (or directly on a comment card) lifts
+  the card with a brighter `bg-card/95` + `border-primary/45`
+  treatment that stays put until the user clicks another comment
+  or anywhere outside the comment list. Replaces the previous
+  1.1-second fade animation that the user said looked off.
+- **Tighter spacing between comments** (24 px → 12 px) so more
+  comments fit on screen without the list feeling cramped.
+- **Attachments enabled by default on every project.** The default
+  for `Project.allowClientAssetUpload` flipped from `false` to
+  `true`. A migration also flips every existing project to `true`
+  — admins who actively disabled attachments on a specific
+  project will need to re-disable from Settings.
+
+### Fixed
+- **Space-to-play/pause on the video player** with a strict guard
+  that skips when focus is in an editable element, so writing a
+  comment with spaces in it never accidentally pauses the video.
+- **Frame-by-frame stepping with ←/→ works in range-edit mode too**
+  (already shipped in 1.9.0 but documented here for completeness).
+- **Range-edit mode polish:** the white playhead is now locked while
+  range-edit is active — clicking or dragging the timeline track
+  no longer scrubs it. Clicking the X on the timestamp chip, the
+  `<video>`, or submitting the comment cleanly exits the mode.
+- **Range bar starts at the avatar's CENTER**, not its left edge.
+  Two root causes: (1) the range bar used `timecodeToSeconds`
+  while the marker used `timestampMs/1000 + frame quantization`,
+  drifting up to a frame; (2) the timeline wrapper had a `px-1`
+  that the avatar row didn't, so the same `left: X%` mapped to
+  different absolute positions. Both fixed; bar + avatar now
+  share the exact computation AND containing-block width.
+- **Voice recorder analyser stays flat-line no more.** Without a
+  connection to `ctx.destination`, Chromium optimised the Web
+  Audio graph out and the analyser stopped pulling samples. Routed
+  `source → analyser → muted gain → destination` (gain at 0 = no
+  audio out) and switched to time-domain `getByteTimeDomainData`
+  for far more reactive RMS waveform bars.
+- **Voice preview UI no longer uses the native `<audio controls>`.**
+  Replaced with a play/pause button + continuous-line scrubber +
+  draggable thumb in our theme. Bars colour in as playback
+  progresses; rAF drives the position at 60 fps so the thumb glides
+  instead of stuttering between sparse `timeupdate` events.
+- **Voice playback bar started behind the play button.** Added an
+  8 px inset to the track + adjusted seek math so the 12 px thumb
+  is fully visible at both 0 % and 100 %.
+- **Admin auth on voice uploads.** Voice recorder was hitting
+  `/api/videos/[id]/client-assets` + `/api/uploads` (TUS) without
+  an Authorization header on admin view (it only sent the share
+  token for client viewers). Added an `getAccessToken()` fallback
+  on both paths so admins can record + upload voice comments.
+- **Saved voice attachments now show actual scrubbing duration.**
+  WebM blobs from `MediaRecorder` have `audio.duration === Infinity`
+  by default. We force-resolve it via a seek-past-end trick — and
+  critically, only do that WHILE THE AUDIO IS PAUSED (in
+  `togglePlay`, not on metadata-load). Doing the seek mid-playback
+  caused the thumb to visibly jump to the end + back to start + fire
+  `ended`, requiring the user to click Play a second time.
+- **Voice messages now auto-post on first Send click**, not the
+  second. The original event-based pattern had a stale-closure
+  race where `voice:autoPost` dispatched before React committed
+  the new attachment to state, so `handleSubmitComment` saw an
+  empty `pendingAttachments` and bailed. Replaced with a
+  `pendingAttachments` watcher + a "user clicked Send during
+  voice preview" ref flag — the watcher fires `onSubmit` when the
+  attachment lands AND the flag is set, capturing the LATEST
+  `onSubmit` closure naturally.
+- **"Cannot update a component while rendering" error** in
+  CommentInput. `setVoiceSend(uploadRecording)` made React
+  interpret the function as a setState updater and call it
+  during render. Switched to a `useRef` + boolean flag pattern
+  for the disabled-prop trigger.
+- **Single official Send button** for voice messages. The voice
+  recorder no longer renders its own paper-plane button — the
+  CommentInput's official Send handles voice uploads via an
+  `onReadyToSendChange` prop callback. Discard (trash) icon
+  stays in the recorder UI.
+
 ## [1.9.0] - 2026-05-28
 
 ### Added

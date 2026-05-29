@@ -132,6 +132,23 @@ export default function CommentInput({
   // preview. While active, we hide the sibling icon buttons (draw,
   // paperclip) so the recorder UI gets the whole input row to itself.
   const [isVoiceActive, setIsVoiceActive] = useState(false)
+  // 1.9.1+: when a voice message is in preview the recorder hands
+  // us its uploadRecording() so the official paper-plane Send
+  // button can trigger it directly. We store the function in a
+  // ref (NOT useState) — passing a raw function to setState makes
+  // React interpret it as a setter and call it during render,
+  // which would invoke uploadRecording mid-render and throw
+  // "Cannot update a component while rendering a different one".
+  // A boolean flag drives the re-render for `disabled` state.
+  const voiceSendRef = useRef<(() => void) | null>(null)
+  const [hasVoicePending, setHasVoicePending] = useState(false)
+  const handleVoiceReadyToSend = useCallback(
+    (send: (() => void) | null) => {
+      voiceSendRef.current = send
+      setHasVoicePending(!!send)
+    },
+    [],
+  )
 
   // 1.1.1+: ref + native input listener to catch OS-level insertions
   // that React's synthetic `onChange` misses. macOS Sequoia's Apple
@@ -269,6 +286,30 @@ export default function CommentInput({
     window.addEventListener('videoTimeUpdated', onTime as EventListener)
     return () => window.removeEventListener('videoTimeUpdated', onTime as EventListener)
   }, [selectedVideoIdProp])
+
+  // 1.9.1+: auto-post the comment when a voice message finishes
+  // uploading. We track a "user clicked Send during voice preview"
+  // ref flag (set in the Send button's onClick, below), and an
+  // effect that watches pendingAttachments. When the attachment
+  // count goes UP after the flag was set, the effect calls onSubmit
+  // — onSubmit here is the LATEST one from props (effect re-runs
+  // when pendingAttachments changes, so it captures fresh closures
+  // including handleSubmitComment with the new attachment in state).
+  // Far more reliable than the previous window-event approach which
+  // had stale-closure races between dispatch and React's render.
+  const justUploadedVoiceRef = useRef(false)
+  const prevAttachmentsCountRef = useRef(pendingAttachments.length)
+  useEffect(() => {
+    const prevLen = prevAttachmentsCountRef.current
+    const currLen = pendingAttachments.length
+    prevAttachmentsCountRef.current = currLen
+    if (currLen > prevLen && justUploadedVoiceRef.current) {
+      justUploadedVoiceRef.current = false
+      // Defer one tick so any sibling state updates from cancel()
+      // in VoiceRecorderButton land before submit reads state.
+      setTimeout(() => onSubmit(), 0)
+    }
+  }, [pendingAttachments, onSubmit])
 
   // 1.9.0+: range-edit mode (click the chip → arrow keys move the
   // yellow OUT handle frame-by-frame instead of stepping the playhead).
@@ -685,6 +726,7 @@ export default function CommentInput({
                     onAttachmentAdded={onAttachmentAdded}
                     disabled={loading}
                     onActiveChange={setIsVoiceActive}
+                    onReadyToSendChange={handleVoiceReadyToSend}
                   />
                 )}
                 {/* In-app emoji picker (1.1.1+). Side-steps the
@@ -700,10 +742,30 @@ export default function CommentInput({
                 )}
               </div>
               )}
+              {/* 1.9.1+: single official Send. When a voice message
+                  is in preview the recorder stores its
+                  uploadRecording() in voiceSendRef via
+                  handleVoiceReadyToSend; clicking Send fires that,
+                  sets justUploadedVoiceRef, and the pendingAttachments
+                  watcher above auto-fires onSubmit once the new
+                  attachment lands. Otherwise the normal text-comment
+                  path. hasVoicePending is the re-render trigger for
+                  the disabled check. */}
               <Button
-                onClick={submitWithAutoFinish}
+                onClick={() => {
+                  if (voiceSendRef.current) {
+                    justUploadedVoiceRef.current = true
+                    voiceSendRef.current()
+                  } else {
+                    submitWithAutoFinish()
+                  }
+                }}
                 variant="default"
-                disabled={!canSubmit && !annotationCtx?.isDrawingMode}
+                disabled={
+                  !hasVoicePending &&
+                  !canSubmit &&
+                  !annotationCtx?.isDrawingMode
+                }
                 size="icon"
                 className="h-8 w-8 shrink-0"
               >
