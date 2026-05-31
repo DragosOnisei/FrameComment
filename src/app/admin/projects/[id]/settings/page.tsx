@@ -1262,13 +1262,18 @@ export default function ProjectSettingsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      {/* 1.9.4+ Phase A: Auto matches the source — we
+                          always start with a fast 480p tier, then
+                          climb the ladder up to whatever the input
+                          actually resolves at (no upscaling). */}
+                      <SelectItem value="auto">Auto (match source — recommended)</SelectItem>
                       <SelectItem value="720p">{t('resolution720p')}</SelectItem>
                       <SelectItem value="1080p">{t('resolution1080p')}</SelectItem>
                       <SelectItem value="2160p">{t('resolution2160p')}</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    {t('previewResolutionHint')}
+                    The progressive ladder always starts at 480p for fast first playback, then climbs to the chosen cap (or the source resolution in Auto mode).
                   </p>
                 </div>
               </div>

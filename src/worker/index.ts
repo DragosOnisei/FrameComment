@@ -5,6 +5,7 @@ import { runCleanup } from '../lib/upload-cleanup'
 import { purgeExpiredTrash } from '../lib/trash-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
 import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
+import { getActiveVideoEncoder, getMaxParallelTranscodes } from '../lib/ffmpeg'
 import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processProjectUpload } from './project-upload-processor'
@@ -27,6 +28,12 @@ async function main() {
   // Get centralized CPU allocation (coordinates with FFmpeg threads)
   const cpuAllocation = getCpuAllocation()
   logCpuAllocation(cpuAllocation)
+
+  // 1.9.4+ Phase A: log the active video encoder + parallelism so
+  // it's obvious at startup which transcoding path is in use.
+  logMessage(
+    `[WORKER] Video encoder: ${getActiveVideoEncoder()} (max parallel tiers: ${getMaxParallelTranscodes()})`,
+  )
 
   if (DEBUG) {
     logMessage('[WORKER DEBUG] Debug mode is ENABLED')

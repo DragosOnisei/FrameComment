@@ -194,6 +194,11 @@ export async function GET(
       const wm2160 = (video as any).preview2160Path as string | null | undefined
       const wm1080 = video.preview1080Path
       const wm720 = video.preview720Path
+      // 1.9.4+ Phase A: 480p fast tier. No `clean480Path` —
+      // the 480p tier is a transient "first playable" preview
+      // and the watermarked path is fine for both the early
+      // review window and any sub-720p fallback slot.
+      const wm480 = (video as any).preview480Path as string | null | undefined
 
       const pick = (...paths: Array<string | null | undefined>): string | null => {
         return paths.find((p): p is string => Boolean(p)) || null
@@ -201,19 +206,24 @@ export async function GET(
 
       if (requestedQuality === '2160p') {
         return preferClean
-          ? pick(clean2160, wm2160, clean1080, wm1080, clean720, wm720)
-          : pick(wm2160, wm1080, wm720)
+          ? pick(clean2160, wm2160, clean1080, wm1080, clean720, wm720, wm480)
+          : pick(wm2160, wm1080, wm720, wm480)
       }
 
       if (requestedQuality === '1080p') {
         return preferClean
-          ? pick(clean1080, wm1080, clean720, wm720, clean2160, wm2160)
-          : pick(wm1080, wm720, wm2160)
+          ? pick(clean1080, wm1080, clean720, wm720, wm480, clean2160, wm2160)
+          : pick(wm1080, wm720, wm480, wm2160)
       }
 
-      return preferClean
-        ? pick(clean720, wm720, clean1080, wm1080, clean2160, wm2160)
-        : pick(wm720, wm1080, wm2160)
+      if (requestedQuality === '720p') {
+        return preferClean
+          ? pick(clean720, wm720, wm480, clean1080, wm1080, clean2160, wm2160)
+          : pick(wm720, wm480, wm1080, wm2160)
+      }
+
+      // 480p: prefer 480p first, then climb the ladder.
+      return pick(wm480, wm720, wm1080, wm2160)
     }
 
     let filePath: string | null = null

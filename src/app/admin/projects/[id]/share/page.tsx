@@ -11,7 +11,7 @@ import ThumbnailReel from '@/components/ThumbnailReel'
 import ResizableSidebar from '@/components/ResizableSidebar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Loader2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import ThemeToggle from '@/components/ThemeToggle'
 import PlayerTopMenu from '@/components/PlayerTopMenu'
@@ -42,6 +42,11 @@ function AdminSharePageInner() {
 
   // Parse URL parameters for video seeking (same as public share page)
   const urlTimestamp = searchParams?.get('t') ? parseFloat(searchParams.get('t')!) : null
+  // 1.9.4+ Phase B: when the player triggers a "new tier
+  // arrived" page refresh, it appends `&autoplay=1` so playback
+  // resumes seamlessly from where the user was watching. Without
+  // this the reload would land at currentTime=t but paused.
+  const urlAutoplay = searchParams?.get('autoplay') === '1'
   const urlVideoName = searchParams?.get('video') || null
   const urlVersion = searchParams?.get('version') ? parseInt(searchParams.get('version')!, 10) : null
   const urlFocusCommentId = searchParams?.get('comment') || null
@@ -207,19 +212,54 @@ function AdminSharePageInner() {
 
     return Promise.all(
       videos.map(async (video: any) => {
-        const cacheKey = `${sessionId}:${video.id}`
+        // 1.9.4+ Phase A: cache key fingerprints both status AND
+        // which tier paths have landed, so the cache rotates
+        // whenever a new progressive tier becomes available (new
+        // streamUrl* slot needs a real token). Status alone
+        // wasn't enough — after the 480p READY flip, when 720p
+        // and 1080p later finished the cache still returned the
+        // pre-720p tokenization with their slots blank.
+        const tierFingerprint = `${!!video.preview480Path ? 1 : 0}${!!video.preview720Path ? 1 : 0}${!!video.preview1080Path ? 1 : 0}${!!video.preview2160Path ? 1 : 0}`
+        const cacheKey = `${sessionId}:${video.id}:${video.status || 'PROCESSING'}:${tierFingerprint}`
         const cached = tokenCacheRef.current.get(cacheKey)
         if (cached) {
-          return cached
+          // Stream URLs are expensive to generate (one API call
+          // per tier per session) so we keep them cached, but
+          // overlay the fresh `processingProgress` + tier-path
+          // flags + hlsQualities from the latest poll so the
+          // Quality menu's "720p · 50%" badge actually advances
+          // tick by tick AND the VideoPlayer's HLS manifest
+          // reload effect sees new tiers as they land.
+          return {
+            ...cached,
+            status: video.status,
+            processingProgress: video.processingProgress,
+            preview480Path: video.preview480Path,
+            preview720Path: video.preview720Path,
+            preview1080Path: video.preview1080Path,
+            preview2160Path: video.preview2160Path,
+            hlsQualities: video.hlsQualities,
+            hlsBasePath: video.hlsBasePath,
+            transcodeProgressByTier: (video as any).transcodeProgressByTier ?? {},
+          }
         }
 
         try {
-          const [token720, token1080, token2160] = await Promise.all([
+          // 1.9.4+ Phase A: also fetch 480p token for the fastest
+          // progressive tier. Empty string for any tier that
+          // hasn't transcoded yet — share-page UI honours that.
+          // 1.9.4+ Phase B: also fetch an HLS session token; the
+          // player prefers HLS when available (seamless quality
+          // upgrade mid-playback), fallback to MP4 otherwise.
+          const [token480, token720, token1080, token2160, tokenHls] = await Promise.all([
+            fetchAdminVideoTokenWithRetry(video.id, '480p', sessionId),
             fetchAdminVideoTokenWithRetry(video.id, '720p', sessionId),
             fetchAdminVideoTokenWithRetry(video.id, '1080p', sessionId),
             fetchAdminVideoTokenWithRetry(video.id, '2160p', sessionId),
+            fetchAdminVideoTokenWithRetry(video.id, 'hls', sessionId),
           ])
 
+          let streamToken480p = token480
           let streamToken720p = token720
           let streamToken1080p = token1080
           let streamToken2160p = token2160
@@ -232,12 +272,26 @@ function AdminSharePageInner() {
           // impossible to actually review them before approval. The
           // /api/admin/video-token endpoint enforces admin auth, so the
           // original isn't exposed beyond the studio.
+          //
+          // 1.9.4+ Phase A: only fall back to the original when NO
+          // preview tier is available. With progressive transcoding
+          // a video may legitimately have 720p but no 1080p/2160p
+          // yet; falling those higher slots back to the original
+          // would lie about quality and serve full-res bytes when
+          // 720p is actually ready. The skipTranscoding case still
+          // works because in that mode none of the three tier
+          // tokens are issued, so every slot is empty and we fall
+          // back to original for all three.
           const originalToken = await fetchAdminVideoTokenWithRetry(video.id, 'original', sessionId)
           if (originalToken) {
             downloadToken = originalToken
-            streamToken720p = streamToken720p || originalToken
-            streamToken1080p = streamToken1080p || originalToken
-            streamToken2160p = streamToken2160p || originalToken
+            const hasAnyPreviewToken = streamToken480p || streamToken720p || streamToken1080p || streamToken2160p
+            if (!hasAnyPreviewToken) {
+              streamToken480p = originalToken
+              streamToken720p = originalToken
+              streamToken1080p = originalToken
+              streamToken2160p = originalToken
+            }
           }
 
           let thumbnailUrl = null
@@ -248,16 +302,28 @@ function AdminSharePageInner() {
             }
           }
 
+          // 1.9.4+ Phase B: build the HLS master URL when the
+          // worker has produced HLS variants. hls.js / Safari
+          // both follow ?token=xxx forward to playlists and
+          // segments, so a single signed master URL covers the
+          // whole adaptive session.
+          const hlsUrl =
+            tokenHls && (video as any).hlsQualities && (video as any).hlsQualities.length > 0
+              ? `/api/videos/${video.id}/hls/master.m3u8?token=${encodeURIComponent(tokenHls)}`
+              : ''
+
           const tokenized = {
             ...video,
+            streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
             streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
             streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
             streamUrl2160p: streamToken2160p ? `/api/content/${streamToken2160p}` : '',
+            hlsUrl,
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
             thumbnailUrl,
           }
 
-          if (tokenized.streamUrl720p || tokenized.streamUrl1080p || tokenized.streamUrl2160p || tokenized.downloadUrl || tokenized.thumbnailUrl) {
+          if (tokenized.streamUrl480p || tokenized.streamUrl720p || tokenized.streamUrl1080p || tokenized.streamUrl2160p || tokenized.downloadUrl || tokenized.thumbnailUrl) {
             tokenCacheRef.current.set(cacheKey, tokenized)
           }
           return tokenized
@@ -269,23 +335,22 @@ function AdminSharePageInner() {
   }, [fetchAdminVideoTokenWithRetry])
 
   // Load project data, settings, and admin user
-  useEffect(() => {
-    let isMounted = true
-
-    async function loadProject() {
+  // 1.9.4+ Phase A: extracted into a useCallback so we can re-call
+  // it from the processing-progress poll below. `silent=true` skips
+  // the `setLoading` flip so the page doesn't flash a "Loading..."
+  // screen on each refresh while the worker chews through tiers.
+  const loadProject = useCallback(
+    async (silent: boolean = false) => {
       if (!id) {
-        setLoading(false)
+        if (!silent) setLoading(false)
         return
       }
       try {
-        // Fetch project, settings, and current user in parallel
         const [projectResponse, userResponse, settingsResponse] = await Promise.all([
           apiFetch(`/api/projects/${id}`, { cache: 'no-store' }),
           apiFetch('/api/auth/session', { cache: 'no-store' }),
           apiFetch('/api/settings', { cache: 'no-store' }),
         ])
-
-        if (!isMounted) return
 
         if (projectResponse.ok) {
           const projectData = await projectResponse.json()
@@ -302,33 +367,72 @@ function AdminSharePageInner() {
             setCompanyName(projectData.companyName || 'Studio')
           }
 
-          if (isMounted) {
-            const transformedData = transformProjectData(projectData)
-            setProject(transformedData)
+          const transformedData = transformProjectData(projectData)
+          setProject(transformedData)
+          // 1.9.4+ Phase A: "auto" is not a valid VideoPlayer
+          // default — map it to 1080p (the typical good-quality
+          // default for the player's quality picker). The actual
+          // tier the worker produces is still source-matched.
+          const playerDefault = projectData.previewResolution === 'auto'
+            ? '1080p'
+            : (projectData.previewResolution || '720p')
+          setDefaultQuality(playerDefault)
 
-            // Use project/company fallback for studio name and preview quality
-            setDefaultQuality(projectData.previewResolution || '720p')
-
-            if (!projectData.hideFeedback) {
-              fetchComments()
-            }
+          if (!projectData.hideFeedback && !silent) {
+            fetchComments()
           }
         }
-      } catch (error) {
+      } catch {
         // Silent fail
       } finally {
-        if (isMounted) {
-          setLoading(false)
-        }
+        if (!silent) setLoading(false)
       }
-    }
+    },
+    [id, fetchComments],
+  )
 
+  useEffect(() => {
     loadProject()
+  }, [loadProject])
 
-    return () => {
-      isMounted = false
-    }
-  }, [id, fetchComments])
+  // 1.9.4+ Phase A: progressive transcoding poll.
+  //
+  // Polls the project endpoint every 3.5 s while:
+  //   - any active video is still in PROCESSING / UPLOADING
+  //     (first tier driving the spinner overlay), OR
+  //   - the progressive ladder hasn't filled in for the current
+  //     source — i.e. there's at least one tier between 480p and
+  //     the input's short-side resolution that doesn't have a
+  //     preview path yet.
+  //
+  // The second condition is what fixes "the Quality menu shows
+  // 8% and never updates after status=READY": without it the
+  // poll stopped the moment 480p landed, leaving the higher
+  // tiers (720/1080/2160) frozen at whatever percentage they
+  // were caught at on the last poll. The interval auto-clears
+  // once the full ladder is in.
+  useEffect(() => {
+    const hasProcessing = (activeVideosRaw || []).some(
+      (v: any) => v?.status === 'PROCESSING' || v?.status === 'UPLOADING',
+    )
+    const hasPendingHigherTier = (activeVideosRaw || []).some((v: any) => {
+      if (!v) return false
+      const shortSide = Math.min(v.width || 0, v.height || 0)
+      if (shortSide <= 0) return false
+      // 1.9.4+ Phase A: 90% tolerance so cinematic 1920×1008
+      // sources still trigger polling for the 1080p tier.
+      const meetsTier = (h: number) => shortSide >= h * 0.9
+      if (meetsTier(720) && !v.preview720Path) return true
+      if (meetsTier(1080) && !v.preview1080Path) return true
+      if (meetsTier(2160) && !v.preview2160Path) return true
+      return false
+    })
+    if (!hasProcessing && !hasPendingHigherTier) return
+    const interval = setInterval(() => {
+      loadProject(true)
+    }, 3500)
+    return () => clearInterval(interval)
+  }, [activeVideosRaw, loadProject])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -693,17 +797,76 @@ function AdminSharePageInner() {
           (player left, comments right) from lg+ so landscape devices like
           Nest Hub (1024×600) don't squeeze the player vertically. */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
-        {readyVideos.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center p-4">
-            <Card className="bg-card">
-              <CardContent className="py-12 text-center">
-                <p className="text-muted-foreground">
-                  {tokensLoading ? t('loadingVideo') : t('noVideosReadyForReview')}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
+        {readyVideos.length === 0 ? (() => {
+          // 1.9.4+ Phase A: themed "still processing" overlay.
+          //
+          // If the user clicked into a video whose first quality
+          // tier hasn't landed yet, show a spinner + percentage
+          // pulled straight from the worker's processingProgress.
+          // The polling effect upstream keeps this number fresh
+          // every ~3.5s; when the worker flips status=READY the
+          // next poll sees a non-empty readyVideos and this branch
+          // disappears, replaced by the actual player.
+          //
+          // We cap at 99% so the user never sees "100%" while
+          // still PROCESSING — the visual jump from 99 → player
+          // is the right "and now it's ready" payoff.
+          const processingVideo = (activeVideosRaw || []).find(
+            (v: any) => v?.status === 'PROCESSING' || v?.status === 'UPLOADING',
+          )
+          if (processingVideo) {
+            const rawProgress = typeof processingVideo.processingProgress === 'number'
+              ? processingVideo.processingProgress
+              : 0
+            const progress = Math.min(99, Math.max(0, Math.round(rawProgress)))
+            const isUploading = processingVideo.status === 'UPLOADING'
+            return (
+              <div className="flex-1 flex items-center justify-center p-4">
+                <Card className="bg-card border-border max-w-md w-full">
+                  <CardContent className="py-10 px-8 flex flex-col items-center text-center gap-5">
+                    <div className="relative">
+                      <Loader2 className="w-12 h-12 text-primary animate-spin" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-lg font-semibold text-card-foreground">
+                        {isUploading
+                          ? (t('preparingVideo') || 'Preparing video…')
+                          : (t('processingVideo') || 'Processing video…')}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {t('processingFirstTierHint')
+                          || "We're generating the first playback quality. The player will open automatically once it's ready."}
+                      </p>
+                    </div>
+                    {/* Progress bar — theme-aware, not a raw browser <progress>. */}
+                    <div className="w-full">
+                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-[width] duration-500 ease-out"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+                        {progress}%
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )
+          }
+          return (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <Card className="bg-card">
+                <CardContent className="py-12 text-center">
+                  <p className="text-muted-foreground">
+                    {tokensLoading ? t('loadingVideo') : t('noVideosReadyForReview')}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          )
+        })() : (
           <>
             {/* Video Player — natural height on mobile, fills space
                 from lg+ so the control bar never gets clipped.
@@ -724,6 +887,7 @@ function AdminSharePageInner() {
                 watermarkEnabled={project.watermarkEnabled}
                 activeVideoName={activeVideoName}
                 initialSeekTime={initialSeekTime}
+                autoPlayOnInitialSeek={urlAutoplay}
                 initialVideoIndex={initialVideoIndex}
                 isAdmin={true}
                 isGuest={false}

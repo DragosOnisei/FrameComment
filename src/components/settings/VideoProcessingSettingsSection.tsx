@@ -112,13 +112,19 @@ export function VideoProcessingSettingsSection({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            {/* 1.9.4+ Phase A: Auto matches the source — we always
+                start with a fast 480p tier, then climb the ladder
+                up to whatever the input actually resolves at (no
+                upscaling). The three explicit caps stay for users
+                who want a CPU / storage ceiling on big sources. */}
+            <SelectItem value="auto">Auto (match source — recommended)</SelectItem>
             <SelectItem value="720p">{t('videoProcessing.resolution720')}</SelectItem>
             <SelectItem value="1080p">{t('videoProcessing.resolution1080')}</SelectItem>
             <SelectItem value="2160p">{t('videoProcessing.resolution2160')}</SelectItem>
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          {t('videoProcessing.resolutionHint')}
+          The progressive ladder always starts at 480p for fast first playback, then climbs to the chosen cap (or the source resolution in Auto mode).
         </p>
       </div>
       )}

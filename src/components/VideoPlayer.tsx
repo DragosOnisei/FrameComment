@@ -29,7 +29,7 @@ interface VideoPlayerProps {
   videos: Video[]
   projectId: string
   projectStatus: ProjectStatus
-  defaultQuality?: '720p' | '1080p' | '2160p' // Default quality from settings
+  defaultQuality?: '480p' | '720p' | '1080p' | '2160p' // Default quality from settings
   onApprove?: () => void // Optional approval callback
   authenticatedEmail?: string | null // Email of OTP-authenticated user
   authenticatedName?: string | null // Name of OTP-authenticated user
@@ -42,6 +42,11 @@ interface VideoPlayerProps {
   isGuest?: boolean // Guest mode - limited view (videos only, no downloads)
   activeVideoName?: string // The video group name (for maintaining selection after reload)
   initialSeekTime?: number | null // Initial timestamp to seek to (from URL params)
+  // 1.9.4+ Phase B: when set together with initialSeekTime,
+  // the player auto-plays after seeking to that timestamp. Used
+  // by the "new tier arrived" auto-refresh path so the reload
+  // resumes playback exactly where the user was watching.
+  autoPlayOnInitialSeek?: boolean
   initialVideoIndex?: number // Initial video index to select (from URL params)
   allowAssetDownload?: boolean // Allow clients to download assets
   clientCanApprove?: boolean // Allow clients to approve videos (false = admin only)
@@ -76,6 +81,7 @@ export default function VideoPlayer({
   isGuest = false, // Default to false (full client view)
   activeVideoName,
   initialSeekTime = null,
+  autoPlayOnInitialSeek = false,
   initialVideoIndex = 0,
   allowAssetDownload = true,
   clientCanApprove = true, // Default to true (clients can approve)
@@ -93,40 +99,219 @@ export default function VideoPlayer({
   const t = useTranslations('videos')
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
-  const [resolvedPlaybackQuality, setResolvedPlaybackQuality] = useState<'720p' | '1080p' | '2160p'>(defaultQuality)
-  // 1.3.2+: User-chosen quality preference (Auto / 720p / 1080p / 2160p).
-  // Persisted per browser in localStorage so a user who picked 1080p
-  // doesn't have to re-pick on every video. Default 'auto' so first
-  // visits still get the snappy 720p experience driven by
-  // `defaultQuality`.
+  const [resolvedPlaybackQuality, setResolvedPlaybackQuality] = useState<'480p' | '720p' | '1080p' | '2160p'>(defaultQuality)
+  // 1.9.4+ Phase B (Frame.io behaviour): User-chosen quality
+  // preference. ALWAYS defaults to 'auto' on mount and never
+  // hydrates from localStorage. This implements the user's
+  // explicit requirement: "tot timpul iti da cea mai mare
+  // calitate daca e deja procesata" — every fresh load of the
+  // page (or every time the user re-enters a video) starts at
+  // the highest available tier, not at whatever they last
+  // selected in a previous session. The menu still works for
+  // mid-session changes; those just don't persist past reload.
   const [qualityChoice, setQualityChoice] = useState<QualityChoice>('auto')
   // Safe-zone preset + rulers toggle. Session-only (no localStorage) —
   // these are spot-check tools, not preferences you want sticky.
   const [guidesPreset, setGuidesPreset] = useState<SafeZonePreset>('off')
   const [rulersEnabled, setRulersEnabled] = useState<boolean>(false)
-  // Hydrate quality preference from localStorage on mount.
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem('framecomment:playerQuality')
-      if (
-        stored === 'auto' ||
-        stored === '720p' ||
-        stored === '1080p' ||
-        stored === '2160p'
-      ) {
-        setQualityChoice(stored)
+  // 1.9.4+ Phase B: hlsUrl is computed further down (after
+  // selectedVideo derivation), but `handleQualityChoiceChange`
+  // needs it inside the manual destroy+recreate path. The ref
+  // sidesteps the temporal dead zone — a small useEffect later
+  // keeps it in sync with the current selectedVideo.hlsUrl.
+  const hlsUrlRef = useRef<string | null>(null)
+
+  // 1.9.4+ Phase B (transport stability): tracks WHICH videoId
+  // we've already committed a videoUrl for. Once set, the
+  // loadVideoUrl effect skips re-setting URL for the same clip,
+  // even if the parent's hlsUrl/streamUrl* fields change. This
+  // is what prevents the MP4 → HLS mid-session swap that used
+  // to reset playback to frame 0 the moment a new tier landed.
+  const committedVideoIdRef = useRef<string | null>(null)
+
+
+  // 1.9.4+ Phase B hls.js instance ref. Surfaced so the quality
+  // menu can call `hlsRef.current.currentLevel = N` to switch
+  // tier without seeking back — seamless mid-playback upgrade.
+  const hlsRef = useRef<any>(null)
+
+  // 1.9.4+ Phase B: when the player needs to swap to a tier
+  // that wasn't present in the master we originally loaded
+  // (i.e. a higher tier finished encoding mid-watch), we tear
+  // down the hls.js instance and rebuild it against a freshly
+  // fetched master. The new MANIFEST_PARSED handler honours
+  // `pendingPinnedHeightRef` so the new instance lands on the
+  // exact tier the caller requested. If nothing's pinned, the
+  // handler picks highest — same behaviour as a fresh page load.
+  const pendingPinnedHeightRef = useRef<number | null>(null)
+
+  const reloadHlsInPlace = useCallback((targetHeight?: number) => {
+    const video = videoRef.current
+    const hls = hlsRef.current
+    const url = hlsUrlRef.current
+    if (!video || !url) return
+
+    // Snapshot exactly enough state to feel seamless on the other
+    // side of the rebuild. We don't try to preserve the buffer —
+    // hls.js will refill from the new variant starting at the
+    // restored currentTime, which on a local network shows up as
+    // a sub-second stall, visually identical to the initial-load
+    // ABR ramp the user already considers "wonderful".
+    const preservedTime = video.currentTime
+    const wasPlaying = !video.paused
+    pendingPinnedHeightRef.current = typeof targetHeight === 'number' ? targetHeight : null
+
+    if (hls) {
+      try {
+        const onResize = (hls as any)._onResize
+        if (onResize) {
+          video.removeEventListener('resize', onResize)
+          video.removeEventListener('loadedmetadata', onResize)
+        }
+        hls.destroy()
+      } catch {
+        // ignore — even partially destroyed is fine, we replace below
       }
-    } catch {
-      // localStorage can throw in private-mode Safari etc. — ignore.
+      hlsRef.current = null
     }
+
+    ;(async () => {
+      try {
+        const HlsModule = await import('hls.js')
+        const Hls = HlsModule.default
+        if (!Hls.isSupported()) return
+
+        const newHls = new Hls({
+          manifestLoadingMaxRetry: Infinity,
+          manifestLoadingRetryDelay: 1000,
+          levelLoadingMaxRetry: Infinity,
+          maxBufferLength: 30,
+          backBufferLength: 30,
+          // CRITICAL: don't fetch the first fragment automatically.
+          // hls.js's default ABR picks the LOWEST level for the
+          // initial fragment to stay safe under unknown bandwidth.
+          // For our admin-review use case we'd much rather pin to
+          // the requested tier first, then trigger loading. With
+          // autoStartLoad:false the master is parsed and `levels`
+          // populated, but no segment request goes out until we
+          // call `startLoad(t)` below — at which point the level
+          // is already pinned.
+          autoStartLoad: false,
+        })
+        hlsRef.current = newHls
+        newHls.attachMedia(video)
+
+        // Append a cache buster so the server's `master.m3u8`
+        // is re-fetched (even though it sets Cache-Control:
+        // no-store, intermediaries / hls.js memoisation might
+        // serve stale otherwise). The token in the URL is the
+        // freshest one because hlsUrlRef.current is kept in
+        // sync with parent token rotations.
+        const sep = url.includes('?') ? '&' : '?'
+        newHls.loadSource(`${url}${sep}_=${Date.now()}`)
+
+        newHls.once(Hls.Events.MANIFEST_PARSED, () => {
+          if (!newHls.levels || newHls.levels.length === 0) return
+          const pinned = pendingPinnedHeightRef.current
+          let chosen: number
+          if (typeof pinned === 'number') {
+            const idx = newHls.levels.findIndex(
+              (l: any) => (l.height || 0) >= pinned * 0.9,
+            )
+            chosen = idx >= 0 ? idx : newHls.levels.length - 1
+          } else {
+            // Frame.io behaviour: start at HIGHEST available.
+            chosen = newHls.levels.length - 1
+          }
+          newHls.nextLevel = chosen
+          newHls.currentLevel = chosen
+          pendingPinnedHeightRef.current = null
+
+          // NOW trigger fragment loading at the preserved time.
+          // hls.js will request the variant playlist for the
+          // pinned level (chosen), then the fragment containing
+          // `preservedTime` — exactly what we want.
+          const startAt = Number.isFinite(preservedTime) && preservedTime > 0
+            ? preservedTime
+            : -1
+          newHls.startLoad(startAt)
+        })
+
+        // Mirror the badge logic from the main attach effect.
+        newHls.on(Hls.Events.LEVEL_SWITCHED, (_: any, data: any) => {
+          const lvl = newHls.levels?.[data?.level]
+          if (!lvl) return
+          const h = lvl.height || 0
+          if (h >= 2160 * 0.9) setResolvedPlaybackQuality('2160p')
+          else if (h >= 1080 * 0.9) setResolvedPlaybackQuality('1080p')
+          else if (h >= 720 * 0.9) setResolvedPlaybackQuality('720p')
+          else setResolvedPlaybackQuality('480p')
+        })
+
+        // Once the first fragment is fully buffered, resume
+        // playback if the user was playing before the rebuild.
+        // FRAG_BUFFERED fires AFTER the bytes are in MediaSource,
+        // which is the earliest play() reliably succeeds without
+        // a "no media data" stall.
+        newHls.once(Hls.Events.FRAG_BUFFERED, () => {
+          if (wasPlaying) {
+            video.play().catch(() => {})
+          }
+        })
+      } catch {
+        // hls.js failed to load — silently degrade. The video
+        // element is still attached to the previous MediaSource
+        // (or empty); the parent page is unaffected.
+      }
+    })()
   }, [])
+
   const handleQualityChoiceChange = useCallback((q: QualityChoice) => {
     setQualityChoice(q)
-    try {
-      window.localStorage.setItem('framecomment:playerQuality', q)
-    } catch {
-      // ignore
+    // 1.9.4+ Phase B (Frame.io behaviour): in-session preference
+    // only — localStorage is intentionally not touched, so a
+    // future reload still picks the highest available tier
+    // automatically (the user explicitly asked for this).
+    const video = videoRef.current
+    const hls = hlsRef.current
+    if (!video) return
+
+    if (q === 'auto') {
+      // Auto = "pin to highest currently in hls.levels". Cheap
+      // path, instant; no reload, no destroy.
+      if (hls && hls.levels && hls.levels.length > 0) {
+        hls.nextLevel = hls.levels.length - 1
+        hls.currentLevel = hls.levels.length - 1
+      }
+      return
     }
+
+    const targetH =
+      q === '2160p' ? 2160 :
+      q === '1080p' ? 1080 :
+      q === '720p' ? 720 :
+      480
+
+    if (hls && hls.levels && hls.levels.length > 0) {
+      const idx = hls.levels.findIndex((l: any) => (l.height || 0) >= targetH * 0.9)
+      if (idx >= 0) {
+        // Cheap path — tier already in hls.js's variant list.
+        // `nextLevel` switches at the next segment boundary
+        // (~6 s max), no buffer flush, no visible stall.
+        hls.nextLevel = idx
+        hls.currentLevel = idx
+        return
+      }
+    }
+
+    // Expensive path — tier was added on the server AFTER the
+    // master we loaded. Do a VIEWPORT-ONLY reload of hls.js:
+    // destroy current instance, fetch a fresh master (with the
+    // new variant listed), pin to the requested height. The
+    // page (comments, timeline, header) stays exactly as it is.
+    // Visually identical to the seamless ABR ramp-up the user
+    // sees on a fresh page load.
+    reloadHlsInPlace(targetH)
   }, [])
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
   const [videoDuration, setVideoDuration] = useState(0)
@@ -174,12 +359,104 @@ export default function VideoPlayer({
   // worker never produced a 2160p variant). Order is high → low so the
   // menu reads top-down.
   const availableQualities = useMemo(() => {
-    const out: ('2160p' | '1080p' | '720p')[] = []
+    // 1.9.4+ Phase A: 480p included as the fastest progressive
+    // tier. Order is high → low so the quality menu reads
+    // top-down with the best option first.
+    //
+    // 1.9.4+ Phase B: when HLS is active, qualities come from
+    // `hlsQualities` (the server's source-of-truth list of
+    // ready tiers) rather than the MP4 stream URL slots. That
+    // way newly-finished tiers show up in the menu as soon as
+    // the next poll lands, even though hls.js's internal level
+    // list is still the original master snapshot.
+    const out: ('2160p' | '1080p' | '720p' | '480p')[] = []
     const v: any = selectedVideo
+    if (v?.hlsUrl && Array.isArray(v?.hlsQualities) && v.hlsQualities.length > 0) {
+      if (v.hlsQualities.includes('2160p')) out.push('2160p')
+      if (v.hlsQualities.includes('1080p')) out.push('1080p')
+      if (v.hlsQualities.includes('720p')) out.push('720p')
+      if (v.hlsQualities.includes('480p')) out.push('480p')
+      return out
+    }
     if (v?.streamUrl2160p) out.push('2160p')
     if (v?.streamUrl1080p) out.push('1080p')
     if (v?.streamUrl720p) out.push('720p')
+    if (v?.streamUrl480p) out.push('480p')
     return out
+  }, [selectedVideo])
+
+  // 1.9.4+ Phase A: pending qualities — tiers the progressive
+  // ladder PLANS to make but hasn't finished yet. We compute the
+  // ladder client-side from the source short-side resolution (no
+  // upscaling, same rule the worker uses). The lowest-not-ready
+  // tier above the highest READY one is "processing" with the
+  // current worker progress; everything past that is "queued".
+  // Player picks the tier from the status board so the user
+  // understands the full ladder, not just what's downloadable.
+  const pendingQualities = useMemo(() => {
+    const v: any = selectedVideo
+    if (!v) return [] as Array<{ tier: '2160p' | '1080p' | '720p' | '480p'; status: 'processing' | 'queued'; progress?: number }>
+    if (v.status !== 'PROCESSING' && v.status !== 'UPLOADING' && v.status !== 'READY') {
+      return []
+    }
+    const shortSide = Math.min(v.width || 0, v.height || 0)
+    if (shortSide <= 0) return []
+    // The full universe of tiers the ladder COULD climb to for
+    // this source. Mirrors computeProgressiveTiers's 90%
+    // tolerance — cinematic / cropped sources like 1920×1008
+    // are still considered "1080p enough" to deserve the tier.
+    const meetsTier = (h: number) => shortSide >= h * 0.9
+    const universe: Array<'480p' | '720p' | '1080p' | '2160p'> = ['480p']
+    if (meetsTier(720)) universe.push('720p')
+    if (meetsTier(1080)) universe.push('1080p')
+    if (meetsTier(2160)) universe.push('2160p')
+
+    // 1.9.4+ Phase B (Bug 5 fix): readiness source must MATCH
+    // whatever `availableQualities` reads from, otherwise a
+    // tier whose MP4 is done but HLS isn't done yet (or vice
+    // versa) ends up in NEITHER bucket and disappears from the
+    // menu for a few seconds. When HLS is active, the player
+    // is HLS-only, so the source of truth is `hlsQualities`.
+    // For legacy MP4-only videos, fall back to the per-tier
+    // stream URL slots like before.
+    const readySet = new Set<string>()
+    if (v.hlsUrl && Array.isArray(v.hlsQualities) && v.hlsQualities.length > 0) {
+      for (const q of v.hlsQualities) readySet.add(q)
+    } else {
+      if (v.streamUrl480p) readySet.add('480p')
+      if (v.streamUrl720p) readySet.add('720p')
+      if (v.streamUrl1080p) readySet.add('1080p')
+      if (v.streamUrl2160p) readySet.add('2160p')
+    }
+
+    // 1.9.4+ Phase B (Bug 1+2 fix): per-tier progress map.
+    // ALL not-ready tiers process in parallel, and each has
+    // its OWN progress key in `transcodeProgressByTier` (e.g.
+    // `{"720p": 45, "1080p": 23}`). Worker writes via atomic
+    // jsonb_set so two parallel ffmpegs don't clobber each
+    // other. This is what makes the menu actually show three
+    // different percentages at once instead of three identical
+    // ones.
+    //
+    // Fallback for legacy rows pre-migration: shared
+    // `processingProgress` field (everyone sees same %, but
+    // at least it's something).
+    const pending: Array<{ tier: '2160p' | '1080p' | '720p' | '480p'; status: 'processing' | 'queued'; progress?: number }> = []
+    const perTier: Record<string, number> = (v.transcodeProgressByTier && typeof v.transcodeProgressByTier === 'object')
+      ? v.transcodeProgressByTier
+      : {}
+    const fallbackProgress = typeof v.processingProgress === 'number' ? v.processingProgress : 0
+    for (const t of universe) {
+      if (readySet.has(t)) continue
+      const tp = perTier[t]
+      const progress = typeof tp === 'number' ? tp : fallbackProgress
+      pending.push({
+        tier: t,
+        status: 'processing',
+        progress,
+      })
+    }
+    return pending
   }, [selectedVideo])
 
   // 1.3.2+: Download Still — grab the current video frame at SOURCE
@@ -313,12 +590,97 @@ export default function VideoPlayer({
   // Safety check: ensure selectedVideo exists before accessing properties
   const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
 
+  // 1.9.4+ Phase B: prefer the HLS master URL when the worker has
+  // produced HLS variants. Falls through to the MP4 ladder below
+  // when HLS is missing (older videos, transcoding failure, etc.).
+  const hlsUrl: string | null = (selectedVideo as any)?.hlsUrl || null
+
+  // 1.9.4+ Phase B FREEZE FIX: stable identity for "which HLS
+  // resource is this player attached to", computed by stripping
+  // the query string (token + cache busters). Used as the dep
+  // for the hls.js attach effect — token rotations on the parent
+  // don't trip the destroy+recreate path, which was the source
+  // of mid-playback freezes whenever a new tier finished. The
+  // full URL (with token) is still used INSIDE the effect for
+  // the actual `loadSource` call.
+  const hlsResourceKey = useMemo(() => {
+    if (!hlsUrl) return ''
+    const qIdx = hlsUrl.indexOf('?')
+    return qIdx >= 0 ? hlsUrl.slice(0, qIdx) : hlsUrl
+  }, [hlsUrl])
+
+  // Keep the ref in sync with the current value so the early-
+  // declared `handleQualityChoiceChange` can read the latest URL.
+  useEffect(() => {
+    hlsUrlRef.current = hlsUrl
+  }, [hlsUrl])
+
+
   // Load video URL with optimization
   useEffect(() => {
     async function loadVideoUrl() {
       try {
         // Safety check: ensure selectedVideo exists
         if (!selectedVideo) {
+          return
+        }
+        // 1.9.4+ Phase B: if this video has HLS configured but
+        // we don't yet have a token to build the HLS URL,
+        // WAIT. Committing the MP4 path here would lock us in
+        // for the session (per committedVideoIdRef), causing
+        // the user's complaint: "intru pe video gata-procesat
+        // si porneste pe 480p". A few hundred ms of "Loading…"
+        // is a much better trade than starting on the wrong
+        // tier for the whole session.
+        const sv: any = selectedVideo
+        const hasHlsConfigured = Array.isArray(sv?.hlsQualities) && sv.hlsQualities.length > 0
+        if (hasHlsConfigured && !hlsUrl) {
+          return
+        }
+
+        // 1.9.4+ Phase B: HLS path. Set videoUrl to the master
+        // manifest; the hls.js useEffect below picks it up and
+        // attaches to the <video> element (or, on Safari, the
+        // browser handles HLS natively from src=).
+        //
+        // FREEZE FIX: when the parent rotates the token (because a
+        // new tier landed and the cache key fingerprint changed),
+        // `hlsUrl` here morphs from `...master.m3u8?token=ABC` to
+        // `...master.m3u8?token=XYZ`. If we always `setVideoUrl`,
+        // Safari (native HLS via <video src>) would reload from
+        // scratch — visible freeze. So we keep the OLD videoUrl
+        // when only the query string changed, swapping only when
+        // the base path differs (new video / new resource). The
+        // already-captured token stays valid in Redis long enough
+        // to outlast any viewing session, and hls.js / Safari
+        // never lose their connection.
+        // 1.9.4+ Phase B (ROOT CAUSE FIX for "video resets when
+        // 720p lands"): once we've committed to a transport
+        // (MP4 or HLS) for this videoId, NEVER switch mid-
+        // session. The race the user kept hitting was:
+        //   1) page opens while only 480p MP4 is ready (HLS
+        //      remux still running) → videoUrl = MP4 stream URL
+        //   2) HLS remux finishes for 480p + 720p
+        //   3) share page invalidates cache (tier fingerprint
+        //      changed), full re-fetch builds a fresh hlsUrl
+        //   4) old code saw a "different base" and replaced
+        //      videoUrl with HLS master → <video src> changed
+        //      → element reset to frame 0 → video freezes,
+        //      timeline still at old position
+        // The committedVideoIdRef tracks which clip's URL is in
+        // the player. While it matches, we leave videoUrl alone
+        // — even if the parent has a "better" URL now. Switching
+        // to HLS mid-session would always cost the user their
+        // playback position.
+        if (hlsUrl) {
+          if (committedVideoIdRef.current === (selectedVideo as any)?.id) {
+            return
+          }
+          setVideoUrl((prev) => {
+            committedVideoIdRef.current = (selectedVideo as any)?.id ?? null
+            currentTimeRef.current = 0
+            return hlsUrl
+          })
           return
         }
 
@@ -328,13 +690,19 @@ export default function VideoPlayer({
         // when set, falling back to the admin-configured defaultQuality
         // when the user has chosen "Auto". The fallback ladder below
         // is shared by both paths.
-        const effectiveQuality: '720p' | '1080p' | '2160p' =
+        const effectiveQuality: '480p' | '720p' | '1080p' | '2160p' =
           qualityChoice === 'auto' ? defaultQuality : qualityChoice
         let url: string | undefined
-        let qualityUsed: '720p' | '1080p' | '2160p' = effectiveQuality
+        let qualityUsed: '480p' | '720p' | '1080p' | '2160p' = effectiveQuality
 
+        // 1.9.4+ Phase A: 480p is the "fastest first playable" tier
+        // — included as the LAST fallback for every quality choice
+        // so a freshly-transcoded video is playable as soon as
+        // 480p lands. When we actually serve 480p the menu label
+        // honestly says "480p" (not "720p HD") so the user
+        // understands why higher options aren't visible yet.
         if (effectiveQuality === '2160p') {
-          // Prefer 2160p, fallback to 1080p then 720p
+          // Prefer 2160p, fall back through the ladder.
           if ((selectedVideo as any).streamUrl2160p) {
             url = (selectedVideo as any).streamUrl2160p
             qualityUsed = '2160p'
@@ -344,9 +712,11 @@ export default function VideoPlayer({
           } else if ((selectedVideo as any).streamUrl720p) {
             url = (selectedVideo as any).streamUrl720p
             qualityUsed = '720p'
+          } else if ((selectedVideo as any).streamUrl480p) {
+            url = (selectedVideo as any).streamUrl480p
+            qualityUsed = '480p'
           }
         } else if (effectiveQuality === '1080p') {
-          // Prefer 1080p, fallback to 720p
           if ((selectedVideo as any).streamUrl1080p) {
             url = (selectedVideo as any).streamUrl1080p
             qualityUsed = '1080p'
@@ -356,10 +726,31 @@ export default function VideoPlayer({
           } else if ((selectedVideo as any).streamUrl2160p) {
             url = (selectedVideo as any).streamUrl2160p
             qualityUsed = '2160p'
+          } else if ((selectedVideo as any).streamUrl480p) {
+            url = (selectedVideo as any).streamUrl480p
+            qualityUsed = '480p'
+          }
+        } else if (effectiveQuality === '720p') {
+          // Prefer 720p, fall back to 480p (fastest), then 1080p, then 2160p.
+          if ((selectedVideo as any).streamUrl720p) {
+            url = (selectedVideo as any).streamUrl720p
+            qualityUsed = '720p'
+          } else if ((selectedVideo as any).streamUrl480p) {
+            url = (selectedVideo as any).streamUrl480p
+            qualityUsed = '480p'
+          } else if ((selectedVideo as any).streamUrl1080p) {
+            url = (selectedVideo as any).streamUrl1080p
+            qualityUsed = '1080p'
+          } else if ((selectedVideo as any).streamUrl2160p) {
+            url = (selectedVideo as any).streamUrl2160p
+            qualityUsed = '2160p'
           }
         } else {
-          // Prefer 720p, fallback to 1080p then 2160p
-          if ((selectedVideo as any).streamUrl720p) {
+          // 480p chosen explicitly — prefer 480p, then climb.
+          if ((selectedVideo as any).streamUrl480p) {
+            url = (selectedVideo as any).streamUrl480p
+            qualityUsed = '480p'
+          } else if ((selectedVideo as any).streamUrl720p) {
             url = (selectedVideo as any).streamUrl720p
             qualityUsed = '720p'
           } else if ((selectedVideo as any).streamUrl1080p) {
@@ -372,6 +763,10 @@ export default function VideoPlayer({
         }
 
         if (url) {
+          if (committedVideoIdRef.current === (selectedVideo as any)?.id) {
+            return
+          }
+          committedVideoIdRef.current = (selectedVideo as any)?.id ?? null
           // Reset player state
           currentTimeRef.current = 0
           setResolvedPlaybackQuality(qualityUsed)
@@ -385,7 +780,224 @@ export default function VideoPlayer({
     }
 
     loadVideoUrl()
-  }, [selectedVideo, defaultQuality, qualityChoice])
+  }, [selectedVideo, defaultQuality, qualityChoice, hlsUrl])
+
+  // 1.9.4+ Phase B: hls.js attach for adaptive HLS streaming.
+  //
+  // CRITICAL: this effect must NEVER re-fire when only the token
+  // (query string) in the HLS URL changes. The share page rotates
+  // tokens whenever a new tier lands (cache key includes a tier
+  // fingerprint), which would cause this effect to destroy +
+  // recreate the hls.js instance and FREEZE playback — exactly
+  // the bug the user kept reporting. We pin the effect's
+  // dependency to `videoUrlBase` (everything before `?`), so
+  // token rotations leave the running player untouched and only
+  // a real source change (different video / different resource)
+  // triggers a re-attach. The URL used for the actual
+  // `loadSource` call is captured ONCE at attach time via a ref,
+  // so segments load with whatever token was current when we
+  // first attached — that token stays valid in Redis long enough
+  // to outlast any sane viewing session.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (!videoUrl || !videoUrl.includes('.m3u8')) return
+
+    // 1.9.4+ Phase B (Chrome 148+ fix): we no longer skip hls.js
+    // for browsers that report native HLS support. Modern Chrome
+    // returns `canPlayType('application/vnd.apple.mpegurl') ===
+    // 'maybe'`, and the old check treated that as "Safari, let
+    // the browser handle it" — meaning we never attached hls.js
+    // and Chrome's own ABR was in control, producing the visible
+    // 480p → 1080p ramp the user kept hitting. We now always
+    // use hls.js when MediaSource is supported, which is true
+    // on every desktop browser worth supporting. The async
+    // `Hls.isSupported()` check below handles the only platform
+    // where MSE is missing (iOS Safari) — there we fall through
+    // and the <video src=...> below picks up native HLS as the
+    // last resort.
+
+    let hlsInstance: any = null
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const HlsModule = await import('hls.js')
+        const Hls = HlsModule.default
+        if (cancelled) return
+        if (!Hls.isSupported()) {
+          return
+        }
+        const hls = new Hls({
+          manifestLoadingMaxRetry: Infinity,
+          manifestLoadingRetryDelay: 1000,
+          levelLoadingMaxRetry: Infinity,
+          maxBufferLength: 30,
+          backBufferLength: 30,
+          // CRITICAL: prevent the initial 480p → 720p → 1080p
+          // ABR ramp the user keeps hitting.
+          //
+          //  - autoStartLoad:false → no fragment fetched until
+          //    we explicitly call startLoad(). Combined with
+          //    pinning currentLevel inside MANIFEST_PARSED, the
+          //    very first fragment is from the top tier.
+          //  - abrEwmaDefaultEstimate:50Mbps → if ABR is still
+          //    consulted somehow (e.g. on the very first probe
+          //    before our pin takes effect), it assumes we have
+          //    plenty of bandwidth and picks high.
+          //  - testBandwidth:false → don't waste an HTTP round-
+          //    trip measuring throughput; trust the high estimate.
+          //  - capLevelToPlayerSize:false → don't downgrade the
+          //    chosen level just because the <video> element is
+          //    small on the page (e.g. while UI is still laying
+          //    out, intrinsic player size might briefly be 100px
+          //    wide and ABR would otherwise pick 480p).
+          autoStartLoad: false,
+          abrEwmaDefaultEstimate: 50_000_000,
+          testBandwidth: false,
+          capLevelToPlayerSize: false,
+        })
+        hlsInstance = hls
+        hlsRef.current = hls
+        hls.attachMedia(video)
+        // FREEZE FIX: read the freshest token-bearing URL at attach
+        // time. Subsequent token rotations are ignored — they live
+        // in `hlsUrlRef.current` but never re-trigger this effect.
+        const attachUrl = hlsUrlRef.current || videoUrl
+        hls.loadSource(attachUrl)
+
+        // 1.9.4+ Phase B (Frame.io behaviour): on initial manifest
+        // parse, pin the player to the HIGHEST tier the master
+        // lists, THEN call startLoad() to begin fetching
+        // fragments. Because autoStartLoad:false was set in the
+        // Hls() config, no fragment has been requested yet, so
+        // when startLoad triggers the first request it comes
+        // from the pinned (top) level. End result: the user
+        // never sees the 480p → 720p → 1080p ABR ramp that the
+        // hls.js default would have produced.
+        hls.once(Hls.Events.MANIFEST_PARSED, () => {
+          if (!hls.levels || hls.levels.length === 0) return
+          const top = hls.levels.length - 1
+          hls.nextLevel = top
+          hls.currentLevel = top
+          hls.startLoad(-1) // -1 = start from current playhead (0 on fresh load)
+        })
+
+        // 1.9.4+ Phase B: badge is driven by hls.js's own
+        // LEVEL_SWITCHED event. This is authoritative — fires
+        // the moment hls.js commits to playing a new level,
+        // unlike `resize` which depended on the video element
+        // catching up. With LEVEL_SWITCHED the SD/HD/HD+ badge
+        // matches what's actually being decoded, not what was
+        // decoded a moment ago. We keep the `resize` listener
+        // below as a Safari-native-HLS fallback (Safari doesn't
+        // expose hls.js events, so we depend on videoHeight
+        // there).
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_: any, data: any) => {
+          const lvl = hls.levels?.[data?.level]
+          if (!lvl) return
+          const h = lvl.height || 0
+          if (h >= 2160 * 0.9) setResolvedPlaybackQuality('2160p')
+          else if (h >= 1080 * 0.9) setResolvedPlaybackQuality('1080p')
+          else if (h >= 720 * 0.9) setResolvedPlaybackQuality('720p')
+          else setResolvedPlaybackQuality('480p')
+        })
+
+        // 1.9.4+ Phase B: on every HLS attach, anchor the quality
+        // badge to 480p (the always-first tier). Without this the
+        // badge inherits the project's default (often "1080p")
+        // and reads HD+ even while playback is actually starting
+        // at SD — wrong for the first second or two of playback.
+        // The `resize` listener below corrects it as soon as the
+        // first frame's videoHeight is known.
+        setResolvedPlaybackQuality('480p')
+
+        // Source of truth for "what's actually playing" is the
+        // video element's videoHeight — it changes the instant
+        // hls.js swaps to a new variant's segments. Compared to
+        // listening on Hls.Events.LEVEL_SWITCHED, this:
+        //   - fires on the initial level too (LEVEL_SWITCHED only
+        //     fires on changes after the first level loads, so
+        //     the badge stayed stuck on whatever the initial
+        //     useState value was), and
+        //   - works for native HLS on Safari as well, where we
+        //     bypass hls.js entirely.
+        const onResize = () => {
+          const h = video.videoHeight || 0
+          if (h <= 0) return
+          if (h >= 2160 * 0.9) setResolvedPlaybackQuality('2160p')
+          else if (h >= 1080 * 0.9) setResolvedPlaybackQuality('1080p')
+          else if (h >= 720 * 0.9) setResolvedPlaybackQuality('720p')
+          else setResolvedPlaybackQuality('480p')
+        }
+        video.addEventListener('resize', onResize)
+        video.addEventListener('loadedmetadata', onResize)
+        // Stash on the cleanup so the listener is removed when
+        // hls.js is destroyed.
+        ;(hls as any)._onResize = onResize
+      } catch {
+        // hls.js failed to load (offline cache miss, blocked, etc.).
+        // The <video src> will try to play the .m3u8 anyway —
+        // Safari handles it, others will surface an error to the
+        // user via the standard <video> error path.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      // 1.9.4+ Phase B: destroy whichever instance hlsRef now
+      // points to — `reloadHlsInPlace` may have swapped the
+      // captured `hlsInstance` for a fresh one mid-life, and
+      // we don't want to leak that new instance when the
+      // viewer navigates to a different clip.
+      const current = hlsRef.current
+      if (current) {
+        try {
+          const onResize = (current as any)._onResize
+          if (onResize) {
+            video.removeEventListener('resize', onResize)
+            video.removeEventListener('loadedmetadata', onResize)
+          }
+          current.destroy()
+        } catch {}
+        hlsRef.current = null
+      } else if (hlsInstance) {
+        // Race: async attach hadn't finished assigning hlsRef
+        // when cleanup ran. Fall back to the local closure.
+        try {
+          hlsInstance.destroy()
+        } catch {}
+      }
+    }
+    // 1.9.4+ Phase B: depend on `videoUrl` directly. With the
+    // `committedVideoIdRef` guard upstream, videoUrl no longer
+    // mutates on token rotation (we commit a single URL per
+    // videoId and never replace it mid-session), so this dep
+    // doesn't trigger the cleanup→recreate freeze we used to
+    // worry about. Using `[videoUrl]` is also necessary because
+    // the body's early-return reads `videoUrl` from the closure;
+    // depending on a memo derived from hlsUrl (the previous fix)
+    // could fire the effect with a stale empty `videoUrl` and
+    // miss the actual attach window.
+  }, [videoUrl])
+
+  // 1.9.4+ Phase B (Frame.io behaviour — NO auto-upgrade):
+  //
+  // When a higher tier finishes encoding mid-watch, the player
+  // does NOTHING automatic. The new tier simply shows up in
+  // the Quality menu as a clickable row (via the readySet
+  // logic in `pendingQualities` + `availableQualities`).
+  // Playback continues uninterrupted at whatever the user is
+  // currently watching. If the user wants the higher quality,
+  // they click it — `handleQualityChoiceChange` does the
+  // switch (cheap path if the tier is already in hls.levels,
+  // expensive `reloadHlsInPlace` if it isn't).
+  //
+  // No MP4 → HLS transition either: if the user opened while
+  // only MP4 was ready, they stay on MP4 for that session.
+  // A page refresh is the only way to pick up HLS once it
+  // catches up — which the user explicitly confirmed they
+  // prefer over any kind of mid-session swap.
 
   // Handle initial seek from URL parameters (only once on mount)
   useEffect(() => {
@@ -399,7 +1011,15 @@ export default function VideoPlayer({
 
           video.currentTime = seekTime
           currentTimeRef.current = seekTime
-          // Don't auto-play - mobile browsers block this anyway, let user control playback
+
+          // 1.9.4+ Phase B: when the URL signals autoplay (the
+          // "new tier arrived, refresh-and-resume" path), call
+          // play() here so the reload feels seamless from the
+          // user's POV. Mobile browsers can still block this
+          // silently — that's fine, they get a tap-to-play.
+          if (autoPlayOnInitialSeek) {
+            video.play().catch(() => {})
+          }
 
           // Mark that we've done the initial seek
           hasInitiallySeenRef.current = true
@@ -1164,7 +1784,39 @@ export default function VideoPlayer({
                   <video
                     key={selectedVideo?.id}
                     ref={videoRef}
-                    src={videoUrl}
+                    // 1.9.4+ Phase B: when the URL is an HLS
+                    // manifest AND the browser can't play HLS
+                    // natively (Chrome / Firefox), DON'T set
+                    // `src` here — hls.js will attach a
+                    // MediaSource via `attachMedia` + load the
+                    // manifest internally via `loadSource`. If we
+                    // set `src` first, the browser tries to play
+                    // the .m3u8 as a regular file and throws
+                    // "NotSupportedError: no supported sources"
+                    // before hls.js gets a chance. Safari / iOS
+                    // do play .m3u8 natively, so we keep `src`
+                    // there.
+                    src={
+                      // 1.9.4+ Phase B (Chrome 148+ fix): when the
+                      // URL is an HLS manifest AND MediaSource is
+                      // supported, leave `src` undefined so the
+                      // hls.js attach effect can wire up MSE
+                      // playback. The old logic gated on
+                      // `canPlayType('application/vnd.apple.mpegurl')`
+                      // — but modern Chrome returns 'maybe' there,
+                      // so we used to set src=videoUrl and let
+                      // Chrome's native HLS handle it (with its
+                      // own visible 480p→1080p ABR ramp). Using
+                      // MediaSource availability instead correctly
+                      // routes Chrome through hls.js where we can
+                      // pin the level. Only iOS Safari (no MSE)
+                      // falls back to the native src.
+                      videoUrl && videoUrl.includes('.m3u8') &&
+                      typeof window !== 'undefined' &&
+                      typeof (window as any).MediaSource !== 'undefined'
+                        ? undefined
+                        : videoUrl
+                    }
                     poster={(selectedVideo as any).thumbnailUrl || undefined}
                     className={`w-full h-full object-contain ${isDrawingMode ? 'pointer-events-none' : 'cursor-pointer'}`}
                     // 1.4.x: belt-and-suspenders inline `object-fit:
@@ -1283,8 +1935,9 @@ export default function VideoPlayer({
                   onMarkerClick={onCommentFocus}
                   playbackSpeed={playbackSpeed}
                   onPlaybackSpeedChange={setPlaybackSpeed}
-                  resolvedPlaybackQuality={resolvedPlaybackQuality}
-                  availableQualities={availableQualities}
+                  resolvedPlaybackQuality={resolvedPlaybackQuality as any}
+                  availableQualities={availableQualities as any}
+                  pendingQualities={pendingQualities}
                   qualityChoice={qualityChoice}
                   onQualityChoiceChange={handleQualityChoiceChange}
                   guidesPreset={guidesPreset}
@@ -1308,7 +1961,7 @@ export default function VideoPlayer({
       {showComparison && displayVideos.length >= 2 && (
         <VideoComparison
           videoVersions={displayVideos}
-          defaultQuality={defaultQuality}
+          defaultQuality={defaultQuality as any}
           timestampDisplayMode={timestampDisplayMode}
           onClose={() => setShowComparison(false)}
         />
@@ -1332,7 +1985,7 @@ export default function VideoPlayer({
           clientName={clientName}
           isPasswordProtected={isPasswordProtected}
           watermarkEnabled={watermarkEnabled}
-          defaultQuality={defaultQuality}
+          defaultQuality={defaultQuality as any}
           onApprove={onApprove ? handleApprove : undefined}
           isAdmin={isAdmin}
           clientCanApprove={clientCanApprove}
@@ -1345,7 +1998,7 @@ export default function VideoPlayer({
           authenticatedName={authenticatedName}
           className="mt-3 lg:order-3"
           usePreviewForApprovedPlayback={usePreviewForApprovedPlayback}
-          playbackQuality={resolvedPlaybackQuality}
+          playbackQuality={resolvedPlaybackQuality as any}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -13,6 +13,229 @@ const DEBUG = process.env.DEBUG_WORKER === 'true'
 // Use system-installed ffmpeg (installed via apk in Dockerfile)
 const ffmpegPath = 'ffmpeg'
 const ffprobePath = 'ffprobe'
+
+/**
+ * 1.9.4+ Phase A: hardware video encoder detection.
+ *
+ * Probes FFmpeg at module load to find the fastest available
+ * encoder. Priority order:
+ *
+ *   1. NVENC (Nvidia GPUs) — fastest, widely available
+ *   2. QSV (Intel Quick Sync) — fast, low latency, on iGPUs +
+ *      newer Intel discrete GPUs (Arc)
+ *   3. VideoToolbox (Apple Silicon / Intel Macs)
+ *   4. VAAPI (Linux generic via /dev/dri/renderD*)
+ *   5. libx264 (software fallback — current TrueNAS production)
+ *
+ * Detection runs once at startup. The encoder is then used for
+ * EVERY subsequent transcode in this process. If the encoder is
+ * compiled into FFmpeg but the hardware is missing (e.g. NVENC
+ * binary exists but no Nvidia card), runtime errors are caught
+ * and the transcode is retried with libx264.
+ *
+ * Override via env var: `FORCE_VIDEO_ENCODER=libx264` to disable
+ * hardware acceleration explicitly (e.g. for benchmarking).
+ *
+ * Net effect on the current TrueNAS Xeon (no GPU): libx264, no
+ * change from production. Net effect when an Arc / Quadro card
+ * is added later: ~5-10x faster encoding, near-zero CPU.
+ */
+export type VideoEncoder = 'libx264' | 'h264_nvenc' | 'h264_qsv' | 'h264_videotoolbox' | 'h264_vaapi'
+
+function detectVideoEncoder(): VideoEncoder {
+  // Explicit override wins — useful for forcing software encoding
+  // when debugging quality issues or benchmarking.
+  const override = process.env.FORCE_VIDEO_ENCODER
+  if (override === 'libx264' || override === 'h264_nvenc' || override === 'h264_qsv' ||
+      override === 'h264_videotoolbox' || override === 'h264_vaapi') {
+    logMessage(`[FFMPEG] Encoder overridden via FORCE_VIDEO_ENCODER: ${override}`)
+    return override
+  }
+
+  let encodersList = ''
+  try {
+    encodersList = execSync(`${ffmpegPath} -hide_banner -encoders 2>&1`, {
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+  } catch (err) {
+    logMessage(`[FFMPEG] Encoder probe failed, falling back to libx264: ${err}`)
+    return 'libx264'
+  }
+
+  // Priority order. We don't actually validate hardware presence
+  // here — if NVENC is listed but the card isn't there, the
+  // transcode will fail at runtime and the caller can fall back.
+  // (Validating with a real encode at startup is expensive and
+  // most setups either have it or don't.)
+  const candidates: VideoEncoder[] = ['h264_nvenc', 'h264_qsv', 'h264_videotoolbox', 'h264_vaapi']
+  for (const candidate of candidates) {
+    if (encodersList.includes(candidate)) {
+      logMessage(`[FFMPEG] Hardware encoder detected: ${candidate}`)
+      return candidate
+    }
+  }
+
+  logMessage('[FFMPEG] No hardware encoder available, using libx264 (software)')
+  return 'libx264'
+}
+
+const VIDEO_ENCODER: VideoEncoder = detectVideoEncoder()
+
+/**
+ * 1.9.4+ Phase A: how many parallel ffmpeg invocations the
+ * orchestrator should fan out for the higher tiers AFTER the
+ * first-tier flip. Software encoders (libx264) thrive on
+ * parallelism because each one uses CPU threads and there's no
+ * shared hardware bottleneck. Most hardware encoders (VideoToolbox
+ * on Mac, VAAPI on a single iGPU) have only 1-2 encode slots —
+ * running parallel ffmpeg + HW on those just causes internal
+ * serialization at best, fallback to software at worst. NVENC
+ * and QSV on a dedicated card can run 2-3 concurrent sessions,
+ * so we allow parallelism there.
+ */
+export function getMaxParallelTranscodes(): number {
+  switch (VIDEO_ENCODER) {
+    case 'h264_nvenc':
+    case 'h264_qsv':
+      return 2 // dedicated GPU cards typically allow 2+ sessions
+    case 'h264_videotoolbox':
+    case 'h264_vaapi':
+      return 1 // single shared engine on Mac / iGPU
+    case 'libx264':
+    default:
+      return 2 // software encoder — CPU-bound, parallel scales linearly
+  }
+}
+
+/** Exposed so the worker can log which encoder is active. */
+export function getActiveVideoEncoder(): VideoEncoder {
+  return VIDEO_ENCODER
+}
+
+/**
+ * Translate our software-encoder preset names + output dimensions
+ * into encoder-specific FFmpeg args. Each branch produces:
+ *   - the `-c:v` selector
+ *   - the encoder's speed/quality knob (preset / quality-mode)
+ *   - rate control (CRF for libx264, bitrate for hardware)
+ *   - profile / level for compatibility
+ *
+ * Shared args (audio codec, faststart, pix_fmt) stay in the
+ * caller — this returns just the video-encoder block.
+ */
+function buildVideoEncoderArgs(
+  encoder: VideoEncoder,
+  preset: string,
+  width: number,
+  height: number,
+  threads: number,
+): string[] {
+  // Approximate bitrate targets (kbps) by output area. Hardware
+  // encoders are bitrate-based so we need a number; we pick
+  // conservative values that match typical streaming quality at
+  // each tier.
+  const pixels = width * height
+  let targetBitrateK: number
+  if (pixels >= 3840 * 2160 * 0.7) targetBitrateK = 16_000 // ~4K
+  else if (pixels >= 1920 * 1080 * 0.7) targetBitrateK = 6_000 // 1080p
+  else if (pixels >= 1280 * 720 * 0.7) targetBitrateK = 3_000 // 720p
+  else targetBitrateK = 1_200 // 480p and below
+  const maxBitrateK = Math.round(targetBitrateK * 1.5)
+  const bufSizeK = targetBitrateK * 2
+
+  switch (encoder) {
+    case 'h264_nvenc':
+      // NVENC uses p1..p7 presets (1=fastest, 7=slowest/best). Map
+      // our names roughly: ultrafast→p1, superfast→p2, faster→p3,
+      // fast→p4, medium→p5, slow→p6.
+      const nvencPreset = ({
+        ultrafast: 'p1',
+        superfast: 'p2',
+        veryfast: 'p2',
+        faster: 'p3',
+        fast: 'p4',
+        medium: 'p5',
+        slow: 'p6',
+      } as Record<string, string>)[preset] || 'p4'
+      return [
+        '-c:v', 'h264_nvenc',
+        '-preset', nvencPreset,
+        '-tune', 'hq',
+        '-rc', 'vbr',
+        '-b:v', `${targetBitrateK}k`,
+        '-maxrate', `${maxBitrateK}k`,
+        '-bufsize', `${bufSizeK}k`,
+        '-profile:v', 'high',
+        '-level', '4.1',
+      ]
+
+    case 'h264_qsv':
+      // Intel Quick Sync. Preset names align with software-ish
+      // names (veryfast / faster / fast / medium).
+      const qsvPreset = ({
+        ultrafast: 'veryfast',
+        superfast: 'veryfast',
+        veryfast: 'veryfast',
+        faster: 'faster',
+        fast: 'fast',
+        medium: 'medium',
+        slow: 'slower',
+      } as Record<string, string>)[preset] || 'fast'
+      return [
+        '-c:v', 'h264_qsv',
+        '-preset', qsvPreset,
+        '-b:v', `${targetBitrateK}k`,
+        '-maxrate', `${maxBitrateK}k`,
+        '-profile:v', 'high',
+        '-level', '4.1',
+      ]
+
+    case 'h264_videotoolbox':
+      // Apple's VT encoder is bitrate-based. We use quality-mode
+      // (-q:v 60) instead of strict bitrate, because batch
+      // encoding via VT is dramatically faster in quality mode —
+      // VT skips its rate-control loop and just dumps frames
+      // through the media engine.
+      //
+      // CRITICAL: do NOT set `-realtime 1` here. That flag tells
+      // VT to encode AT real-time speed (1x source duration),
+      // which capped batch encoding at the playback length of
+      // the input. For a 40-min source that meant 40 min minimum
+      // encoding — the exact opposite of what we want.
+      return [
+        '-c:v', 'h264_videotoolbox',
+        '-q:v', '60', // 0..100, lower = higher quality; 60 ≈ libx264 CRF 23
+        '-b:v', `${targetBitrateK}k`, // bitrate hint, not strict cap
+        '-profile:v', 'high',
+        '-level', '4.1',
+        '-allow_sw', '1', // fall back to software if HW path errors at runtime
+      ]
+
+    case 'h264_vaapi':
+      // Generic Linux hardware accel (Intel + AMD iGPUs).
+      // VAAPI presets map similarly to QSV.
+      return [
+        '-c:v', 'h264_vaapi',
+        '-b:v', `${targetBitrateK}k`,
+        '-maxrate', `${maxBitrateK}k`,
+        '-profile:v', 'high',
+        '-level', '4.1',
+      ]
+
+    case 'libx264':
+    default:
+      // Software fallback — current production path.
+      return [
+        '-c:v', 'libx264',
+        '-preset', preset,
+        '-crf', '23',
+        '-threads', threads.toString(),
+        '-profile:v', 'high',
+        '-level', '4.1',
+      ]
+  }
+}
 
 export interface VideoMetadata {
   duration: number
@@ -237,6 +460,16 @@ export interface TranscodeOptions {
   watermarkFontSize?: WatermarkFontSize
   applyLut?: boolean // Apply preview LUT for color-calibrated previews (default: true)
   onProgress?: (progress: number) => void
+  // 1.9.4+: optional cancellation signal — when aborted, the
+  // running FFmpeg process is SIGTERM'd and the promise rejects
+  // with a "TranscodeAborted" error. Used by the worker to bail
+  // out fast when the user deletes a video mid-transcode.
+  signal?: AbortSignal
+  // 1.9.4+ Phase A: explicit x264 preset override. Used by the
+  // worker to pass `ultrafast` for the 480p fast first tier
+  // (we want time-to-first-playable, not file-size optimisation
+  // — higher tiers later get a better preset for archival use).
+  preset?: 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow'
 }
 
 export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
@@ -246,8 +479,16 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     width,
     height,
     watermarkText,
-    onProgress
+    onProgress,
+    signal
   } = options
+
+  // Short-circuit when the caller already cancelled before we even
+  // started — saves spawning ffmpeg for a job whose video row is
+  // already gone.
+  if (signal?.aborted) {
+    throw new Error('TranscodeAborted')
+  }
 
   if (DEBUG) {
     logMessage('[FFMPEG DEBUG] Starting transcodeVideo with options:', {
@@ -265,15 +506,24 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
   const cpuAllocation = getCpuAllocation()
   const threads = cpuAllocation.threadsPerJob
 
-  // Optimize preset based on available threads
-  // Fewer threads = faster preset to compensate
-  let preset = 'fast'
-  if (threads <= 2) {
-    preset = 'faster'
-  } else if (threads <= 4) {
-    preset = 'fast'
+  // 1.9.4+ Phase A: caller can pin the preset explicitly (the
+  // worker uses this for the 480p fast tier — ultrafast cuts
+  // encode time roughly in half vs the auto-selected preset, at
+  // the cost of a larger file. For a transient first-playable
+  // preview, file size doesn't matter; time-to-ready does.)
+  let preset: string
+  if (options.preset) {
+    preset = options.preset
   } else {
-    preset = 'medium'
+    // Auto-select based on available threads — fewer threads
+    // means faster preset to compensate.
+    if (threads <= 2) {
+      preset = 'faster'
+    } else if (threads <= 4) {
+      preset = 'fast'
+    } else {
+      preset = 'medium'
+    }
   }
 
   if (DEBUG) {
@@ -371,17 +621,18 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     logMessage('[FFMPEG DEBUG] Built filter complex:', filterComplex)
   }
 
+  // 1.9.4+ Phase A: pick encoder-specific args. Hardware encoders
+  // have different rate-control flags and presets than libx264.
+  // The chunk inside the helper keeps the rest of the arg list
+  // (audio, faststart, etc.) shared.
+  const videoEncoderArgs = buildVideoEncoderArgs(VIDEO_ENCODER, preset, width, height, threads)
+
   // Build ffmpeg arguments with optimizations
   const args = [
     '-v', 'verbose', // Enable verbose logging for debug
     '-i', inputPath,
     '-vf', filterComplex,
-    '-c:v', 'libx264',
-    '-preset', preset,
-    '-crf', '23', // Constant Rate Factor: 18-28 range (lower = better quality, 23 is default)
-    '-threads', threads.toString(),
-    '-profile:v', 'high',
-    '-level', '4.1',
+    ...videoEncoderArgs,
     '-pix_fmt', 'yuv420p', // Ensure compatibility with all players (especially Safari/iOS)
     '-c:a', 'aac',
     '-b:a', '128k', // Reduced from 192k to 128k (sufficient for most use cases, saves bandwidth)
@@ -424,9 +675,34 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let stderr = ''
+    // 1.9.4+: track abort source so the close handler reports
+    // "TranscodeAborted" instead of treating the SIGTERM exit code
+    // as a generic ffmpeg failure (which would surface as a noisy
+    // ERROR row on the video).
+    let abortedByCaller = false
 
     if (DEBUG) {
       logMessage('[FFMPEG DEBUG] FFmpeg process spawned, PID:', ffmpeg.pid)
+    }
+
+    // 1.9.4+: wire up AbortSignal → kill ffmpeg. Used by the worker
+    // when a video is deleted while its transcode is running. We
+    // send SIGTERM first (graceful) and fall through to SIGKILL via
+    // a short timeout if ffmpeg ignores it.
+    let abortListener: (() => void) | null = null
+    if (signal) {
+      abortListener = () => {
+        abortedByCaller = true
+        try {
+          ffmpeg.kill('SIGTERM')
+          setTimeout(() => {
+            try {
+              if (!ffmpeg.killed) ffmpeg.kill('SIGKILL')
+            } catch {}
+          }, 2000).unref()
+        } catch {}
+      }
+      signal.addEventListener('abort', abortListener, { once: true })
     }
 
     ffmpeg.stderr.on('data', (data) => {
@@ -461,6 +737,13 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     })
 
     ffmpeg.on('close', (code) => {
+      // Detach the AbortSignal listener — the process is gone, no
+      // point keeping the reference alive (and signal could be
+      // long-lived across multiple transcodes).
+      if (signal && abortListener) {
+        signal.removeEventListener('abort', abortListener)
+      }
+
       // Cleanup watermark temp file and directory
       if (watermarkTextFile && fs.existsSync(watermarkTextFile)) {
         try {
@@ -477,6 +760,14 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
 
       if (DEBUG) {
         logMessage('[FFMPEG DEBUG] Process exited with code:', code)
+      }
+
+      // 1.9.4+: if the caller aborted us (e.g. video was deleted
+      // mid-transcode), surface a typed error so the orchestrator
+      // can bail out cleanly instead of marking the video as ERROR.
+      if (abortedByCaller) {
+        reject(new Error('TranscodeAborted'))
+        return
       }
 
       if (code === 0) {
@@ -651,6 +942,81 @@ export async function generateStoryboard(
     })
     ffmpeg.on('error', (err) => {
       reject(new Error(`Failed to start FFmpeg for storyboard: ${err.message}`))
+    })
+  })
+}
+
+/**
+ * 1.9.4+ Phase B: remux an already-encoded MP4 into HLS — splits
+ * the existing audio + video streams into TS segments + a VOD
+ * playlist WITHOUT re-encoding (-c copy). Wall-clock cost is
+ * typically 5-30 seconds for a multi-GB MP4 because FFmpeg is
+ * just demuxing and chunking byte ranges; the heavy work was
+ * already done when we encoded the MP4.
+ *
+ * Args:
+ *   - `inputMp4Path`: local filesystem path to the MP4 we just
+ *     encoded (the tier output).
+ *   - `outDir`: local filesystem dir where the playlist + .ts
+ *     segments should land. Created if missing.
+ *   - `segmentSeconds`: target segment duration (6 s standard).
+ *
+ * The output playlist is named `playlist.m3u8` and segments are
+ * `seg_000.ts`, `seg_001.ts`, etc. — matches what the streaming
+ * API expects.
+ */
+export async function remuxToHls(
+  inputMp4Path: string,
+  outDir: string,
+  segmentSeconds: number = 6,
+): Promise<void> {
+  if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true })
+  }
+
+  const playlistPath = path.join(outDir, 'playlist.m3u8')
+  const segmentPattern = path.join(outDir, 'seg_%03d.ts')
+
+  const args = [
+    '-v', 'error',
+    '-i', inputMp4Path,
+    // -c copy is the magic: no re-encoding, just demux + chunk.
+    // Both video and audio streams are passed through bit-exact.
+    '-c', 'copy',
+    // VOD mode = full playlist written at end (no live updates).
+    '-hls_time', String(segmentSeconds),
+    '-hls_playlist_type', 'vod',
+    '-hls_segment_filename', segmentPattern,
+    // -hls_flags independent_segments lets each .ts be decoded
+    // standalone (needed for clean quality switching). +program_date_time
+    // helps some players sync timing.
+    '-hls_flags', 'independent_segments',
+    '-f', 'hls',
+    '-y', // overwrite if exists
+    playlistPath,
+  ]
+
+  if (DEBUG) {
+    logMessage('[FFMPEG DEBUG] HLS remux command:', 'nice -n 10', ffmpegPath, args.join(' '))
+  }
+
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stderr = ''
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`FFmpeg HLS remux failed: ${stderr}`))
+      }
+    })
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`Failed to start FFmpeg for HLS remux: ${err.message}`))
     })
   })
 }

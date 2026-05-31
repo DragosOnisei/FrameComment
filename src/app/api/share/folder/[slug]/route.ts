@@ -207,6 +207,10 @@ export async function GET(
           status: true,
           approved: true,
           thumbnailPath: true,
+          // 1.9.4+ Phase A: 480p tier is the fastest progressive
+          // preview and is preferred for hover-scrub fallback
+          // (smaller file → smoother seek).
+          preview480Path: true,
           preview720Path: true,
           preview1080Path: true,
           preview2160Path: true,
@@ -290,13 +294,18 @@ export async function GET(
           }
         }
         let previewUrl: string | null = null
-        const previewQuality = v.preview720Path
-          ? '720p'
-          : v.preview1080Path
-          ? '1080p'
-          : v.preview2160Path
-          ? '2160p'
-          : 'original'
+        // 1.9.4+ Phase A: prefer 480p for hover-scrub fallback —
+        // smallest tier, fastest seek when the storyboard sprite
+        // isn't ready yet.
+        const previewQuality = (v as any).preview480Path
+          ? '480p'
+          : v.preview720Path
+            ? '720p'
+            : v.preview1080Path
+              ? '1080p'
+              : v.preview2160Path
+                ? '2160p'
+                : 'original'
         try {
           const token = await generateVideoAccessToken(
             v.id,

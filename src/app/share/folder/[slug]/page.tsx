@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
 import { logError } from '@/lib/logging'
+import { DownloadManagerProvider, useDownloadManager } from '@/contexts/DownloadManager'
+import { DownloadBanners } from '@/components/DownloadBanners'
 
 /**
  * Public folder share page (1.0.6+).
@@ -106,7 +108,21 @@ interface FolderShareResponse {
   isAdmin?: boolean
 }
 
+// 2.0.x+: the page is wrapped in the DownloadManagerProvider below
+// so the `useDownloadManager` calls inside `handleDownloadAll` can
+// push jobs into the bottom-right banner stack rendered by
+// <DownloadBanners />. The original component is renamed to
+// PublicFolderSharePageInner and the default export wraps it.
 export default function PublicFolderSharePage() {
+  return (
+    <DownloadManagerProvider>
+      <PublicFolderSharePageInner />
+      <DownloadBanners />
+    </DownloadManagerProvider>
+  )
+}
+
+function PublicFolderSharePageInner() {
   const params = useParams()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -216,41 +232,37 @@ export default function PublicFolderSharePage() {
   // `Authorization` header — anchor downloads only carry cookies.
   // Instead we fetch the response, convert to a Blob, and trigger
   // a normal browser download on the resulting object URL.
+  // 2.0.x+: route through the DownloadManager so the user gets the
+  // bottom-right progress banner + Cancel button instead of a button
+  // that just sits there in a loading state for the whole download.
+  // The local `downloadingAll` flag is kept for the button disabled
+  // state — the manager tracks the underlying job + cancellation.
   const [downloadingAll, setDownloadingAll] = useState(false)
-  const handleDownloadAll = useCallback(async () => {
+  const { startStreamDownload } = useDownloadManager()
+  const handleDownloadAll = useCallback(() => {
     if (downloadingAll) return
     setDownloadingAll(true)
-    try {
-      // Note: the `?root=` query param is NOT needed for the download
-      // route — the server scopes the ZIP to the slug we hit, which
-      // is already the in-view folder.
-      const res = await fetch(`/api/share/folder/${slug}/download`, {
-        headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        alert(`Download failed: ${body?.error || `HTTP ${res.status}`}`)
-        return
-      }
-      const blob = await res.blob()
-      const cd = res.headers.get('content-disposition') || ''
-      const match = cd.match(/filename\*?="?([^";]+)"?/i)
-      const filename = match?.[1] || `${data?.folder?.name || 'folder'}.zip`
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      a.rel = 'noopener'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1500)
-    } catch (err) {
-      logError('[PublicFolderSharePage] download failed:', err)
-    } finally {
-      setDownloadingAll(false)
-    }
-  }, [slug, bearer, data, downloadingAll])
+    startStreamDownload({
+      label: `${data?.folder?.name || 'Folder'}.zip`,
+      url: `/api/share/folder/${slug}/download`,
+      statUrl: `/api/share/folder/${slug}/download/stat`,
+      fetcher: (input, init) =>
+        fetch(input, {
+          ...init,
+          headers: {
+            ...(init?.headers || {}),
+            ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+          },
+        }),
+      fallbackFilename: `${data?.folder?.name || 'folder'}.zip`,
+    })
+    // Release the button-disabled state after a brief beat — the
+    // manager already prevents the UI from queuing a duplicate
+    // banner because each click creates a fresh job id; we just
+    // want the button to feel responsive again so the user can
+    // retry if they cancelled the previous one.
+    setTimeout(() => setDownloadingAll(false), 800)
+  }, [slug, bearer, data, downloadingAll, startStreamDownload])
 
   const handleSubmitPassword = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -24,6 +24,10 @@ type VideoLike = {
   id: string
   projectId: string
   thumbnailPath?: string | null
+  // 1.9.4+ Phase A: 480p tier is the fastest progressive preview.
+  // Preferred for hover-scrub because the file is small (lower
+  // seek-and-decode cost than the higher tiers).
+  preview480Path?: string | null
   preview720Path?: string | null
   preview1080Path?: string | null
   preview2160Path?: string | null
@@ -101,13 +105,22 @@ export async function enrichVideosForAdmin<T extends VideoLike>(
       }
 
       let previewUrl: string | null = null
-      const previewQuality = v.preview720Path
-        ? '720p'
-        : v.preview1080Path
-          ? '1080p'
-          : v.preview2160Path
-            ? '2160p'
-            : 'original'
+      // 1.9.4+ Phase A: hover-scrub fallback prefers the SMALLEST
+      // tier available. When the storyboard sprite isn't ready
+      // yet the VideoCard falls back to seeking a real <video>
+      // element — that seek-and-decode is dramatically faster on
+      // a 480p preview (~100 MB for a 40-min source) than on the
+      // original 2.7 GB master. Without this fix the scrub feels
+      // visibly jerky until the storyboard sprite lands.
+      const previewQuality = v.preview480Path
+        ? '480p'
+        : v.preview720Path
+          ? '720p'
+          : v.preview1080Path
+            ? '1080p'
+            : v.preview2160Path
+              ? '2160p'
+              : 'original'
       try {
         const token = await generateVideoAccessToken(
           v.id,

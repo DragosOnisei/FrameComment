@@ -572,11 +572,25 @@ function FolderPreviewBody({
       </div>
       <div
         className="p-4 overflow-y-auto"
-        // Width stays tight so a 1-col grid (single folder) doesn't
-        // stretch to half the monitor — capped at 720px and floored
-        // at 640px (or 80vw, whichever is smaller on narrow screens)
-        // so 3-col layouts still have room for legible thumbnails.
-        style={{ maxHeight: '75vh', minWidth: 'min(80vw, 640px)', maxWidth: '720px' }}
+        // Width is FIXED (not min/max) once we know how many tiles
+        // we have, so any layout change inside (e.g. a video tile's
+        // intrinsic dims showing through during hover-scrub) can't
+        // jostle the panel. The 1/2/3-tile breakpoints below pick a
+        // pixel-perfect width that fits the columns + 12px gaps + 32px
+        // padding without overflow, capped by viewport on narrow
+        // screens.
+        style={{
+          maxHeight: '75vh',
+          width: contents
+            ? `min(95vw, ${
+                Math.min(3, Math.max(1, contents.folders.length + contents.videos.length)) === 1
+                  ? 360
+                  : Math.min(3, Math.max(1, contents.folders.length + contents.videos.length)) === 2
+                  ? 520
+                  : 720
+              }px)`
+            : 'min(95vw, 720px)',
+        }}
       >
         {loading ? (
           <div className="text-sm text-muted-foreground text-center py-8">
@@ -622,7 +636,14 @@ function FolderPreviewBody({
                     openFolder(f.id)
                   }
                 }}
-                className="rounded-md overflow-hidden border border-border/50 bg-muted flex flex-col cursor-pointer hover:border-primary/40 transition-colors"
+                // 2.0.x+: `min-w-0` so the tile inherits `minmax(0, 1fr)`
+                // sizing properly. Without it, a grid item's default
+                // `min-width: auto` falls back to its min-content —
+                // and the moment ScrubThumbnail renders its <video>
+                // (which has intrinsic dimensions like 1920×1080),
+                // the column would grow / shrink to accommodate
+                // those, jiggling the whole panel width.
+                className="min-w-0 rounded-md overflow-hidden border border-border/50 bg-muted flex flex-col cursor-pointer hover:border-primary/40 transition-colors"
                 title={`${f.name} — double-click to open`}
               >
                 <div className="relative aspect-video bg-black/30 dark:bg-black/40">
@@ -648,7 +669,10 @@ function FolderPreviewBody({
                     openVideo(v.name)
                   }
                 }}
-                className="rounded-md overflow-hidden border border-border/50 bg-muted flex flex-col cursor-pointer hover:border-primary/40 transition-colors"
+                // 2.0.x+: see folder tile above — `min-w-0` keeps the
+                // grid column from being inflated by the <video>'s
+                // intrinsic size on first hover-scrub render.
+                className="min-w-0 rounded-md overflow-hidden border border-border/50 bg-muted flex flex-col cursor-pointer hover:border-primary/40 transition-colors"
                 title={`${v.name} — double-click to open`}
               >
                 <ScrubThumbnail video={v} />

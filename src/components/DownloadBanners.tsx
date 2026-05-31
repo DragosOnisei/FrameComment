@@ -1,0 +1,149 @@
+'use client'
+
+import { Download, X, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
+import { useDownloadManager, type DownloadJob } from '@/contexts/DownloadManager'
+
+/**
+ * 2.0.x+: bottom-right stack of in-progress download banners. One row
+ * per active job (folder ZIP, multi-file save, etc.) — each shows a
+ * progress bar, percentage / N-of-M count, and a Cancel/Dismiss
+ * button. Picks up jobs from the shared `DownloadManager` context.
+ *
+ * Mounted once at the root of every page that wants downloads
+ * (admin app shell + the public folder share page). Renders nothing
+ * when there are no jobs.
+ */
+export function DownloadBanners() {
+  const { jobs, cancel, dismiss } = useDownloadManager()
+
+  if (jobs.length === 0) return null
+
+  return (
+    <div
+      className="fixed bottom-4 right-4 z-[2147483600] flex flex-col gap-2 max-w-[calc(100vw-2rem)] pointer-events-none"
+      aria-live="polite"
+    >
+      {jobs.map((job) => (
+        <DownloadBanner
+          key={job.id}
+          job={job}
+          onCancel={() => cancel(job.id)}
+          onDismiss={() => dismiss(job.id)}
+        />
+      ))}
+    </div>
+  )
+}
+
+function DownloadBanner({
+  job,
+  onCancel,
+  onDismiss,
+}: {
+  job: DownloadJob
+  onCancel: () => void
+  onDismiss: () => void
+}) {
+  const isManual = job.kind === 'manual'
+  const isTerminal =
+    job.status === 'success' || job.status === 'error' || job.status === 'cancelled'
+
+  // Compute percentage. For stream jobs, prefer bytes/totalBytes; if
+  // totalBytes hasn't arrived yet (or it's a stat-less request), fall
+  // back to "indeterminate" — render the bar as a slow pulse instead
+  // of a stuck 0%.
+  let pct: number | null = null
+  let progressLabel = ''
+  if (isManual) {
+    const done = job.completedItems ?? 0
+    const total = job.totalItems ?? 0
+    pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null
+    progressLabel = total > 0 ? `${done} / ${total} files` : `${done} files`
+  } else {
+    const recv = job.bytesReceived ?? 0
+    const total = job.totalBytes ?? 0
+    if (total > 0) {
+      pct = Math.min(100, Math.round((recv / total) * 100))
+      progressLabel = `${formatBytes(recv)} / ${formatBytes(total)}`
+    } else if (recv > 0) {
+      progressLabel = formatBytes(recv)
+    }
+  }
+  if (job.status === 'success') pct = 100
+
+  return (
+    <div
+      className="pointer-events-auto w-[340px] rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.4)] p-3 animate-in slide-in-from-bottom-2 fade-in duration-200"
+      role="status"
+    >
+      <div className="flex items-start gap-2.5">
+        <div className="shrink-0 mt-0.5">
+          {job.status === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-green-500" />
+          ) : job.status === 'error' ? (
+            <AlertCircle className="w-4 h-4 text-red-500" />
+          ) : job.status === 'cancelled' ? (
+            <X className="w-4 h-4 text-muted-foreground" />
+          ) : pct === null ? (
+            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+          ) : (
+            <Download className="w-4 h-4 text-primary" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-card-foreground truncate" title={job.label}>
+            {job.label}
+          </div>
+          <div className="text-[11px] text-muted-foreground truncate">
+            {job.status === 'success'
+              ? 'Done'
+              : job.status === 'error'
+              ? job.error || 'Failed'
+              : job.status === 'cancelled'
+              ? 'Cancelled'
+              : job.status === 'pending'
+              ? 'Preparing…'
+              : progressLabel || 'Downloading…'}
+          </div>
+        </div>
+        {/* Action button: Cancel during run, dismiss-on-success/error. */}
+        <button
+          type="button"
+          onClick={isTerminal ? onDismiss : onCancel}
+          className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={isTerminal ? 'Dismiss' : 'Cancel download'}
+          title={isTerminal ? 'Dismiss' : 'Cancel download'}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {/* Progress bar: solid fill if we know %, indeterminate sweep
+          otherwise. Hidden for success/cancelled so the banner can
+          fade out cleanly. */}
+      {!isTerminal && (
+        <div className="mt-2.5 h-1 w-full rounded-full bg-muted overflow-hidden">
+          {pct !== null ? (
+            <div
+              className={`h-full rounded-full transition-all duration-200 ease-out ${
+                job.status === 'error' ? 'bg-red-500' : 'bg-primary'
+              }`}
+              style={{ width: `${pct}%` }}
+            />
+          ) : (
+            <div className="h-full w-1/3 rounded-full bg-primary/70 animate-pulse" />
+          )}
+        </div>
+      )}
+      {pct !== null && !isTerminal && (
+        <div className="mt-1 text-[10px] text-muted-foreground tabular-nums">{pct}%</div>
+      )}
+    </div>
+  )
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
+}

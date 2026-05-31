@@ -42,11 +42,19 @@ interface CustomVideoControlsProps {
   onPlaybackSpeedChange?: (speed: number) => void
   /** Resolved quality for the current stream — used as a small read-only
    *  badge on the right-hand side of the bar (e.g. HD/4K). */
-  resolvedPlaybackQuality?: '720p' | '1080p' | '2160p'
+  resolvedPlaybackQuality?: '720p' | '1080p' | '2160p' | '480p'
   /** 1.3.2+: Settings popup state — Quality / Guides / Rulers /
    *  Download Still. All optional so the player can drop the menu when
    *  the parent doesn't wire it up (e.g. comparison view). */
-  availableQualities?: ('2160p' | '1080p' | '720p')[]
+  availableQualities?: ('2160p' | '1080p' | '720p' | '480p')[]
+  /** 1.9.4+ Phase A: progressive tiers not yet finished — surfaced
+   *  in the Quality submenu with status badges so users see the
+   *  full ladder including what's still cooking. */
+  pendingQualities?: Array<{
+    tier: '2160p' | '1080p' | '720p' | '480p'
+    status: 'processing' | 'queued'
+    progress?: number
+  }>
   qualityChoice?: QualityChoice
   onQualityChoiceChange?: (q: QualityChoice) => void
   guidesPreset?: SafeZonePreset
@@ -194,6 +202,7 @@ export default function CustomVideoControls({
   onPlaybackSpeedChange,
   resolvedPlaybackQuality,
   availableQualities,
+  pendingQualities,
   qualityChoice,
   onQualityChoiceChange,
   guidesPreset,
@@ -1705,6 +1714,7 @@ export default function CustomVideoControls({
            onDownloadStill ? (
             <PlayerSettingsMenu
               availableQualities={availableQualities || []}
+              pendingQualities={pendingQualities}
               quality={qualityChoice || 'auto'}
               onQualityChange={onQualityChoiceChange}
               resolvedQuality={resolvedPlaybackQuality || null}

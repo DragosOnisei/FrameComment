@@ -51,20 +51,31 @@ export function getCpuAllocation(): CpuAllocation {
     cleanPreviewConcurrency = 1
     threadsPerJob = 1
   } else if (effectiveThreads <= 8) {
-    // Medium (6-8 threads): 1+1 jobs, 2 threads each = 4 threads (50-67%)
+    // Medium (6-8 threads): 1+1 jobs, 4 threads each = up to 8 (100%
+    // when a job is running, idle otherwise). 1.9.4+ Phase A bumped
+    // this from 2 threads/job to 4 — typical dedicated NAS / TrueNAS
+    // boxes have nothing else burning CPU, so we should USE the
+    // threads we have rather than play conservative.
     workerConcurrency = 1
     cleanPreviewConcurrency = 1
-    threadsPerJob = 2
+    threadsPerJob = 4
   } else if (effectiveThreads <= 16) {
-    // Large (12-16 threads): 1+1 jobs, 2 threads each = 4 threads (25-33%)
+    // Large (12-16 threads, e.g. Xeon E5-1650 v3 6c/12t): 1+1 jobs,
+    // 6 threads each. With Phase A's parallel-tier encoding we run
+    // 2 ffmpeg processes simultaneously after the first tier flips
+    // READY, so 6+6 = 12 threads = full utilisation of a 12-thread
+    // box. The `nice -n 10` cushion already keeps the system
+    // responsive, so leaving 8 of 12 threads idle (the old config)
+    // was just CPU left on the floor.
     workerConcurrency = 1
     cleanPreviewConcurrency = 1
-    threadsPerJob = 2
+    threadsPerJob = 6
   } else {
-    // XL (24+ threads): 2+1 jobs, 2 threads each = 6 threads (~25%)
+    // XL (24+ threads): 2+1 jobs, 8 threads each = up to 24 (50-67%).
+    // Two parallel video jobs keep the box busy without saturating.
     workerConcurrency = 2
     cleanPreviewConcurrency = 1
-    threadsPerJob = 2
+    threadsPerJob = 8
   }
 
   const maxThreadsUsed = (workerConcurrency + cleanPreviewConcurrency) * threadsPerJob

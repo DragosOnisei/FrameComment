@@ -38,6 +38,10 @@ export async function GET(
     return NextResponse.json({ error: shareMessages?.accessDenied || 'Access denied' }, { status: 403 })
   }
 
+  // 1.9.4+ Phase A: cast via `as any` because preview480Path was
+  // added to the schema but the Prisma client types haven't been
+  // regenerated yet (`npx prisma migrate dev` does that at the
+  // same time it runs the migration). Runtime is fine.
   const video = await prisma.video.findUnique({
     where: { id: videoId },
     select: {
@@ -45,8 +49,12 @@ export async function GET(
       projectId: true,
       approved: true,
       thumbnailPath: true,
-    },
-  })
+      preview480Path: true,
+      preview720Path: true,
+      preview1080Path: true,
+      preview2160Path: true,
+    } as any,
+  }) as any
 
   if (!video || video.projectId !== project.id) {
     return NextResponse.json({ error: shareMessages?.videoNotFound || 'Video not found' }, { status: 404 })
@@ -54,6 +62,24 @@ export async function GET(
 
   if (quality === 'original' && !video.approved) {
     return NextResponse.json({ error: shareMessages?.originalQualityUnavailable || 'Original quality unavailable' }, { status: 403 })
+  }
+
+  // 1.9.4+ Phase A: return an empty token when the caller asks
+  // for a quality tier that doesn't exist yet. The client mirrors
+  // this back as `streamUrl<tier>: ''`, so the player's "highest
+  // available" picker (and its quality label) stays honest while
+  // the worker is still producing higher tiers.
+  if (quality === '480p' && !video.preview480Path) {
+    return NextResponse.json({ token: '' })
+  }
+  if (quality === '720p' && !video.preview720Path) {
+    return NextResponse.json({ token: '' })
+  }
+  if (quality === '1080p' && !video.preview1080Path) {
+    return NextResponse.json({ token: '' })
+  }
+  if (quality === '2160p' && !video.preview2160Path) {
+    return NextResponse.json({ token: '' })
   }
 
   const sessionId = shareContext.sessionId || `share:${project.id}:${token}`

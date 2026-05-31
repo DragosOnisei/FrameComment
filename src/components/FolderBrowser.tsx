@@ -27,6 +27,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
+import { useDownloadManager } from '@/contexts/DownloadManager'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import FolderCard from './FolderCard'
 import VideoCard from './VideoCard'
@@ -34,6 +35,7 @@ import NewFolderDialog from './NewFolderDialog'
 import FolderContextMenu from './FolderContextMenu'
 import { ConfirmModal } from './ConfirmModal'
 import { ShareModal } from './ShareModal'
+import { RenameDialog } from './ui/rename-dialog'
 import { SplitVersionsModal, type SplitVersionRow } from './SplitVersionsModal'
 import QuickPreviewOverlay, { type QuickPreviewTarget } from './QuickPreviewOverlay'
 import FolderBrowserTable from './FolderBrowserTable'
@@ -544,16 +546,31 @@ function FolderBrowserInner(
     [router, projectId],
   )
 
+  // 2.0.x+: themed rename dialog (RenameDialog) replaces the native
+  // window.prompt(). State drives a controlled <RenameDialog />
+  // rendered at the bottom of the component; the kebab handler
+  // (`handleRename`) just sets the target folderId + opens it.
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string
+    name: string
+  } | null>(null)
+
   const handleRename = useCallback(
-    async (folderId: string) => {
+    (folderId: string) => {
       const current = folders.find((f) => f.id === folderId)
-      const next = window.prompt('Rename folder to:', current?.name || '')
-      if (!next || !next.trim() || next.trim() === current?.name) return
+      setRenameTarget({ id: folderId, name: current?.name || '' })
+    },
+    [folders],
+  )
+
+  const handleRenameSubmit = useCallback(
+    async (next: string) => {
+      if (!renameTarget) return
       try {
-        const res = await apiFetch(`/api/folders/${folderId}`, {
+        const res = await apiFetch(`/api/folders/${renameTarget.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: next.trim() }),
+          body: JSON.stringify({ name: next }),
         })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
@@ -562,10 +579,13 @@ function FolderBrowserInner(
         await fetchFolders({ silent: true })
         onMutated?.()
       } catch (err) {
+        // Surface to the user — keep the dialog open by returning
+        // false so they can fix the name and try again.
         alert(err instanceof Error ? err.message : 'Failed to rename folder')
+        return false
       }
     },
-    [folders, fetchFolders, onMutated],
+    [renameTarget, fetchFolders, onMutated],
   )
 
   const handleShare = useCallback(
@@ -1140,14 +1160,31 @@ function FolderBrowserInner(
    * Trigger a browser download for each video sequentially. We use a
    * hidden anchor + small delay between hits to avoid the popup
    * blocker that fires on multiple programmatic downloads.
+   *
+   * 2.0.x+: multi-file jobs (ids.length > 1) get tracked in the
+   * DownloadManager so the user sees "X / Y files" progress + a
+   * Cancel button. Single-video downloads skip the banner —
+   * they're one anchor click, fast, no value in chrome around them.
    */
+  const { startManualDownload } = useDownloadManager()
   const downloadVideos = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return
     setBulkBusy(true)
+    const useBanner = ids.length > 1
+    const job = useBanner
+      ? startManualDownload({
+          label: `${ids.length} files`,
+          totalItems: ids.length,
+        })
+      : null
     try {
       for (const id of ids) {
+        if (job?.signal.aborted) break
         const url = await fetchDownloadUrl(id)
-        if (!url) continue
+        if (!url) {
+          job?.bumpItem()
+          continue
+        }
         const a = document.createElement('a')
         a.href = url
         // The /api/content endpoint already sets a Content-Disposition
@@ -1158,111 +1195,61 @@ function FolderBrowserInner(
         document.body.appendChild(a)
         a.click()
         a.remove()
+        job?.bumpItem()
         await new Promise((r) => setTimeout(r, 400))
       }
+      if (job) {
+        job.finish(job.signal.aborted ? 'error' : 'success',
+          job.signal.aborted ? 'Cancelled' : undefined)
+      }
     } finally {
       setBulkBusy(false)
     }
-  }, [])
+  }, [startManualDownload])
 
-  // 1.4.x+: structured single-folder download. Hits the new
-  // /api/folders/[id]/download endpoint that streams a ZIP of the
-  // whole tree with folder names + original filenames preserved.
-  //
-  // We can't use a plain anchor tag here — admin auth in this app
-  // is Bearer-based (`Authorization: Bearer <admin-token>`), and
-  // `<a href="...">` only carries cookies. The endpoint would 401
-  // and the browser would save the JSON error body as
-  // `download.json`. Instead we go through `apiFetch` which adds
-  // the Bearer header, take the response as a Blob, and trigger the
-  // anchor-tag download on a generated object URL. The filename
-  // comes from the response's Content-Disposition header so a future
-  // server rename (e.g. unicode folder names) doesn't need a client
-  // change.
-  const handleDownloadFolder = useCallback(async (folderId: string) => {
-    setBulkBusy(true)
-    try {
-      const res = await apiFetch(`/api/folders/${folderId}/download`)
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`
-        try {
-          const body = await res.json()
-          if (body?.error) msg = body.error
-        } catch {
-          /* ignore parse errors */
-        }
-        alert(`Failed to download folder: ${msg}`)
-        return
-      }
-      const blob = await res.blob()
-      // Try to read filename from Content-Disposition; fall back to
-      // a generic name. The server-side route quotes the filename,
-      // so we strip the surrounding `"`.
-      const cd = res.headers.get('content-disposition') || ''
-      const match = cd.match(/filename\*?="?([^";]+)"?/i)
-      const filename = match?.[1] || 'folder.zip'
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      a.rel = 'noopener'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      // Give Safari a tick to actually start the save before we
-      // revoke; some engines flake if we revoke too early.
-      setTimeout(() => URL.revokeObjectURL(url), 1500)
-    } finally {
-      setBulkBusy(false)
-    }
-  }, [])
+  // 2.0.x+: routes through DownloadManager so the user sees a
+  // bottom-right progress banner with percentage + Cancel button.
+  // The manager fetches /stat for the byte total, then streams the
+  // ZIP from /download chunk-by-chunk, accumulating bytes into the
+  // banner state. Same Bearer auth via apiFetch — passed as the
+  // custom fetcher so /stat is also authed.
+  const { startStreamDownload } = useDownloadManager()
+  const handleDownloadFolder = useCallback((folderId: string) => {
+    startStreamDownload({
+      label: 'Folder.zip',
+      url: `/api/folders/${folderId}/download`,
+      statUrl: `/api/folders/${folderId}/download/stat`,
+      fetcher: apiFetch as any,
+      fallbackFilename: 'folder.zip',
+    })
+  }, [startStreamDownload])
 
-  const handleBulkDownload = useCallback(async () => {
-    // 1.1.0+: bulk download spans both selected videos AND every
-    // video found recursively inside each selected folder. We walk
-    // sub-folders client-side via the existing `/api/folders/[id]`
-    // endpoint (which returns this folder's direct videos +
-    // sub-folder ids) and accumulate the unique latest-version ids.
-    const ids = new Set<string>(selectedVideoIds)
-    const visited = new Set<string>()
-    const queue: string[] = Array.from(selectedFolderIds)
-    while (queue.length > 0) {
-      const fid = queue.shift()!
-      if (visited.has(fid)) continue
-      visited.add(fid)
-      try {
-        const res = await apiFetch(`/api/folders/${fid}`)
-        if (!res.ok) continue
-        const data = await res.json().catch(() => null)
-        const folderPayload = data?.folder
-        if (!folderPayload) continue
-        // Videos: take only the LATEST version per (projectId, name)
-        // — same grouping the grid uses on the card.
-        const vids = Array.isArray(folderPayload.videos)
-          ? (folderPayload.videos as Array<any>)
-          : []
-        const byName = new Map<string, any>()
-        for (const v of vids) {
-          const key = `${v.projectId}:${v.name}`
-          const prev = byName.get(key)
-          if (!prev || (v.version ?? 0) > (prev.version ?? 0)) {
-            byName.set(key, v)
-          }
-        }
-        for (const v of byName.values()) ids.add(v.id)
-        // Recurse into sub-folders.
-        const subs = Array.isArray(folderPayload.subfolders)
-          ? (folderPayload.subfolders as Array<any>)
-          : []
-        for (const sf of subs) {
-          if (sf?.id) queue.push(sf.id)
-        }
-      } catch {
-        // Best-effort — skip folders we can't read.
-      }
+  const handleBulkDownload = useCallback(() => {
+    // 2.0.x+: each selected folder gets its OWN ZIP — exactly as if
+    // the user had clicked "Download folder" on it individually.
+    // Previously the bulk handler flattened all sub-tree videos into
+    // one giant list and then triggered a per-file anchor click for
+    // every leaf, which (a) produced N separate browser saves
+    // instead of N tidy ZIPs and (b) lost the folder layout the
+    // user was expecting in the archive.
+    //
+    // Selected LOOSE videos (i.e. selectedVideoIds outside any
+    // selected folder) still go through the original
+    // single-file-per-click pipeline — they have no folder to ZIP.
+    for (const folderId of selectedFolderIds) {
+      startStreamDownload({
+        label: 'Folder.zip', // overwritten by stat with the real name
+        url: `/api/folders/${folderId}/download`,
+        statUrl: `/api/folders/${folderId}/download/stat`,
+        fetcher: apiFetch as any,
+        fallbackFilename: 'folder.zip',
+      })
     }
-    downloadVideos(Array.from(ids))
-  }, [selectedVideoIds, selectedFolderIds, downloadVideos])
+    const looseVideoIds = Array.from(selectedVideoIds)
+    if (looseVideoIds.length > 0) {
+      downloadVideos(looseVideoIds)
+    }
+  }, [selectedVideoIds, selectedFolderIds, downloadVideos, startStreamDownload])
 
   const handleDownloadAll = useCallback(() => {
     const ids = videoGroups.map((g) => g.id)
@@ -2785,6 +2772,13 @@ function FolderBrowserInner(
           await confirmState.onConfirm?.()
         }}
         onCancel={() => setConfirmState({ open: false, title: '' })}
+      />
+      <RenameDialog
+        open={!!renameTarget}
+        onOpenChange={(next) => { if (!next) setRenameTarget(null) }}
+        title="Rename folder"
+        initialValue={renameTarget?.name || ''}
+        onSubmit={handleRenameSubmit}
       />
       <ShareModal
         open={shareState.open}

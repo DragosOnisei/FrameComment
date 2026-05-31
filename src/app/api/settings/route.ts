@@ -296,10 +296,14 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (defaultPreviewResolution !== undefined) {
-      const validResolutions = ['720p', '1080p', '2160p']
+      // 1.9.4+ Phase A: "auto" is the new recommended default —
+      // the worker matches the source resolution at processing
+      // time. Internal-only 480p never appears here because it's
+      // always the ladder's first step, not a user cap.
+      const validResolutions = ['auto', '720p', '1080p', '2160p']
       if (!validResolutions.includes(defaultPreviewResolution)) {
         return NextResponse.json(
-          { error: settingsMessages.invalidPreviewResolution || 'Invalid preview resolution. Must be 720p, 1080p, or 2160p.' },
+          { error: settingsMessages.invalidPreviewResolution || 'Invalid preview resolution. Must be auto, 720p, 1080p, or 2160p.' },
           { status: 400 }
         )
       }
@@ -521,6 +525,32 @@ export async function PATCH(request: NextRequest) {
         adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
       },
     })
+
+    // 1.9.4+ Phase A: cascade the global previewResolution to
+     // every project so a change here actually takes effect for
+     // the existing roster — not just future creates. Without
+     // this the user changes Global Settings → Auto, then opens a
+     // project's settings and still sees the old 720p value
+     // because each Project row keeps its own copy.
+     //
+     // Per-project overrides are still possible: after this PATCH
+     // lands, the operator can open any specific project and pick
+     // a different value, and the next time global is touched it
+     // will get overwritten back. That's the price of treating
+     // global as the source of truth — which is exactly what the
+     // user asked for.
+    if (defaultPreviewResolution !== undefined) {
+      try {
+        const result = await prisma.project.updateMany({
+          data: { previewResolution: defaultPreviewResolution },
+        })
+        logMessage(
+          `[SETTINGS] Cascaded previewResolution=${defaultPreviewResolution} to ${result.count} project(s)`,
+        )
+      } catch (err) {
+        logError('[SETTINGS] previewResolution cascade failed:', err)
+      }
+    }
 
     invalidateEmailSettingsCache()
 

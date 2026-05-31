@@ -882,17 +882,10 @@ export default function GlobalSettingsPage() {
         </div>
 
         {/* Bottom notifications + save */}
-        {error && (
-          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-destructive font-medium">{error}</p>
-          </div>
-        )}
-
-        {success && (
-          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-success font-medium">{t('savedSuccessfully')}</p>
-          </div>
-        )}
+        {/* 1.9.4+: the success / error banner used to render
+            BOTH above the content (top of the page) and again
+            here below it, so a save flash showed twice. Keeping
+            only the top instance — drop the duplicate below. */}
 
         <div className="mt-6 sm:mt-8 pb-20 lg:pb-24 flex justify-end">
           <Button onClick={handleSave} variant="default" disabled={saving} size="default">

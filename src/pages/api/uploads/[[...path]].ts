@@ -3,7 +3,8 @@ import { FileStore } from '@tus/file-store'
 import { prisma } from '@/lib/db'
 import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
-import { uploadFile, moveFile, initStorage, getTusUploadDir, isS3Mode } from '@/lib/storage'
+import { uploadFile, moveFile, initStorage, getTusUploadDir, isS3Mode, getFilePath } from '@/lib/storage'
+import { generateThumbnail } from '@/lib/ffmpeg'
 import path from 'path'
 import fs from 'fs'
 import { Readable } from 'stream'
@@ -370,6 +371,37 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
 
   logMessage(`[UPLOAD] Video ${videoId} upload complete, status updated to PROCESSING`)
 
+  // 1.9.4+ Phase A: instant thumbnail extraction runs BEFORE
+  // we queue the worker job so the still frame is visible the
+  // moment the folder grid renders — by the time the worker's
+  // ~2-minute 480p transcode finishes the thumbnail has long
+  // since been there. We race the extraction against a 15-second
+  // hard timeout so it can never block the upload response
+  // indefinitely; if it doesn't beat the timeout (CPU contention,
+  // disk pressure, weird codec), we fall through and let the
+  // worker generate the thumbnail later. Local-mode only — S3
+  // would require downloading the full original just for one
+  // frame, which doesn't pay back.
+  if (!isS3Mode()) {
+    try {
+      await Promise.race([
+        initInstantThumbnail(video.id, video.projectId, video.originalStoragePath),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('Instant thumbnail timeout')), 15000),
+        ),
+      ])
+    } catch (err) {
+      // Non-fatal: worker will generate a thumbnail later via its
+      // own processThumbnail call. Log and continue.
+      logError(`[UPLOAD] Instant thumbnail failed for ${videoId} (non-fatal):`, err)
+    }
+  }
+
+  // Queue the worker job AFTER the instant thumbnail attempt.
+  // The instant pass is short (1-2 s for a typical 1080p source,
+  // bounded by the 15 s timeout above) so the worker only starts
+  // a moment later — well worth it for the immediate visual
+  // feedback in the folder grid.
   await videoQueue.add('process-video', {
     videoId: video.id,
     originalStoragePath: video.originalStoragePath,
@@ -560,6 +592,96 @@ async function validateUploadedAssetFile(tusFilePath: string, filename?: string)
   // This ensures proper file content validation happens during processing
   // without causing Next.js build issues with the file-type ESM module
   logMessage(`[UPLOAD] Asset extension validation passed, magic byte check will run in worker`)
+}
+
+/**
+ * Phase A — Instant thumbnail.
+ *
+ * Pulls a single frame out of the freshly-uploaded video file
+ * before the heavy worker pipeline runs, so the folder grid /
+ * project page can show a real thumbnail within ~3 seconds of
+ * upload finish instead of waiting 5-10 minutes for transcoding.
+ *
+ * Local storage only. In S3 mode the original is in cloud storage
+ * and pulling it back just for one frame is a poor tradeoff —
+ * worker.processThumbnail will handle it after the file is staged.
+ *
+ * Soft-fail: any error (ffmpeg missing, file race, etc.) is logged
+ * and swallowed — the worker will overwrite with a higher-quality
+ * thumbnail later anyway. Uses the SAME storage path the worker
+ * uses (`projects/<projectId>/videos/<videoId>/thumbnail.jpg`) so
+ * the worker's later write is the authoritative final version.
+ */
+async function initInstantThumbnail(
+  videoId: string,
+  projectId: string,
+  originalStoragePath: string,
+): Promise<void> {
+  // Resolve the on-disk location of the master file. In local mode
+  // this is the absolute path under STORAGE_DIR.
+  const sourcePath = getFilePath(originalStoragePath)
+  if (!fs.existsSync(sourcePath)) {
+    logMessage(
+      `[UPLOAD] Instant thumbnail: source not found at ${sourcePath} for ${videoId}; skipping`,
+    )
+    return
+  }
+
+  // Stage into the worker's TEMP_DIR so we don't pollute /tmp and
+  // the worker cleanup sweeps it up later if we leak.
+  const tmpRoot = '/tmp/framecomment'
+  if (!fs.existsSync(tmpRoot)) {
+    fs.mkdirSync(tmpRoot, { recursive: true })
+  }
+  const tmpThumb = path.join(tmpRoot, `instant-${videoId}.jpg`)
+
+  // Frame 0 — literal first frame, matching the worker's
+  // THUMBNAIL_CONFIG (percentage: 0) so the instant version and
+  // the worker's eventual rewrite are visually identical. Users
+  // expect "the thumbnail = the first frame they'd see if they hit
+  // play". generateThumbnail uses `nice -n 10` so it doesn't starve
+  // worker transcodes if any are already running.
+  try {
+    await generateThumbnail(sourcePath, tmpThumb, 0)
+  } catch (err) {
+    logError(`[UPLOAD] Instant thumbnail ffmpeg failed for ${videoId}:`, err)
+    return
+  }
+
+  if (!fs.existsSync(tmpThumb)) {
+    logMessage(`[UPLOAD] Instant thumbnail: ffmpeg produced no output for ${videoId}`)
+    return
+  }
+
+  // Upload via the storage abstraction (local → moves to
+  // STORAGE_DIR; S3 path won't run, see caller). Use the EXACT
+  // path the worker will later write so finalizeVideo's overwrite
+  // logic is the authoritative final pass.
+  const thumbnailStoragePath = `projects/${projectId}/videos/${videoId}/thumbnail.jpg`
+  try {
+    const buffer = fs.readFileSync(tmpThumb)
+    await uploadFile(thumbnailStoragePath, buffer, buffer.length, 'image/jpeg')
+  } catch (err) {
+    logError(`[UPLOAD] Instant thumbnail upload failed for ${videoId}:`, err)
+    try { fs.unlinkSync(tmpThumb) } catch {}
+    return
+  }
+
+  try { fs.unlinkSync(tmpThumb) } catch {}
+
+  // Persist on the Video row so the folder grid + project page
+  // pick it up on next render.
+  try {
+    await prisma.video.update({
+      where: { id: videoId },
+      data: { thumbnailPath: thumbnailStoragePath },
+    })
+  } catch (err) {
+    logError(`[UPLOAD] Instant thumbnail DB update failed for ${videoId}:`, err)
+    return
+  }
+
+  logMessage(`[UPLOAD] Instant thumbnail ready for ${videoId}`)
 }
 
 async function cleanupTUSFile(tusFilePath: string) {

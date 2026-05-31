@@ -3,6 +3,8 @@
 import { AuthProvider } from '@/components/AuthProvider'
 import AdminHeader from '@/components/AdminHeader'
 import SessionMonitor from '@/components/SessionMonitor'
+import { DownloadManagerProvider } from '@/contexts/DownloadManager'
+import { DownloadBanners } from '@/components/DownloadBanners'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 
@@ -64,17 +66,20 @@ export default function AdminLayout({
 
   return (
     <AuthProvider requireAuth={true}>
-      <div className="flex flex-1 min-h-0 bg-background flex-col overflow-x-hidden">
-        {!hideHeader && (
-          <div ref={headerRef}>
-            <AdminHeader />
+      <DownloadManagerProvider>
+        <div className="flex flex-1 min-h-0 bg-background flex-col overflow-x-hidden">
+          {!hideHeader && (
+            <div ref={headerRef}>
+              <AdminHeader />
+            </div>
+          )}
+          <div className="flex-1 min-h-0 flex flex-col">
+            {children}
           </div>
-        )}
-        <div className="flex-1 min-h-0 flex flex-col">
-          {children}
+          <SessionMonitor />
+          <DownloadBanners />
         </div>
-        <SessionMonitor />
-      </div>
+      </DownloadManagerProvider>
     </AuthProvider>
   )
 }

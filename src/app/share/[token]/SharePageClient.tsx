@@ -563,13 +563,34 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
     return Promise.all(
       videos.map(async (video: any) => {
-        const cacheKey = `${shareToken}:${video.id}`
+        // 1.9.4+ Phase A: cache key fingerprints status AND
+        // which tier paths have landed, so the cache rotates
+        // whenever a new tier comes online. The cached entry's
+        // stream URLs are kept (expensive to regenerate), but
+        // progress + tier-path flags are overlaid from the fresh
+        // poll data so the Quality menu's "720p · 50%" badge
+        // actually advances between polls.
+        const tierFingerprint = `${!!video.preview480Path ? 1 : 0}${!!video.preview720Path ? 1 : 0}${!!video.preview1080Path ? 1 : 0}${!!video.preview2160Path ? 1 : 0}`
+        const cacheKey = `${shareToken}:${video.id}:${video.status || 'PROCESSING'}:${tierFingerprint}`
         const cached = tokenCacheRef.current.get(cacheKey)
         if (cached) {
-          return cached
+          return {
+            ...cached,
+            status: video.status,
+            processingProgress: video.processingProgress,
+            preview480Path: video.preview480Path,
+            preview720Path: video.preview720Path,
+            preview1080Path: video.preview1080Path,
+            preview2160Path: video.preview2160Path,
+          }
         }
 
         try {
+          // 1.9.4+ Phase A: 480p is the fastest progressive tier.
+          // We fetch a token for it alongside the higher tiers so
+          // the player can serve it the moment it lands, even
+          // before 720p+ finish.
+          let streamToken480p = ''
           let streamToken720p = ''
           let streamToken1080p = ''
           let streamToken2160p = ''
@@ -579,12 +600,14 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             // Check if project uses preview for approved playback
             if (project?.usePreviewForApprovedPlayback) {
               // Use preview tokens for streaming, original for download
-              const [token720, token1080, token2160, originalToken] = await Promise.all([
+              const [token480, token720, token1080, token2160, originalToken] = await Promise.all([
+                fetchVideoTokenWithRetry(video.id, '480p'),
                 fetchVideoTokenWithRetry(video.id, '720p'),
                 fetchVideoTokenWithRetry(video.id, '1080p'),
                 fetchVideoTokenWithRetry(video.id, '2160p'),
                 fetchVideoTokenWithRetry(video.id, 'original'),
               ])
+              streamToken480p = token480
               streamToken720p = token720
               streamToken1080p = token1080
               streamToken2160p = token2160
@@ -592,17 +615,20 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             } else {
               // Default: original for everything
               const originalToken = await fetchVideoTokenWithRetry(video.id, 'original')
+              streamToken480p = originalToken
               streamToken720p = originalToken
               streamToken1080p = originalToken
               streamToken2160p = originalToken
               downloadToken = originalToken
             }
           } else {
-            const [token720, token1080, token2160] = await Promise.all([
+            const [token480, token720, token1080, token2160] = await Promise.all([
+              fetchVideoTokenWithRetry(video.id, '480p'),
               fetchVideoTokenWithRetry(video.id, '720p'),
               fetchVideoTokenWithRetry(video.id, '1080p'),
               fetchVideoTokenWithRetry(video.id, '2160p'),
             ])
+            streamToken480p = token480
             streamToken720p = token720
             streamToken1080p = token1080
             streamToken2160p = token2160
@@ -618,6 +644,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
           const tokenized = {
             ...video,
+            streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
             streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
             streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
             streamUrl2160p: streamToken2160p ? `/api/content/${streamToken2160p}` : '',
@@ -627,7 +654,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
           // Only cache successful tokenization results.
           // Avoid caching empty URLs from transient failures on first load.
-          if (tokenized.streamUrl720p || tokenized.streamUrl1080p || tokenized.streamUrl2160p || tokenized.downloadUrl || tokenized.thumbnailUrl) {
+          if (tokenized.streamUrl480p || tokenized.streamUrl720p || tokenized.streamUrl1080p || tokenized.streamUrl2160p || tokenized.downloadUrl || tokenized.thumbnailUrl) {
             tokenCacheRef.current.set(cacheKey, tokenized)
           }
           return tokenized

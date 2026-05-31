@@ -17,6 +17,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.0.1] - 2026-06-01
+
+A polish pass on the post-2.0 download UX plus two small admin-side
+fixes the user pointed out the moment 2.0 shipped.
+
+### Added
+
+- **Download progress banner (bottom-right stack).** Folder ZIP
+  downloads no longer fire-and-forget into the network; the moment
+  the user clicks Download they get a card in the bottom-right
+  corner showing the folder name, a real percentage that ticks up,
+  byte-progress (`125 MB / 3.0 GB`), and a Cancel button. The
+  manager handles multiple jobs in parallel — each downloads gets
+  its own card, stacked vertically.
+  - Server: two new lightweight endpoints,
+    `GET /api/folders/[id]/download/stat` and
+    `GET /api/share/folder/[slug]/download/stat`, that walk the
+    same folder tree the streaming download walks but only sum
+    `Video.originalFileSize` so the client knows the total upfront.
+  - Client: `DownloadManagerProvider` context wraps the admin app
+    shell and the public share folder page; `DownloadBanners`
+    renders the stack; per-job `AbortController` powers Cancel.
+  - All three trigger points routed through it: admin "Download
+    folder" kebab, public share "Download all", and bulk
+    multi-folder selection.
+- **Bulk download = one ZIP per selected folder.** Previously,
+  selecting N folders and clicking Download fanned out into a
+  per-video flood of anchor saves (the user got N×M individual
+  files instead of N tidy archives, and lost the folder layout
+  the archive should have preserved). Now each selected folder
+  triggers its own streamed ZIP job + banner. Loose selected
+  videos (sitting outside the chosen folders) keep the old
+  per-file anchor behaviour.
+
+### Fixed
+
+- **Themed rename dialog for folders.** The folder kebab's "Rename"
+  used `window.prompt()` — a gray native browser blob that didn't
+  match the rest of the app. Replaced with the existing
+  `RenameDialog` (already used for project rename): same Cancel /
+  Rename buttons, focus + select the input on open, spinner on
+  submit, server errors keep the dialog open so the user can
+  correct the name without re-typing.
+- **Quick Preview panel no longer shrinks during hover-scrub.**
+  When the user pressed Space on a folder containing videos and
+  then hovered a video tile to scrub through it, the panel would
+  shrink because the `<video>` element's intrinsic dimensions
+  (1920×1080) inflated the grid column's min-content. Fixed two
+  ways: `min-w-0` on every tile so `minmax(0, 1fr)` actually wins,
+  and the panel itself now uses a fixed width per tile-count
+  (360 / 520 / 720 px) instead of a content-driven min/max range.
+
 ## [2.0.0] - 2026-06-01
 
 A major release rebuilding the entire video playback pipeline around

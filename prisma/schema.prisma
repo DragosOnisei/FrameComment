@@ -83,14 +83,14 @@ model Project {
   timestampDisplay String @default("TIMECODE")
 
   // Video processing settings
-  previewResolution String  @default("720p") // "720p", "1080p", or "2160p" (originals can be any resolution including 2160p)
+  previewResolution String  @default("auto") // "auto" | "720p" | "1080p" | "2160p". The ladder always starts at 480p (the fast first tier) and climbs to whatever cap is set here. "auto" matches the source — a 1080p input gets the full 480→720→1080 ladder, a 4K input gets all four, a 720p input stops at 720p. The three explicit values stay for users who want a CPU / storage ceiling on big sources.
   skipTranscoding   Boolean @default(false) // Skip transcoding entirely — serve original file directly
   watermarkEnabled  Boolean @default(true) // Enable/disable watermarks for this project
   watermarkText     String? // Custom watermark text (null = use default format)
   watermarkPositions String  @default("center") // comma-separated: center, top-left, top-right, bottom-left, bottom-right
   watermarkOpacity   Int     @default(30) // Opacity percentage (10-100)
   watermarkFontSize  String  @default("medium") // small, medium, large
-  applyPreviewLut      Boolean @default(true) // Apply preview LUT during transcoding (for color-calibrated previews)
+  applyPreviewLut      Boolean @default(false) // 1.9.4+ Phase A: LUT off by default for ALL videos — the color-calibration filter ran at INPUT resolution before the downscale, adding 30-60 s per tier on a 40-min source for visual benefit the typical reviewer never asks for. Operators who actually want color-calibrated previews can opt in per-project.
 
   // Client share page settings
   allowAssetDownload     Boolean @default(true) // Allow clients to download video assets when project is approved
@@ -243,10 +243,37 @@ model Video {
   processingProgress Float       @default(0)
   processingError    String?
 
-  // Preview versions (watermarked)
+  // Preview versions (watermarked).
+  // 1.9.4+ Phase A: preview480Path is the lowest progressive tier —
+  // fastest to encode, first to land, flips the video to READY in
+  // under a minute on most inputs. Higher tiers (720/1080/2160)
+  // populate progressively as the worker climbs the ladder.
   preview2160Path String?
   preview1080Path String?
   preview720Path  String?
+  preview480Path  String?
+
+  // 1.9.4+ Phase B: HLS adaptive-streaming variants. The worker
+  // remuxes each MP4 tier into HLS segments + playlist after the
+  // tier completes — zero re-encoding penalty, just splits the
+  // existing bytes. `hlsBasePath` points to the storage prefix
+  // (e.g. `projects/<id>/videos/<id>/hls/`) and `hlsQualities`
+  // lists the tiers ready for streaming (e.g. ["480p", "720p"]).
+  // The master.m3u8 manifest is generated on-the-fly by the API,
+  // listing only the qualities present in `hlsQualities` — so
+  // when 1080p lands mid-playback, the player's next manifest
+  // poll picks it up and auto-upgrades without restarting.
+  hlsBasePath  String?
+  hlsQualities String[] @default([])
+  // 1.9.4+ Phase B: per-tier transcode progress. JSON map keyed
+  // by tier name (e.g. `{"720p": 45, "1080p": 23}`). Updated by
+  // the worker's ffmpeg onProgress callback using an atomic
+  // `jsonb_set` so two parallel tiers can write to it without
+  // clobbering each other. The single `processingProgress` field
+  // above only tracks the worker's coarse overall progress and
+  // gets overwritten by whichever ffmpeg races last — this map
+  // is what the Quality menu's per-row percentage reads from.
+  transcodeProgressByTier Json @default("{}")
   thumbnailPath   String?
   // Hover-scrub storyboard (1.0.6+). A single tiny JPEG packing 100
   // evenly-spaced frames in a 10×10 grid. The folder grid uses CSS
@@ -506,7 +533,10 @@ model Settings {
   appDomain String? // e.g., "https://yourdomain.com"
 
   // Default Video Processing Settings
-  defaultPreviewResolution  String? @default("720p")
+  // 1.9.4+ Phase A: "auto" lets the worker match the source —
+  // the progressive ladder always starts at a fast 480p tier and
+  // climbs to whatever the source can deliver (no upscaling).
+  defaultPreviewResolution  String? @default("auto")
   defaultSkipTranscoding   Boolean @default(false)
   defaultWatermarkEnabled  Boolean @default(true)
   defaultWatermarkText     String?
