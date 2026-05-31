@@ -17,6 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.9.3] - 2026-05-29
+
+### Fixed
+- **Billing storage now counts master video files.** The 1.9.2
+  Billing pane only summed `VideoAsset.fileSize` (extra
+  attachments — project files, comment audio, image uploads) +
+  `ProjectUpload.fileSize` (reverse-share). The actual master
+  files uploaded by admins live in `Video.originalFileSize`, which
+  is by far the bulk of storage — a project with 4.3 GB of videos
+  was reporting 268 KB. Fixed by also aggregating
+  `prisma.video.aggregate({ _sum: { originalFileSize } })` and
+  including it in `storageBytes`. Numbers should now match the
+  folder-level "X.X GB" sizes shown on project tiles.
+- **Removed the Billing preview-only banner.** The "Billing is
+  currently preview-only" warning at the top of the Billing pane
+  was retired at user request — the placeholder Connect Stripe
+  button below already signals the integration isn't live yet.
+
 ## [1.9.2] - 2026-05-29
 
 ### Added
