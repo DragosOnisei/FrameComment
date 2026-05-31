@@ -17,6 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [1.9.2] - 2026-05-29
+
+### Added
+- **Billing pane in Global Settings.** Owner-facing usage summary
+  with the current month-to-date estimate, broken down per line:
+  number of users × $25/user/month + storage GB × $0.10/GB/month,
+  with the next-billing date (last day of the current month) and
+  a payment-method placeholder ("Connect Stripe", disabled until
+  the real integration lands). Storage counts every file the app
+  holds (`VideoAsset` + `ProjectUpload`), including soft-deleted
+  projects in Trash. Users counts every row in the User table.
+  No money is moved yet — UI-only, but the numbers are accurate.
+
+  Wired via a new admin-only `GET /api/settings/billing/usage`
+  endpoint that aggregates the two sums + returns the pricing
+  tariff as JSON so the client doesn't hard-code dollar amounts.
+
 ## [1.9.1] - 2026-05-29
 
 ### Added

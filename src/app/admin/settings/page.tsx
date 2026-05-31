@@ -3,12 +3,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Settings as SettingsIcon, Save, Palette, Mail, Video, Shield, Building2, ShieldCheck, FolderCog, Ban } from 'lucide-react'
+import { Settings as SettingsIcon, Save, Palette, Mail, Video, Shield, Building2, ShieldCheck, FolderCog, Ban, CreditCard } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTranslations } from 'next-intl'
 import { AppearanceSection } from '@/components/settings/AppearanceSection'
 import { BrandingSection } from '@/components/settings/BrandingSection'
 import { PrivacySection } from '@/components/settings/PrivacySection'
+import { BillingSection } from '@/components/settings/BillingSection'
 import { NotificationsSection } from '@/components/settings/NotificationsSection'
 import { VideoProcessingSettingsSection } from '@/components/settings/VideoProcessingSettingsSection'
 import { ProjectDefaultsSection } from '@/components/settings/ProjectDefaultsSection'
@@ -193,6 +194,7 @@ export default function GlobalSettingsPage() {
   const [showAppearance, setShowAppearance] = useState(false)
   const [showBranding, setShowBranding] = useState(false)
   const [showPrivacy, setShowPrivacy] = useState(false)
+  const [showBilling, setShowBilling] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
   const [showProjectDefaults, setShowProjectDefaults] = useState(false)
@@ -688,6 +690,8 @@ export default function GlobalSettingsPage() {
     { id: 'video-processing', label: t('videoProcessing.title'), icon: Video },
     { id: 'security', label: t('security.title'), icon: Shield },
     { id: 'blocklist', label: t('blocklist.title'), icon: Ban },
+    // 1.9.2+: usage-based billing summary. UI-only — no Stripe yet.
+    { id: 'billing', label: 'Billing', icon: CreditCard },
   ]
 
   const appearanceProps = {
@@ -819,6 +823,7 @@ export default function GlobalSettingsPage() {
             setShowSecuritySettings={setShowSecuritySettings}
           />
           <BlocklistSection {...blocklistProps} show={showBlocklist} setShow={setShowBlocklist} />
+          <BillingSection show={showBilling} setShow={setShowBilling} />
         </div>
 
         {/* Desktop: sidebar nav + content panel */}
@@ -869,6 +874,9 @@ export default function GlobalSettingsPage() {
             )}
             {activeSection === 'blocklist' && (
               <BlocklistSection {...blocklistProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'billing' && (
+              <BillingSection show={true} setShow={() => {}} collapsible={false} />
             )}
           </div>
         </div>
