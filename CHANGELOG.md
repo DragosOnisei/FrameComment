@@ -17,6 +17,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.0.2] - 2026-06-01
+
+### Fixed
+
+- **Docker build: `npm ci --legacy-peer-deps` failed in CI.** The
+  2.0.0 and 2.0.1 release ceremonies used `sed 's/2.0.0/2.0.1/g'`
+  on `package-lock.json` which over-eagerly bumped EVERY string
+  matching `"version": "2.0.0"`, including transitive dependencies
+  like `@tus/server` and `@tus/file-store` that legitimately
+  resolve to 2.0.0. The resulting lockfile listed `@tus/server@2.0.1`
+  — a version that doesn't exist on the npm registry — and
+  `npm ci` (strict consistency check) refused to install with
+  `EUSAGE: lock file's @tus/server@2.0.1 does not satisfy
+  @tus/server@2.0.0`. Regenerated the lockfile from a clean v1.9.3
+  base, applied the version bump ONLY to the top-level
+  `framecomment` entry (lines 3 + 9), and let
+  `npm install --package-lock-only` add the new dependencies
+  (`hls.js@1.6.16`) accumulated between v1.9.3 and now. The
+  `npm ci --dry-run` round-trip passes cleanly in this release.
+- **Release ceremony documentation gap.** Future releases will
+  bump versions using either `npm version <next>` (which edits
+  both files correctly and atomically) or the precise sed line
+  addresses (`sed '3s/.../.../; 9s/.../.../'`), never the global
+  `s/X/Y/g` form on a JSON lockfile.
+
 ## [2.0.1] - 2026-06-01
 
 A polish pass on the post-2.0 download UX plus two small admin-side
