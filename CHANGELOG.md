@@ -17,6 +17,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.0.0] - 2026-06-01
+
+A major release rebuilding the entire video playback pipeline around
+progressive multi-tier encoding, HLS adaptive streaming, and the
+Frame.io-style quality menu. Time-to-first-playable drops from
+single-digit minutes to under a minute on most inputs, and players
+land directly on the highest available tier without any visible
+ABR ramp-up.
+
+### Added — Phase A: progressive MP4 tier ladder
+
+- **Instant-thumbnail at upload.** The TUS finish handler now extracts
+  the first frame the moment the original lands in storage, so the
+  folder grid stops showing the spinning "Generating thumbnail"
+  placeholder for the entire transcode duration.
+- **Progressive 480p → 720p → 1080p → 2160p MP4 ladder.** The worker
+  encodes the lowest tier first (`ultrafast` x264 preset, ~1-2 min
+  on most clips) and flips the video to `READY` as soon as it's
+  playable. Higher tiers continue in the same job and populate their
+  own `previewNNNNPath` columns as they finish. The player picks the
+  highest available tier at watch time.
+- **Hardware encoder auto-detection.** At worker startup we probe
+  FFmpeg for `h264_nvenc`, `h264_qsv`, `h264_videotoolbox` and
+  `h264_vaapi` and prefer them when present. Override with
+  `FORCE_VIDEO_ENCODER=libx264` for benchmarking or quality tuning.
+- **Parallel tier encoding.** All higher tiers fire from the same
+  job concurrently (no queue), so a 4K source's 720p + 1080p +
+  2160p land roughly in the wall-time of the slowest one instead
+  of their sum.
+- **Per-tier transcode progress map.** New `Video.transcodeProgressByTier`
+  JSONB column updated atomically via `jsonb_set` so parallel ffmpegs
+  don't clobber each other. The Quality menu now shows three
+  independent percentages while three tiers cook simultaneously.
+- **"Auto" preview-resolution mode.** Projects can now ask the worker
+  to climb to whatever the input's actual short-side resolution
+  supports — a 4K master gets the full 480→720→1080→2160 ladder,
+  a phone clip stops at 720p.
+- **480p-as-fast-first-tier.** The fastest path to a playable preview
+  on every clip. Cinematic/cropped sources within 90% of a nominal
+  tier (e.g. 1920×1008) still get the full ladder slot they look
+  like they deserve.
+
+### Added — Phase B: HLS adaptive streaming
+
+- **HLS remux pipeline.** After each MP4 tier completes, the worker
+  runs `ffmpeg -c copy` to remux to HLS segments + variant playlist,
+  uploads to storage, and adds the tier to `Video.hlsQualities`.
+  Zero re-encoding penalty.
+- **Dynamic master.m3u8 endpoint.** The HLS master is generated on
+  every request from `hlsQualities`, listing only ready tiers. The
+  variant playlists and `.ts` segments are served from the API with
+  token-bearing URLs (one signed token per session covers the
+  whole HLS read path).
+- **Token forwarding for HLS segments.** Variant playlists are
+  rewritten server-side so `?token=...` propagates from master →
+  variant → segment, working around RFC 3986 relative-URL query
+  stripping.
+- **`hls.js` integration on Chrome / Firefox / Edge.** The player
+  lazy-loads hls.js, attaches via MSE, pins `currentLevel` to the
+  highest variant at `MANIFEST_PARSED` and triggers `startLoad(-1)`
+  — so the very first fragment requested is from the top tier and
+  the user never sees the default ABR ramp from 480p.
+- **Chrome 148+ native-HLS fix.** Modern Chrome reports
+  `canPlayType('application/vnd.apple.mpegurl') === 'maybe'`. The
+  old check treated this as Safari and skipped hls.js entirely,
+  letting Chrome's built-in native HLS run its own slow ABR ramp.
+  We now route on `MediaSource` availability instead — Chrome goes
+  through hls.js, only iOS Safari (no MSE) falls back to native.
+- **Frame.io-style Quality menu.** Ready tiers appear as clickable
+  rows; tiers still encoding appear with a per-tier percentage and
+  switch to a "Finalizing…" state once MP4 is done but HLS remux
+  is still finishing. Clicking a tier in `hls.levels` flips
+  `nextLevel` (smooth, no buffer flush); clicking a tier the master
+  doesn't yet list does a viewport-only `reloadHlsInPlace` that
+  destroys + recreates hls.js with the same `<video>` element,
+  pinning the new pick and seeking back to the saved timestamp.
+- **`LEVEL_SWITCHED`-driven badge.** The SD / HD / HD+ / 4K chip
+  next to the gear icon now reads the level hls.js just committed
+  to instead of relying on `videoHeight` race conditions.
+- **Transport stability per videoId.** Once the player commits a
+  `videoUrl` for a clip (HLS master or MP4 stream), it never
+  swaps mid-session — even if the parent rotates tokens or HLS
+  becomes available after we started on MP4. The user keeps the
+  transport they opened with; a refresh is the only way to switch.
+  This is what finally stopped the "video jumps to frame 0 when a
+  new tier lands" class of bug.
+
+### Added — supporting infrastructure
+
+- **`hlsBasePath` + `hlsQualities` columns** on `Video`. Migration
+  `20260531100000_video_hls` adds both with safe defaults.
+- **`transcodeProgressByTier` column** on `Video`. Migration
+  `20260531120000_transcode_progress_by_tier` adds the JSONB map.
+
+### Fixed
+
+- **No more "ramp-up" on fully-processed videos.** Opening a clip
+  whose `1080p` or `2160p` is already done now starts on that tier
+  from the first frame — no audible / visible 480p → 720p → 1080p
+  ladder.
+- **No more freeze when a new tier lands mid-watch.** The MP4 →
+  HLS mid-session swap that used to reset the `<video>` element to
+  frame 0 (the moment a higher HLS variant became available) is
+  gone for good thanks to the per-videoId commit ref.
+
+### Why 2.0?
+
+The 1.x series matured the Frame.io review surface (comments,
+annotations, voice, range edits, folders, billing). 2.0 catches
+the playback layer up to the rest of the product: progressive
+encoding for sub-minute time-to-first-playable, adaptive
+streaming for bandwidth-friendly reviews, and a quality menu that
+actually behaves the way reviewers expect. The schema changes are
+additive (no breaking column drops); existing videos keep playing
+through the MP4 path and grow HLS variants on next reprocess.
+
 ## [1.9.3] - 2026-05-29
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "framecomment",
-  "version": "1.9.3",
+  "version": "2.0.0",
   "description": "FrameComment — self-hosted video review and approval platform for filmmakers and video professionals.",
   "author": {
     "name": "Dragos Onisei",
@@ -56,6 +56,7 @@
     "clsx": "^2.1.1",
     "driver.js": "^1.4.0",
     "file-type": "^22.0.0",
+    "hls.js": "^1.5.15",
     "html-to-text": "^9.0.5",
     "ioredis": "^5.8.2",
     "isomorphic-dompurify": "^3.7.1",
