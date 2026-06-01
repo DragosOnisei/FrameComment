@@ -148,7 +148,17 @@ COPY --link previewlut.cube /usr/share/ffmpeg/previewlut.cube
 
 RUN chmod a+r /usr/share/ffmpeg/previewlut.cube && \
     chown -R app:app /app && \
-    chmod -R a+rX /app
+    chmod -R a+rX /app && \
+    # 2.1.4+: Prisma's CLI writes a lock/metadata file under
+    # node_modules/@prisma/engines on first `migrate deploy` run.
+    # When the container is invoked with `user: '568:568'` (typical
+    # on TrueNAS SCALE Apps) the runtime UID doesn't own this path
+    # — owned by UID 911 from build time — and `prisma migrate
+    # deploy` aborts with "Can't write to /app/node_modules/@prisma/
+    # engines". Granting world-write on that subtree fixes it for
+    # any deployment UID without baking 568 (or any other host's
+    # convention) into the image.
+    chmod -R a+w /app/node_modules/@prisma
 
 ENV PUID=1000 PGID=1000
 

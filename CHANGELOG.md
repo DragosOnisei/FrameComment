@@ -17,6 +17,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.4] - 2026-06-01
+
+### Fixed
+
+- **Prisma migrate deploy crashes on first start of the Debian
+  runner with "Can't write to /app/node_modules/@prisma/
+  engines".** The runner image chowns `/app` to the build-time
+  user (UID 911) and grants only read+execute to others.
+  TrueNAS SCALE Apps invokes containers via `user: '568:568'`
+  which lands the process on a UID that doesn't own the path,
+  and Prisma's CLI tries to drop a lock/metadata file under
+  `@prisma/engines` on every `migrate deploy` (this was
+  silent on the Alpine runner because earlier ladder steps had
+  already touched the file). Image now does an extra
+  `chmod -R a+w /app/node_modules/@prisma` at build time so
+  any runtime UID can write the lock file without breaking
+  out into the rest of the tree. No security impact —
+  contents of `@prisma` are public NPM artifacts.
+
 ## [2.1.3] - 2026-06-01
 
 ### Fixed
