@@ -1,11 +1,9 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
-import { Button } from './ui/button'
-import { Input } from './ui/input'
-import { Upload, Video, X, Plus, Pause, Play, CheckCircle2, Lightbulb } from 'lucide-react'
+import { Upload, Video, X, Pause, Play, CheckCircle2 } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import * as tus from 'tus-js-client'
 import { apiPost, apiDelete } from '@/lib/api-client'
@@ -232,6 +230,11 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
         speed: 0,
       }))
       setPendingUploads(prev => [...prev, ...newUploads])
+      // 2.0.x+: banner-style flow — there's no "Start Upload"
+      // button any more. As soon as the user selects files we
+      // kick off TUS for each one. They can pause / cancel per
+      // row from the expanded banner.
+      newUploads.forEach(item => startUpload(item))
     }
   }
 
@@ -728,238 +731,321 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
     }
   }, [hasActiveUploads])
 
+  // 2.0.x+: banner-style flow — once every upload in the panel
+  // has flipped to `completed`, leave the "all done" tick on
+  // screen for ~5 s so the user gets to acknowledge it, then
+  // dismiss the banner automatically (clears state via the
+  // existing handleClose). If the user adds more files during
+  // the grace window we cancel the timer.
+  useEffect(() => {
+    if (!allCompleted) return
+    const id = setTimeout(() => {
+      setPendingUploads([])
+      onClose()
+    }, 5_000)
+    return () => clearTimeout(id)
+  }, [allCompleted, onClose])
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="sm:max-w-lg overflow-hidden" onPointerDownOutside={(e) => hasActiveUploads && e.preventDefault()}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Upload className="w-5 h-5 text-primary" />
-            {t('uploadVideos')}
-          </DialogTitle>
-        </DialogHeader>
+    <UploadBannerView
+      isOpen={isOpen}
+      pendingUploads={pendingUploads}
+      fileInputRef={fileInputRef}
+      handleFileSelect={handleFileSelect}
+      handleRemove={handleRemove}
+      handlePauseResume={handlePauseResume}
+      handleRetry={handleRetry}
+      handleClose={handleClose}
+      allCompleted={allCompleted}
+      hasActiveUploads={hasActiveUploads}
+    />
+  )
+}
 
-        <div className="space-y-4">
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="video/*,image/jpeg,image/png,image/webp,image/gif"
-            multiple
-            onChange={handleFileSelect}
-            className="hidden"
-          />
+/**
+ * 2.0.x+: bottom-right banner replacement for the old modal
+ * dialog. Renders nothing when there are no uploads. While the
+ * panel is collapsed it shows a 1-line summary (count + bar);
+ * click anywhere on the header to expand the per-file list with
+ * pause/resume/cancel controls.
+ *
+ * Sits ABOVE the processing-status banner via a slightly higher
+ * z-index so the user-initiated thing the user actually cares
+ * about right now (their pending uploads) wins the visual race.
+ * Positioned 200px above the bottom of the viewport so it
+ * stacks above the processing banner even when both are visible
+ * at once — far from ideal, but a full layout refactor that
+ * lifted upload state into a global manager is overkill here.
+ */
+function UploadBannerView({
+  isOpen,
+  pendingUploads,
+  fileInputRef,
+  handleFileSelect,
+  handleRemove,
+  handlePauseResume,
+  handleRetry,
+  handleClose,
+  allCompleted,
+  hasActiveUploads,
+}: {
+  isOpen: boolean
+  pendingUploads: PendingUpload[]
+  fileInputRef: React.RefObject<HTMLInputElement | null>
+  handleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
+  handleRemove: (id: string) => void
+  handlePauseResume: (id: string) => void
+  handleRetry: (id: string) => void
+  handleClose: () => void
+  allCompleted: boolean
+  hasActiveUploads: boolean
+}) {
+  const t = useTranslations('videos')
+  const tc = useTranslations('common')
+  // 2.0.x+: start collapsed so the banner is just a 1-line
+  // summary (icon + "Uploading videos" + X/Y done + progress
+  // bar). Click the row to expand the per-file list. Matches
+  // the ProcessingStatusBanners default behaviour.
+  const [expanded, setExpanded] = useState(false)
+  // SSR guard: createPortal needs `document.body`, which doesn't
+  // exist during Server Components rendering. Defer mounting the
+  // portal until after the client hydrates so the upload-progress
+  // banner survives the sr-only wrapper that AdminVideoManager
+  // sits inside on the project page.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
-          {/* 1.5.7: VPN/LAN hint — shown only when the user is accessing
-              FrameComment via a public hostname (i.e. via a CDN/reverse
-              proxy that may throttle sustained uploads). Disappears once
-              an upload is active to avoid distracting from progress. */}
-          {isPublicHost && !hasActiveUploads && (
-            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-200/90">
-              <Lightbulb className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-400" />
-              <span className="leading-relaxed">{t('remoteHostHint')}</span>
-            </div>
-          )}
+  // Hidden file input is always rendered so external triggers
+  // (FolderBrowser drop zone, "Add more videos" button, etc.)
+  // can still open the system picker — even when there are no
+  // active uploads and the banner itself isn't visible. We keep
+  // it OUTSIDE the portal because it lives at the same DOM spot
+  // it has always lived at; only the visible UI needs to escape
+  // the sr-only wrapper.
+  const hiddenInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="video/*,image/jpeg,image/png,image/webp,image/gif"
+      multiple
+      onChange={handleFileSelect}
+      className="hidden"
+    />
+  )
 
-          {/* Drop zone - only show when no active uploads */}
-          {!hasActiveUploads && (
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={cn(
-                'border-2 border-dashed rounded-xl p-8 transition-all cursor-pointer text-center',
-                isDragging
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-primary/50 hover:bg-accent/30'
+  if (!isOpen || pendingUploads.length === 0) return hiddenInput
+  if (!mounted) return hiddenInput
+
+  const done = pendingUploads.filter((u) => u.status === 'completed').length
+  const total = pendingUploads.length
+  const overallPct =
+    total > 0
+      ? Math.round(
+          pendingUploads.reduce(
+            (acc, u) => acc + (u.status === 'completed' ? 100 : u.progress),
+            0,
+          ) / total,
+        )
+      : 0
+
+  // Portal the banner to document.body so the sr-only wrapper
+  // around AdminVideoManager (project page only hosts the modal
+  // for its TUS triggers, not for any visible UI) doesn't visually
+  // hide the panel.
+  return (
+    <>
+      {hiddenInput}
+      {createPortal(
+      <div
+        className="fixed bottom-4 right-4 z-[2147483700] flex flex-col gap-2 max-w-[calc(100vw-2rem)] pointer-events-none"
+        aria-live="polite"
+      >
+        <div
+          className="pointer-events-auto w-[340px] rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.4)] animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden"
+          role="status"
+        >
+          {/* Header — click anywhere on the row (except the X) to
+              expand/collapse the per-file list. We use a div here
+              rather than a button because the X is a button and
+              <button> inside <button> is invalid HTML; React
+              would emit a hydration warning. The Enter/Space
+              handlers below preserve keyboard accessibility. */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setExpanded((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setExpanded((v) => !v)
+              }
+            }}
+            className="w-full text-left p-3 flex items-start gap-2.5 hover:bg-muted/40 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            aria-expanded={expanded}
+            aria-label={`${allCompleted ? t('completed') : t('uploadVideos')}. ${done} / ${total} done. Click to ${expanded ? 'collapse' : 'expand'}.`}
+          >
+            <div className="shrink-0 mt-0.5">
+              {allCompleted ? (
+                <CheckCircle2 className="w-4 h-4 text-green-500" />
+              ) : (
+                <Upload className="w-4 h-4 text-primary" />
               )}
-            >
-              <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">
-                {isDragging ? t('dropVideosHere') : t('dropVideosOrBrowse')}
-              </p>
             </div>
-          )}
-
-          {/* Uploads list */}
-          {pendingUploads.length > 0 && (
-            <div className="space-y-3 max-h-[400px] overflow-y-auto overflow-x-hidden">
-              {pendingUploads.map((upload) => (
-                <div key={upload.id} className="border rounded-lg p-3 bg-card overflow-hidden">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="shrink-0 mt-1">
-                      {upload.status === 'completed' ? (
-                        <CheckCircle2 className="w-5 h-5 text-success" />
-                      ) : (
-                        <Video className="w-5 h-5 text-muted-foreground" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-2">
-                      {/* Video name input */}
-                      <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                        <Input
-                          value={upload.videoName}
-                          onChange={(e) => handleUpdateName(upload.id, e.target.value)}
-                          placeholder={t('videoName')}
-                          className="h-9 flex-1 min-w-0"
-                          disabled={upload.status !== 'pending'}
-                          maxLength={MAX_VIDEO_NAME_LENGTH}
-                        />
-                        {upload.status === 'pending' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleRemove(upload.id)}
-                            className="h-9 w-9 shrink-0"
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-
-                      {/* Version label input */}
-                      {upload.status === 'pending' && (
-                        <Input
-                          value={upload.versionLabel}
-                          onChange={(e) => handleUpdateVersionLabel(upload.id, e.target.value)}
-                          placeholder={t('versionLabelPlaceholder')}
-                          className="h-8 text-sm w-full min-w-0"
-                        />
-                      )}
-
-                      {/* File info */}
-                      <div className="text-xs text-muted-foreground">
-                        <span title={upload.file.name}>{truncateFilename(upload.file.name, MAX_FILENAME_DISPLAY_LENGTH)}</span>
-                        <span> ({formatFileSize(upload.file.size)})</span>
-                      </div>
-
-                      {/* Progress bar */}
-                      {(upload.status === 'uploading' || upload.status === 'completed') && (
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">
-                              {upload.paused ? t('paused') : upload.status === 'completed' ? t('completed') : t('uploading')}
-                            </span>
-                            <span className="font-medium">{upload.progress}%</span>
-                          </div>
-                          <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
-                            <div
-                              className={cn(
-                                "h-full transition-all",
-                                upload.status === 'completed' ? 'bg-success' : upload.paused ? 'bg-warning' : 'bg-primary'
-                              )}
-                              style={{ width: `${upload.progress}%` }}
-                            />
-                          </div>
-                          {upload.speed > 0 && upload.status === 'uploading' && !upload.paused && (
-                            <p className="text-xs text-muted-foreground">
-                              {t('speed')} {upload.speed} MB/s
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Upload controls */}
-                      {upload.status === 'uploading' && (
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handlePauseResume(upload.id)}
-                            className="flex-1 h-8"
-                          >
-                            {upload.paused ? (
-                              <>
-                                <Play className="w-3 h-3 mr-1" />
-                                {t('resume')}
-                              </>
-                            ) : (
-                              <>
-                                <Pause className="w-3 h-3 mr-1" />
-                                {t('pause')}
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handleRemove(upload.id)}
-                            className="h-8"
-                          >
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      )}
-
-                      {/* Error state */}
-                      {upload.status === 'error' && (
-                        <div className="space-y-2">
-                          <p className="text-xs text-destructive break-words">{upload.error}</p>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRetry(upload.id)}
-                              className="h-8"
-                            >
-                              {tc('retry')}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRemove(upload.id)}
-                              className="h-8"
-                            >
-                              {tc('remove')}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-card-foreground truncate">
+                {allCompleted ? t('completed') : t('uploadVideos')}
+              </div>
+              <div className="text-[11px] text-muted-foreground truncate tabular-nums">
+                {done} / {total} done
+              </div>
             </div>
-          )}
-
-          {/* Add more button */}
-          {pendingUploads.length > 0 && !hasActiveUploads && !allCompleted && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              {t('addMoreVideos')}
-            </Button>
-          )}
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              onClick={handleClose}
-              disabled={hasActiveUploads}
-            >
-              {allCompleted ? tc('done') : tc('cancel')}
-            </Button>
-            {hasPendingItems && !hasActiveUploads && (
-              <Button onClick={handleStartAll}>
-                <Upload className="w-4 h-4 mr-2" />
-                {t('startUpload')}
-              </Button>
+            {allCompleted && !hasActiveUploads && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleClose()
+                }}
+                className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                aria-label={tc('done')}
+                title={tc('done')}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             )}
           </div>
-
-          {/* Help text */}
-          {!hasActiveUploads && !allCompleted && (
-            <p className="text-xs text-muted-foreground text-center">
-              {t('versionLabelHint')}
-            </p>
+          {/* Progress bar. Uses the average completion across
+              all queued uploads as a coarse roll-up. */}
+          <div className="px-3 pb-3">
+            <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                className={cn(
+                  'h-full rounded-full transition-all duration-300 ease-out',
+                  allCompleted ? 'bg-green-500' : 'bg-primary',
+                )}
+                style={{ width: `${overallPct}%` }}
+              />
+            </div>
+            <div className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+              {overallPct}%
+            </div>
+          </div>
+          {expanded && (
+            <div className="border-t border-border max-h-[260px] overflow-y-auto">
+              <ul className="divide-y divide-border">
+                {pendingUploads.map((upload) => (
+                  <UploadRow
+                    key={upload.id}
+                    upload={upload}
+                    onPauseResume={() => handlePauseResume(upload.id)}
+                    onRemove={() => handleRemove(upload.id)}
+                    onRetry={() => handleRetry(upload.id)}
+                  />
+                ))}
+              </ul>
+            </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>,
+      document.body,
+      )}
+    </>
+  )
+}
+
+function UploadRow({
+  upload,
+  onPauseResume,
+  onRemove,
+  onRetry,
+}: {
+  upload: PendingUpload
+  onPauseResume: () => void
+  onRemove: () => void
+  onRetry: () => void
+}) {
+  const tc = useTranslations('common')
+  // Lazily-imported only inside this row because the parent
+  // banner doesn't need it. Keeps the bundle slim.
+  return (
+    <li className="flex items-start gap-2.5 px-3 py-2 hover:bg-muted/40 transition-colors">
+      <div className="shrink-0 mt-0.5">
+        {upload.status === 'completed' ? (
+          <CheckCircle2 className="w-4 h-4 text-green-500" />
+        ) : upload.status === 'error' ? (
+          <X className="w-4 h-4 text-red-500" />
+        ) : upload.paused ? (
+          <Pause className="w-4 h-4 text-amber-500" />
+        ) : (
+          <Video className="w-4 h-4 text-primary" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div
+          className="text-xs font-medium text-card-foreground truncate"
+          title={upload.videoName || upload.file.name}
+        >
+          {upload.videoName || upload.file.name}
+        </div>
+        <div className="text-[10px] text-muted-foreground truncate tabular-nums">
+          {upload.status === 'completed'
+            ? formatFileSize(upload.file.size)
+            : upload.status === 'error'
+              ? (upload.error || 'Failed')
+              : `${upload.progress}% · ${formatFileSize(upload.file.size)}${
+                  upload.speed > 0 && !upload.paused
+                    ? ` · ${upload.speed} MB/s`
+                    : ''
+                }`}
+        </div>
+        {(upload.status === 'uploading' || upload.status === 'pending') && (
+          <div className="mt-1 h-1 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn(
+                'h-full rounded-full transition-all',
+                upload.paused ? 'bg-amber-500' : 'bg-primary',
+              )}
+              style={{ width: `${upload.progress}%` }}
+            />
+          </div>
+        )}
+      </div>
+      <div className="shrink-0 flex items-center gap-1">
+        {upload.status === 'uploading' && (
+          <button
+            type="button"
+            onClick={onPauseResume}
+            className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            aria-label={upload.paused ? 'Resume' : 'Pause'}
+            title={upload.paused ? 'Resume' : 'Pause'}
+          >
+            {upload.paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+          </button>
+        )}
+        {upload.status === 'error' && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="text-[10px] px-1.5 py-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            title={tc('retry')}
+          >
+            {tc('retry')}
+          </button>
+        )}
+        {upload.status !== 'completed' && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            aria-label={tc('remove')}
+            title={tc('remove')}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    </li>
   )
 }

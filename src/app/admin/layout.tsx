@@ -5,6 +5,9 @@ import AdminHeader from '@/components/AdminHeader'
 import SessionMonitor from '@/components/SessionMonitor'
 import { DownloadManagerProvider } from '@/contexts/DownloadManager'
 import { DownloadBanners } from '@/components/DownloadBanners'
+import { ProcessingStatusProvider } from '@/contexts/ProcessingStatusContext'
+import { ProcessingStatusBanners } from '@/components/ProcessingStatusBanners'
+import { GlobalDropOverlay } from '@/components/GlobalDropOverlay'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 
@@ -67,18 +70,22 @@ export default function AdminLayout({
   return (
     <AuthProvider requireAuth={true}>
       <DownloadManagerProvider>
-        <div className="flex flex-1 min-h-0 bg-background flex-col overflow-x-hidden">
-          {!hideHeader && (
-            <div ref={headerRef}>
-              <AdminHeader />
+        <ProcessingStatusProvider>
+          <div className="flex flex-1 min-h-0 bg-background flex-col overflow-x-hidden">
+            {!hideHeader && (
+              <div ref={headerRef}>
+                <AdminHeader />
+              </div>
+            )}
+            <div className="flex-1 min-h-0 flex flex-col">
+              {children}
             </div>
-          )}
-          <div className="flex-1 min-h-0 flex flex-col">
-            {children}
+            <SessionMonitor />
+            <DownloadBanners />
+            <ProcessingStatusBanners />
+            <GlobalDropOverlay />
           </div>
-          <SessionMonitor />
-          <DownloadBanners />
-        </div>
+        </ProcessingStatusProvider>
       </DownloadManagerProvider>
     </AuthProvider>
   )

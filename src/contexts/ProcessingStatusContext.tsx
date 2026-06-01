@@ -1,0 +1,206 @@
+'use client'
+
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
+import { apiFetch } from '@/lib/api-client'
+import { logError } from '@/lib/logging'
+
+/**
+ * 2.0.x+: shared state for the bottom-right "Uploading X/Y" and
+ * "Processing X/Y" banners. Polls /api/processing-status every
+ * few seconds while the admin shell is open, and keeps a
+ * high-water-mark (`hwm`) for the denominator so the banner can
+ * read as "21 of 67 done" instead of "21 left to do, who knows
+ * how many we started with".
+ *
+ * The HWM resets when both counts hit 0 for ~5 seconds. That
+ * lets the banner show a brief "All done!" state, then disappear
+ * cleanly. If a new batch starts within that window, we just
+ * keep growing the HWM.
+ *
+ * Polling interval is fast (3 s) when there's any active work,
+ * slower (15 s) when idle — to catch the "someone just started a
+ * bulk-upload.mjs run on their Mac" case without hammering the
+ * DB.
+ */
+export type ProcessingVideo = {
+  id: string
+  name: string
+  versionLabel: string
+  thumbnailPath: string | null
+  /** Signed `/api/content/<token>` URL — null until the worker
+   *  generates the instant thumbnail. Used by the banner's
+   *  expanded list to show a small poster image per row. */
+  thumbnailUrl: string | null
+  /** Pixel dimensions written by the worker after ffprobe. Used
+   *  client-side to render the thumbnail at the original aspect
+   *  ratio (portrait vs landscape). null while the worker hasn't
+   *  inspected the file yet — fall back to 16:9. */
+  width: number | null
+  height: number | null
+  status: 'UPLOADING' | 'PROCESSING' | 'READY'
+  createdAt: string
+  projectId: string
+  projectTitle: string
+  folderId: string | null
+  /** 0..100. Bytes-sent / total for UPLOADING rows (set by TUS clients). */
+  uploadProgress: number
+  /** 0..100. Overall transcode progress across all tiers for PROCESSING rows. */
+  processingProgress: number
+  /**
+   * True when this video is currently being worked on by a BullMQ
+   * processor (vs sitting in `wait` waiting for a free slot).
+   * Derived from `queue.getActive()` on the server.
+   */
+  isActive: boolean
+}
+
+type StatusResponse = {
+  uploading: { count: number; videos: ProcessingVideo[] }
+  processing: { count: number; videos: ProcessingVideo[] }
+}
+
+type StatusValue = {
+  uploadingCount: number
+  uploadingHwm: number
+  uploadingVideos: ProcessingVideo[]
+  processingCount: number
+  processingHwm: number
+  processingVideos: ProcessingVideo[]
+  /** Force a one-off refetch (e.g. right after the user uploads). */
+  refetch: () => void
+}
+
+const ProcessingStatusCtx = createContext<StatusValue | null>(null)
+
+const ACTIVE_INTERVAL_MS = 3_000
+const IDLE_INTERVAL_MS = 15_000
+const HWM_RESET_DELAY_MS = 5_000
+
+export function ProcessingStatusProvider({ children }: { children: ReactNode }) {
+  const [uploadingCount, setUploadingCount] = useState(0)
+  const [uploadingHwm, setUploadingHwm] = useState(0)
+  const [uploadingVideos, setUploadingVideos] = useState<ProcessingVideo[]>([])
+  const [processingCount, setProcessingCount] = useState(0)
+  const [processingHwm, setProcessingHwm] = useState(0)
+  const [processingVideos, setProcessingVideos] = useState<ProcessingVideo[]>([])
+
+  // Track the most recent fetch sequence so an in-flight poll
+  // can't clobber a newer one when the user mashes refetch().
+  const fetchSeqRef = useRef(0)
+  // When both counts go to 0, wait HWM_RESET_DELAY_MS before
+  // resetting the high-water marks so the banner can flash
+  // "all done" briefly without snapping back to bare "0/0".
+  const idleSinceRef = useRef<number | null>(null)
+  const aliveRef = useRef(true)
+
+  const fetchStatus = async () => {
+    const seq = ++fetchSeqRef.current
+    try {
+      const res = await apiFetch('/api/processing-status')
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
+      if (!res.ok) {
+        // 401 means we got logged out — don't spam the console
+        // with errors. Just silently bail; the AdminHeader will
+        // bounce the user to /login soon enough.
+        if (res.status !== 401) {
+          logError(`[ProcessingStatus] fetch failed: ${res.status}`)
+        }
+        return
+      }
+      const data = (await res.json()) as StatusResponse
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
+
+      const uc = data.uploading?.count ?? 0
+      const pc = data.processing?.count ?? 0
+      setUploadingCount(uc)
+      setUploadingVideos(data.uploading?.videos || [])
+      setProcessingCount(pc)
+      setProcessingVideos(data.processing?.videos || [])
+
+      // HWM bookkeeping. While there's work, the HWM only grows.
+      // The reset window starts the first time we see 0/0.
+      const totalActive = uc + pc
+      if (totalActive > 0) {
+        idleSinceRef.current = null
+        setUploadingHwm((prev) => Math.max(prev, uc))
+        setProcessingHwm((prev) => Math.max(prev, pc))
+      } else {
+        if (idleSinceRef.current === null) {
+          idleSinceRef.current = Date.now()
+        } else if (Date.now() - idleSinceRef.current > HWM_RESET_DELAY_MS) {
+          setUploadingHwm(0)
+          setProcessingHwm(0)
+        }
+      }
+    } catch (err) {
+      if (seq !== fetchSeqRef.current || !aliveRef.current) return
+      logError('[ProcessingStatus] fetch threw:', err)
+    }
+  }
+
+  useEffect(() => {
+    aliveRef.current = true
+    // Initial fetch on mount so the banners can appear instantly
+    // for already-in-flight work (e.g. user reloads the tab).
+    fetchStatus()
+    return () => {
+      aliveRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Adaptive interval: faster when something is happening, slower
+  // when idle. We re-create the interval whenever the active flag
+  // flips so we don't have to manually tear down + rebuild on
+  // every count change.
+  const hasWork = uploadingCount > 0 || processingCount > 0 ||
+    uploadingHwm > 0 || processingHwm > 0
+  useEffect(() => {
+    const intervalMs = hasWork ? ACTIVE_INTERVAL_MS : IDLE_INTERVAL_MS
+    const id = setInterval(fetchStatus, intervalMs)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasWork])
+
+  return (
+    <ProcessingStatusCtx.Provider
+      value={{
+        uploadingCount,
+        uploadingHwm,
+        uploadingVideos,
+        processingCount,
+        processingHwm,
+        processingVideos,
+        refetch: fetchStatus,
+      }}
+    >
+      {children}
+    </ProcessingStatusCtx.Provider>
+  )
+}
+
+export function useProcessingStatus(): StatusValue {
+  const ctx = useContext(ProcessingStatusCtx)
+  if (!ctx) {
+    // Safe no-op fallback for components rendered outside the
+    // provider (e.g. a stray sidebar widget on the public share
+    // page) — they just see 0/0 and render nothing.
+    return {
+      uploadingCount: 0,
+      uploadingHwm: 0,
+      uploadingVideos: [],
+      processingCount: 0,
+      processingHwm: 0,
+      processingVideos: [],
+      refetch: () => {},
+    }
+  }
+  return ctx
+}

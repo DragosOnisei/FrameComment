@@ -17,6 +17,7 @@ import {
   Check,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
+import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -53,6 +54,13 @@ export interface VideoCardProps {
    *  overlay shown over the cover so the user knows why there's no
    *  thumbnail yet. */
   status?: string
+  /** TUS upload progress 0..100. Drives the thin bar overlaid on
+   *  the bottom edge of the cover while `status === 'UPLOADING'`. */
+  uploadProgress?: number | null
+  /** Worker transcode progress 0..100. Drives the same thin bar
+   *  while `status === 'PROCESSING'` so the user sees the worker
+   *  chew through each tier rather than staring at a spinner. */
+  processingProgress?: number | null
   approved?: boolean
   commentCount?: number
   uploaderName?: string | null
@@ -254,6 +262,8 @@ export default function VideoCard({
   previewUrl,
   storyboardUrl,
   status,
+  uploadProgress,
+  processingProgress,
   approved,
   commentCount = 0,
   uploaderName,
@@ -377,6 +387,21 @@ export default function VideoCard({
   // these states, so this placeholder swaps to the real thumbnail
   // without a manual refresh.
   const isProcessing = status === 'UPLOADING' || status === 'PROCESSING'
+
+  // 2.0.x+: sync the pulsing bar at the bottom of the cover with
+  // whatever the global ProcessingStatusBanners is showing. That
+  // endpoint already queries BullMQ + falls back to "N oldest
+  // PROCESSING rows" + keeps READY-but-still-encoding videos in
+  // the list, so reading from the same context here guarantees
+  // the per-card indicator turns OFF at exactly the same moment
+  // the banner says "All processing complete". The context's
+  // hook returns empty arrays when no provider is mounted (e.g.
+  // public share page), so this is safe in every render context.
+  const { uploadingVideos, processingVideos } = useProcessingStatus()
+  const isUploadingInQueue = uploadingVideos.some((v) => v.id === id)
+  const isProcessingInQueue = processingVideos.some((v) => v.id === id)
+  const showProgressBar = isUploadingInQueue || isProcessingInQueue
+  const progressBarColour = isUploadingInQueue ? 'bg-primary' : 'bg-amber-500'
 
   // Push the new scrub fraction into the preview <video> (legacy
   // fallback). When a storyboard sprite is available we skip this
@@ -671,6 +696,21 @@ export default function VideoCard({
             <span className="text-xs tabular-nums">{fmtDuration}</span>
           )}
         </div>
+        {/* 2.0.x+: full-width pulsing bar pinned to the very bottom
+            edge of the cover while the SAME video is listed as
+            uploading or processing by ProcessingStatusBanners.
+            That source of truth is the BullMQ active set + N-oldest
+            fallback + READY-but-still-encoding extension, so the
+            bar turns OFF at the exact moment the banner does — no
+            more "video card says done, banner still says cooking"
+            inconsistency. Mirrors the pulse animation the banner
+            uses on its active status pip. */}
+        {showProgressBar && (
+          <div
+            className={`absolute inset-x-0 bottom-0 h-1 animate-pulse z-10 ${progressBarColour}`}
+            aria-hidden
+          />
+        )}
       </div>
 
       {/* Footer: name + meta + kebab. 1.1.0+: explicit light-gray

@@ -218,6 +218,12 @@ interface VideoGroup {
    *  "Failed" overlay on the card so the user can see why there's
    *  no thumbnail yet. */
   status?: string
+  /** TUS upload progress 0..100 for the latest version (status =
+   *  UPLOADING). Drives the thin bar on the card's bottom edge. */
+  uploadProgress?: number | null
+  /** Worker transcode progress 0..100 for the latest version
+   *  (status = PROCESSING). Drives the same bar. */
+  processingProgress?: number | null
   /** Sum of comments across every version in the group. */
   commentCount: number
   /** "uploader" = createdBy of the latest version. */
@@ -925,6 +931,8 @@ function FolderBrowserInner(
         previewUrl: latest.previewUrl ?? null,
         storyboardUrl: latest.storyboardUrl ?? null,
         status: latest.status,
+        uploadProgress: (latest as any).uploadProgress ?? null,
+        processingProgress: (latest as any).processingProgress ?? null,
         allIds: sorted.map((v) => v.id),
         commentCount: totalComments,
         uploaderName,
@@ -2456,17 +2464,13 @@ function FolderBrowserInner(
           dashed box already communicates "drop here". Pointer-
           events-none so the underlying drag events keep reaching
           the container. */}
-      {isFileDropHover && hasItems && currentFolderId && (
-        <div
-          aria-hidden
-          className="absolute inset-0 z-40 rounded-2xl border-2 border-dashed border-primary/70 bg-primary/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none"
-        >
-          <div className="flex flex-col items-center gap-3 text-primary">
-            <UploadCloud className="w-12 h-12" />
-            <p className="text-sm font-medium">Drop files to upload here</p>
-          </div>
-        </div>
-      )}
+      {/* 2.0.x+: dropped the per-folder dashed overlay — the
+          GlobalDropOverlay mounted in the admin layout covers
+          the entire viewport with a single hint, so doubling up
+          here just added visual noise (border + tinted bg over
+          the grid, plus a card in the middle). The drag handler
+          still runs and feeds files to the folder browser; only
+          the visual chrome is suppressed. */}
 
       {/* Hidden file inputs used by the Upload dropdown above. The
           folder input gets `webkitdirectory` set imperatively in an
@@ -2610,6 +2614,8 @@ function FolderBrowserInner(
               previewUrl={v.previewUrl ?? null}
               storyboardUrl={v.storyboardUrl ?? null}
               status={v.status}
+              uploadProgress={v.uploadProgress ?? null}
+              processingProgress={v.processingProgress ?? null}
               approved={v.approved}
               commentCount={v.commentCount}
               uploaderName={v.uploaderName ?? null}

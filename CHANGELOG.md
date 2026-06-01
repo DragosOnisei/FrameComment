@@ -17,6 +17,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.0.4] - 2026-06-01
+
+### Added
+
+- **Global "Processing videos" + "Uploading videos" status banners.**
+  Bottom-right of the admin app, always visible while there's
+  active work. Each banner is collapsible (header shows X/Y done
+  + overall progress bar), expanded list shows per-video rows
+  with thumbnail (correct aspect ratio), name, project folder,
+  and an active/queued status pip. Active row pulses in the
+  banner's accent colour, queued rows are dimmed. Lists are
+  capped at 50 per status to keep the poll cheap. Driven by a new
+  `/api/processing-status` endpoint that intersects BullMQ's
+  `getActive()` with the visible row set and falls back to the
+  N oldest rows when BullMQ returns nothing — guarantees exactly
+  one row is marked active while the worker is busy.
+- **Global drop-files overlay.** Drag a video or folder from
+  your OS anywhere over the admin tab and a centered card
+  appears: "Drop files to upload — Drop video files or whole
+  folders anywhere on this page." Listens to window-level drag
+  events with a counter so child-element transitions don't make
+  it flicker.
+- **Per-card processing/upload pulse.** Each video card in the
+  folder grid now grows a thin coloured bar across its bottom
+  edge while the video is uploading (blue) or processing (amber).
+  Reads from the same `ProcessingStatusContext` the banner reads
+  from, so the bar disappears at the exact same poll the banner
+  marks the work as done.
+- **Worker tuning env vars.** `WORKER_CONCURRENCY`,
+  `FFMPEG_THREADS_PER_JOB`, `CLEAN_PREVIEW_CONCURRENCY` now
+  override the tier-aware defaults in `src/lib/cpu-config.ts`
+  without recompiling. Exposed in the TrueNAS chart's
+  `questions.yaml` under "Worker Tuning" so users can dial them
+  from the UI.
+
+### Changed
+
+- **Worker concurrency defaults raised on dedicated hosts.** The
+  6-8 thread tier moves to 2 jobs × 3 ffmpeg threads (was 1 × 4),
+  the 12-16 thread tier (the common 6c/12t Xeon TrueNAS) moves
+  to 2 jobs × 6 threads (was 1 × 6), and the 24+ thread tier
+  moves to 3 jobs × 8 threads (was 2 × 8). Net effect on the
+  reference 6c/12t Xeon: roughly 2× throughput on bulk imports.
+  Override via the new env vars above when you also run Plex /
+  Postgres / etc. on the same host.
+- **Video upload UI replaced with a bottom-right banner.** The
+  centered modal dialog is gone; uploads start the moment files
+  are selected (no Start Upload button), show in a collapsible
+  banner with per-row pause / resume / cancel controls, and
+  auto-dismiss 5 s after the last upload completes. Banner is
+  portaled to `document.body` so the sr-only wrapper around
+  `AdminVideoManager` on the project page can't hide it.
+
+### Fixed
+
+- **"Failed to load project" flash on rapid folder navigation.**
+  The folder page treated a 404 on `GET /api/projects/[id]`
+  (which can happen transiently while the next route is still
+  resolving) as a fatal error. Now it mirrors the project page:
+  on `projectRes.status === 404` it bounces the user to
+  `/admin/projects` instead of surfacing the card.
+
 ## [2.0.3] - 2026-06-01
 
 ### Fixed
