@@ -92,6 +92,14 @@ export default function ProjectFolderPage() {
         router.push(`/admin/projects/${projectId}`)
         return
       }
+      // Project 404 happens on rapid navigation when the URL projectId
+      // briefly references a deleted/moved project. Mirror the project
+      // page's behaviour: bounce to the project list instead of flashing
+      // a "Failed to load project" card.
+      if (projectRes.status === 404) {
+        router.push('/admin/projects')
+        return
+      }
       if (!folderRes.ok) {
         // Pull the server's `detail` so we see the real DB / Prisma
         // error instead of a generic "Failed to load folder".

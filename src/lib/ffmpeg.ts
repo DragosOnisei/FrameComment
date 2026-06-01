@@ -28,19 +28,95 @@ const ffprobePath = 'ffprobe'
  *   5. libx264 (software fallback — current TrueNAS production)
  *
  * Detection runs once at startup. The encoder is then used for
- * EVERY subsequent transcode in this process. If the encoder is
- * compiled into FFmpeg but the hardware is missing (e.g. NVENC
- * binary exists but no Nvidia card), runtime errors are caught
- * and the transcode is retried with libx264.
+ * EVERY subsequent transcode in this process.
  *
- * Override via env var: `FORCE_VIDEO_ENCODER=libx264` to disable
- * hardware acceleration explicitly (e.g. for benchmarking).
+ * 2.0.3: detection now runs a real probe encode (1 frame, 64×64
+ * to /dev/null) for each HW candidate. Listing in
+ * `ffmpeg -encoders` only tells us the binary was compiled with
+ * support — it does NOT mean the host has the right hardware,
+ * driver, or device node. Alpine's ffmpeg ships h264_qsv compiled
+ * in even on systems with no Intel iGPU, so the previous "did
+ * `-encoders` list it?" heuristic was wrong on the most common
+ * deployment (TrueNAS SCALE on a Xeon-only box). Result: every
+ * transcode failed with `Error creating a MFX session: -9` and
+ * the worker had no fallback path. Now each candidate is
+ * actually invoked once; if the probe fails, we move to the
+ * next candidate, eventually landing on libx264 (which always
+ * works).
+ *
+ * Override via env var: `FORCE_VIDEO_ENCODER=libx264` to skip
+ * the probe entirely and force a specific encoder. Useful for
+ * benchmarking, or for hosts where the probe is slow.
  *
  * Net effect on the current TrueNAS Xeon (no GPU): libx264, no
  * change from production. Net effect when an Arc / Quadro card
  * is added later: ~5-10x faster encoding, near-zero CPU.
  */
 export type VideoEncoder = 'libx264' | 'h264_nvenc' | 'h264_qsv' | 'h264_videotoolbox' | 'h264_vaapi'
+
+/**
+ * Encoder-specific probe arguments. The probe runs a tiny encode
+ * (64×64, 1 frame, no audio) and discards the output. If the
+ * encoder can't initialize the underlying hardware/session it
+ * exits non-zero almost immediately, which is exactly what we
+ * want for a cheap startup gate.
+ *
+ * VAAPI is special: it needs a hwupload filter and an explicit
+ * device. We try the standard render node path; if it doesn't
+ * exist the open() call fails and we fall through to libx264.
+ */
+function probeArgsFor(enc: VideoEncoder): string[] {
+  const common = [
+    '-hide_banner', '-v', 'error',
+    '-f', 'lavfi', '-i', 'color=size=64x64:rate=1:duration=1',
+  ]
+  switch (enc) {
+    case 'h264_nvenc':
+      return [...common, '-c:v', 'h264_nvenc', '-f', 'null', '-']
+    case 'h264_qsv':
+      return [...common, '-c:v', 'h264_qsv', '-f', 'null', '-']
+    case 'h264_videotoolbox':
+      return [...common, '-c:v', 'h264_videotoolbox', '-f', 'null', '-']
+    case 'h264_vaapi':
+      // VAAPI requires an explicit device + frame format upload.
+      // If /dev/dri/renderD128 isn't present (very common in
+      // containers) the init fails fast and we skip to the next
+      // candidate.
+      return [
+        '-hide_banner', '-v', 'error',
+        '-vaapi_device', '/dev/dri/renderD128',
+        '-f', 'lavfi', '-i', 'color=size=64x64:rate=1:duration=1',
+        '-vf', 'format=nv12,hwupload',
+        '-c:v', 'h264_vaapi',
+        '-f', 'null', '-',
+      ]
+    case 'libx264':
+    default:
+      return [...common, '-c:v', 'libx264', '-preset', 'ultrafast', '-f', 'null', '-']
+  }
+}
+
+/** Run a single tiny encode to confirm the encoder actually works. */
+function canEncodeWith(enc: VideoEncoder): boolean {
+  const args = probeArgsFor(enc)
+  try {
+    execSync(`${ffmpegPath} ${args.join(' ')}`, {
+      stdio: 'pipe',
+      timeout: 8_000,
+    })
+    return true
+  } catch (err: any) {
+    const stderr = err?.stderr?.toString?.() || err?.message || String(err)
+    // Trim to the first line so the log stays readable — the
+    // full ffmpeg dump is overwhelming and the first line is
+    // almost always the actionable error ("Cannot load nvcuda.dll",
+    // "Error creating a MFX session", "No such file or directory",
+    // etc.).
+    const firstLine = stderr.split(/\r?\n/).find((l: string) => l.trim())?.trim() || stderr.trim()
+    logMessage(`[FFMPEG] Probe for ${enc} failed: ${firstLine}`)
+    return false
+  }
+}
 
 function detectVideoEncoder(): VideoEncoder {
   // Explicit override wins — useful for forcing software encoding
@@ -63,20 +139,23 @@ function detectVideoEncoder(): VideoEncoder {
     return 'libx264'
   }
 
-  // Priority order. We don't actually validate hardware presence
-  // here — if NVENC is listed but the card isn't there, the
-  // transcode will fail at runtime and the caller can fall back.
-  // (Validating with a real encode at startup is expensive and
-  // most setups either have it or don't.)
+  // Try each HW candidate in priority order. For each one we
+  // first check that the binary even lists it (cheap), then run
+  // a tiny real encode (slightly more expensive, ~100-300ms when
+  // it succeeds, faster when it fails). The probe catches the
+  // common "binary supports it but the host doesn't have the
+  // hardware" case that used to take down every transcode.
   const candidates: VideoEncoder[] = ['h264_nvenc', 'h264_qsv', 'h264_videotoolbox', 'h264_vaapi']
   for (const candidate of candidates) {
-    if (encodersList.includes(candidate)) {
-      logMessage(`[FFMPEG] Hardware encoder detected: ${candidate}`)
+    if (!encodersList.includes(candidate)) continue
+    logMessage(`[FFMPEG] Probing hardware encoder: ${candidate}`)
+    if (canEncodeWith(candidate)) {
+      logMessage(`[FFMPEG] Hardware encoder confirmed working: ${candidate}`)
       return candidate
     }
   }
 
-  logMessage('[FFMPEG] No hardware encoder available, using libx264 (software)')
+  logMessage('[FFMPEG] No working hardware encoder, using libx264 (software)')
   return 'libx264'
 }
 

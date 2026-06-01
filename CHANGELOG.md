@@ -17,6 +17,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.0.3] - 2026-06-01
+
+### Fixed
+
+- **CRITICAL: Every transcode fails on GPU-less hosts with `Error
+  creating a MFX session: -9`, leaving uploaded videos stuck in
+  ERROR.** The 1.9.4+ hardware encoder detection picked the first
+  HW encoder that appeared in `ffmpeg -encoders`. But on the
+  Alpine ffmpeg build shipped with the FrameComment image,
+  `h264_qsv` is always listed because the binary is compiled
+  with `--enable-libvpl` — even on hosts without an Intel iGPU or
+  `/dev/dri` node. On those hosts (the most common deployment:
+  TrueNAS SCALE on a Xeon server), the worker happily picked
+  `h264_qsv`, the encoder failed at runtime when oneVPL couldn't
+  open an MFX session, and every job dropped into ERROR with no
+  fallback. The fix replaces the naïve list-scan with a real
+  probe: each HW candidate now runs a 64×64 / 1-frame test encode
+  to `/dev/null` at startup, and any encoder that can't initialize
+  its underlying device is skipped. If every HW candidate fails
+  the probe, libx264 takes over — which is what users on Xeon
+  hosts have been getting in practice anyway. Net effect:
+  uploads on GPU-less hosts now process successfully on first try.
+- **TrueNAS chart: worker entrypoint health-check used the wrong
+  service name.** The worker container's entrypoint blocks on
+  `curl http://${APP_HOST}/api/health` with `APP_HOST` defaulting
+  to `framecomment-app` (the `container_name` from the root
+  `docker-compose.yml`). The TrueNAS Apps chart template, however,
+  names the app service simply `app:`. Existing deployments where
+  TrueNAS happens to set the container name explicitly were
+  unaffected, but a fresh chart-only deploy would have the worker
+  loop on connection-refused forever. Added `APP_HOST: app`
+  (plus `APP_PORT: "4321"` for clarity) to the worker's
+  environment block in
+  `truenas-catalog/community/framecomment/2.0.3/templates/docker-compose.yaml`.
+- **"Project not found" / "Failed to load project" flash when
+  navigating folders rapidly.** The folder page's `fetchFolder`
+  treated a 404 on `GET /api/projects/[id]` (which can happen
+  transiently while the next route is still resolving) as a fatal
+  error and surfaced a "Failed to load project" card. Now it
+  mirrors the project page's behaviour: on `projectRes.status === 404`,
+  bounce the user to `/admin/projects` instead. The stale fetch
+  guard still drops obsolete results, so this only triggers for
+  a true 404 path.
+
 ## [2.0.2] - 2026-06-01
 
 ### Fixed
