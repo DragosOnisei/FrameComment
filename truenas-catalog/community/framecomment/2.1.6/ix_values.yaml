@@ -62,7 +62,7 @@ gpu:
 images:
   app:
     repository: dragosonisei/framecomment
-    tag: 2.1.5
+    tag: 2.1.6
     pullPolicy: IfNotPresent
   postgres:
     repository: postgres

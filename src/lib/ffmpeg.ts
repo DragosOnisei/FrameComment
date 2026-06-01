@@ -694,10 +694,54 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     filters.push(`lut3d=${lutPath}`)
   }
 
-  const filterComplex = filters.join(',')
+  // 2.1.6+: Full-GPU pipeline for NVENC. Up to 2.1.5 we used
+  // NVENC only for the FINAL encode step — decode + scale + CPU
+  // filters all ran on the Xeon, and `nvidia-smi` showed ~5%
+  // GPU-Util while every CPU thread sat at 99%. Now we:
+  //   1. Add `-hwaccel cuda -hwaccel_output_format cuda` BEFORE
+  //      `-i`, so NVDEC decodes straight into GPU memory.
+  //   2. Replace the first software `scale=W:H` with
+  //      `scale_cuda=W:H`, which runs the resize on the GPU
+  //      without ever touching system memory.
+  //   3. If there are any CPU-only filters in the chain
+  //      (drawtext for watermark, lut3d for the preview LUT),
+  //      insert `hwdownload,format=nv12` after scale_cuda so
+  //      those filters can read CPU frames; nvenc then uploads
+  //      them back to the GPU on its own.
+  // The "happy path" of no watermark + no LUT keeps every frame
+  // in VRAM end-to-end — that's the case where GPU-Util should
+  // jump from 5% to 50-80% and CPU drops correspondingly.
+  const isNvenc = VIDEO_ENCODER === 'h264_nvenc'
+  const inputArgs: string[] = ['-v', 'verbose']
+  if (isNvenc) {
+    inputArgs.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda')
+  }
+
+  let finalFilters = filters
+  if (isNvenc) {
+    // Swap the leading software scale for scale_cuda, then add
+    // hwdownload if we have CPU filters after it.
+    const hasCpuFilters = filters.length > 1 // anything beyond the bare scale
+    finalFilters = filters.map((f, idx) => {
+      if (idx === 0 && f.startsWith('scale=')) {
+        return f.replace(/^scale=/, 'scale_cuda=')
+      }
+      return f
+    })
+    if (hasCpuFilters) {
+      // Insert hwdownload+format=nv12 right after scale_cuda so
+      // CPU filters operate on CPU-side frames.
+      finalFilters.splice(1, 0, 'hwdownload', 'format=nv12')
+    }
+  }
+
+  const filterComplex = finalFilters.join(',')
 
   if (DEBUG) {
     logMessage('[FFMPEG DEBUG] Built filter complex:', filterComplex)
+    if (isNvenc) {
+      logMessage('[FFMPEG DEBUG] Full-GPU NVENC pipeline (hwaccel cuda + scale_cuda)')
+    }
   }
 
   // 1.9.4+ Phase A: pick encoder-specific args. Hardware encoders
@@ -708,7 +752,7 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
 
   // Build ffmpeg arguments with optimizations
   const args = [
-    '-v', 'verbose', // Enable verbose logging for debug
+    ...inputArgs,
     '-i', inputPath,
     '-vf', filterComplex,
     ...videoEncoderArgs,

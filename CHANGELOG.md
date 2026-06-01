@@ -17,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.6] - 2026-06-01
+
+### Changed
+
+- **Full-GPU NVENC transcode pipeline (decode + scale + encode
+  on the GPU).** Through 2.1.5 we used `h264_nvenc` only for
+  the final encode step — every frame still had to be decoded
+  by libavcodec on the CPU, scaled with `scale=...` on the
+  CPU, then uploaded to the GPU just before NVENC. On the test
+  Xeon E5-1650 v3 + Quadro M4000 this showed up as 5% GPU-Util
+  while all 12 CPU threads ran at 99%. 2.1.6 changes that:
+  when the resolved encoder is `h264_nvenc` we now prepend
+  `-hwaccel cuda -hwaccel_output_format cuda` to the ffmpeg
+  command and rewrite the leading `scale=W:H` filter to
+  `scale_cuda=W:H` so decoding (via NVDEC), resizing and
+  encoding all run inside VRAM. If the chain has CPU-only
+  filters left (watermark drawtext, preview lut3d), we splice
+  in `hwdownload,format=nv12` after the GPU scale so those
+  steps can read system-memory frames; NVENC then re-uploads
+  for the final encode. Expected effect on the M4000: GPU-Util
+  jumps to 50-80%, host CPU drops from 99% to 20-30%, and
+  individual transcodes finish 3-5× faster — on top of the
+  baseline NVENC speedup the worker already got.
+
 ## [2.1.5] - 2026-06-01
 
 ### Fixed
