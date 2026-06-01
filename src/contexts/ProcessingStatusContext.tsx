@@ -94,10 +94,16 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
   // Track the most recent fetch sequence so an in-flight poll
   // can't clobber a newer one when the user mashes refetch().
   const fetchSeqRef = useRef(0)
-  // When both counts go to 0, wait HWM_RESET_DELAY_MS before
-  // resetting the high-water marks so the banner can flash
-  // "all done" briefly without snapping back to bare "0/0".
-  const idleSinceRef = useRef<number | null>(null)
+  // 2.1.7+: Each banner gets its OWN HWM reset clock so the
+  // upload banner can disappear the moment uploads finish even
+  // if processing is still chewing through the queue. Previously
+  // a single shared `idleSinceRef` waited for upload+processing
+  // to BOTH hit zero — so when a user finished uploading a 50-
+  // file batch, the "All uploads complete" banner stuck around
+  // for the next 5+ minutes of NVENC encoding. Splitting the
+  // clocks lets each banner dismiss independently.
+  const uploadingIdleSinceRef = useRef<number | null>(null)
+  const processingIdleSinceRef = useRef<number | null>(null)
   const aliveRef = useRef(true)
 
   const fetchStatus = async () => {
@@ -124,18 +130,27 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
       setProcessingCount(pc)
       setProcessingVideos(data.processing?.videos || [])
 
-      // HWM bookkeeping. While there's work, the HWM only grows.
-      // The reset window starts the first time we see 0/0.
-      const totalActive = uc + pc
-      if (totalActive > 0) {
-        idleSinceRef.current = null
+      // HWM bookkeeping (2.1.7+). Per-banner clocks so each
+      // surface dismisses independently — the upload banner
+      // doesn't wait for processing to finish before fading out.
+      const now = Date.now()
+      if (uc > 0) {
+        uploadingIdleSinceRef.current = null
         setUploadingHwm((prev) => Math.max(prev, uc))
+      } else {
+        if (uploadingIdleSinceRef.current === null) {
+          uploadingIdleSinceRef.current = now
+        } else if (now - uploadingIdleSinceRef.current > HWM_RESET_DELAY_MS) {
+          setUploadingHwm(0)
+        }
+      }
+      if (pc > 0) {
+        processingIdleSinceRef.current = null
         setProcessingHwm((prev) => Math.max(prev, pc))
       } else {
-        if (idleSinceRef.current === null) {
-          idleSinceRef.current = Date.now()
-        } else if (Date.now() - idleSinceRef.current > HWM_RESET_DELAY_MS) {
-          setUploadingHwm(0)
+        if (processingIdleSinceRef.current === null) {
+          processingIdleSinceRef.current = now
+        } else if (now - processingIdleSinceRef.current > HWM_RESET_DELAY_MS) {
           setProcessingHwm(0)
         }
       }

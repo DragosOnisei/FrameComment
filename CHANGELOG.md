@@ -17,6 +17,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.7] - 2026-06-01
+
+### Added
+
+- **Upload Videos button in non-empty folder toolbars.** The
+  Upload dropdown previously only rendered as part of the
+  Frame.io-style empty state — once a user had any video in a
+  folder, the button disappeared and the only way to add more
+  was OS drag-drop. The toolbar at the top of the folder now
+  also surfaces the dropdown (Upload files / Upload folder)
+  whenever `currentFolderId` + `onUploadFiles` are wired. The
+  empty-state button is still rendered when there's nothing in
+  the folder, so the two never collide.
+
+### Fixed
+
+- **Server-side upload progress so the banner actually moves.**
+  The "Uploading videos" banner used to sit on `0 %` until the
+  whole transfer finished, then snap to `100 %`. Root cause:
+  the TUS server received bytes but never wrote a
+  `Video.uploadProgress` value, so `/api/processing-status`
+  reported the field as zero on every poll. The TUS Server's
+  `POST_RECEIVE` event now fires a throttled
+  `(offset / size) * 100` update into the DB row (one write
+  per video per 1.5 s). Works for browser uploads and for the
+  CLI `scripts/bulk-upload.mjs` alike — no client changes
+  needed, the progress is derived purely from data the server
+  was already observing.
+- **Upload banner no longer waits for processing to finish
+  before dismissing.** Single shared HWM reset clock meant the
+  "All uploads complete · 100 %" card hung around until every
+  transcode tier landed — sometimes minutes. Split the clock
+  per banner so the upload card fades 5 s after the last byte,
+  independent of how much work the processing queue still has
+  ahead of it.
+
 ## [2.1.6] - 2026-06-01
 
 ### Changed

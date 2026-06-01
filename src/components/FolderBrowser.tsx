@@ -2270,6 +2270,63 @@ function FolderBrowserInner(
         {breadcrumbRendered}
         {!hideHeaderActions && (
           <div className="flex items-center gap-2">
+            {/* 2.1.7+: Upload dropdown in the folder toolbar. The
+                empty-state Upload button only rendered when the
+                folder was empty — once a user had any content in
+                the folder the only way to upload more was OS
+                drag-drop, which kept tripping users up. We gate
+                this on `hasItems` to avoid duplicating the dropdown
+                with the empty-state copy (their refs would
+                collide and outside-click handling would only fire
+                on one of them). When the folder is empty the
+                existing empty-state dropdown still handles uploads
+                as before. */}
+            {currentFolderId && onUploadFiles && hasItems && (
+              <div ref={uploadMenuRef} className="relative">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setUploadMenuOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={uploadMenuOpen}
+                >
+                  <Upload className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Upload</span>
+                </Button>
+                {uploadMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+                  >
+                    <button
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setUploadMenuOpen(false)
+                        filesInputRef.current?.click()
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                    >
+                      <Files className="w-4 h-4 shrink-0" />
+                      Upload files
+                    </button>
+                    <button
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setUploadMenuOpen(false)
+                        folderInputRef.current?.click()
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                    >
+                      <FolderIcon className="w-4 h-4 shrink-0" />
+                      Upload folder
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {/* Download All — only useful inside a folder that has
                 videos. Sequential download of the latest version per
                 video name (matches what the user sees on the cards).

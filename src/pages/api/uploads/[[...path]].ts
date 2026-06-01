@@ -295,6 +295,55 @@ const tusServer: Server = new Server({
   }
 })
 
+// 2.1.7+: Server-side per-video upload progress tracking. The TUS
+// server emits a `POST_RECEIVE` event after each successful PATCH
+// chunk. We use it to push `(offset / size) * 100` into the
+// Video.uploadProgress field, which the `/api/processing-status`
+// endpoint already reads on every poll. This fixes the dead
+// "Uploading videos · 0%" banner for both browser TUS uploads AND
+// the bulk-upload.mjs CLI — neither client had to be modified
+// because progress is now derived purely from what the server
+// already observes.
+//
+// Throttle by videoId: each video gets its own 1500 ms cooldown
+// so a fast 10 MB chunk every 200 ms doesn't generate 50 db
+// writes/second. The final state hits when onUploadFinish flips
+// status to PROCESSING (uploadProgress becomes irrelevant at
+// that point because the row is no longer in the "uploading"
+// banner anyway).
+const lastProgressWriteAt = new Map<string, number>()
+const UPLOAD_PROGRESS_THROTTLE_MS = 1500
+
+;(tusServer as any).on?.('POST_RECEIVE', async (_req: any, upload: any) => {
+  try {
+    const videoId = upload?.metadata?.videoId as string | undefined
+    if (!videoId) return
+    const size = Number(upload?.size ?? 0)
+    const offset = Number(upload?.offset ?? 0)
+    if (!size || size <= 0) return
+
+    const now = Date.now()
+    const last = lastProgressWriteAt.get(videoId) ?? 0
+    if (now - last < UPLOAD_PROGRESS_THROTTLE_MS) return
+    lastProgressWriteAt.set(videoId, now)
+
+    const pct = Math.min(99, Math.max(0, Math.round((offset / size) * 100)))
+    await prisma.video
+      .update({
+        where: { id: videoId },
+        data: { uploadProgress: pct },
+      })
+      .catch((err) => {
+        // Don't blow up the upload because we couldn't update a
+        // progress field. Most likely the row got deleted mid-
+        // upload (user navigated away + cancelled). Swallow.
+        logError(`[UPLOAD] uploadProgress update failed for ${videoId}:`, err)
+      })
+  } catch (err) {
+    logError('[UPLOAD] POST_RECEIVE handler threw:', err)
+  }
+})
+
 async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId: string, tusServer: any) {
   const video = await prisma.video.findUnique({
     where: { id: videoId }
