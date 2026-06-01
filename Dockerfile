@@ -18,35 +18,39 @@ RUN apk update && apk upgrade --no-cache && \
     && npm cache clean --force \
     && ffmpeg -version
 
-# 2.1.0+: Swap stock alpine ffmpeg (no NVENC/QSV/VAAPI) for BtbN's
-# static GPL build which ships with full hardware acceleration
-# support — h264_nvenc / hevc_nvenc / vaapi / qsv all available
-# without runtime dependencies. We only do this on amd64 because:
-#   (a) the static build is amd64-only,
-#   (b) arm64 is dev-only (Mac) and uses VideoToolbox via the host,
-#   (c) our worker auto-detects available encoders and falls back
-#       to libx264 if no HW encoder is reachable, so this is purely
-#       opt-in performance.
-# Uses BtbN's "latest" pointer pinned to the n7.1 stable series
-# instead of master. "latest" is a special tag that always points
-# at the most recent autobuild — both stable (the URL never 404s)
-# and fresh (each build pulls the newest NVENC headers). Pin to
-# a dated autobuild tag instead if you want full reproducibility.
+# 2.1.1+: Swap stock alpine ffmpeg (no NVENC/QSV/VAAPI) for John Van
+# Sickle's truly-static linux ffmpeg build which ships with NVENC
+# support compiled in. We tried BtbN's "static" GPL build first
+# (2.1.0) but it turned out to be dynamically linked to glibc and
+# wouldn't run on Alpine even with gcompat — missing libmvec.so.1
+# and fcntl64 symbols. JVS's build is statically linked against
+# musl-compatible primitives so it runs cleanly on Alpine without
+# any libc shim.
+#   (a) amd64 only — the JVS static build is amd64-only,
+#   (b) arm64 dev (Mac) keeps alpine ffmpeg + VideoToolbox via host,
+#   (c) worker auto-detects available encoders + falls back to
+#       libx264 if NVENC init fails, so this is purely opt-in
+#       performance.
+# JVS is the canonical Alpine-static ffmpeg distribution used by
+# Plex / Jellyfin / Emby docs, hosted at johnvansickle.com/ffmpeg.
+# The release tarball at this URL is updated periodically; the
+# binary contained always includes h264_nvenc / hevc_nvenc.
 RUN if [ "$(uname -m)" = "x86_64" ]; then \
         apk add --no-cache --virtual .ffmpeg-build-deps xz && \
         curl -fsSL --retry 3 --retry-delay 5 -o /tmp/ffmpeg.tar.xz \
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz" && \
+            "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" && \
         mkdir -p /tmp/ffmpeg-extract && \
         tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-extract --strip-components=1 && \
-        cp /tmp/ffmpeg-extract/bin/ffmpeg  /usr/local/bin/ffmpeg && \
-        cp /tmp/ffmpeg-extract/bin/ffprobe /usr/local/bin/ffprobe && \
+        cp /tmp/ffmpeg-extract/ffmpeg  /usr/local/bin/ffmpeg && \
+        cp /tmp/ffmpeg-extract/ffprobe /usr/local/bin/ffprobe && \
         chmod 0755 /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
         rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-extract && \
         apk del --no-cache .ffmpeg-build-deps && \
-        echo "BtbN ffmpeg installed — encoders with HW support:" && \
+        echo "JVS static ffmpeg installed — testing run + encoders:" && \
+        /usr/local/bin/ffmpeg -version | head -1 && \
         /usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "nvenc|vaapi|qsv" || true; \
     else \
-        echo "Skipping BtbN ffmpeg on non-amd64 ($(uname -m)) — alpine ffmpeg keeps the default behaviour"; \
+        echo "Skipping JVS ffmpeg on non-amd64 ($(uname -m)) — alpine ffmpeg keeps the default behaviour"; \
     fi
 
 # === Dependencies ===

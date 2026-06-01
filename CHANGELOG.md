@@ -17,6 +17,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.1] - 2026-06-01
+
+### Fixed
+
+- **NVENC ffmpeg from 2.1.0 wouldn't actually run on Alpine.**
+  BtbN's "static GPL" linux64 build is dynamically linked
+  against glibc (needs `libmvec.so.1`, `fcntl64`,
+  `_ZGVbN2v_cos` and other glibc symbols). Alpine's musl libc
+  can't satisfy those — even `gcompat` is too thin. The
+  worker container ended up shipping a 138 MB ffmpeg binary
+  that produced `exec: no such file or directory` on every
+  invocation, silently falling back to nothing (so all
+  transcodes failed-soft to the libx264 path via the auto-
+  detection in 2.0.3). Swapped the source to John Van
+  Sickle's truly-static amd64 release
+  (`https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz`)
+  — the canonical Alpine-static distribution used by Plex,
+  Jellyfin and Emby docs. Same NVENC support, runs cleanly
+  on musl without any libc shim.
+
 ## [2.1.0] - 2026-06-01
 
 ### Added
