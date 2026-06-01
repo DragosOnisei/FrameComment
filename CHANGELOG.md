@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.5] - 2026-06-01
+
+### Fixed
+
+- **Worker container reports as unhealthy even though BullMQ is
+  running.** Debian's `bookworm-slim` base ships without
+  `procps`, so the worker healthcheck (`ps aux | grep -v grep
+  | grep -q 'npm run worker'`) errors with `exec: "ps":
+  executable file not found in $PATH`. The container itself
+  was fine — BullMQ scheduled jobs were ticking, the worker
+  was processing events — but TrueNAS reported the app as
+  stuck in `Deploying` and refused to mark it Running. Added
+  `procps` to the apt install list so `ps` is back.
+
 ## [2.1.4] - 2026-06-01
 
 ### Fixed

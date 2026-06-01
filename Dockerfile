@@ -84,7 +84,7 @@ ENV NODE_ENV=production \
 # su-exec in the entrypoint).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash curl ca-certificates fontconfig fonts-dejavu-core \
-        gnupg openssl gosu xz-utils \
+        gnupg openssl gosu xz-utils procps \
     && ln -s /usr/sbin/gosu /usr/local/bin/su-exec \
     && rm -rf /var/lib/apt/lists/*
 
