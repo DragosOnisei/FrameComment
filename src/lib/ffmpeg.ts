@@ -549,9 +549,87 @@ export interface TranscodeOptions {
   // (we want time-to-first-playable, not file-size optimisation
   // — higher tiers later get a better preset for archival use).
   preset?: 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow'
+  // 2.1.9+ INTERNAL: override the encoder for this one run. Used
+  // by the runtime fallback logic in `transcodeVideo` to retry a
+  // failed hardware encode with libx264. Callers should NEVER set
+  // this — leave it undefined to use the auto-detected encoder.
+  _forceEncoder?: VideoEncoder
+}
+
+/**
+ * 2.1.9+: error signatures we treat as "the hardware encoder
+ * pipeline is broken for this specific clip, fall back to libx264
+ * and try again". Conservative on purpose — matching too broadly
+ * would also catch real video corruption / abort / disk errors,
+ * which a software retry can't fix. Keep this list narrow to known
+ * HW failures.
+ */
+const HW_ENCODER_FAILURE_PATTERNS: RegExp[] = [
+  // Filter graph can't bridge cuda↔CPU formats (the `-pix_fmt
+  // yuv420p` + scale_cuda interaction bug surfaced in 2.1.8 prod
+  // when the worker tried to force a yuv420p output on cuda frames
+  // without hwdownload between them).
+  /Impossible to convert between the formats supported by the filter/i,
+  /Error reinitializing filters/i,
+  // NVENC / NVDEC / CUDA init failures
+  /Could not open encoder/i,
+  /OpenEncodeSessionEx failed/i,
+  /Cannot load (?:nvcuda|cuda|nvenc)/i,
+  /NVENC capability not present/i,
+  /No NVENC capable devices found/i,
+  /Driver does not support the required nvenc API/i,
+  // QSV / VAAPI / VideoToolbox equivalents
+  /Error initializing an internal MFX session/i,
+  /VAAPI hardware does not support encoding/i,
+  /Error while opening encoder for output stream/i,
+  // Generic "filter not implemented" from cuda filter mismatches
+  /Function not implemented/i,
+]
+
+function isHardwareEncoderError(err: unknown): boolean {
+  if (!err) return false
+  const message = err instanceof Error ? err.message : String(err)
+  return HW_ENCODER_FAILURE_PATTERNS.some((rx) => rx.test(message))
 }
 
 export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
+  // 2.1.9+: runtime auto-fallback to libx264 when the active
+  // hardware encoder errors out for a specific clip. The probe at
+  // startup (`detectVideoEncoder`) can only confirm the encoder
+  // CAN run a tiny synthetic clip — it can't catch corner cases
+  // like the cuda↔CPU filter graph mismatch surfaced in 2.1.8
+  // prod, where NVENC was probed-OK but every real transcode
+  // failed before NVENC even initialised. We now try once with
+  // the auto-detected encoder; if the error message matches a
+  // known-HW-failure pattern, we retry the SAME clip with
+  // libx264 within the same job — so the user never sees a
+  // failed video for an encoder bug.
+  const initialEncoder = options._forceEncoder || VIDEO_ENCODER
+  try {
+    await runTranscodeOnce(options, initialEncoder)
+  } catch (err) {
+    // Don't retry on user-initiated abort, on already-software
+    // failures (there's nothing left to fall back to), or on
+    // errors we don't recognise as HW-related — those are real
+    // problems with the input or the disk and a software retry
+    // won't help.
+    const isAbort = err instanceof Error && err.message === 'TranscodeAborted'
+    const isAlreadyFallback = initialEncoder === 'libx264' || options._forceEncoder === 'libx264'
+    if (isAbort || isAlreadyFallback || !isHardwareEncoderError(err)) {
+      throw err
+    }
+    const message = err instanceof Error ? err.message.split('\n')[0] : String(err)
+    logMessage(
+      `[FFMPEG] Hardware encoder ${initialEncoder} failed at runtime: ${message.slice(0, 200)} — retrying with libx264 (CPU fallback) for this clip.`,
+    )
+    await runTranscodeOnce(options, 'libx264')
+  }
+}
+
+async function runTranscodeOnce(
+  options: TranscodeOptions,
+  effectiveEncoder: VideoEncoder,
+): Promise<void> {
   const {
     inputPath,
     outputPath,
@@ -703,15 +781,29 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
   //   2. Replace the first software `scale=W:H` with
   //      `scale_cuda=W:H`, which runs the resize on the GPU
   //      without ever touching system memory.
-  //   3. If there are any CPU-only filters in the chain
-  //      (drawtext for watermark, lut3d for the preview LUT),
-  //      insert `hwdownload,format=nv12` after scale_cuda so
-  //      those filters can read CPU frames; nvenc then uploads
-  //      them back to the GPU on its own.
-  // The "happy path" of no watermark + no LUT keeps every frame
-  // in VRAM end-to-end — that's the case where GPU-Util should
-  // jump from 5% to 50-80% and CPU drops correspondingly.
-  const isNvenc = VIDEO_ENCODER === 'h264_nvenc'
+  //   3. Always insert `hwdownload,format=nv12` after scale_cuda
+  //      so CPU filters (drawtext for watermark, lut3d for the
+  //      LUT) can read CPU frames; nvenc then uploads them back
+  //      to the GPU on its own. 2.1.9+ change: this used to be
+  //      gated on `hasCpuFilters` and skipped on the "no
+  //      watermark + no LUT" happy path to keep frames in VRAM
+  //      end-to-end. But the explicit `-pix_fmt yuv420p` flag
+  //      lower down would then ask ffmpeg to convert the cuda
+  //      frames to yuv420p AFTER the filter chain ended — and
+  //      ffmpeg's auto-inserted `auto_scale` filter can't bridge
+  //      cuda↔CPU without a manual `hwdownload`. Every clip with
+  //      no LUT (the prod default — LUT is disabled globally)
+  //      died with "Impossible to convert between the formats
+  //      supported by the filter 'Parsed_scale_cuda_0' and the
+  //      filter 'auto_scale_0'", and NVENC never even initialised
+  //      so the fallback couldn't detect it. Always downloading
+  //      after scale_cuda costs one PCIe roundtrip per frame but
+  //      makes the pipeline deterministic and matches the rest
+  //      of the args list.
+  // 2.1.9+: respect the per-call effectiveEncoder override so
+  // the auto-fallback path (libx264) builds a software pipeline
+  // even when the auto-detected encoder is NVENC.
+  const isNvenc = effectiveEncoder === 'h264_nvenc'
   const inputArgs: string[] = ['-v', 'verbose']
   if (isNvenc) {
     inputArgs.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda')
@@ -719,20 +811,16 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
 
   let finalFilters = filters
   if (isNvenc) {
-    // Swap the leading software scale for scale_cuda, then add
-    // hwdownload if we have CPU filters after it.
-    const hasCpuFilters = filters.length > 1 // anything beyond the bare scale
     finalFilters = filters.map((f, idx) => {
       if (idx === 0 && f.startsWith('scale=')) {
         return f.replace(/^scale=/, 'scale_cuda=')
       }
       return f
     })
-    if (hasCpuFilters) {
-      // Insert hwdownload+format=nv12 right after scale_cuda so
-      // CPU filters operate on CPU-side frames.
-      finalFilters.splice(1, 0, 'hwdownload', 'format=nv12')
-    }
+    // 2.1.9+: ALWAYS download from GPU after scale_cuda — see
+    // the comment block above for why the previous
+    // `hasCpuFilters` gate was broken.
+    finalFilters.splice(1, 0, 'hwdownload', 'format=nv12')
   }
 
   const filterComplex = finalFilters.join(',')
@@ -748,7 +836,10 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
   // have different rate-control flags and presets than libx264.
   // The chunk inside the helper keeps the rest of the arg list
   // (audio, faststart, etc.) shared.
-  const videoEncoderArgs = buildVideoEncoderArgs(VIDEO_ENCODER, preset, width, height, threads)
+  // 2.1.9+: uses the per-call effectiveEncoder so the libx264
+  // fallback path generates software encoder args even when the
+  // detected encoder is NVENC.
+  const videoEncoderArgs = buildVideoEncoderArgs(effectiveEncoder, preset, width, height, threads)
 
   // Build ffmpeg arguments with optimizations
   const args = [

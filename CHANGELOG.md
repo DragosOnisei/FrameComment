@@ -17,6 +17,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.9] - 2026-06-01
+
+### Fixed
+
+- **NVENC pipeline died on every clip with no LUT / no watermark.**
+  When the worker detected NVENC at startup it built a full-GPU
+  filter chain (`NVDEC → scale_cuda → NVENC`) and then passed the
+  global `-pix_fmt yuv420p` flag at the end of the arg list. With
+  no CPU filters in the chain (LUT is disabled globally by
+  default, watermarks are opt-in), the filter graph ended with
+  `cuda`-format frames in GPU memory. ffmpeg's auto-inserted
+  `auto_scale` filter can't bridge `cuda → yuv420p` without a
+  manual `hwdownload` between them, so every transcode died with
+  `Impossible to convert between the formats supported by the
+  filter 'Parsed_scale_cuda_0' and the filter 'auto_scale_0'`
+  (error -38) — NVENC never even initialised. The worker now
+  always inserts `hwdownload, format=nv12` after `scale_cuda`,
+  regardless of whether CPU filters follow. One PCIe roundtrip
+  per frame in exchange for a deterministic, working pipeline.
+
+### Changed
+
+- **Runtime auto-fallback from any hardware encoder to libx264.**
+  The startup probe in `detectVideoEncoder` confirms a candidate
+  encoder CAN run a tiny synthetic clip but can't catch failures
+  that only show up on real input (filter graph mismatches, NVENC
+  session limits, driver edge cases). `transcodeVideo` now wraps
+  each ffmpeg run; if it errors out with a message matching a
+  known-HW-failure pattern (cuda filter mismatch, encoder open
+  failure, MFX session error, etc.) AND the active encoder isn't
+  already libx264, it retries the SAME clip with libx264 in the
+  same job. The user never sees a video stuck in ERROR for a
+  hardware-encoder bug — worst case, the clip transcodes a bit
+  slower on CPU. BullMQ retries (`attempts: 3` per video) stack
+  on top of this for plain transient failures (disk full, OOM,
+  network blips on the storage backend).
+
 ## [2.1.8] - 2026-06-01
 
 ### Fixed
