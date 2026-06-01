@@ -97,17 +97,25 @@ function StatusBanner({
       : isDone
       ? 'All processing complete'
       : 'Processing videos'
-  // 2.0.6+: when work is in flight, surface "X in progress" prominently
-  // instead of "0 / N done". With CLI bulk uploads the banner used to
-  // sit at "0 / 6 done" for minutes while the worker actually was
-  // chewing through them — there was no signal that anything was alive.
-  // Now the live count of in-flight items leads, and the done counter
-  // tags along only once at least one item has finished.
+  // 2.1.8+: "in progress" should reflect what the WORKER is actively
+  // chewing on, not the entire queue. Counting all PROCESSING rows
+  // overstates concurrency — a 6-video bulk upload would say "6 in
+  // progress" while only 2 ffmpegs were actually running and the
+  // other 4 sat in `wait`. We now count the rows the API marked
+  // `isActive` (BullMQ getActive + the oldest-N fallback) for the
+  // processing banner. For the upload banner there's no equivalent
+  // "active vs queued" split — TUS uploads run in parallel from
+  // the client and any UPLOADING row IS receiving bytes — so we
+  // keep using the total there.
+  const activeInFlight =
+    kind === 'processing'
+      ? videos.filter((v) => v.isActive).length || current
+      : current
   const labelCount = isDone
     ? `${total} / ${total} done`
     : done > 0
-    ? `${current} in progress · ${done} / ${total} done`
-    : `${current} in progress`
+    ? `${activeInFlight} in progress · ${done} / ${total} done`
+    : `${activeInFlight} in progress`
 
   return (
     <div

@@ -17,6 +17,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.8] - 2026-06-01
+
+### Fixed
+
+- **Upload Video(s) button silently no-op'd on every click after
+  the first dismissal.** Clicking the toolbar's "Upload Video(s)"
+  entry (or the matching right-click "Upload Asset" context-menu
+  item) opened the file picker the very first time, but if the
+  user dismissed the picker with Escape and then clicked the
+  trigger again, nothing happened — the modal's `isOpen` was
+  already `true`, so the picker-opening effect didn't re-fire and
+  the click felt dead. `AdminVideoManager` now bumps a monotonic
+  `uploadTriggerNonce` counter on every invocation of
+  `triggerUpload` / `triggerUploadWithFiles` /
+  `triggerUploadWithFolderTree`, and `VideoUploadModal` keys its
+  hidden-input auto-click effect off that counter so every trigger
+  re-opens the system file picker — regardless of whether the
+  modal was already mounted.
+
+- **"Upload Video(s)" never surfaced the file picker on the first
+  click either.** The same auto-click effect now also fires on the
+  very first open (when no files are pre-seeded and no folder tree
+  is being dropped), so a single click on the toolbar entry takes
+  the user straight to the system picker without an extra empty
+  modal step in the middle.
+
+### Changed
+
+- **Processing banner "X in progress" reflects the WORKER's active
+  set instead of the total queue.** A 6-video bulk upload used to
+  read "6 in progress" while only two FFmpeg processes were
+  actually running and the other four sat in `wait`. The banner
+  now counts the rows marked `isActive` by the status API (BullMQ
+  `getActive()` plus the oldest-N fallback), so the count matches
+  the number of transcodes really chewing on the box. The upload
+  banner is unchanged — TUS uploads stream in parallel from the
+  client, so every UPLOADING row is by definition receiving bytes.
+
 ## [2.1.7] - 2026-06-01
 
 ### Added

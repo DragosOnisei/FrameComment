@@ -87,22 +87,37 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
   const [pendingInitialFilesWithFolders, setPendingInitialFilesWithFolders] =
     useState<Array<{ file: File; folderId: string | null }> | null>(null)
 
+  // Monotonic counter that increments on EVERY call to
+  // `triggerUpload`. We need this because setting
+  // `isUploadModalOpen=true` is a no-op when it's already true —
+  // which happens after the user opens the file picker once,
+  // dismisses it with Escape (no `cancel` event we can hook), and
+  // then asks for it again via the toolbar button or the right-
+  // click "Upload Asset" item. The modal listens on this counter
+  // alongside `isOpen`, so each invocation re-fires its auto-pick
+  // effect even when `isOpen` doesn't change. We bump it from all
+  // three trigger paths so the behavior is uniform.
+  const [uploadTriggerNonce, setUploadTriggerNonce] = useState(0)
+
   // Expose triggerUpload method to parent via ref
   useImperativeHandle(ref, () => ({
     triggerUpload: () => {
       setPendingInitialFiles(null)
       setPendingInitialFilesWithFolders(null)
       setIsUploadModalOpen(true)
+      setUploadTriggerNonce((n) => n + 1)
     },
     triggerUploadWithFiles: (files: File[]) => {
       setPendingInitialFilesWithFolders(null)
       setPendingInitialFiles(files)
       setIsUploadModalOpen(true)
+      setUploadTriggerNonce((n) => n + 1)
     },
     triggerUploadWithFolderTree: (entries) => {
       setPendingInitialFiles(null)
       setPendingInitialFilesWithFolders(entries)
       setIsUploadModalOpen(true)
+      setUploadTriggerNonce((n) => n + 1)
     },
   }))
 
@@ -185,6 +200,7 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
       {/* Upload Modal - handles full upload with TUS, processing shows inline after */}
       <VideoUploadModal
         isOpen={isUploadModalOpen}
+        triggerNonce={uploadTriggerNonce}
         onClose={() => {
           setIsUploadModalOpen(false)
           // Clear seeded files so the next plain triggerUpload()

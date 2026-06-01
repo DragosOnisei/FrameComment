@@ -41,6 +41,12 @@ interface PendingUpload {
 
 interface VideoUploadModalProps {
   isOpen: boolean
+  /** Monotonic counter bumped on every trigger from
+   *  AdminVideoManager. We listen on it so a second toolbar /
+   *  context-menu click re-fires the auto file-picker effect
+   *  even when `isOpen` was already true (the user dismissed
+   *  the picker with Escape and there's no event we can hook). */
+  triggerNonce?: number
   onClose: () => void
   projectId: string
   onUploadComplete: (videoName: string, videoId: string) => void
@@ -62,7 +68,7 @@ interface VideoUploadModalProps {
   folderId?: string | null
 }
 
-export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete, initialFiles, initialFilesWithFolders, folderId }: VideoUploadModalProps) {
+export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onUploadComplete, initialFiles, initialFilesWithFolders, folderId }: VideoUploadModalProps) {
   const t = useTranslations('videos')
   const tc = useTranslations('common')
   const storageProvider = useStorageProvider()
@@ -348,6 +354,35 @@ export function VideoUploadModal({ isOpen, onClose, projectId, onUploadComplete,
       setSeededActive(false)
     }
   }, [isOpen])
+
+  // 2.2.0+: When the parent calls `triggerUpload()` plain (no
+  // seeded files / folder tree) we set `isOpen=true` but the
+  // component returns just the hidden file input — the user
+  // never sees a dialog and the system file picker never opens
+  // on its own. That bug surfaced from both the toolbar's
+  // "Upload Video(s)" button AND the right-click "Upload Asset"
+  // context-menu item. Auto-clicking the hidden input here
+  // synthesises the picker, so the user gets the native dialog
+  // immediately when they click either trigger. We gate on no
+  // initialFiles/initialFilesWithFolders so we don't re-open the
+  // picker when the parent already seeded the upload with files
+  // (drag-drop, "Add more videos", etc.) — those paths set
+  // pendingUploads which then renders the visible banner.
+  useEffect(() => {
+    if (!isOpen) return
+    if (initialFiles && initialFiles.length > 0) return
+    if (initialFilesWithFolders && initialFilesWithFolders.length > 0) return
+    // Defer one tick so React has flushed the input render and any
+    // upstream click event (the kebab menu, the toolbar button)
+    // has finished — otherwise the picker dismisses immediately.
+    const id = setTimeout(() => {
+      fileInputRef.current?.click()
+    }, 0)
+    return () => clearTimeout(id)
+    // `triggerNonce` in the deps list is what re-runs this effect
+    // when the user invokes triggerUpload() a second time without
+    // ever closing the modal in between.
+  }, [isOpen, triggerNonce, initialFiles, initialFilesWithFolders])
 
   const handleRemove = (id: string) => {
     // 1.5.x+: Cancel/Remove now performs a FULL teardown — not just
