@@ -111,11 +111,32 @@ services:
     restart: unless-stopped
     user: "568:568"
     command: ["npm", "run", "worker"]
+    {% if values.gpu is defined and values.gpu.nvidia is defined and values.gpu.nvidia.enabled %}
+    # 2.1.0+: NVIDIA GPU passthrough for hardware-accelerated transcoding.
+    # Requires the nvidia-container-runtime on the host (TrueNAS SCALE
+    # installs it automatically when "Install NVIDIA Drivers" is enabled
+    # in Apps configuration). The worker auto-detects h264_nvenc at boot
+    # and falls back to libx264 transparently if NVENC initialization
+    # fails — so flipping this toggle off doesn't break anything beyond
+    # losing the speedup.
+    runtime: nvidia
+    {% endif %}
     depends_on:
       app:
         condition: service_healthy
     environment:
       <<: *common-env
+      {% if values.gpu is defined and values.gpu.nvidia is defined and values.gpu.nvidia.enabled %}
+      # `all` exposes every GPU isolated to the Docker subsystem. On a
+      # multi-GPU host you can pin a specific device with a UUID or
+      # index list (eg "GPU-abc123" or "0,1") — overrideable via chart
+      # values if/when we add a GPU-picker question.
+      NVIDIA_VISIBLE_DEVICES: "all"
+      # video: enables nvenc/nvdec; compute: enables CUDA (we don't use
+      # it directly but ffmpeg's hwupload_cuda path benefits);
+      # utility: enables nvidia-smi inside the container for diagnostics.
+      NVIDIA_DRIVER_CAPABILITIES: "video,compute,utility"
+      {% endif %}
       # The worker's entrypoint waits for the app's /api/health to come
       # up before BullMQ boots. In this compose the app service is
       # called `app`, but the entrypoint defaults APP_HOST to

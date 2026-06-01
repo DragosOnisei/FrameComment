@@ -17,6 +17,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.0] - 2026-06-01
+
+### Added
+
+- **NVIDIA GPU hardware-accelerated video transcoding via NVENC.**
+  The Docker image now ships BtbN's static GPL ffmpeg build
+  (linux64, n7.1 series) with `h264_nvenc` / `hevc_nvenc` /
+  `vaapi` / `qsv` baked in, replacing the stock Alpine ffmpeg
+  on amd64 only (arm64 dev builds keep Alpine for Mac M-series
+  compatibility). The TrueNAS chart gained a new "Hardware
+  Acceleration → Use NVIDIA GPU" toggle in the install form
+  (default ON), which adds `runtime: nvidia`,
+  `NVIDIA_VISIBLE_DEVICES=all`, and
+  `NVIDIA_DRIVER_CAPABILITIES=video,compute,utility` to the
+  worker container. On a typical Maxwell-or-newer Quadro / GTX
+  card you should see a 5-10× speedup on transcode jobs with
+  the host CPU almost idle, vs libx264 at `ultrafast` pegging
+  every thread to 100%. The worker's encoder auto-detection
+  (added in 2.0.3) falls back to libx264 transparently if NVENC
+  initialization fails at runtime, so flipping the toggle off
+  or losing GPU access mid-job never breaks processing — it
+  only loses the speedup.
+
+  Setup: TrueNAS SCALE → Apps → Configuration → "Install NVIDIA
+  Drivers" → wait for install → System Settings → Advanced →
+  Isolated GPU Device(s) → bifează cardul → Save. After upgrade
+  the toggle is on by default.
+
 ## [2.0.6] - 2026-06-01
 
 ### Fixed

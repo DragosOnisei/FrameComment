@@ -18,6 +18,37 @@ RUN apk update && apk upgrade --no-cache && \
     && npm cache clean --force \
     && ffmpeg -version
 
+# 2.1.0+: Swap stock alpine ffmpeg (no NVENC/QSV/VAAPI) for BtbN's
+# static GPL build which ships with full hardware acceleration
+# support — h264_nvenc / hevc_nvenc / vaapi / qsv all available
+# without runtime dependencies. We only do this on amd64 because:
+#   (a) the static build is amd64-only,
+#   (b) arm64 is dev-only (Mac) and uses VideoToolbox via the host,
+#   (c) our worker auto-detects available encoders and falls back
+#       to libx264 if no HW encoder is reachable, so this is purely
+#       opt-in performance.
+# Uses BtbN's "latest" pointer pinned to the n7.1 stable series
+# instead of master. "latest" is a special tag that always points
+# at the most recent autobuild — both stable (the URL never 404s)
+# and fresh (each build pulls the newest NVENC headers). Pin to
+# a dated autobuild tag instead if you want full reproducibility.
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+        apk add --no-cache --virtual .ffmpeg-build-deps xz && \
+        curl -fsSL --retry 3 --retry-delay 5 -o /tmp/ffmpeg.tar.xz \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz" && \
+        mkdir -p /tmp/ffmpeg-extract && \
+        tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-extract --strip-components=1 && \
+        cp /tmp/ffmpeg-extract/bin/ffmpeg  /usr/local/bin/ffmpeg && \
+        cp /tmp/ffmpeg-extract/bin/ffprobe /usr/local/bin/ffprobe && \
+        chmod 0755 /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
+        rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-extract && \
+        apk del --no-cache .ffmpeg-build-deps && \
+        echo "BtbN ffmpeg installed — encoders with HW support:" && \
+        /usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "nvenc|vaapi|qsv" || true; \
+    else \
+        echo "Skipping BtbN ffmpeg on non-amd64 ($(uname -m)) — alpine ffmpeg keeps the default behaviour"; \
+    fi
+
 # === Dependencies ===
 FROM base AS deps
 WORKDIR /app

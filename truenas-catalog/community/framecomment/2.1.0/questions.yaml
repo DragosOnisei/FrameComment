@@ -14,6 +14,8 @@ groups:
     description: Optional. If enabled, video files are stored in an S3-compatible bucket instead of the local volume.
   - name: Resources
     description: CPU and memory reservations.
+  - name: Hardware Acceleration
+    description: Optional GPU passthrough for the video processing worker.
 
 portals:
   web_portal:
@@ -343,3 +345,35 @@ questions:
                 schema:
                   type: string
                   default: "2Gi"
+
+  # ---------- Hardware Acceleration ----------
+  # 2.1.0+: NVIDIA GPU passthrough for video transcoding. When enabled,
+  # the worker container gets `runtime: nvidia` plus the standard
+  # NVIDIA_VISIBLE_DEVICES + NVIDIA_DRIVER_CAPABILITIES env vars so
+  # ffmpeg can use h264_nvenc / hevc_nvenc instead of libx264 on CPU.
+  # On a typical Maxwell+ Quadro / GTX card the speedup is 5-10×.
+  # Requires the host to have the NVIDIA driver installed (TrueNAS
+  # SCALE: Apps → Configuration → Install NVIDIA Drivers) and the GPU
+  # isolated (System Settings → Advanced → Isolated GPU Devices).
+  - variable: gpu
+    label: Hardware Acceleration
+    group: Hardware Acceleration
+    schema:
+      type: dict
+      attrs:
+        - variable: nvidia
+          label: NVIDIA GPU
+          schema:
+            type: dict
+            attrs:
+              - variable: enabled
+                label: Use NVIDIA GPU for video processing
+                description: >-
+                  Enable hardware-accelerated transcoding via NVENC. Requires
+                  NVIDIA drivers + an isolated GPU on the host. Worker
+                  auto-detects NVENC at boot and falls back to libx264 (CPU)
+                  if the GPU is unreachable, so leaving this on is safe even
+                  if the GPU briefly disappears.
+                schema:
+                  type: boolean
+                  default: true
