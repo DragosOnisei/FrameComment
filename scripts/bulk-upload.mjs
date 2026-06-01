@@ -73,6 +73,14 @@ Optional:
   --extensions <list>  Comma list (default: mp4,mov,m4v,avi,mkv,webm,
                        jpg,jpeg,png,gif,webp)
   --no-skip-existing   Force re-upload (default skips files already done)
+  --reset              Delete the state file + errors log BEFORE running.
+                       Useful for repeat test runs against a fresh project.
+                       Implies --no-skip-existing.
+  --suffix-existing    When the target project already exists on the
+                       server, auto-append _2, _3, ... to the requested
+                       name and create a NEW project instead of reusing
+                       the cached one. Pairs nicely with --reset for
+                       quick smoke tests.
   --verbose            Log every API call + folder creation
 
 Examples:
@@ -110,8 +118,28 @@ const config = {
     'mp4,mov,m4v,avi,mkv,webm,jpg,jpeg,png,gif,webp')
     .split(',')
     .map((s) => s.trim().toLowerCase().replace(/^\./, '')),
-  skipExisting: args['no-skip-existing'] ? false : true,
+  skipExisting: args['no-skip-existing'] || args.reset ? false : true,
+  reset: !!args.reset,
+  suffixExisting: !!args['suffix-existing'],
   verbose: !!args.verbose,
+}
+
+// 2.0.5+: --reset wipes the per-source bookkeeping BEFORE we load it,
+// so loadState() below starts from a clean slate. This avoids the
+// "6 already uploaded, 0 to go" trap when you're re-testing against a
+// fresh project on the same source folder. Errors log is wiped too so
+// the new run's errors aren't mixed with stale ones.
+if (config.reset && !config.dryRun) {
+  for (const p of [config.stateFile, config.errorLogFile]) {
+    try {
+      fs.unlinkSync(p)
+      console.log(`✓ Reset: removed ${p}`)
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.warn(`! Reset: could not remove ${p}: ${err.message}`)
+      }
+    }
+  }
 }
 
 if (!fs.existsSync(config.source) || !fs.statSync(config.source).isDirectory()) {
@@ -257,12 +285,29 @@ async function findOrCreateProject(name) {
   }
   const projects = await apiCall('GET', '/api/projects')
   const list = Array.isArray(projects) ? projects : projects?.projects || []
-  const match = list.find((p) => p.title === name)
-  if (match) {
-    log.ok(`Found existing project "${name}" (${match.id})`)
-    state.projectId = match.id
-    saveState(state)
-    return match.id
+
+  // 2.0.5+: --suffix-existing turns "match by name" upside down.
+  // Instead of reusing the existing project, we find the next free
+  // suffix (_2, _3, ...) and CREATE a new project. Useful for repeat
+  // test runs against a fresh project without manual rename.
+  if (config.suffixExisting) {
+    const existingTitles = new Set(list.map((p) => p.title))
+    if (existingTitles.has(name)) {
+      let n = 2
+      while (existingTitles.has(`${name}_${n}`)) n++
+      const suffixed = `${name}_${n}`
+      log.info(`Project "${name}" exists — using "${suffixed}" instead`)
+      name = suffixed
+      config.projectName = suffixed
+    }
+  } else {
+    const match = list.find((p) => p.title === name)
+    if (match) {
+      log.ok(`Found existing project "${name}" (${match.id})`)
+      state.projectId = match.id
+      saveState(state)
+      return match.id
+    }
   }
   if (config.dryRun) {
     log.info(`[dry-run] would create project "${name}"`)

@@ -97,9 +97,17 @@ function StatusBanner({
       : isDone
       ? 'All processing complete'
       : 'Processing videos'
+  // 2.0.6+: when work is in flight, surface "X in progress" prominently
+  // instead of "0 / N done". With CLI bulk uploads the banner used to
+  // sit at "0 / 6 done" for minutes while the worker actually was
+  // chewing through them — there was no signal that anything was alive.
+  // Now the live count of in-flight items leads, and the done counter
+  // tags along only once at least one item has finished.
   const labelCount = isDone
     ? `${total} / ${total} done`
-    : `${done} / ${total} done`
+    : done > 0
+    ? `${current} in progress · ${done} / ${total} done`
+    : `${current} in progress`
 
   return (
     <div

@@ -44,6 +44,30 @@ and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for 
   dropdown finally shows "Auto (match source — recommended)"
   by default, as it always should have.
 
+### Changed
+
+- **Processing banner now leads with the live "in progress"
+  count instead of just the completed count.** With bulk
+  uploads the collapsed header used to say `0 / 6 done` for
+  several minutes while the worker actually was chewing
+  through them — there was no signal that anything was alive.
+  The label now reads `6 in progress` while work is in
+  flight, then `4 in progress · 2 / 6 done` once items start
+  landing, and finally `6 / 6 done` when everything is
+  finished. No change to the expanded card list.
+
+- **`scripts/bulk-upload.mjs` gets `--reset` and
+  `--suffix-existing` for repeat smoke tests.** `--reset`
+  deletes the per-source state file (and errors log) before
+  the run and implies `--no-skip-existing`, so re-uploading
+  the same library doesn't get short-circuited by stale
+  "already uploaded" entries. `--suffix-existing` flips the
+  project lookup: if a project with the requested title
+  already exists on the server the script auto-appends `_2`,
+  `_3`, ... and creates a new one instead of reusing the
+  existing project. Pair the two for one-shot fresh smoke
+  tests with zero manual cleanup.
+
 ## [2.0.4] - 2026-06-01
 
 ### Added
