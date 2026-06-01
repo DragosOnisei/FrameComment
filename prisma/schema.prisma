@@ -3,6 +3,16 @@
 
 generator client {
   provider = "prisma-client-js"
+  // 2.1.2+: explicit binary targets so Prisma generates query
+  // engines for BOTH the alpine builder (musl) and the debian
+  // runner (glibc). Without these, `prisma generate` only
+  // builds the "native" target = whatever distro is doing the
+  // generation = alpine musl, and the runtime fails to load
+  // the engine with cryptic "Query engine not found" or silent
+  // db-connect failures (PostgreSQL is up + healthy but Prisma
+  // can't open it). Keep both entries while we ship a
+  // multi-distro image.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {

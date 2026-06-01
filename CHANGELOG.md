@@ -17,6 +17,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.3] - 2026-06-01
+
+### Fixed
+
+- **App container can't connect to PostgreSQL on the new Debian
+  runtime — Prisma query engine missing for glibc.** When 2.1.2
+  switched the runner from Alpine to Debian, the Prisma client
+  inside `node_modules` was still the musl-only binary that the
+  builder stage (still on Alpine) produced. Prisma defaults to
+  generating a single `native` engine = whatever distro runs
+  `prisma generate`, so the runner had no glibc engine to load
+  and the app spun forever in `wait_for_postgres` (the DB was
+  healthy; the client just couldn't talk to it). The fix sets
+  explicit `binaryTargets` on the Prisma generator —
+  `["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]`
+  — so the builder produces both engines and either runtime
+  picks the right one. Keep this list as long as the build
+  pipeline straddles two distros.
+
 ## [2.1.2] - 2026-06-01
 
 ### Fixed
