@@ -429,7 +429,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             if (projectData.settings) {
               setCompanyName(projectData.settings.companyName || 'Studio')
               // Prefer per-project resolution, fall back to global default
-              setDefaultQuality(projectData.previewResolution || projectData.settings.defaultPreviewResolution || '720p')
+              setDefaultQuality(projectData.previewResolution || projectData.settings.defaultPreviewResolution || 'auto')
             }
 
             if (!projectData.hideFeedback) {

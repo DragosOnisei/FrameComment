@@ -130,7 +130,7 @@ export default function GlobalSettingsPage() {
   const [smtpFromAddress, setSmtpFromAddress] = useState('')
   const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
   const [appDomain, setAppDomain] = useState('')
-  const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('720p')
+  const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('auto')
   const [defaultSkipTranscoding, setDefaultSkipTranscoding] = useState(false)
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
   const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
@@ -220,7 +220,7 @@ export default function GlobalSettingsPage() {
     setSmtpFromAddress(data.smtpFromAddress || '')
     setSmtpSecure(data.smtpSecure || 'STARTTLS')
     setAppDomain(data.appDomain || '')
-    setDefaultPreviewResolution(data.defaultPreviewResolution || '720p')
+    setDefaultPreviewResolution(data.defaultPreviewResolution || 'auto')
     setDefaultSkipTranscoding(data.defaultSkipTranscoding ?? false)
     setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
     setDefaultWatermarkText(data.defaultWatermarkText || '')
@@ -540,7 +540,7 @@ export default function GlobalSettingsPage() {
         smtpFromAddress: smtpFromAddress || null,
         smtpSecure: smtpSecure || 'STARTTLS',
         appDomain: appDomain || null,
-        defaultPreviewResolution: defaultPreviewResolution || '720p',
+        defaultPreviewResolution: defaultPreviewResolution || 'auto',
         defaultSkipTranscoding,
         defaultWatermarkEnabled: defaultWatermarkEnabled,
         defaultWatermarkText: defaultWatermarkText || null,

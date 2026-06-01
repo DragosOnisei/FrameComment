@@ -498,7 +498,10 @@ export const updateSettingsSchema = z.object({
   smtpFromAddress: emailSchema.optional(),
   smtpSecure: z.enum(['STARTTLS', 'TLS', 'NONE']).optional(),
   appDomain: urlSchema.optional(),
-  defaultPreviewResolution: z.enum(['720p', '1080p', '2160p']).optional(),
+  // 2.0.x+: include "auto" as a valid value so the schema default
+  // (set to "auto" since the Phase A ladder rewrite) actually round-trips
+  // through Save Changes without being coerced back to "720p".
+  defaultPreviewResolution: z.enum(['auto', '720p', '1080p', '2160p']).optional(),
   defaultSkipTranscoding: z.boolean().optional(),
   defaultWatermarkText: safeStringSchema(0, 100).optional(),
   defaultWatermarkPositions: z.string().refine(val => {

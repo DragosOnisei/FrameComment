@@ -289,7 +289,16 @@ export async function POST(request: NextRequest) {
           status: isShareOnly ? 'SHARE_ONLY' : 'IN_REVIEW',
           hideFeedback: isShareOnly ? true : false,
           approvedAt: isShareOnly ? new Date() : null,
-          previewResolution: settings?.defaultPreviewResolution || '720p',
+          // 2.0.x+: default to "auto" (= match source) instead of
+          // legacy "720p" cap. With the cap, a 1080×1920 vertical
+          // source would only get 480p + 720p tiers from the worker
+          // even though the player's pendingQualities (driven by
+          // source resolution) includes 1080p — and that mismatch
+          // left the Quality menu showing "1080p — Finalizing..."
+          // forever after the worker actually finished. The schema
+          // default has been "auto" since Phase A; the API just
+          // missed the memo.
+          previewResolution: settings?.defaultPreviewResolution || 'auto',
           skipTranscoding: settings?.defaultSkipTranscoding ?? false,
           watermarkEnabled: settings?.defaultWatermarkEnabled ?? true,
           watermarkText: settings?.defaultWatermarkText || null,

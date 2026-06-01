@@ -17,6 +17,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.0.5] - 2026-06-01
+
+### Fixed
+
+- **"1080p — Finalizing..." sticks in the Quality menu forever for
+  videos uploaded under the old default settings.** Root cause was
+  threefold: (a) `POST /api/projects` hard-coded `previewResolution`
+  to `'720p'` (instead of the schema-default `'auto'`) when no
+  global setting was present, so the worker never ladders above
+  720p; (b) the player's `pendingQualities` computed the universe
+  purely from source resolution, so it kept expecting a 1080p tier
+  the worker never planned; (c) the global Settings validator
+  enum didn't list `'auto'`, so saving "Auto" from the UI silently
+  failed and the value snapped back to `'720p'`. All three flipped
+  to `'auto'`. The player also bails on the pending list as soon
+  as `processingProgress >= 100`, so even existing videos stuck on
+  the legacy 720p ladder stop showing "Finalizing..." after the
+  worker truly finishes.
+- **Existing Settings rows stay on the legacy `720p` cap after
+  upgrade.** Added migration
+  `20260601000000_default_preview_resolution_auto_existing`: any
+  row whose `defaultPreviewResolution` is still `'720p'` or NULL
+  gets flipped to `'auto'`. Admins who deliberately chose 1080p
+  or 2160p are untouched. After upgrade the Global Settings
+  dropdown finally shows "Auto (match source — recommended)"
+  by default, as it always should have.
+
 ## [2.0.4] - 2026-06-01
 
 ### Added

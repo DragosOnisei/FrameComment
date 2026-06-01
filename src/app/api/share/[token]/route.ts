@@ -378,7 +378,7 @@ export async function GET(
 
       settings: {
         companyName: globalSettings?.companyName || 'Studio',
-        defaultPreviewResolution: globalSettings?.defaultPreviewResolution || '720p',
+        defaultPreviewResolution: globalSettings?.defaultPreviewResolution || 'auto',
         maxCommentAttachments: globalSettings?.maxCommentAttachments ?? 10,
         maxReverseShareFiles: globalSettings?.maxReverseShareFiles ?? 10,
         privacyDisclosureEnabled: globalSettings?.privacyDisclosureEnabled ?? false,

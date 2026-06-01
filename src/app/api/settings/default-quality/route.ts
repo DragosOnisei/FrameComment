@@ -29,12 +29,12 @@ export async function GET() {
     })
 
     return NextResponse.json({
-      defaultPreviewResolution: settings?.defaultPreviewResolution || '720p'
+      defaultPreviewResolution: settings?.defaultPreviewResolution || 'auto'
     })
   } catch (error) {
     logError('Error fetching default quality:', error)
     return NextResponse.json(
-      { defaultPreviewResolution: '720p' },
+      { defaultPreviewResolution: 'auto' },
       { status: 200 } // Still return default even on error
     )
   }

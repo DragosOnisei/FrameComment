@@ -399,6 +399,21 @@ export default function VideoPlayer({
     if (v.status !== 'PROCESSING' && v.status !== 'UPLOADING' && v.status !== 'READY') {
       return []
     }
+    // 2.0.x+: once the worker writes processingProgress === 100,
+    // it's fully done. Any tier still in the source-resolution
+    // "universe" but missing from the ladder the worker actually
+    // ran (i.e. the project's previewResolution was tighter than
+    // the source) would otherwise be stuck in "Finalizing..."
+    // forever. The worker is the source of truth — if it says
+    // 100 % at READY, nothing more is coming. (UPLOADING /
+    // PROCESSING still flow through normally.)
+    if (
+      v.status === 'READY' &&
+      typeof v.processingProgress === 'number' &&
+      v.processingProgress >= 100
+    ) {
+      return []
+    }
     const shortSide = Math.min(v.width || 0, v.height || 0)
     if (shortSide <= 0) return []
     // The full universe of tiers the ladder COULD climb to for
