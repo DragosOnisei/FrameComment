@@ -17,6 +17,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.1.2] - 2026-06-01
+
+### Fixed
+
+- **Worker container moved from Alpine to Debian-bookworm-slim so
+  NVENC actually works.** The previous two NVENC attempts (BtbN
+  at 2.1.0, JVS at 2.1.1) failed because every prebuilt linux
+  ffmpeg with NVENC is glibc-linked and Alpine uses musl. JVS
+  *ran* but turned out to not actually include NVENC in its
+  configure flags — only software codecs. The 2.1.2 fix swaps
+  the runner stage's base image from `node:24-alpine3.23` to
+  `node:24-bookworm-slim` and installs `jellyfin-ffmpeg7` from
+  Jellyfin's official Debian repo. Same binary that ships in
+  production Jellyfin servers — NVENC + NVDEC + VAAPI + QSV
+  all enabled and extensively tested. Also fixes a related
+  Alpine-only issue: nvidia-container-runtime injects driver
+  libraries into `/usr/lib/x86_64-linux-gnu/` (Debian's ld
+  search path), so on Debian the GPU is visible to the
+  container natively — `nvidia-smi` works, NVENC encoder
+  loads cleanly. Image grew from ~400 MB to ~700 MB but that
+  one-time cost buys persistent 5-10× transcode speedups for
+  every video the worker touches.
+- Build stages (`base` / `deps` / `builder`) stay on Alpine for
+  build speed and image-cache reuse. Only the runtime layer
+  switched distributions, so cross-platform development on
+  Mac arm64 is unaffected.
+
 ## [2.1.1] - 2026-06-01
 
 ### Fixed

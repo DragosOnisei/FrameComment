@@ -18,40 +18,15 @@ RUN apk update && apk upgrade --no-cache && \
     && npm cache clean --force \
     && ffmpeg -version
 
-# 2.1.1+: Swap stock alpine ffmpeg (no NVENC/QSV/VAAPI) for John Van
-# Sickle's truly-static linux ffmpeg build which ships with NVENC
-# support compiled in. We tried BtbN's "static" GPL build first
-# (2.1.0) but it turned out to be dynamically linked to glibc and
-# wouldn't run on Alpine even with gcompat — missing libmvec.so.1
-# and fcntl64 symbols. JVS's build is statically linked against
-# musl-compatible primitives so it runs cleanly on Alpine without
-# any libc shim.
-#   (a) amd64 only — the JVS static build is amd64-only,
-#   (b) arm64 dev (Mac) keeps alpine ffmpeg + VideoToolbox via host,
-#   (c) worker auto-detects available encoders + falls back to
-#       libx264 if NVENC init fails, so this is purely opt-in
-#       performance.
-# JVS is the canonical Alpine-static ffmpeg distribution used by
-# Plex / Jellyfin / Emby docs, hosted at johnvansickle.com/ffmpeg.
-# The release tarball at this URL is updated periodically; the
-# binary contained always includes h264_nvenc / hevc_nvenc.
-RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        apk add --no-cache --virtual .ffmpeg-build-deps xz && \
-        curl -fsSL --retry 3 --retry-delay 5 -o /tmp/ffmpeg.tar.xz \
-            "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" && \
-        mkdir -p /tmp/ffmpeg-extract && \
-        tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-extract --strip-components=1 && \
-        cp /tmp/ffmpeg-extract/ffmpeg  /usr/local/bin/ffmpeg && \
-        cp /tmp/ffmpeg-extract/ffprobe /usr/local/bin/ffprobe && \
-        chmod 0755 /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
-        rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-extract && \
-        apk del --no-cache .ffmpeg-build-deps && \
-        echo "JVS static ffmpeg installed — testing run + encoders:" && \
-        /usr/local/bin/ffmpeg -version | head -1 && \
-        /usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "nvenc|vaapi|qsv" || true; \
-    else \
-        echo "Skipping JVS ffmpeg on non-amd64 ($(uname -m)) — alpine ffmpeg keeps the default behaviour"; \
-    fi
+# 2.1.2+: The base stage is now only used by deps/builder. Runtime
+# ffmpeg with NVENC support is installed in the Debian-based runner
+# stage below. Previous attempts (BtbN at 2.1.0, JVS static at 2.1.1)
+# all hit the same wall — every linux ffmpeg distribution that
+# ships NVENC is glibc-linked, but Alpine uses musl. The bridge
+# attempts (gcompat, BtbN-on-Alpine) couldn't satisfy libmvec /
+# fcntl64 / vector cosine symbols. The clean fix is to build on a
+# distro that natively uses glibc + nvidia-container-runtime's
+# library injection points.
 
 # === Dependencies ===
 FROM base AS deps
@@ -84,7 +59,14 @@ ENV NEXT_PHASE=phase-production-build
 RUN npm run build
 
 # === Production ===
-FROM base AS runner
+# 2.1.2+: Debian-bookworm runner (was Alpine before). Switch needed
+# because every NVENC-capable ffmpeg distribution for linux is
+# glibc-linked, and Alpine's musl can't load them — even with
+# gcompat the dynamic-loader-level symbols (libmvec, _ZGVbN2v_cos)
+# stay missing. nvidia-container-runtime also injects driver libs
+# into /usr/lib/x86_64-linux-gnu (Debian's ld search path), so the
+# host GPU is visible to the container natively, no extra setup.
+FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 
 ARG APP_VERSION
@@ -94,15 +76,47 @@ LABEL org.opencontainers.image.source="https://github.com/DragosOnisei/FrameComm
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.licenses="MIT"
 
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    DEBIAN_FRONTEND=noninteractive
 
+# Base runtime tools (curl for healthchecks, ca-certs for HTTPS,
+# fonts/fontconfig for ffmpeg text drawing, gosu replaces alpine's
+# su-exec in the entrypoint).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash curl ca-certificates fontconfig fonts-dejavu-core \
+        gnupg openssl gosu xz-utils \
+    && ln -s /usr/sbin/gosu /usr/local/bin/su-exec \
+    && rm -rf /var/lib/apt/lists/*
 
-# Python for Apprise notifications
-RUN apk add --no-cache python3 py3-pip \
+# 2.1.2+: jellyfin-ffmpeg7 from Jellyfin's official Debian repo.
+# Compiled with --enable-nvenc --enable-vaapi --enable-libvpl
+# (QSV) + all the standard codec libs. Same binary that ships in
+# production Jellyfin servers — extensively tested for NVENC.
+# Installed to /usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe}; we
+# symlink to /usr/local/bin so the worker finds it in $PATH.
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/jellyfin.gpg] https://repo.jellyfin.org/debian bookworm main" \
+        > /etc/apt/sources.list.d/jellyfin.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends jellyfin-ffmpeg7 \
+    && ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg  /usr/local/bin/ffmpeg \
+    && ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "jellyfin-ffmpeg installed — HW encoders available:" \
+    && /usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "nvenc|vaapi|qsv" || true
+
+# Python for Apprise notifications (unchanged behaviour from Alpine
+# stage; venv layout identical).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip \
     && python3 -m venv /opt/apprise-venv \
     && /opt/apprise-venv/bin/pip install --no-cache-dir --timeout=120 --upgrade pip \
     && /opt/apprise-venv/bin/pip install --no-cache-dir --timeout=120 apprise==1.9.9 \
-    && apk del --no-cache py3-pip
+    && apt-get remove -y python3-pip \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV APPRISE_PYTHON=/opt/apprise-venv/bin/python3
 
@@ -110,8 +124,12 @@ ARG TARGETPLATFORM
 ARG TARGETARCH
 RUN echo "Building for: $TARGETPLATFORM ($TARGETARCH)" && uname -a
 
-# App user (UID 911, remappable via PUID/PGID)
-RUN addgroup -g 911 app && adduser -D -u 911 -G app -h /app app
+# App user (UID 911, remappable via PUID/PGID). Debian syntax
+# replaces alpine's `addgroup`/`adduser` busybox variants. We
+# create the user without a home directory because WORKDIR /app
+# already exists and is the target home.
+RUN groupadd -g 911 app \
+    && useradd -u 911 -g app -d /app -s /bin/bash -M app
 
 # Copy production files
 COPY --from=deps --link /tmp/prod_node_modules ./node_modules
