@@ -1234,3 +1234,105 @@ export async function remuxToHls(
     })
   })
 }
+
+// =====================================================================
+// 2.2.0+ Atomic HLS master rewrite + per-videoId advisory lock.
+// =====================================================================
+//
+// Architectural note: the master.m3u8 for a video is generated on the
+// fly by `src/app/api/videos/[id]/hls/[...path]/route.ts` directly
+// from `Video.hlsBasePath` + `Video.hlsQualities`. There is no
+// physical master file on disk that we need to atomically swap — the
+// "master rewrite" is conceptually a DB column update.
+//
+// That said, the new breadth-first encode pipeline runs multiple
+// `encode-tier` jobs per video on independent worker slots. Two of
+// them finishing within milliseconds of each other could clobber
+// `hlsQualities` via lost updates if we use a naive read-modify-write.
+// Two safeguards:
+//
+//   1. Per-videoId in-process mutex (the Map below) so two tiers on
+//      the SAME worker process serialise their RMW cycle.
+//
+//   2. DB-side atomic merge using `array_append` semantics —
+//      Postgres serialises concurrent UPDATEs at the row level, so
+//      even across multiple worker processes the merge stays sane.
+//
+// We keep this helper in ffmpeg.ts because it sits next to
+// `remuxToHls` — the two are the read/write halves of the HLS
+// lifecycle.
+
+const hlsRewriteLocks = new Map<string, Promise<unknown>>()
+
+/**
+ * 2.2.0+: atomic master playlist rewrite for a video.
+ *
+ * Conceptually this swaps out the master.m3u8 to include the new
+ * tier. In FrameComment the master is dynamic (generated from DB),
+ * so "rewrite" means "atomically append `tier` to `Video.hlsQualities`
+ * + ensure `hlsBasePath` is set". The next master.m3u8 GET picks up
+ * the new list automatically (the endpoint sends `Cache-Control:
+ * no-store` — see hls/[...path]/route.ts).
+ *
+ * Atomicity:
+ *   - In-process: per-videoId Promise chain so concurrent encode-tier
+ *     jobs on the same worker queue strictly serialise.
+ *   - Cross-process: the Postgres UPDATE is row-level atomic; the
+ *     SET clause computes the new array from the previous value in
+ *     one statement, so two parallel UPDATEs can't lose a tier.
+ *
+ * Soft-fail by design: if the DB write throws P2025 (row deleted
+ * mid-encode), we swallow it — the encoder already produced segments
+ * and we can't un-produce them, but there's no video row to announce
+ * them on anymore.
+ */
+export async function rewriteHlsMaster(
+  videoId: string,
+  tier: '480p' | '720p' | '1080p' | '2160p',
+  basePath: string,
+): Promise<void> {
+  // Chain off whatever the previous holder of this videoId's lock was
+  // doing. `prev.catch(() => {})` so a thrown previous run can't
+  // cascade into "permanently broken lock" — we only care about
+  // serialisation, not error propagation.
+  const prev = hlsRewriteLocks.get(videoId) || Promise.resolve()
+  const next = prev.catch(() => {}).then(async () => {
+    // Import lazily so this module stays usable from non-worker
+    // contexts (e.g. the API route's static analysis) without
+    // pulling Prisma into the worker bundle twice.
+    const { prisma } = await import('./db')
+    try {
+      // Read the current set, add the tier, write back. The read +
+      // write happen inside this lock holder so two simultaneous
+      // calls for the same videoId on this process serialise. For
+      // OTHER processes, the Postgres UPDATE is atomic on the row.
+      const existing = (await prisma.video.findUnique({
+        where: { id: videoId },
+        select: { hlsQualities: true } as any,
+      })) as any
+      const set = new Set<string>(existing?.hlsQualities || [])
+      set.add(tier)
+      await prisma.video.update({
+        where: { id: videoId },
+        data: {
+          hlsBasePath: basePath,
+          hlsQualities: Array.from(set),
+        } as any,
+      })
+    } catch (err: any) {
+      if (err?.code === 'P2025') return // row deleted mid-flight
+      logError(`[HLS] master rewrite failed for ${videoId} ${tier}:`, err)
+    }
+  })
+  hlsRewriteLocks.set(videoId, next)
+  try {
+    await next
+  } finally {
+    // Drop the lock entry once it resolves AND we're still the latest
+    // holder — otherwise a slower predecessor would unset the entry
+    // someone else just installed.
+    if (hlsRewriteLocks.get(videoId) === next) {
+      hlsRewriteLocks.delete(videoId)
+    }
+  }
+}

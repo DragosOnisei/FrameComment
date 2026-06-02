@@ -89,6 +89,13 @@ function StatusBanner({
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null
 
   const Icon = isDone ? CheckCircle2 : kind === 'upload' ? Upload : Cog
+  // 2.2.0+: the processing banner now reflects the new breadth-first
+  // pipeline. "Encoding tiers" is more accurate than the legacy
+  // "Processing videos" copy because the worker is no longer doing
+  // any one video end-to-end — it's chewing through individual
+  // encode-tier jobs (480p across all videos, then 720p, then 1080p,
+  // etc.) The completion copy stays as "All processing complete"
+  // because that's terminal regardless of how the pipeline got there.
   const labelHead =
     kind === 'upload'
       ? isDone
@@ -96,7 +103,7 @@ function StatusBanner({
         : 'Uploading videos'
       : isDone
       ? 'All processing complete'
-      : 'Processing videos'
+      : 'Encoding tiers'
   // 2.1.8+: "in progress" should reflect what the WORKER is actively
   // chewing on, not the entire queue. Counting all PROCESSING rows
   // overstates concurrency — a 6-video bulk upload would say "6 in

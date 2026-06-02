@@ -199,11 +199,18 @@ async function duplicateVideoRow(
   // pipeline as a fresh upload.
   if (!isImage) {
     try {
-      await videoQueue.add('process-video', {
-        videoId: created.id,
-        originalStoragePath: newOriginalPath,
-        projectId: source.projectId,
-      })
+      // 2.2.0+: enqueue prepare-video (prio 1) instead of legacy
+      // process-video. The breadth-first pipeline fans out into
+      // encode-tier + finalize-video jobs in the worker.
+      await videoQueue.add(
+        'prepare-video',
+        {
+          videoId: created.id,
+          originalStoragePath: newOriginalPath,
+          projectId: source.projectId,
+        },
+        { priority: 1, jobId: `prepare-${created.id}` },
+      )
     } catch (err) {
       logError('[duplicate] enqueue failed', err)
     }

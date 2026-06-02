@@ -2673,6 +2673,8 @@ function FolderBrowserInner(
               status={v.status}
               uploadProgress={v.uploadProgress ?? null}
               processingProgress={v.processingProgress ?? null}
+              plannedTiers={(v as any).plannedTiers ?? null}
+              completedTiers={(v as any).completedTiers ?? null}
               approved={v.approved}
               commentCount={v.commentCount}
               uploaderName={v.uploaderName ?? null}

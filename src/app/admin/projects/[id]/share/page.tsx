@@ -66,6 +66,16 @@ function AdminSharePageInner() {
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
+  // 2.2.0+: Cache the last successfully-tokenized activeVideos so we
+  // can fall back to it when a refresh cycle produces a degraded
+  // result (empty array, all bare videos without stream URLs, etc.).
+  // Without this, the polling effect would flicker the player UI
+  // between "Loading video…" / "No videos are ready for review yet."
+  // / the actual player on every poll for clips whose source height
+  // doesn't match an expected tier (so `hasPendingHigherTier` keeps
+  // the poll alive forever). See the loop description in the 2.2.0
+  // bug-fix notes for the exact symptom.
+  const lastGoodActiveVideosRef = useRef<any[]>([])
   const [initialSeekTime, setInitialSeekTime] = useState<number | null>(null)
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
   const [adminUser, setAdminUser] = useState<any>(null)
@@ -457,6 +467,33 @@ function AdminSharePageInner() {
     }
   }, [fetchComments])
 
+  // 2.2.0+: Build a stable fingerprint of the "raw videos" list so we
+  // can short-circuit `setActiveVideosRaw` when nothing meaningful has
+  // changed across a poll. `transformProjectData` rebuilds the
+  // videosByName arrays on every poll (new reference), which was
+  // re-triggering the tokenize effect every 3.5 s and flickering the
+  // player UI between "Loading video…" / the actual player / "No
+  // videos are ready for review yet." for clips whose source short-
+  // side doesn't fit a clean tier (so `hasPendingHigherTier` keeps
+  // the poll alive indefinitely). Only re-tokenize when something
+  // the tokenizer actually cares about has changed.
+  const fingerprintRawVideos = useCallback((videos: any[] | null | undefined): string => {
+    if (!videos || videos.length === 0) return ''
+    return videos
+      .map((v: any) => [
+        v?.id ?? '',
+        v?.status ?? '',
+        v?.processingProgress ?? '',
+        v?.preview480Path ? 1 : 0,
+        v?.preview720Path ? 1 : 0,
+        v?.preview1080Path ? 1 : 0,
+        v?.preview2160Path ? 1 : 0,
+        Array.isArray(v?.hlsQualities) ? v.hlsQualities.length : 0,
+        v?.approved ? 1 : 0,
+      ].join('|'))
+      .join('::')
+  }, [])
+
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
     if (project?.videosByName) {
@@ -494,7 +531,13 @@ function AdminSharePageInner() {
         setActiveVideoName(videoNameToUse)
 
         const videos = project.videosByName[videoNameToUse]
-        setActiveVideosRaw(videos)
+        // 2.2.0+: refuse to seed `activeVideosRaw` with an empty
+        // array on the very first project load — the rest of the
+        // pipeline assumes that once we have a videoNameToUse we
+        // also have at least one raw video to tokenize.
+        if (Array.isArray(videos) && videos.length > 0) {
+          setActiveVideosRaw(videos)
+        }
 
         if (urlVersion !== null && videos) {
           const targetIndex = videos.findIndex((v: any) => v.version === urlVersion)
@@ -508,12 +551,54 @@ function AdminSharePageInner() {
         }
       } else {
         const videos = project.videosByName[activeVideoName]
-        if (videos) {
-          setActiveVideosRaw(videos)
+        // 2.2.0+: only push a fresh raw-videos array down to the
+        // tokenize effect when something the tokenizer cares about
+        // has actually changed. The polling effect upstream calls
+        // `loadProject(true)` every ~3.5 s while a higher tier is
+        // pending, and `transformProjectData` rebuilds the arrays
+        // each time — so without this guard the tokenize effect
+        // would re-fire on every poll and bounce `tokensLoading`
+        // up + down, which is what surfaced as the visible flicker
+        // between the player and the "No videos are ready" card.
+        // Also: never overwrite a populated list with an empty /
+        // missing one — a transient poll that drops the active
+        // video group must not flush the player to empty.
+        if (Array.isArray(videos) && videos.length > 0) {
+          setActiveVideosRaw((prev) => {
+            if (fingerprintRawVideos(prev) === fingerprintRawVideos(videos)) {
+              return prev
+            }
+            return videos
+          })
         }
       }
     }
-  }, [project, activeVideoName, urlVideoName, urlVersion, urlTimestamp])
+  }, [project, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos])
+
+  // 2.2.0+: A tokenized video is "useful" when at least one playable
+  // surface is available (any tier stream URL, an HLS master, a
+  // download URL, or a thumbnail). The catch branch in
+  // `fetchTokensForVideos` returns the raw `video` object without any
+  // of these, which would slip past the simple
+  // `activeVideos.filter(v => v.status === 'READY')` check downstream
+  // and render the player with `videoUrl === ''` — the source of the
+  // "Loading video…" flash inside the actual player frame. We use
+  // this helper to decide whether a fresh tokenization is good enough
+  // to publish into `activeVideos`, or whether we should keep the
+  // last-known-good list around so the player stays mounted on real
+  // stream URLs while a transient token-fetch failure rotates through.
+  const isTokenizedVideoUsable = useCallback((v: any): boolean => {
+    if (!v) return false
+    return Boolean(
+      v.streamUrl480p ||
+      v.streamUrl720p ||
+      v.streamUrl1080p ||
+      v.streamUrl2160p ||
+      v.hlsUrl ||
+      v.downloadUrl ||
+      v.thumbnailUrl,
+    )
+  }, [])
 
   // Tokenize active videos lazily
   useEffect(() => {
@@ -526,8 +611,41 @@ function AdminSharePageInner() {
       }
       setTokensLoading(true)
       const tokenized = await fetchTokensForVideos(activeVideosRaw)
-      if (isMounted) {
-        setActiveVideos(tokenized)
+      if (!isMounted) return
+      // 2.2.0+: defend against degraded poll cycles.
+      //
+      // The poll → `loadProject(true)` → `setProject` → effect-461
+      // → `setActiveVideosRaw` → this effect chain re-runs every
+      // ~3.5 s while `hasPendingHigherTier` is true. If a single
+      // refresh produces an "empty" or "all-bare" tokenized array
+      // (transient 401 + refresh, brief network blip, the
+      // `fetchTokensForVideos` catch branch returning the raw video
+      // object without any signed URLs, etc.), we MUST NOT clobber
+      // the previously-good `activeVideos` — that's exactly what
+      // makes the player UI bounce between the actual VideoPlayer
+      // and the "No videos are ready for review yet." card.
+      //
+      // Policy:
+      //  * empty tokenized array → keep the previous activeVideos
+      //  * tokenized array where every clip lacks stream URLs but
+      //    we already have a good cached list → keep the previous
+      //  * otherwise → publish the new array, and snapshot it as
+      //    the next "last known good" baseline.
+      const tokenizedAny = Array.isArray(tokenized) ? tokenized : []
+      const anyUsable = tokenizedAny.some(isTokenizedVideoUsable)
+      const lastGood = lastGoodActiveVideosRef.current
+      const haveLastGood = Array.isArray(lastGood) && lastGood.length > 0
+      if (tokenizedAny.length === 0 && haveLastGood) {
+        // Don't surface an empty list; keep the player mounted.
+      } else if (!anyUsable && haveLastGood) {
+        // Every entry came back without a playable surface — keep
+        // serving the cached good list rather than flashing the
+        // empty-state card.
+      } else {
+        setActiveVideos(tokenizedAny)
+        if (anyUsable) {
+          lastGoodActiveVideosRef.current = tokenizedAny
+        }
       }
       setTokensLoading(false)
     }
@@ -537,7 +655,7 @@ function AdminSharePageInner() {
     return () => {
       isMounted = false
     }
-  }, [activeVideosRaw, fetchTokensForVideos])
+  }, [activeVideosRaw, fetchTokensForVideos, isTokenizedVideoUsable])
 
   // Fetch thumbnails for all video groups
   useEffect(() => {
@@ -610,6 +728,13 @@ function AdminSharePageInner() {
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
     setViewState('player')
+    // 2.2.0+: switching to a different video group means the
+    // last-known-good `activeVideos` snapshot is for the OLD group
+    // and must not be replayed onto the new one (otherwise the
+    // tokenize-effect's "keep previous on degraded result" guard
+    // would briefly show the wrong clip in the player). Reset so
+    // the next successful tokenization seeds a fresh baseline.
+    lastGoodActiveVideosRef.current = []
 
     const params = new URLSearchParams(searchParams?.toString() || '')
     params.set('video', videoName)

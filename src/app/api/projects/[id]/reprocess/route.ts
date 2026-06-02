@@ -123,12 +123,19 @@ export async function POST(
         },
       })
 
-      // Re-queue video for processing
-      await videoQueue.add('process-video', {
-        videoId: video.id,
-        originalStoragePath: video.originalStoragePath,
-        projectId: project.id,
-      })
+      // 2.2.0+: enqueue the breadth-first prepare-video job (prio 1)
+      // instead of the legacy process-video. The single prepare job
+      // fans out into per-tier encode-tier jobs + a finalize-video
+      // tail in the worker.
+      await videoQueue.add(
+        'prepare-video',
+        {
+          videoId: video.id,
+          originalStoragePath: video.originalStoragePath,
+          projectId: project.id,
+        },
+        { priority: 1, jobId: `prepare-${video.id}` },
+      )
 
       reprocessed.push({
         id: video.id,

@@ -115,6 +115,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
+  // 2.2.0+: Mirror of the admin share page's "last good tokenized
+  // list" guard — used by the tokenize effect to refuse publishing a
+  // degraded array (empty, or every entry missing a playable surface)
+  // over a previously-good `activeVideos`. See the matching comment
+  // in `src/app/admin/projects/[id]/share/page.tsx`.
+  const lastGoodActiveVideosRef = useRef<any[]>([])
   const [initialSeekTime, setInitialSeekTime] = useState<number | null>(null)
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
   const [shareToken, setShareToken] = useState<string | null>(null)
@@ -449,6 +455,27 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     }
   }, [token, shareToken, storageKey, fetchComments])
 
+  // 2.2.0+: Stable fingerprint of the raw videos list. Used to skip
+  // no-op `setActiveVideosRaw` calls when the source data hasn't
+  // meaningfully changed between project refreshes — same guard as
+  // the admin share page, see comments there for the full rationale.
+  const fingerprintRawVideos = useCallback((videos: any[] | null | undefined): string => {
+    if (!videos || videos.length === 0) return ''
+    return videos
+      .map((v: any) => [
+        v?.id ?? '',
+        v?.status ?? '',
+        v?.processingProgress ?? '',
+        v?.preview480Path ? 1 : 0,
+        v?.preview720Path ? 1 : 0,
+        v?.preview1080Path ? 1 : 0,
+        v?.preview2160Path ? 1 : 0,
+        Array.isArray(v?.hlsQualities) ? v.hlsQualities.length : 0,
+        v?.approved ? 1 : 0,
+      ].join('|'))
+      .join('::')
+  }, [])
+
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
     if (project?.videosByName) {
@@ -482,7 +509,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         setActiveVideoName(videoNameToUse)
 
         const videos = project.videosByName[videoNameToUse]
-        setActiveVideosRaw(videos)
+        // 2.2.0+: refuse to seed `activeVideosRaw` with an empty
+        // array. Mirrors the admin share page guard.
+        if (Array.isArray(videos) && videos.length > 0) {
+          setActiveVideosRaw(videos)
+        }
 
         // If URL specifies a version, calculate the index for initial selection
         if (urlVersion !== null && videos) {
@@ -499,12 +530,21 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       } else {
         // Keep activeVideos in sync when project data refreshes (ensures updated approval status/thumbnails/tokens)
         const videos = project.videosByName[activeVideoName]
-        if (videos) {
-          setActiveVideosRaw(videos)
+        // 2.2.0+: same fingerprint-based no-op suppression as the
+        // admin share page — avoids re-tokenizing every refresh
+        // when nothing the tokenizer cares about actually changed,
+        // and never overwrites a populated list with an empty one.
+        if (Array.isArray(videos) && videos.length > 0) {
+          setActiveVideosRaw((prev) => {
+            if (fingerprintRawVideos(prev) === fingerprintRawVideos(videos)) {
+              return prev
+            }
+            return videos
+          })
         }
       }
     }
-  }, [project?.videosByName, activeVideoName, urlVideoName, urlVersion, urlTimestamp])
+  }, [project?.videosByName, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos])
 
   const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
@@ -665,6 +705,26 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     )
   }, [shareToken, fetchVideoTokenWithRetry, project?.usePreviewForApprovedPlayback])
 
+  // 2.2.0+: Match the admin share page's "usable tokenized clip"
+  // predicate so the same defensive guard works here. A clip needs at
+  // least one playable surface (any tier stream URL, an HLS master, a
+  // download URL, or a thumbnail) before we'll publish it into
+  // `activeVideos`; otherwise the player would mount with
+  // `videoUrl === ''` and immediately show its internal "Loading
+  // video…" placeholder.
+  const isTokenizedVideoUsable = useCallback((v: any): boolean => {
+    if (!v) return false
+    return Boolean(
+      v.streamUrl480p ||
+      v.streamUrl720p ||
+      v.streamUrl1080p ||
+      v.streamUrl2160p ||
+      v.hlsUrl ||
+      v.downloadUrl ||
+      v.thumbnailUrl,
+    )
+  }, [])
+
   useEffect(() => {
     let isMounted = true
 
@@ -679,8 +739,26 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       }
       setTokensLoading(true)
       const tokenized = await fetchTokensForVideos(activeVideosRaw)
-      if (isMounted) {
-        setActiveVideos(tokenized)
+      if (!isMounted) return
+      // 2.2.0+: same defence as the admin share page — never replace
+      // a previously-good `activeVideos` with a degraded result
+      // (empty array, or every clip missing a playable surface).
+      // Without this the public share page would briefly flash
+      // "No videos are ready for review yet." on any transient
+      // token-fetch hiccup.
+      const tokenizedAny = Array.isArray(tokenized) ? tokenized : []
+      const anyUsable = tokenizedAny.some(isTokenizedVideoUsable)
+      const lastGood = lastGoodActiveVideosRef.current
+      const haveLastGood = Array.isArray(lastGood) && lastGood.length > 0
+      if (tokenizedAny.length === 0 && haveLastGood) {
+        // Keep the previously-published list.
+      } else if (!anyUsable && haveLastGood) {
+        // Same — refuse to clobber a working list with bare clips.
+      } else {
+        setActiveVideos(tokenizedAny)
+        if (anyUsable) {
+          lastGoodActiveVideosRef.current = tokenizedAny
+        }
       }
       setTokensLoading(false)
     }
@@ -690,7 +768,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     return () => {
       isMounted = false
     }
-  }, [activeVideosRaw, shareToken, fetchTokensForVideos])
+  }, [activeVideosRaw, shareToken, fetchTokensForVideos, isTokenizedVideoUsable])
 
   // Fetch thumbnails for all video groups (for grid and reel display)
   useEffect(() => {
@@ -756,6 +834,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
     setViewState('player')
+    // 2.2.0+: invalidate the "last good tokenized" fallback when
+    // switching clip groups so the tokenize-effect guard can't
+    // briefly replay the previous video's stream URLs onto the
+    // newly-selected one. Mirrors the admin share page.
+    lastGoodActiveVideosRef.current = []
 
     // Update URL with video parameter (preserves state on refresh)
     const params = new URLSearchParams(searchParams?.toString() || '')

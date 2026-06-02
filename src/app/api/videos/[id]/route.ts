@@ -6,6 +6,7 @@ import { getAutoApproveProject } from '@/lib/settings'
 import { rateLimit } from '@/lib/rate-limit'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
+import { cancelPendingVideoJobs } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 
@@ -295,8 +296,24 @@ export async function DELETE(
         where: { id },
         data: { deletedAt: new Date() } as any,
       })
+      // 2.2.0+: yank pending encode-tier + finalize jobs for this
+      // videoId so the queue doesn't burn worker slots on a row
+      // that's now in the trash. The currently-active encode (if
+      // any) will still self-abort via the TranscodeAborted /
+      // P2025 path on its next DB write — that hasn't changed
+      // since 1.9.4.
+      cancelPendingVideoJobs(id).catch((err) =>
+        logError(`[VIDEO DELETE] cancelPendingVideoJobs failed for ${id}:`, err),
+      )
       return NextResponse.json({ success: true, soft: true })
     }
+
+    // 2.2.0+: cancel any pending breadth-first jobs before we tear
+    // down the row + storage. Doing this first means the encode-tier
+    // workers don't race us to look up a row that's about to vanish.
+    await cancelPendingVideoJobs(id).catch((err) =>
+      logError(`[VIDEO DELETE] cancelPendingVideoJobs (permanent) failed for ${id}:`, err),
+    )
 
     // Permanent delete — same legacy behaviour as before: wipe every
     // associated file on disk, then drop the row.

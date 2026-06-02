@@ -17,6 +17,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.2.0] - 2026-06-02
+
+### Changed
+
+- **Breadth-first encode pipeline for bulk uploads.** The worker
+  used to do EVERY tier (480p → 720p → 1080p → 2160p) for one
+  video before moving to the next. On a 100-file bulk upload the
+  last video sat in the queue while files #1–#99 finished
+  end-to-end, including their slow 1080p / 2160p tiers — the user
+  watched a thumbnail wall of "Processing…" for tens of minutes
+  before file #100 even got a 480p. 2.2.0 splits the single
+  `process-video` BullMQ job into three job types on the same
+  queue, each with a hard-coded priority:
+
+    1. `prepare-video` (priority 1): downloads the original to a
+       persistent `/tmp/framecomment/<videoId>-original` cache,
+       runs magic-byte validation, probes metadata, generates the
+       thumbnail, computes the planned tier list from
+       `project.previewResolution` + the source's actual short
+       side, persists `plannedTiers`, then enqueues one
+       `encode-tier` job per tier and a single trailing
+       `finalize-video`.
+
+    2. `encode-tier` (priority 10/50/100/200 for
+       480p/720p/1080p/2160p): encodes ONE tier for ONE video.
+       Re-downloads the source from storage only if the cached
+       original got swept. Writes `preview<tier>Path`, appends
+       to `completedTiers`, flips `status=READY` the first time a
+       tier lands, remuxes to HLS, and atomically updates the
+       dynamic master manifest via a per-videoId in-process
+       advisory lock + Postgres row-level atomic UPDATE so
+       parallel tiers can't lose writes.
+
+    3. `finalize-video` (priority 500 — lowest): waits for every
+       tier in `plannedTiers` to land. If not all in, re-queues
+       itself with a 30-second delay (worker slot is released —
+       no busy-waiting). Soft timeout at 30 minutes, after which
+       it logs and exits cleanly. On the happy path it generates
+       the hover-scrub storyboard sprite from the cheap 480p tier
+       (not the master), then cleans up the cached original and
+       any leftover tier MP4s.
+
+  Net effect on a 100-file bulk upload: every file gets a
+  thumbnail + visible queue presence within a few seconds, then
+  every 480p lands before any 720p starts, every 720p before any
+  1080p, etc. File #100 is playable in roughly the time it used
+  to take file #1 to finish its full ladder.
+
+- **Per-video deletion now also yanks pending encode-tier jobs.**
+  The delete endpoint cancels every queued
+  `prepare-<videoId>` / `encode-<videoId>-<tier>` /
+  `finalize-<videoId>` job via `Queue.remove(jobId)` before
+  tearing down the row. The actively-running ffmpeg (if any) still
+  self-aborts via the existing TranscodeAborted / P2025 path —
+  unchanged from 1.9.4.
+
+### Backwards compatibility
+
+- Schema additions (`plannedTiers Json?`, `completedTiers Json?`)
+  are nullable + default NULL. Videos produced before 2.2.0 with
+  `status=READY` and tiers already on disk continue to work
+  identically — readers fall back to the `preview*Path` columns
+  for them. The "Encoding HD…" badge on `VideoCard` and the
+  `Encoding tiers` banner copy only trigger when `plannedTiers`
+  is non-null, so legacy rows render exactly as in 2.1.x.
+
+- The single Worker dispatches on `job.name`, including the legacy
+  `process-video` name, so any 2.1.x jobs sitting in Redis at
+  upgrade time still complete via the old end-to-end orchestrator
+  (`src/worker/video-processor.ts`).
+
+- The runtime auto-fallback to libx264 from 2.1.9
+  (`runTranscodeOnce` retry inside `transcodeVideo`) lives in
+  `transcodeVideo`, which the new `encode-tier` processor calls
+  exactly the same way the old one did — hardware encoder errors
+  per clip still recover transparently.
+
+### UI
+
+- `VideoCard.tsx`: small "Encoding HD…" pill renders in the
+  top-right corner of any video that's `status=READY` but still
+  has `completedTiers.length < plannedTiers.length`. Anchors just
+  under the version tag when both are present.
+
+- `ProcessingStatusBanners.tsx`: the processing banner header
+  now reads "Encoding tiers" instead of "Processing videos" while
+  jobs are in flight. The completion copy ("All processing
+  complete") is unchanged.
+
 ## [2.1.9] - 2026-06-01
 
 ### Fixed

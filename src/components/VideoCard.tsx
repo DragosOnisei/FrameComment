@@ -61,6 +61,20 @@ export interface VideoCardProps {
    *  while `status === 'PROCESSING'` so the user sees the worker
    *  chew through each tier rather than staring at a spinner. */
   processingProgress?: number | null
+  /** 2.2.0+: ordered list of quality tiers the breadth-first
+   *  pipeline plans to produce for this video (e.g.
+   *  ['480p','720p','1080p']). NULL on legacy rows produced
+   *  before 2.2.0 — readers MUST treat NULL as "we have no
+   *  forward-looking tier info, fall back to the preview*Path
+   *  columns to know what's playable". Only populated by the
+   *  prepare-video job. */
+  plannedTiers?: string[] | null
+  /** 2.2.0+: tiers the encode-tier jobs have actually landed so
+   *  far. NULL on legacy rows. When status===READY but this is
+   *  strictly shorter than plannedTiers we know the video is
+   *  playable but still climbing the ladder — that's the trigger
+   *  for the "Encoding HD…" badge in the corner. */
+  completedTiers?: string[] | null
   approved?: boolean
   commentCount?: number
   uploaderName?: string | null
@@ -264,6 +278,8 @@ export default function VideoCard({
   status,
   uploadProgress,
   processingProgress,
+  plannedTiers,
+  completedTiers,
   approved,
   commentCount = 0,
   uploaderName,
@@ -402,6 +418,26 @@ export default function VideoCard({
   const isProcessingInQueue = processingVideos.some((v) => v.id === id)
   const showProgressBar = isUploadingInQueue || isProcessingInQueue
   const progressBarColour = isUploadingInQueue ? 'bg-primary' : 'bg-amber-500'
+
+  // 2.2.0+: derive "still climbing the encode ladder" state for the
+  // corner badge. The breadth-first pipeline writes plannedTiers
+  // up front and appends to completedTiers per tier; status flips
+  // to READY at the very first tier landing. So "READY but still
+  // encoding HD" is the case where:
+  //   - plannedTiers exists (post-2.2.0 row, NOT a legacy one)
+  //   - completedTiers length is strictly less than plannedTiers
+  //
+  // Legacy rows produced before 2.2.0 will have plannedTiers ===
+  // null and never trigger this badge — they retain their original
+  // "tier badges from preview*Path columns" behaviour, controlled
+  // elsewhere in the player's quality menu. This is the
+  // backwards-compat invariant called out in the release plan.
+  const planned: string[] = Array.isArray(plannedTiers) ? plannedTiers : []
+  const completed: string[] = Array.isArray(completedTiers) ? completedTiers : []
+  const stillClimbingTiers =
+    status === 'READY' &&
+    planned.length > 0 &&
+    completed.length < planned.length
 
   // Push the new scrub fraction into the preview <video> (legacy
   // fallback). When a storyboard sprite is available we skip this
@@ -652,6 +688,24 @@ export default function VideoCard({
         {versionTag && (
           <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/65 text-white text-xs font-medium tabular-nums backdrop-blur-sm">
             {versionTag}
+          </span>
+        )}
+        {/* 2.2.0+: "Encoding HD…" pill — replaces the static quality
+            badge for the small window between "video became playable
+            at 480p" and "every higher tier (720p / 1080p / 2160p)
+            also landed". We anchor right below the version tag, so
+            both pieces of metadata are visible at once on the card.
+            Backwards compat: legacy rows have plannedTiers === null
+            and never trigger this branch — they keep their pre-2.2.0
+            look. */}
+        {stillClimbingTiers && !versionTag && (
+          <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-amber-500/85 text-white text-[10px] font-semibold tracking-wide uppercase backdrop-blur-sm">
+            Encoding HD…
+          </span>
+        )}
+        {stillClimbingTiers && versionTag && (
+          <span className="absolute top-9 right-2 px-2 py-0.5 rounded bg-amber-500/85 text-white text-[10px] font-semibold tracking-wide uppercase backdrop-blur-sm">
+            Encoding HD…
           </span>
         )}
         {/* Multi-select checkbox (1.0.6+). Visible on hover, or

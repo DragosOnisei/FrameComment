@@ -151,11 +151,18 @@ export async function POST(request: NextRequest) {
         data: { status: 'PROCESSING', processingProgress: 0 },
       })
 
-      await videoQueue.add('process-video', {
-        videoId: dbVideo.id,
-        originalStoragePath: dbVideo.originalStoragePath,
-        projectId: dbVideo.projectId,
-      })
+      // 2.2.0+: enqueue prepare-video (prio 1) instead of legacy
+      // process-video. The breadth-first pipeline fans out into
+      // encode-tier + finalize-video jobs in the worker.
+      await videoQueue.add(
+        'prepare-video',
+        {
+          videoId: dbVideo.id,
+          originalStoragePath: dbVideo.originalStoragePath,
+          projectId: dbVideo.projectId,
+        },
+        { priority: 1, jobId: `prepare-${dbVideo.id}` },
+      )
 
       logMessage(`[S3 COMPLETE] Video ${dbVideo.id} queued for processing`)
     } else if (dbAsset) {

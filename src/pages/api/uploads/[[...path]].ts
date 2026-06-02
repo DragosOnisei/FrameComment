@@ -451,11 +451,22 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
   // bounded by the 15 s timeout above) so the worker only starts
   // a moment later — well worth it for the immediate visual
   // feedback in the folder grid.
-  await videoQueue.add('process-video', {
-    videoId: video.id,
-    originalStoragePath: video.originalStoragePath,
-    projectId: video.projectId,
-  })
+  // 2.2.0+: enqueue prepare-video (priority 1) instead of the
+  // legacy process-video. prepare-video does the cheap up-front
+  // work (download, validate, probe, thumbnail, plan tiers) and
+  // fans out per-tier encode-tier jobs + a finalize-video tail.
+  // For a bulk upload, every video reaches "thumbnail visible +
+  // tiers planned" before ANY encode starts — the breadth-first
+  // behaviour 2.2.0 is built around.
+  await videoQueue.add(
+    'prepare-video',
+    {
+      videoId: video.id,
+      originalStoragePath: video.originalStoragePath,
+      projectId: video.projectId,
+    },
+    { priority: 1, jobId: `prepare-${video.id}` },
+  )
 
   logMessage(`[UPLOAD] Video ${videoId} queued for worker processing`)
 

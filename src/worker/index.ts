@@ -1,5 +1,14 @@
-import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ProjectUploadProcessingJob, ExternalNotificationJob } from '../lib/queue'
+import { Worker, Queue, Job } from 'bullmq'
+import {
+  VideoProcessingJob,
+  VideoQueueJobData,
+  PrepareVideoJob,
+  EncodeTierJob,
+  FinalizeVideoJob,
+  AssetProcessingJob,
+  ProjectUploadProcessingJob,
+  ExternalNotificationJob,
+} from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { purgeExpiredTrash } from '../lib/trash-cleanup'
@@ -7,6 +16,9 @@ import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
 import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
 import { getActiveVideoEncoder, getMaxParallelTranscodes } from '../lib/ffmpeg'
 import { processVideo } from './video-processor'
+import { processPrepareVideo } from './prepare-video-processor'
+import { processEncodeTier } from './encode-tier-processor'
+import { processFinalizeVideo } from './finalize-video-processor'
 import { processAsset } from './asset-processor'
 import { processProjectUpload } from './project-upload-processor'
 import { processAdminNotifications } from './admin-notifications'
@@ -61,7 +73,38 @@ async function main() {
 
   logMessage(`[WORKER] Worker concurrency: ${concurrency} (from CPU allocation)`)
 
-  const worker = new Worker<VideoProcessingJob>('video-processing', processVideo, {
+  // 2.2.0+: single Worker, multiple job types on the same queue.
+  // We dispatch on `job.name` so a 2.1.x-era `process-video` job
+  // sitting in Redis at upgrade time still routes correctly via the
+  // legacy `processVideo` handler — that preserves backwards compat
+  // for jobs already enqueued before the worker swap.
+  //
+  // New job types:
+  //   - prepare-video   → processPrepareVideo  (prio 1)
+  //   - encode-tier     → processEncodeTier    (prio 10/50/100/200)
+  //   - finalize-video  → processFinalizeVideo (prio 500)
+  //
+  // BullMQ's `defaultJobOptions.attempts: 3` from getVideoQueue()
+  // applies to ALL of these uniformly, so transient failures retry
+  // identically to 2.1.x.
+  const videoJobRouter = async (job: Job<VideoQueueJobData>) => {
+    switch (job.name) {
+      case 'prepare-video':
+        return processPrepareVideo(job as Job<PrepareVideoJob>)
+      case 'encode-tier':
+        return processEncodeTier(job as Job<EncodeTierJob>)
+      case 'finalize-video':
+        return processFinalizeVideo(job as Job<FinalizeVideoJob>)
+      case 'process-video':
+      default:
+        // Legacy path — drains any 2.1.x jobs that were enqueued
+        // before the deploy. New uploads always enqueue
+        // `prepare-video` via the four updated call sites.
+        return processVideo(job as Job<VideoProcessingJob>)
+    }
+  }
+
+  const worker = new Worker<VideoQueueJobData>('video-processing', videoJobRouter, {
     connection: getRedisForQueue(),
     concurrency,
     lockDuration: 600_000,

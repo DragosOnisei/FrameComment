@@ -284,6 +284,23 @@ model Video {
   // gets overwritten by whichever ffmpeg races last — this map
   // is what the Quality menu's per-row percentage reads from.
   transcodeProgressByTier Json @default("{}")
+  // 2.2.0+: breadth-first encoding tier tracking.
+  //
+  // `prepare-video` writes `plannedTiers` once (e.g.
+  // ["480p","720p","1080p","2160p"]) right after probing the
+  // source so we know up-front which tiers will land. Each
+  // `encode-tier` job appends its slug to `completedTiers` on
+  // success — that's how `finalize-video` knows the encode ladder
+  // is finished, and how the UI tells "we're still climbing"
+  // apart from "everything that will ever land has landed".
+  //
+  // Both columns are nullable for backwards compat: rows produced
+  // by the pre-2.2.0 single-job orchestrator never wrote these
+  // fields and stay null. Readers MUST treat `null` as "trust
+  // legacy preview*Path columns + status" instead of "no tiers
+  // planned/done" — see VideoCard + ProcessingStatusBanners.
+  plannedTiers   Json?
+  completedTiers Json?
   thumbnailPath   String?
   // Hover-scrub storyboard (1.0.6+). A single tiny JPEG packing 100
   // evenly-spaced frames in a 10×10 grid. The folder grid uses CSS
