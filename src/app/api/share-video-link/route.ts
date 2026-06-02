@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { signVideoShareName } from '@/lib/share-video-sig'
 import { safeParseBody } from '@/lib/validation'
+import { getAppUrl } from '@/lib/url'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -62,11 +63,23 @@ export async function POST(request: NextRequest) {
     })
     if (folderId) params.set('folderId', folderId)
 
-    // Build absolute URL from the request origin so the admin can copy
-    // and share the link directly. Falls back to a relative path when
-    // the origin isn't resolvable (shouldn't happen in the browser).
-    const url = new URL(request.url)
-    const origin = url.origin
+    // 2.2.1+: use the configured `appDomain` from Settings → Branding
+    // when available so the copied link uses the studio's public
+    // domain (e.g. `https://framecomment.com/...`) instead of whatever
+    // host header the request arrived with. The pre-2.2.1 code built
+    // the URL from `request.url` directly, which on TrueNAS behind
+    // the built-in reverse proxy resolves to `http://localhost:4321`
+    // — so admins ended up sharing a link only reachable from the
+    // server itself. `getAppUrl` checks the DB-level setting first
+    // and falls back to the request headers (x-forwarded-host /
+    // host) so external deployments without `appDomain` set still
+    // get a useful URL.
+    const rawBaseUrl = await getAppUrl(request)
+    // Strip any trailing slash from the admin-entered domain so the
+    // final URL has exactly one slash before `/share/...` even if the
+    // user pasted `https://framecomment.com/` (which the input
+    // explicitly allows).
+    const origin = rawBaseUrl.replace(/\/+$/, '')
     const shareUrl = `${origin}/share/${project.slug}?${params.toString()}`
 
     return NextResponse.json({ url: shareUrl, sig })

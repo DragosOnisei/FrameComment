@@ -5,34 +5,27 @@ let isRedirecting = false
 let refreshInFlight: Promise<boolean> | null = null
 
 /**
- * 2.2.0+: transparent 429 backoff caps.
+ * 2.2.2+: single in-band 429 retry with backoff.
  *
- * Admin stress-tested by clicking rapidly into folders and back out
- * 8 times in a row. Each navigation mounts a fresh page → fires a
- * fresh `/api/projects/[id]` (or `/api/folders/[id]`). The per-IP +
- * session rate limiter (60 req/min for project reads, similar for
- * folders) starts returning 429 around request #6-8. Before this,
- * the page's catch path swallowed the throw, the finally set
- * loading=false, and the user saw a "Project not found" card —
- * which only cleared after 60s when the rate-limit window slid past.
- *
- * Now `apiFetch` transparently re-tries on 429 up to MAX_429_RETRIES
- * times. Each retry waits the larger of:
- *   - Retry-After header (server's hint, in seconds; the
- *     `lib/rate-limit.ts` middleware sets this), capped at 5s
- *   - Exponential backoff (1s, 2s, 4s) capped at 5s
- *
- * By the time even one retry succeeds the user has usually already
- * landed on the destination page; the staler-fetch guards in the
- * page components drop the result if it's no longer relevant.
- *
- * 3 retries × 5s max = ~15s total worst-case wait. That's well below
- * the 60s rate-limit window, so we never give up before the limit
- * resets. If the server is genuinely overloaded the request fails
- * cleanly with a real 429 the caller can render — no more silent
- * "Project not found" mis-attribution.
+ * History:
+ *  - 2.2.0 introduced this with 3 retries × 5s max = 15s worst case
+ *    to fix the "Project not found" stress-test bug.
+ *  - 2.2.1 raised the per-endpoint limits where it mattered
+ *    (`/api/projects/[id]` → 300 req/min) so the retries fired less.
+ *  - 2.2.2 discovered the high retry count was actually MAKING the
+ *    problem worse on token-heavy endpoints. The admin player fans
+ *    out N videos × 7 tokens per fetch — a folder with 30 videos
+ *    bursts 210 requests through `apiFetch` in one shot. As soon as
+ *    one of them hit 429, the 3-retry amplifier multiplied the
+ *    failed wave by 4x (1 original + 3 retries) and pushed deeper
+ *    into the rate-limit window. Worker logs showed 17000+ requests
+ *    on a single page session. We now retry ONCE, with a 1-second
+ *    minimum / Retry-After-capped delay, so amplification is bounded
+ *    at 2x. Per-call callers (e.g. `fetchAdminVideoTokenWithRetry`)
+ *    layer their own retries on top of this when they want more —
+ *    composing intentionally instead of duplicating blindly.
  */
-const MAX_429_RETRIES = 3
+const MAX_429_RETRIES = 1
 
 function delayBeforeRetry(attempt: number, retryAfterHeader: string | null): number {
   const retryAfterSec = parseInt(retryAfterHeader || '', 10)

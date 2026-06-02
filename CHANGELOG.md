@@ -17,6 +17,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.2.2] - 2026-06-02
+
+Polish release fixing two prod issues spotted right after 2.2.1
+shipped.
+
+### Fixed
+
+- **Share-video link copied `http://localhost:4321/...` instead of
+  the configured studio domain.** The `/api/share-video-link`
+  endpoint built the URL straight from `request.url`, which on
+  TrueNAS behind the built-in reverse proxy resolves to
+  `localhost:4321` — so admins ended up sharing links nobody
+  outside the box could open. It now routes through
+  `getAppUrl(request)` like the rest of the share endpoints,
+  which prefers the `appDomain` admin setting (Global Settings →
+  Branding → Application Domain), and strips trailing slashes so
+  a value entered as `https://framecomment.com/` doesn't produce
+  `https://framecomment.com//share/...`.
+- **Admin player fired thousands of `video-token` requests on
+  load** — a single page session was hitting 17000+ HTTP requests
+  with most coming back 429. Three things compounded:
+  - The admin player fans out `N videos × 7 tokens each` (480/720/
+    1080/2160/hls/original/thumbnail) in one bulk fetch. For a
+    folder with 30 videos that's 210 requests already.
+  - The endpoint was rate-limited at 200/min — the very first bulk
+    fetch tripped it.
+  - 2.2.1's `apiFetch` 429 retry (3 attempts) then quadrupled the
+    failed wave on every cycle, and the per-token retry inside the
+    page added another layer. Net amplification ≈ 8× per real
+    cache-miss, repeated every poll.
+
+  We addressed both ends: rate limit on `/api/admin/video-token`
+  bumped 200 → 2000/min (JWT minting is cheap; 2000/min covers
+  folders up to ~280 videos per refresh comfortably), and the
+  `apiFetch` 429 retry budget dropped from 3 → 1 (max amplification
+  2× instead of 4×). Per-call layers that genuinely want more
+  retries — `fetchAdminVideoTokenWithRetry` — opt into them
+  explicitly on top of the new floor.
+
 ## [2.2.1] - 2026-06-02
 
 Polish release on top of the 2.2.0 breadth-first pipeline — five

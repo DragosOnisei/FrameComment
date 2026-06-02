@@ -27,10 +27,20 @@ export async function GET(request: NextRequest) {
     return authResult
   }
 
-  // Rate limiting: Allow generous limit for token generation
+  // Rate limiting: token generation is cheap (JWT minting) but the
+  // share / admin player pages fan out aggressively — N videos × 7
+  // tokens each (480/720/1080/2160/hls/original/thumbnail). A folder
+  // with 30 videos already sits at 210 requests in one bulk fetch,
+  // and the pre-2.2.2 ceiling of 200/min hit 429 on the very first
+  // navigation. The 429 then cascaded through `apiFetch`'s 429-retry
+  // (added in 2.2.1) and the per-token retry inside the page, blowing
+  // up to thousands of failed requests in a few seconds. 2000/min
+  // (33/sec) comfortably covers folders up to ~280 videos per refresh
+  // without ever tripping the limiter; abusive automation would still
+  // hit it but no real admin pattern can.
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
-    maxRequests: 200,
+    maxRequests: 2000,
     message: videosMessages.tooManyTokenGenerationRequests || 'Too many token generation requests. Please slow down.'
   }, 'admin-video-token')
 
