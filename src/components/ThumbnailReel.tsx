@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, CheckCircle2, ChevronDown, Film, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Film, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -38,6 +38,14 @@ interface ThumbnailReelProps {
    *  Used to highlight the active version in the dropdown. Optional —
    *  when missing, the first (latest) version is treated as active. */
   activeVideoId?: string
+  /** 2.2.4+: tokenized versions of the active video group, used by
+   *  the version-reel expansion below the title bar. Each entry
+   *  carries the per-version `thumbnailUrl` + `storyboardUrl`
+   *  (signed `/api/content/<token>` URLs) the reel needs to render
+   *  per-version thumbnails and hover-scrub. Optional — when omitted
+   *  the reel renders a generic placeholder per version (no
+   *  thumbnail, no scrub) but the version-switch UX still works. */
+  activeVersionsTokenized?: any[]
 }
 
 export default function ThumbnailReel({
@@ -55,6 +63,7 @@ export default function ThumbnailReel({
   trailingAction,
   topRightMenu,
   activeVideoId,
+  activeVersionsTokenized,
 }: ThumbnailReelProps) {
   const tShare = useTranslations('share')
   const tComments = useTranslations('comments')
@@ -86,7 +95,74 @@ export default function ThumbnailReel({
     }
   }, [versionMenuOpen])
 
+  // 2.2.4+: Threshold for showing left/right page-scroll arrows
+  // inside the expanded version reel. Below this we expect the
+  // versions to fit comfortably on screen (or scroll via touch),
+  // so arrows would just add visual noise.
+  const VERSION_REEL_ARROWS_THRESHOLD = 10
+
+  // 2.2.4+: storyboard sprite-sheet hover-scrub. Same constants
+  // VideoCard uses for the grid view (10×10 grid = 100 frames per
+  // clip). When the mouse moves over a version thumbnail, we map
+  // its X position to a fraction (0…1) and shift the sprite via
+  // CSS `background-position`. State is per-versionId so multiple
+  // adjacent thumbs can be hovered without trampling each other
+  // (eg quick mouse-through).
+  const STORY_COLS = 10
+  const STORY_ROWS = 10
+  const STORY_CELLS = STORY_COLS * STORY_ROWS
+  const [hoverScrubByVersionId, setHoverScrubByVersionId] = useState<Map<string, number>>(new Map())
+
+  const setVersionScrub = (versionId: string, fraction: number | null) => {
+    setHoverScrubByVersionId((prev) => {
+      const next = new Map(prev)
+      if (fraction === null) next.delete(versionId)
+      else next.set(versionId, fraction)
+      return next
+    })
+  }
+
+  const storyboardStyleFor = (storyboardUrl: string | null | undefined, fraction: number | undefined) => {
+    if (!storyboardUrl || fraction === undefined) return undefined
+    const idx = Math.max(0, Math.min(STORY_CELLS - 1, Math.floor(fraction * STORY_CELLS)))
+    const col = idx % STORY_COLS
+    const row = Math.floor(idx / STORY_COLS)
+    const xPct = (col / (STORY_COLS - 1)) * 100
+    const yPct = (row / (STORY_ROWS - 1)) * 100
+    return {
+      backgroundImage: `url(${storyboardUrl})`,
+      backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
+      backgroundPosition: `${xPct}% ${yPct}%`,
+      backgroundRepeat: 'no-repeat' as const,
+    }
+  }
+
+  const scrollVersionReel = (direction: 'left' | 'right') => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    // Page-by-80%-of-container — leaves a visual overlap so the
+    // user keeps context across paging clicks.
+    const delta = container.clientWidth * 0.8 * (direction === 'left' ? -1 : 1)
+    container.scrollBy({ left: delta, behavior: 'smooth' })
+  }
+
+  // 2.2.4+: The expanded reel now shows ONLY the versions of the
+  // active video instead of every clip in the folder/project.
+  // Pre-2.2.4 click-on-title would dump 50+ siblings into the
+  // overlay; that's an item picker masquerading as a version
+  // picker. The new behaviour:
+  //   - 1 version  → title is NOT clickable (cursor-default, no
+  //     hover, button is `disabled`)
+  //   - 2+ versions → click flips the reel open, showing each
+  //     version's thumbnail + label
+  //   - 10+ versions → left/right arrow buttons fade in inside
+  //     the reel for keyboard-free paging
+  //
+  // `canExpandVersionReel` is computed from `currentVersions`
+  // (declared further down). The handler closes over a getter
+  // function so we don't run into a TDZ at function-scope.
   const handleToggleExpanded = () => {
+    if ((videosByName[activeVideoName] || []).length < 2) return
     setIsExpanded(!isExpanded)
   }
 
@@ -122,32 +198,6 @@ export default function ThumbnailReel({
   // filename + version dropdown — see the JSX below.
   const activeIndex = videoNames.indexOf(activeVideoName)
 
-  // Scroll to active thumbnail when expanded
-  useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container || !activeVideoName || !isExpanded) return
-
-    // Reset scroll flag when expanding
-    if (!hasScrolledRef.current) {
-      const idx = videoNames.indexOf(activeVideoName)
-      if (idx === -1) return
-
-      // Find the active thumbnail element
-      const thumbnails = container.querySelectorAll('[data-thumbnail]')
-      const activeThumbnail = thumbnails[idx] as HTMLElement
-      if (!activeThumbnail) return
-
-      // Scroll to center the active thumbnail
-      const containerWidth = container.clientWidth
-      const thumbnailLeft = activeThumbnail.offsetLeft
-      const thumbnailWidth = activeThumbnail.offsetWidth
-      const scrollTo = thumbnailLeft - containerWidth / 2 + thumbnailWidth / 2
-
-      container.scrollTo({ left: scrollTo, behavior: 'smooth' })
-      hasScrolledRef.current = true
-    }
-  }, [activeVideoName, videoNames, isExpanded])
-
   // Reset scroll flag when collapsing
   useEffect(() => {
     if (!isExpanded) {
@@ -159,13 +209,59 @@ export default function ThumbnailReel({
   const currentVideos = activeVideoName ? videosByName[activeVideoName] : []
   const hasApprovedCurrent = currentVideos.some((v: any) => v.approved === true)
 
-  // Versions of the active video (already in `videosByName[activeVideoName]`),
-  // sorted newest-first so the dropdown reads like a release history.
+  // 2.2.4+: Versions of the active video, sorted ASCENDING so the
+  // reel reads left-to-right v1 → v2 → v3 → … This matches a
+  // chronological release timeline (oldest on the left, newest on
+  // the right) — same direction the user reads. Pre-2.2.4 this
+  // was newest-first which felt right for the chip dropdown but
+  // backwards for the thumbnail strip.
+  //
+  // We MERGE by id — start from raw `currentVideos` (so order +
+  // complete set is preserved even if tokenization is still in
+  // flight) and overlay the tokenized fields (thumbnailUrl,
+  // storyboardUrl) from `activeVersionsTokenized` when present.
   const currentVersions = useMemo(() => {
-    return [...currentVideos].sort(
-      (a: any, b: any) => (b.version ?? 0) - (a.version ?? 0)
+    const tokenizedById = new Map<string, any>()
+    if (Array.isArray(activeVersionsTokenized)) {
+      for (const v of activeVersionsTokenized) {
+        if (v?.id) tokenizedById.set(v.id, v)
+      }
+    }
+    return [...currentVideos]
+      .map((v: any) => {
+        const t = tokenizedById.get(v.id)
+        return t ? { ...v, ...t } : v
+      })
+      .sort((a: any, b: any) => (a.version ?? 0) - (b.version ?? 0))
+  }, [currentVideos, activeVersionsTokenized])
+
+  // 2.2.4+: Scroll to active VERSION (not video name) when the
+  // reel is expanded. Index lookups go through `currentVersions`
+  // so on large version histories the active version is centered
+  // in the viewport.
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container || !isExpanded) return
+    if (hasScrolledRef.current) return
+    if (currentVersions.length < 2) return
+
+    const versionIdx = currentVersions.findIndex((v: any) =>
+      activeVideoId ? v.id === activeVideoId : v === currentVersions[currentVersions.length - 1]
     )
-  }, [currentVideos])
+    if (versionIdx < 0) return
+
+    const thumbnails = container.querySelectorAll('[data-thumbnail]')
+    const activeThumbnail = thumbnails[versionIdx] as HTMLElement
+    if (!activeThumbnail) return
+
+    const containerWidth = container.clientWidth
+    const thumbnailLeft = activeThumbnail.offsetLeft
+    const thumbnailWidth = activeThumbnail.offsetWidth
+    const scrollTo = thumbnailLeft - containerWidth / 2 + thumbnailWidth / 2
+
+    container.scrollTo({ left: scrollTo, behavior: 'smooth' })
+    hasScrolledRef.current = true
+  }, [activeVideoId, currentVersions, isExpanded])
 
   // Derive the active version's label for the chip. We try (in order):
   //   1) activeVideoId match → that video's versionLabel
@@ -174,7 +270,7 @@ export default function ThumbnailReel({
   const activeVideo =
     (activeVideoId
       ? currentVersions.find((v: any) => v.id === activeVideoId)
-      : null) || currentVersions[0]
+      : null) || currentVersions[currentVersions.length - 1]
   const activeVersionLabel: string =
     activeVideo?.versionLabel ||
     (typeof activeVideo?.version === 'number' ? `v${activeVideo.version}` : 'v1')
@@ -262,12 +358,25 @@ export default function ThumbnailReel({
               <button
                 data-tutorial="video-reel-center"
                 onClick={handleToggleExpanded}
+                disabled={currentVersions.length < 2}
                 className={cn(
                   "flex items-center gap-2 min-w-0 px-2 py-1 rounded-md transition-all max-w-[40vw] sm:max-w-[50vw]",
-                  "hover:bg-muted/80 active:scale-95",
-                  isExpanded && "bg-muted/50"
+                  // 2.2.4+: only show hover affordance + scale when
+                  // there are 2+ versions to switch between. A
+                  // single-version clip leaves the title visually
+                  // static — clicking it would be a dead-end.
+                  currentVersions.length >= 2
+                    ? "hover:bg-muted/80 active:scale-95 cursor-pointer"
+                    : "cursor-default",
+                  isExpanded && currentVersions.length >= 2 && "bg-muted/50"
                 )}
-                title={isExpanded ? 'Hide video thumbnails' : 'Show video thumbnails'}
+                title={
+                  currentVersions.length < 2
+                    ? 'This video has only one version'
+                    : isExpanded
+                      ? 'Hide versions'
+                      : 'Show versions'
+                }
               >
                 {/* 1.7.0+: removed the CheckCircle2 approval glyph
                     that used to sit in front of the filename — the
@@ -355,7 +464,7 @@ export default function ThumbnailReel({
                   {currentVersions.map((video) => {
                     const isActive = activeVideoId
                       ? video.id === activeVideoId
-                      : video === currentVersions[0]
+                      : video === currentVersions[currentVersions.length - 1]
                     const isApproved = video.approved === true
                     return (
                       <button
@@ -435,38 +544,83 @@ export default function ThumbnailReel({
         </div>
       </div>
 
-      {/* Floating Thumbnail Overlay - Appears below the bar, overlays content */}
-      {isExpanded && (
+      {/* 2.2.4+: Floating VERSION reel — shows the active video's
+          versions (not other videos in the folder/project). When
+          ≥10 versions are present, left/right arrow buttons appear
+          inside the panel for paging. */}
+      {isExpanded && currentVersions.length >= 2 && (
         <div
           className="absolute left-2 right-2 sm:left-3 sm:right-3 top-full z-30 mt-1"
         >
           <div className="bg-background/90 backdrop-blur-md shadow-lg rounded-xl">
-            <div className="px-2 py-3 sm:px-4">
-              {/* Thumbnails container */}
+            <div className="px-2 py-3 sm:px-4 relative">
+              {currentVersions.length > VERSION_REEL_ARROWS_THRESHOLD && (
+                <button
+                  type="button"
+                  aria-label="Scroll versions left"
+                  onClick={() => scrollVersionReel('left')}
+                  className={cn(
+                    'absolute left-1 sm:left-2 top-1/2 -translate-y-1/2 z-10',
+                    'h-8 w-8 rounded-full bg-background/95 ring-1 ring-border shadow-md',
+                    'flex items-center justify-center',
+                    'hover:bg-muted transition-colors',
+                  )}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              )}
+
               <div
                 ref={scrollContainerRef}
-                className="flex gap-2 sm:gap-3 overflow-x-auto overscroll-x-contain snap-x snap-mandatory justify-center"
+                className={cn(
+                  'flex gap-2 sm:gap-3 overflow-x-auto overscroll-x-contain snap-x snap-mandatory',
+                  currentVersions.length > VERSION_REEL_ARROWS_THRESHOLD
+                    ? 'px-10 justify-start'
+                    : 'justify-center',
+                )}
                 style={{
                   scrollbarWidth: 'none',
                   msOverflowStyle: 'none',
                   WebkitOverflowScrolling: 'touch',
                 }}
               >
-                {videoNames.map((name) => {
-                  const videos = videosByName[name]
-                  const hasApprovedVideo = videos.some((v: any) => v.approved === true)
-                  const versionCount = videos.length
-                  const thumbnailUrl = thumbnailsByName.get(name)
-                  const isActive = activeVideoName === name
+                {currentVersions.map((version: any) => {
+                  const isActive = activeVideoId
+                    ? version.id === activeVideoId
+                    : version === currentVersions[currentVersions.length - 1]
+                  const versionThumb: string | undefined = version.thumbnailUrl
+                  const versionStoryboard: string | undefined = version.storyboardUrl
+                  const versionApproved = version.approved === true
+                  const versionLabel = version.versionLabel || `v${version.version}`
+                  const scrubFraction = hoverScrubByVersionId.get(version.id)
+                  const isScrubbing = scrubFraction !== undefined
+                  const scrubStyle = storyboardStyleFor(versionStoryboard, scrubFraction)
+
+                  const handleScrub = (e: React.MouseEvent<HTMLButtonElement>) => {
+                    if (!versionStoryboard) return
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const x = e.clientX - rect.left
+                    const fraction = Math.max(0, Math.min(1, x / rect.width))
+                    setVersionScrub(version.id, fraction)
+                  }
 
                   return (
                     <button
-                      key={name}
+                      key={version.id}
                       data-thumbnail
                       onClick={() => {
-                        onVideoSelect(name)
-                        setIsExpanded(false) // Close after selection
+                        // Reuse the same event the version chip
+                        // dropdown dispatches — VideoPlayer listens
+                        // for it and jumps to the right index.
+                        window.dispatchEvent(
+                          new CustomEvent('selectVideoVersion', {
+                            detail: { videoId: version.id },
+                          })
+                        )
+                        setIsExpanded(false)
                       }}
+                      onMouseMove={handleScrub}
+                      onMouseLeave={() => setVersionScrub(version.id, null)}
                       className={cn(
                         'shrink-0 rounded-md sm:rounded-lg overflow-hidden snap-start',
                         'bg-muted border-2 transition-all duration-150',
@@ -476,61 +630,84 @@ export default function ThumbnailReel({
                           ? 'border-primary ring-2 ring-primary/30'
                           : 'border-transparent hover:border-border'
                       )}
+                      title={version.originalFileName || versionLabel}
                     >
-                      {/* Thumbnail */}
-                      <div className="aspect-video relative bg-black">
-                        {thumbnailUrl ? (
+                      <div className="aspect-video relative bg-black overflow-hidden">
+                        {versionThumb && (
                           <Image
-                            src={thumbnailUrl}
-                            alt={name}
+                            src={versionThumb}
+                            alt={versionLabel}
                             fill
                             sizes="(min-width: 1024px) 150px, (min-width: 640px) 110px, 80px"
-                            className="object-contain"
+                            className={cn(
+                              'object-contain transition-opacity duration-75',
+                              isScrubbing ? 'opacity-0' : 'opacity-100',
+                            )}
                             draggable={false}
                             unoptimized
                           />
-                        ) : (
+                        )}
+                        {!versionThumb && !isScrubbing && (
                           <div className="absolute inset-0 flex items-center justify-center bg-muted">
                             <Film className="w-5 h-5 sm:w-6 sm:h-6 text-muted-foreground/50" />
                           </div>
                         )}
+                        {/* Storyboard scrub layer — only visible while
+                            mouse is over the tile. CSS background-
+                            position swaps in the right sprite cell
+                            without any image swap or seek. */}
+                        {versionStoryboard && (
+                          <div
+                            className={cn(
+                              'absolute inset-0 transition-opacity duration-75',
+                              isScrubbing ? 'opacity-100' : 'opacity-0',
+                            )}
+                            style={scrubStyle}
+                            aria-hidden
+                          />
+                        )}
 
-                        {/* Approved badge */}
-                        {hasApprovedVideo && (
+                        {versionApproved && (
                           <div className="absolute top-1 right-1 bg-success text-success-foreground rounded-full p-0.5">
                             <CheckCircle2 className="w-3 h-3" />
                           </div>
                         )}
 
-                        {/* Version count badge */}
-                        {versionCount > 1 && (
-                          <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                            <Layers className="w-2.5 h-2.5" />
-                            <span>{versionCount}</span>
-                          </div>
-                        )}
-
-                        {/* Active overlay */}
                         {isActive && (
-                          <div className="absolute inset-0 bg-primary/10" />
+                          <div className="absolute inset-0 bg-primary/10 pointer-events-none" />
                         )}
                       </div>
 
-                      {/* Name */}
-                      <div className="px-1.5 py-1 sm:px-2 sm:py-1.5 bg-card/80">
-                        <p
+                      <div className="px-1.5 py-1 sm:px-2 sm:py-1.5 bg-card/80 flex items-center justify-center gap-1">
+                        <span
                           className={cn(
-                            'text-[10px] sm:text-xs truncate text-center',
-                            isActive ? 'text-primary font-medium' : 'text-foreground'
+                            'text-[10px] sm:text-xs font-mono font-semibold',
+                            isActive ? 'text-primary' : 'text-foreground'
                           )}
                         >
-                          {name}
-                        </p>
+                          {versionLabel}
+                        </span>
                       </div>
                     </button>
                   )
                 })}
               </div>
+
+              {currentVersions.length > VERSION_REEL_ARROWS_THRESHOLD && (
+                <button
+                  type="button"
+                  aria-label="Scroll versions right"
+                  onClick={() => scrollVersionReel('right')}
+                  className={cn(
+                    'absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 z-10',
+                    'h-8 w-8 rounded-full bg-background/95 ring-1 ring-border shadow-md',
+                    'flex items-center justify-center',
+                    'hover:bg-muted transition-colors',
+                  )}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>

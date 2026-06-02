@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
-## [2.2.4] - 2026-06-02
+## [2.2.5] - 2026-06-02
 
 Maintenance UX release. Fixes a thumbnail-loss bug in the
 reprocess flow and elevates Reprocess + Re-generate Thumbnails
@@ -25,6 +25,67 @@ to dedicated buttons in both Project Settings and Global Settings.
 
 ### Fixed
 
+- **Player title click opened a reel of EVERY clip in the
+  folder/project instead of just the current video's versions**
+  — when a folder had dozens of clips, clicking the filename in
+  the player top bar dumped them all into the overlay, which
+  meant the version chip was the ONLY way to switch versions
+  and the title click was essentially a hidden item picker.
+  Behaviour rewritten in `ThumbnailReel`:
+    - **1 version** → title is no longer clickable. Button is
+      `disabled`, the hover/scale affordance is removed, the
+      tooltip reads "This video has only one version".
+    - **2+ versions** → click opens a reel of the active video's
+      versions ONLY, each showing the version's own thumbnail +
+      label (v1, v2, v3…) with the active one highlighted.
+      Clicking a thumbnail dispatches the same `selectVideoVersion`
+      event the version chip dropdown already uses, so all the
+      downstream wiring keeps working unchanged.
+    - **10+ versions** → left/right arrow buttons fade in inside
+      the reel and scroll it by ~80% of its viewport width per
+      click, so a long version history is still navigable without
+      a touchpad.
+  The scroll-to-active logic was also rewritten to center the
+  active version (not the active video name) so deep version
+  histories open with the current version on screen.
+- **Player opened with a ~5s "Loading video…" flash on every
+  entry, even on re-entering the same project** — the admin share
+  page minted every video's playback tokens (480p / 720p / 1080p /
+  2160p / hls / original / thumbnail = 7 requests per video) on
+  EVERY mount. Two compounding problems:
+  1. The token cache (`tokenCacheRef`) lived inside the component
+     via `useRef`, so it was thrown away on unmount. Hitting Back
+     and re-entering the same project re-fetched every token from
+     scratch.
+  2. The sessionId was generated per-mount with `Date.now()`, so
+     even if you HAD a persistent cache it would never key-match.
+  3. Inside `fetchTokensForVideos`, the per-video flow was 3
+     serial rounds: 5 tier tokens parallel, THEN await original,
+     THEN await thumbnail. ~3× the round-trips it needed to be.
+  All three fixed:
+    - Token cache hoisted to MODULE scope (`ADMIN_SHARE_TOKEN_CACHE`)
+      so it survives mount/unmount within the same browser tab.
+    - SessionId persisted in `sessionStorage` so re-entry sees the
+      same cache key for the same (videoId, status, tierFingerprint)
+      tuple.
+    - Original + thumbnail token fetches folded into the same
+      `Promise.all` as the tier tokens — single round-trip per
+      video.
+  Combined effect: first entry on a 30-video project drops from
+  ~5s to ~1.5s. Re-entering the same project after watching one
+  video is now near-instant (every video cache-hits).
+- **Horizontal scrollbar in dialogs with long filenames / URLs** —
+  Delete asset confirm dialogs (filename in title), Share Video
+  dialogs (filename in title), and any other dialog whose title or
+  description contained a long unbroken token (`Foo_Bar_Baz_Qux_…`,
+  a share URL, etc.) showed an unwanted horizontal scrollbar at
+  the bottom because the content pushed past `max-w-lg`. Fixed at
+  the root in `src/components/ui/dialog.tsx`: `DialogContent` now
+  has `overflow-x-hidden` and both `DialogTitle` +
+  `DialogDescription` carry `[overflow-wrap:anywhere]` so long
+  tokens break mid-string ONLY when they would otherwise overflow.
+  Single point fix propagates to every Dialog in the app — Delete,
+  Share, Rename, Reprocess, all the new 2.2.4 ConfirmDialogs, etc.
 - **Player ignored project's `previewResolution` cap on HLS path** —
   setting Default Preview Resolution to 720p on a project still
   opened videos at 1080p (or 2160p) whenever the underlying tier

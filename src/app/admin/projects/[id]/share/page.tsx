@@ -23,6 +23,49 @@ const TOKEN_FETCH_RETRY_MAX_MS = 400
 
 type TokenFetchTelemetryEvent = 'first-attempt-failure' | 'retry-success' | 'retry-failure'
 
+// 2.2.4+: module-scope persistent token cache + sessionId.
+//
+// The old per-mount `tokenCacheRef` cache was being thrown away
+// every time the page unmounted (eg user hits Back to return to
+// the dashboard, then re-enters the same project). On the next
+// mount we'd re-mint every video token from scratch — 5–7 token
+// requests per video × N videos in the project = ~5s of
+// "Loading video..." on what should be a near-instant re-entry.
+//
+// Hoisting the cache to module scope and persisting `sessionId`
+// in sessionStorage means a re-mount sees the SAME cache key for
+// the same (videoId, status, tierFingerprint) tuple and hits
+// cache for every video. Net effect: re-entering the same
+// project after watching one video opens the player almost
+// instantly.
+//
+// The cache is keyed by (sessionId, videoId, status, tierFingerprint),
+// so it auto-invalidates when a new tier lands (tierFingerprint
+// rotates) or the row's status flips — no stale tokens served.
+//
+// Module-scope state survives Next.js client-side navigations
+// within the same browser tab (the JS bundle stays loaded). It
+// resets on a hard reload — exactly when the backend's signed
+// tokens may have rotated anyway.
+const ADMIN_SHARE_TOKEN_CACHE = new Map<string, any>()
+
+function getPersistentAdminSessionId(): string {
+  if (typeof window === 'undefined') return `admin:${Date.now()}`
+  const STORAGE_KEY = 'frameComment.adminShareSessionId'
+  try {
+    const existing = window.sessionStorage.getItem(STORAGE_KEY)
+    if (existing) return existing
+    const fresh = `admin:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`
+    window.sessionStorage.setItem(STORAGE_KEY, fresh)
+    return fresh
+  } catch {
+    // sessionStorage can throw in private browsing modes / strict
+    // permissions. Falling back to a per-call ID is fine — the
+    // module-scope cache will still hit within the same mount.
+    return `admin:${Date.now()}`
+  }
+}
+
 export default function AdminSharePage() {
   return (
     <AnnotationProvider>
@@ -83,8 +126,17 @@ function AdminSharePageInner() {
   const [viewState, setViewState] = useState<'grid' | 'player'>('grid')
   const [thumbnailsByName, setThumbnailsByName] = useState<Map<string, string>>(new Map())
   const [thumbnailsLoading, setThumbnailsLoading] = useState(true)
-  const tokenCacheRef = useRef<Map<string, any>>(new Map())
-  const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
+  // 2.2.4+: the token cache + sessionId are now MODULE-SCOPE
+  // (declared at the top of the file). This is what makes
+  // re-entering the same project show the player almost
+  // instantly: tokens minted on the first mount survive the
+  // unmount/remount cycle as long as the browser tab is alive,
+  // so the second open hits cache for every video and never
+  // re-fetches. The localRef wrappers below keep the existing
+  // closures untouched while pointing them at the persistent
+  // store underneath.
+  const tokenCacheRef = useRef<Map<string, any>>(ADMIN_SHARE_TOKEN_CACHE)
+  const sessionIdRef = useRef<string>(getPersistentAdminSessionId())
   const inFlightTokenRequestsRef = useRef<Map<string, Promise<string>>>(new Map())
   // 2.2.3+: thumbnail tokens are per-session-stable — the file backing
   // a thumbnail never changes once uploaded, so the signed URL minted
@@ -285,19 +337,44 @@ function AdminSharePageInner() {
           // 1.9.4+ Phase B: also fetch an HLS session token; the
           // player prefers HLS when available (seamless quality
           // upgrade mid-playback), fallback to MP4 otherwise.
-          const [token480, token720, token1080, token2160, tokenHls] = await Promise.all([
+          //
+          // 2.2.4+: pre-2.2.4 this was 3 serial rounds — the 5
+          // preview/HLS tokens parallel, THEN await the original
+          // token, THEN (conditionally) await the thumbnail
+          // token. Three round-trips per video × N videos was
+          // the dominant chunk of the "5s Loading video…" the
+          // user reported on first entry. Folding everything
+          // into ONE Promise.all collapses it to a single round-
+          // trip per video (~3× faster). The original + thumbnail
+          // aren't on the playback-critical path so making them
+          // race the tier tokens has no functional cost.
+          const [token480, token720, token1080, token2160, tokenHls, originalToken, thumbToken, storyboardToken] = await Promise.all([
             fetchAdminVideoTokenWithRetry(video.id, '480p', sessionId),
             fetchAdminVideoTokenWithRetry(video.id, '720p', sessionId),
             fetchAdminVideoTokenWithRetry(video.id, '1080p', sessionId),
             fetchAdminVideoTokenWithRetry(video.id, '2160p', sessionId),
             fetchAdminVideoTokenWithRetry(video.id, 'hls', sessionId),
+            fetchAdminVideoTokenWithRetry(video.id, 'original', sessionId),
+            video.thumbnailPath
+              ? fetchAdminVideoTokenWithRetry(video.id, 'thumbnail', sessionId)
+              : Promise.resolve(''),
+            // 2.2.4+: storyboard sprite-sheet token. Needed by the
+            // new version-reel hover-scrub (ThumbnailReel) so each
+            // version thumbnail responds to mouse movement with the
+            // same CSS-background-position scrubbing VideoCard
+            // already does in the grid view. Empty string when the
+            // worker never produced a storyboard (legacy rows,
+            // images, very short clips).
+            video.storyboardPath
+              ? fetchAdminVideoTokenWithRetry(video.id, 'storyboard', sessionId)
+              : Promise.resolve(''),
           ])
 
           let streamToken480p = token480
           let streamToken720p = token720
           let streamToken1080p = token1080
           let streamToken2160p = token2160
-          let downloadToken = null
+          let downloadToken: string | null = null
 
           // Always fetch the original as a fallback for admin preview.
           // Without this, videos uploaded with "Skip transcoding" (which
@@ -316,7 +393,6 @@ function AdminSharePageInner() {
           // works because in that mode none of the three tier
           // tokens are issued, so every slot is empty and we fall
           // back to original for all three.
-          const originalToken = await fetchAdminVideoTokenWithRetry(video.id, 'original', sessionId)
           if (originalToken) {
             downloadToken = originalToken
             const hasAnyPreviewToken = streamToken480p || streamToken720p || streamToken1080p || streamToken2160p
@@ -328,13 +404,8 @@ function AdminSharePageInner() {
             }
           }
 
-          let thumbnailUrl = null
-          if (video.thumbnailPath) {
-            const thumbToken = await fetchAdminVideoTokenWithRetry(video.id, 'thumbnail', sessionId)
-            if (thumbToken) {
-              thumbnailUrl = `/api/content/${thumbToken}`
-            }
-          }
+          const thumbnailUrl = thumbToken ? `/api/content/${thumbToken}` : null
+          const storyboardUrl = storyboardToken ? `/api/content/${storyboardToken}` : null
 
           // 1.9.4+ Phase B: build the HLS master URL when the
           // worker has produced HLS variants. hls.js / Safari
@@ -355,6 +426,9 @@ function AdminSharePageInner() {
             hlsUrl,
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
             thumbnailUrl,
+            // 2.2.4+: per-version storyboard sprite, surfaces in
+            // the new version reel hover-scrub.
+            storyboardUrl,
           }
 
           if (tokenized.streamUrl480p || tokenized.streamUrl720p || tokenized.streamUrl1080p || tokenized.streamUrl2160p || tokenized.downloadUrl || tokenized.thumbnailUrl) {
@@ -1003,6 +1077,10 @@ function AdminSharePageInner() {
         thumbnailsByName={thumbnailsByName}
         activeVideoName={activeVideoName}
         activeVideoId={activeVideoId}
+        // 2.2.4+: tokenized active group — gives ThumbnailReel
+        // per-version thumbnailUrl + storyboardUrl for the new
+        // version reel (thumbnails + hover-scrub).
+        activeVersionsTokenized={activeVideos}
         onVideoSelect={handleVideoSelect}
         onBackToGrid={handleBackToGrid}
         showBackButton={true}
