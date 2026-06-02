@@ -17,6 +17,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.2.3] - 2026-06-02
+
+Polish release after 2.2.2 — fixes a per-poll thumbnail token leak
+that the 2.2.2 rate-limit bump was only masking.
+
+### Fixed
+
+- **Admin player still fanned out hundreds of `video-token`
+  requests per session on opening a single video** — DevTools
+  network panel showed 6000+ token requests in a short browsing
+  burst with most returning 429 even after the 2.2.2 rate-limit
+  bump from 200 → 2000/min. Root cause was the thumbnails effect
+  on the admin share page (and the same effect on the public
+  share page): it called `fetchAdminVideoTokenWithRetry(..., 'thumbnail', ...)`
+  directly, completely bypassing `tokenCacheRef`. The effect's
+  dependency was `project?.videosByName`, which `transformProjectData`
+  rebuilds by reference on every 3.5s `loadProject(true)` driven by
+  any still-processing clip in the project. So the effect re-fired
+  every 3.5s and minted a fresh thumbnail token for EVERY video
+  group, regardless of whether one had ever been resolved before.
+  A folder with 30 videos plus a single still-encoding clip held
+  the poll alive and burned ~510 thumbnail-token requests per
+  minute on the limiter — pre-2.2.2 that blew the 200/min cap
+  immediately; post-2.2.2 it took a couple of minutes but still
+  surfaced as thousands of 429s and a player that gave up loading.
+  We now keep `thumbnailUrlCacheRef` (videoId → URL) and
+  `lastThumbnailFingerprintRef` per mount: the effect short-circuits
+  whenever the (name → videoIdWithThumb) fingerprint matches the
+  previous sweep, and otherwise serves cached entries to the loop
+  — fresh API calls happen only for never-seen videos, exactly
+  once per session. For the canonical 30-video / 1-encoding-clip
+  case this is a ~165× reduction (37 token requests per session
+  instead of 6115), and the rate limiter has all the headroom it
+  ever needed. Polling for new tiers on still-processing clips is
+  untouched — the tokenize effect's per-tier fingerprint still
+  rotates and re-mints the active group's stream URLs as the
+  worker drops new tiers.
+
 ## [2.2.2] - 2026-06-02
 
 Polish release fixing two prod issues spotted right after 2.2.1

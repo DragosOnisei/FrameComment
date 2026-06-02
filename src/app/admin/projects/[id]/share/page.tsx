@@ -86,6 +86,30 @@ function AdminSharePageInner() {
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
   const inFlightTokenRequestsRef = useRef<Map<string, Promise<string>>>(new Map())
+  // 2.2.3+: thumbnail tokens are per-session-stable — the file backing
+  // a thumbnail never changes once uploaded, so the signed URL minted
+  // for a given videoId is good for the entire mount. Pre-2.2.3 the
+  // thumbnails effect (see further below) called
+  // `fetchAdminVideoTokenWithRetry(videoId, 'thumbnail', ...)` for
+  // EVERY video group in the project on every poll cycle, because the
+  // effect's dependency was `project?.videosByName` and the project
+  // refresher rebuilds that map by reference every 3.5s. The tokenize
+  // effect's `tokenCacheRef` was never consulted on this path, so each
+  // 3.5s tick fired N thumbnail token requests (N = number of video
+  // groups). For a folder with 30 videos plus a single still-encoding
+  // clip keeping the poll alive, that's ~510 token requests per minute
+  // dedicated to thumbnails alone, which is what blew the per-IP rate
+  // limit and surfaced as thousands of 429s in the network panel.
+  // This Map caches the resolved thumbnail URL per videoId.
+  const thumbnailUrlCacheRef = useRef<Map<string, string>>(new Map())
+  // 2.2.3+: stable fingerprint of the last thumbnails sweep — `name ::
+  // videoIdWithThumb` joined. The thumbnails effect short-circuits
+  // when the fingerprint matches, so identical-content polls don't
+  // re-call the (now cached) loop. Without this guard the effect still
+  // walks every group, hits the cache, and calls `setThumbnailsByName`
+  // with a fresh Map every 3.5s — fine for tokens but pointless React
+  // work and a downstream re-render of ThumbnailReel / ThumbnailGrid.
+  const lastThumbnailFingerprintRef = useRef<string>('')
   const tokenFetchTelemetryRef = useRef({
     firstAttemptFailures: 0,
     retrySuccesses: 0,
@@ -677,7 +701,35 @@ function AdminSharePageInner() {
     }
   }, [activeVideosRaw, fetchTokensForVideos, isTokenizedVideoUsable])
 
-  // Fetch thumbnails for all video groups
+  // Fetch thumbnails for all video groups.
+  //
+  // 2.2.3+: ROOT-CAUSE FIX for the "6000+ 429s on /api/admin/video-token"
+  // bug reported against 2.2.2.
+  //
+  // The progressive transcoding poll above re-runs `loadProject(true)`
+  // every 3.5s while any active video is still in PROCESSING / has a
+  // pending higher MP4 tier / is waiting on an HLS remux.
+  // `transformProjectData` then returns a brand-new `videosByName` map
+  // by reference on every poll, which retriggers this effect (its dep
+  // is `project?.videosByName`). Pre-fix the effect walked every video
+  // group and called `fetchAdminVideoTokenWithRetry(..., 'thumbnail')`
+  // for each — bypassing `tokenCacheRef` entirely (that cache lives in
+  // `fetchTokensForVideos` and only covers the active video group).
+  //
+  // Two layers of defence applied below:
+  //   1. `lastThumbnailFingerprintRef` short-circuits the effect when
+  //      the (name → videoIdWithThumb) mapping hasn't changed across a
+  //      poll. This handles the common case: same set of videos, same
+  //      thumbnail-bearing version picked. The effect becomes a true
+  //      no-op rather than a "walk N cached entries and re-render".
+  //   2. `thumbnailUrlCacheRef` (videoId → /api/content/<token> URL).
+  //      Thumbnails are stable for the lifetime of the session — the
+  //      backing file never changes — so once we have a URL for a
+  //      videoId we never re-fetch it. This handles the edge case
+  //      where the fingerprint DID change (new video added, different
+  //      version surfaced as the thumbnail carrier, etc.) — only the
+  //      newly-needed videoIds hit the wire; everything else replays
+  //      from the cache.
   useEffect(() => {
     let isMounted = true
     const sessionId = sessionIdRef.current
@@ -687,24 +739,61 @@ function AdminSharePageInner() {
         return
       }
 
+      // 2.2.3+: fingerprint the (name → videoIdWithThumb) mapping —
+      // that's the ONLY shape this effect actually depends on. If it
+      // matches the prior sweep we skip both the token fetches AND the
+      // `setThumbnailsByName` call, so identical-content polls cost
+      // literally zero requests and zero downstream re-renders.
+      const entries = Object.entries(
+        project.videosByName as Record<string, any[]>,
+      )
+      const fingerprintParts: string[] = []
+      const nameToVideoWithThumb = new Map<string, any>()
+      for (const [name, videos] of entries) {
+        const videoWithThumb = videos.find((v: any) => v.thumbnailPath)
+        const thumbVideoId = videoWithThumb?.id ?? ''
+        fingerprintParts.push(`${name}::${thumbVideoId}`)
+        if (videoWithThumb) {
+          nameToVideoWithThumb.set(name, videoWithThumb)
+        }
+      }
+      const fingerprint = fingerprintParts.join('||')
+      if (
+        fingerprint === lastThumbnailFingerprintRef.current &&
+        // Don't skip on the very first call (empty initial ref vs empty
+        // project) — we still need to flush `thumbnailsLoading` to false.
+        lastThumbnailFingerprintRef.current !== ''
+      ) {
+        return
+      }
+
       setThumbnailsLoading(true)
       const newThumbnails = new Map<string, string>()
 
       try {
         await Promise.all(
-          Object.entries(project.videosByName as Record<string, any[]>).map(async ([name, videos]) => {
-            const videoWithThumb = videos.find((v: any) => v.thumbnailPath)
-            if (videoWithThumb) {
-              const thumbToken = await fetchAdminVideoTokenWithRetry(videoWithThumb.id, 'thumbnail', sessionId)
-              if (thumbToken && isMounted) {
-                newThumbnails.set(name, `/api/content/${thumbToken}`)
+          Array.from(nameToVideoWithThumb.entries()).map(async ([name, videoWithThumb]) => {
+            // 2.2.3+: serve from cache when we've already minted a
+            // thumbnail URL for this videoId during this session.
+            const cachedUrl = thumbnailUrlCacheRef.current.get(videoWithThumb.id)
+            if (cachedUrl) {
+              if (isMounted) {
+                newThumbnails.set(name, cachedUrl)
               }
+              return
+            }
+            const thumbToken = await fetchAdminVideoTokenWithRetry(videoWithThumb.id, 'thumbnail', sessionId)
+            if (thumbToken && isMounted) {
+              const url = `/api/content/${thumbToken}`
+              thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
+              newThumbnails.set(name, url)
             }
           })
         )
 
         if (isMounted) {
           setThumbnailsByName(newThumbnails)
+          lastThumbnailFingerprintRef.current = fingerprint
         }
       } catch (error) {
         // Failed to load thumbnails

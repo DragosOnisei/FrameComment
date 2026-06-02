@@ -132,6 +132,20 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const inFlightTokenRequestsRef = useRef<Map<string, Promise<string>>>(new Map())
+  // 2.2.3+: thumbnail URL cache (videoId → /api/content/<token>).
+  // Mirrors the admin share page fix — see the long comment above the
+  // thumbnails effect there. The public share page doesn't have a 3.5s
+  // poll, but `fetchProjectData` (called on approve / OTP / password
+  // success) wipes `tokenCacheRef` and triggers a fresh `setProject`,
+  // which re-fires the thumbnails effect with a new `videosByName`
+  // reference. Without per-videoId thumbnail caching every approval
+  // burst-fires N thumbnail token requests at the same endpoint —
+  // small N today, but the public path has no rate-limit headroom and
+  // a project with many approved versions would hit the same wall.
+  const thumbnailUrlCacheRef = useRef<Map<string, string>>(new Map())
+  // 2.2.3+: stable fingerprint of the last thumbnails sweep so the
+  // effect can no-op on identical-content re-runs.
+  const lastThumbnailFingerprintRef = useRef<string>('')
   const tokenFetchTelemetryRef = useRef({
     firstAttemptFailures: 0,
     retrySuccesses: 0,
@@ -770,7 +784,15 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     }
   }, [activeVideosRaw, shareToken, fetchTokensForVideos, isTokenizedVideoUsable])
 
-  // Fetch thumbnails for all video groups (for grid and reel display)
+  // Fetch thumbnails for all video groups (for grid and reel display).
+  //
+  // 2.2.3+: same root-cause fix as the admin share page — guard the
+  // effect with a (name → videoIdWithThumb) fingerprint and a per-
+  // videoId thumbnail URL cache so re-runs triggered by a fresh
+  // `project.videosByName` reference (post-approve refetch, OTP /
+  // password success seeding `fetchProjectData`, etc.) don't re-mint
+  // thumbnail tokens that haven't changed. See the matching comment on
+  // the admin share page for the full rationale.
   useEffect(() => {
     let isMounted = true
 
@@ -779,25 +801,53 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         return
       }
 
+      // 2.2.3+: fingerprint + per-videoId cache, as above.
+      const entries = Object.entries(
+        project.videosByName as Record<string, any[]>,
+      )
+      const fingerprintParts: string[] = []
+      const nameToVideoWithThumb = new Map<string, any>()
+      for (const [name, videos] of entries) {
+        const videoWithThumb = videos.find((v: any) => v.thumbnailPath)
+        const thumbVideoId = videoWithThumb?.id ?? ''
+        fingerprintParts.push(`${name}::${thumbVideoId}`)
+        if (videoWithThumb) {
+          nameToVideoWithThumb.set(name, videoWithThumb)
+        }
+      }
+      const fingerprint = fingerprintParts.join('||')
+      if (
+        fingerprint === lastThumbnailFingerprintRef.current &&
+        lastThumbnailFingerprintRef.current !== ''
+      ) {
+        return
+      }
+
       setThumbnailsLoading(true)
       const newThumbnails = new Map<string, string>()
 
       try {
         await Promise.all(
-          Object.entries(project.videosByName as Record<string, any[]>).map(async ([name, videos]) => {
-            // Find a video with a thumbnail
-            const videoWithThumb = videos.find((v: any) => v.thumbnailPath)
-            if (videoWithThumb) {
-              const thumbToken = await fetchVideoTokenWithRetry(videoWithThumb.id, 'thumbnail')
-              if (thumbToken && isMounted) {
-                newThumbnails.set(name, `/api/content/${thumbToken}`)
+          Array.from(nameToVideoWithThumb.entries()).map(async ([name, videoWithThumb]) => {
+            const cachedUrl = thumbnailUrlCacheRef.current.get(videoWithThumb.id)
+            if (cachedUrl) {
+              if (isMounted) {
+                newThumbnails.set(name, cachedUrl)
               }
+              return
+            }
+            const thumbToken = await fetchVideoTokenWithRetry(videoWithThumb.id, 'thumbnail')
+            if (thumbToken && isMounted) {
+              const url = `/api/content/${thumbToken}`
+              thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
+              newThumbnails.set(name, url)
             }
           })
         )
 
         if (isMounted) {
           setThumbnailsByName(newThumbnails)
+          lastThumbnailFingerprintRef.current = fingerprint
         }
       } catch (error) {
         // Failed to load thumbnails
