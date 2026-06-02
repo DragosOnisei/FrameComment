@@ -17,6 +17,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.2.1] - 2026-06-02
+
+Polish release on top of the 2.2.0 breadth-first pipeline — five
+player / navigation fixes that surfaced during live testing.
+
+### Fixed
+
+- **Player flapped between "Loading video…" and "No videos are
+  ready for review yet."** The admin player page runs three
+  coupled effects (project load, tier-poll, tokenize) on `setProject`
+  every 3.5 s. Each cycle stamped a fresh array reference on
+  `activeVideosRaw` even when nothing had actually changed, the
+  tokenize effect re-fired, and any transient token-fetch hiccup
+  briefly published an empty/partial `activeVideos` — toggling the
+  page between the player and the empty-state card. We now
+  fingerprint `activeVideosRaw` to skip no-op state churn and keep
+  the last successful tokenized list as a buffer so a flaky retry
+  never replaces a known-good payload with junk. The public share
+  page got the same defensive treatment.
+- **"Project not found" after rapid back/forward navigation.**
+  Clicking into folders and back ~8 times in quick succession blew
+  through the per-endpoint rate limit on `/api/projects/[id]`. The
+  catch path in `fetchProject` swallowed the throw and flipped
+  `loading=false`, surfacing the empty-state card until the
+  rate-limit window slid past 60 s later. `apiFetch` now
+  transparently retries 429s up to three times with `Retry-After`
+  backoff (~15 s worst-case), the project page distinguishes a
+  TERMINAL 404 (redirect to dashboard) from a TRANSIENT failure
+  (keep the spinner up — never the misleading "Project not found"
+  card), and the server-side rate limit on that endpoint went from
+  60 → 300 req/min (5/sec average) to cover real-world admin
+  navigation patterns without spurious 429s.
+- **Share link to a fully-processed clip opened at 480p instead
+  of 1080p.** When a project was set to `previewResolution = auto`
+  the player received `defaultQuality = 'auto'`, which fell through
+  to the else-branch of the tier ladder and was treated as 480p.
+  The MP4 path now has an explicit `auto` case that picks the
+  highest available tier on first load (2160p → 1080p → 720p →
+  480p). HLS uses adaptive selection so it was already correct.
+- **"1080p · Finalizing…" stayed pinned in the Quality menu until
+  the user manually refreshed.** The progressive-tier poll on the
+  admin share page gated solely on MP4 path availability — once
+  `preview1080Path` was set it stopped polling, even if the HLS
+  variant for that tier was still being remuxed. Since the
+  player's readiness check uses `hlsQualities` as the source of
+  truth when HLS is active, the menu got stuck on the stale
+  "Finalizing…" state. We now also keep polling whenever there's
+  an MP4 tier without a matching HLS variant — the menu auto-
+  updates within ~3 s of the remux finishing.
+
+### Changed
+
+- **NVENC + cuda filter graph fix carried forward in 2.2.0's
+  release notes** — this entry just records that the 2.1.9 fix is
+  still in place under the new pipeline (encode-tier jobs call the
+  same `transcodeVideo` wrapper with its auto-fallback to libx264
+  intact).
+
 ## [2.2.0] - 2026-06-02
 
 ### Changed

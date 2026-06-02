@@ -437,7 +437,27 @@ function AdminSharePageInner() {
       if (meetsTier(2160) && !v.preview2160Path) return true
       return false
     })
-    if (!hasProcessing && !hasPendingHigherTier) return
+    // 2.2.0+: keep polling while the HLS master playlist hasn't
+    // caught up to the MP4 ladder. The worker writes
+    // `preview<tier>Path` as soon as MP4 transcode finishes but
+    // remuxes the HLS variant playlist a few seconds later, so the
+    // user kept seeing "1080p · Finalizing…" until a manual page
+    // refresh — even though the tier was already encoded. The
+    // Quality-menu readySet uses `hlsQualities` as the source of
+    // truth when HLS is active, so we keep polling until every MP4
+    // tier has a matching HLS variant.
+    const hasPendingHlsRemux = (activeVideosRaw || []).some((v: any) => {
+      if (!v || !v.hlsUrl) return false
+      const hlsSet = new Set<string>(
+        Array.isArray(v.hlsQualities) ? v.hlsQualities : [],
+      )
+      if (v.preview480Path && !hlsSet.has('480p')) return true
+      if (v.preview720Path && !hlsSet.has('720p')) return true
+      if (v.preview1080Path && !hlsSet.has('1080p')) return true
+      if (v.preview2160Path && !hlsSet.has('2160p')) return true
+      return false
+    })
+    if (!hasProcessing && !hasPendingHigherTier && !hasPendingHlsRemux) return
     const interval = setInterval(() => {
       loadProject(true)
     }, 3500)

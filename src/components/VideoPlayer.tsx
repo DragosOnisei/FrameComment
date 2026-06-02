@@ -705,10 +705,19 @@ export default function VideoPlayer({
         // when set, falling back to the admin-configured defaultQuality
         // when the user has chosen "Auto". The fallback ladder below
         // is shared by both paths.
-        const effectiveQuality: '480p' | '720p' | '1080p' | '2160p' =
-          qualityChoice === 'auto' ? defaultQuality : qualityChoice
+        // 2.2.0+: defaultQuality can also be the literal `'auto'`
+        // string when the project's previewResolution is set to
+        // auto (the default). In that case we pick the HIGHEST
+        // available tier on first load — exactly what a user
+        // expects when they share a fully-processed 1080p clip
+        // and the share page opens at 480p ("default se duce la
+        // cea mai mica calitate"). The cast to `any` here covers
+        // the runtime sentinel that the type union doesn't model.
+        const effectiveQuality: '480p' | '720p' | '1080p' | '2160p' | 'auto' =
+          qualityChoice === 'auto' ? (defaultQuality as any) : qualityChoice
         let url: string | undefined
-        let qualityUsed: '480p' | '720p' | '1080p' | '2160p' = effectiveQuality
+        let qualityUsed: '480p' | '720p' | '1080p' | '2160p' =
+          (effectiveQuality === 'auto' ? '720p' : effectiveQuality) as '480p' | '720p' | '1080p' | '2160p'
 
         // 1.9.4+ Phase A: 480p is the "fastest first playable" tier
         // — included as the LAST fallback for every quality choice
@@ -716,7 +725,27 @@ export default function VideoPlayer({
         // 480p lands. When we actually serve 480p the menu label
         // honestly says "480p" (not "720p HD") so the user
         // understands why higher options aren't visible yet.
-        if (effectiveQuality === '2160p') {
+        if (effectiveQuality === 'auto') {
+          // 2.2.0+ fix: project set to auto + user hasn't picked a
+          // tier yet → start at the highest available tier. Without
+          // this branch the else-fallback at the bottom of the
+          // ladder mis-categorised "auto" as the lowest tier, so a
+          // shared 1080p clip opened at 480p even though the higher
+          // streams were ready.
+          if ((selectedVideo as any).streamUrl2160p) {
+            url = (selectedVideo as any).streamUrl2160p
+            qualityUsed = '2160p'
+          } else if ((selectedVideo as any).streamUrl1080p) {
+            url = (selectedVideo as any).streamUrl1080p
+            qualityUsed = '1080p'
+          } else if ((selectedVideo as any).streamUrl720p) {
+            url = (selectedVideo as any).streamUrl720p
+            qualityUsed = '720p'
+          } else if ((selectedVideo as any).streamUrl480p) {
+            url = (selectedVideo as any).streamUrl480p
+            qualityUsed = '480p'
+          }
+        } else if (effectiveQuality === '2160p') {
           // Prefer 2160p, fall back through the ladder.
           if ((selectedVideo as any).streamUrl2160p) {
             url = (selectedVideo as any).streamUrl2160p

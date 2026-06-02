@@ -64,8 +64,30 @@ export default function ProjectPage() {
   }, [])
 
   // Fetch project data function (extracted so it can be called on upload complete)
+  // 2.2.0+: distinguishes a TERMINAL failure (the project genuinely
+  // doesn't exist — 404 → bounce to dashboard) from a TRANSIENT one
+  // (network error, rate-limit exhausted after apiFetch's own
+  // retries, 5xx). The pre-2.2.0 code lumped both into "no project"
+  // and rendered "Project not found" the instant `setLoading(false)`
+  // ran. The fix has two parts:
+  //
+  //  - `apiFetch` already transparently retries 429s up to 3 times
+  //    with Retry-After backoff (~15s total worst-case), so by the
+  //    time we get to this catch the rate-limit window has had
+  //    plenty of opportunity to bleed. We deliberately do NOT add
+  //    a second layer of retry at the page level — that would
+  //    quadruple the per-navigation hit count on the limit and
+  //    actively make the problem worse under sustained load.
+  //
+  //  - On a transient failure we keep `loading=true` so the
+  //    spinner stays visible instead of flashing the "Project not
+  //    found" card. The user can navigate away (the alive/seq
+  //    guards swallow the stale state) or refresh the tab to
+  //    recover — both well-behaved patterns. A real 404 still
+  //    redirects to the projects list cleanly.
   const fetchProject = useCallback(async () => {
     const seq = ++fetchSeqRef.current
+    let transientFailure = false
     try {
       const response = await apiFetch(`/api/projects/${id}`)
       // A newer fetch (or a route change that unmounted us) has
@@ -76,19 +98,29 @@ export default function ProjectPage() {
           router.push('/admin/projects')
           return
         }
-        throw new Error('Failed to fetch project')
+        transientFailure = true
+        throw new Error(`Failed to fetch project (HTTP ${response.status})`)
       }
       const data = await response.json()
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
       setProject(data)
     } catch (error) {
       // Swallow stale errors so a rapid back/forward doesn't
-      // surface "Project not found" from a request that was
-      // already superseded.
+      // surface a misleading card over a page the user has already
+      // moved past.
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
       logError('Error fetching project:', error)
+      // Network errors / aborts also count as transient — they're
+      // not "this project doesn't exist", they're "the request
+      // didn't make it". Same treatment as a 5xx / exhausted 429.
+      transientFailure = true
     } finally {
-      if (seq === fetchSeqRef.current && aliveRef.current) {
+      // Only flip loading=false on a CLEAN result (either we have
+      // data, or a definitive 404 bounce). Transient failures keep
+      // the spinner up — the user can navigate away or refresh to
+      // recover without ever seeing a misleading "Project not
+      // found" card.
+      if (seq === fetchSeqRef.current && aliveRef.current && !transientFailure) {
         setLoading(false)
       }
     }

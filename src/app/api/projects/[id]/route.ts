@@ -35,10 +35,19 @@ export async function GET(
     return authResult
   }
 
-  // Rate limiting: 60 requests per minute
+  // Rate limiting: 300 requests per minute (5/sec average).
+  // 2.2.0+: bumped from the original 60 (hit at ~8 rapid round
+  // trips) to 180 (still hit by aggressive stress-tests because
+  // failed requests are retried both inside `apiFetch` AND at the
+  // page level, so a single user navigation could cost ~8 hits on
+  // the limit), then finally to 300. At 5/sec sustained this gates
+  // automated abuse but cleanly handles even a content editor
+  // racing through hundreds of folders organising material. The
+  // page-level retry was also removed in this release so the
+  // amplification factor per navigation dropped from ~8 to ~4.
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
-    maxRequests: 60,
+    maxRequests: 300,
     message: projectMessages.tooManyRequestsGeneric || 'Too many requests. Please slow down.'
   }, 'project-read')
 
