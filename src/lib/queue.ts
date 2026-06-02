@@ -75,6 +75,21 @@ export interface FinalizeVideoJob {
   originalStoragePath: string
 }
 
+// 2.2.4+: lightweight thumbnail-only regen job. Triggered by the
+// new "Re-generate Thumbnails" maintenance button (project + global
+// settings). Re-downloads the original, runs `generateThumbnail` at
+// the same percentage as a normal prepare, uploads to the canonical
+// path, and persists `Video.thumbnailPath`. Crucially does NOT touch
+// `plannedTiers`, `completedTiers`, or `status` — the row stays
+// READY throughout, and no encode-tier work happens. Priority sits
+// AFTER FINALIZE so it never starves a tier encode of any other
+// video (this is operational maintenance, not user-blocking work).
+export interface RegenerateThumbnailJob {
+  videoId: string
+  projectId: string
+  originalStoragePath: string
+}
+
 // Union over every shape a single job on the video-processing
 // queue can carry. The worker uses `job.name` to discriminate,
 // so this type is the static "what payload does the handler
@@ -87,11 +102,16 @@ export type VideoQueueJobData =
   | PrepareVideoJob
   | EncodeTierJob
   | FinalizeVideoJob
+  | RegenerateThumbnailJob
 
 // 2.2.0+: priorities are hard-coded constants instead of magic
 // numbers scattered around enqueue sites. BullMQ priority is
 // `number` (lower = sooner). The gaps between tiers leave room
 // for hot-fixes / experimentation without renumbering.
+//
+// 2.2.4+: REGENERATE_THUMBNAIL sits at 700 (after FINALIZE=500) so
+// a bulk maintenance sweep across hundreds of videos never delays
+// in-flight tier encoding for a freshly-uploaded video.
 export const VIDEO_JOB_PRIORITY = {
   PREPARE: 1,
   ENCODE_480P: 10,
@@ -99,6 +119,7 @@ export const VIDEO_JOB_PRIORITY = {
   ENCODE_1080P: 100,
   ENCODE_2160P: 200,
   FINALIZE: 500,
+  REGENERATE_THUMBNAIL: 700,
 } as const
 
 export function priorityForTier(tier: EncodeTierJob['tier']): number {

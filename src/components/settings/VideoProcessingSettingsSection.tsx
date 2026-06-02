@@ -3,6 +3,8 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
+import { Button } from '@/components/ui/button'
+import { RefreshCw, Image as ImageIcon } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 const WATERMARK_POSITIONS = ['center', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
@@ -27,6 +29,18 @@ interface VideoProcessingSettingsSectionProps {
   show: boolean
   setShow: (value: boolean) => void
   collapsible?: boolean
+
+  // 2.2.4+: optional global maintenance handlers. When BOTH are
+  // supplied we render the "Maintenance" card under Default Preview
+  // Resolution with two dedicated buttons (mirrors the per-project
+  // Settings → Video Processing layout). The parent admin/settings
+  // page owns the ConfirmDialog state + API calls — this component
+  // just renders the buttons + their busy / result state.
+  onReprocessAllVideos?: () => void
+  onRegenerateAllThumbnails?: () => void
+  reprocessingAllVideos?: boolean
+  regeneratingAllThumbnails?: boolean
+  maintenanceResult?: { kind: 'reprocess' | 'regen-thumbs'; count: number } | null
 }
 
 export function VideoProcessingSettingsSection({
@@ -49,6 +63,11 @@ export function VideoProcessingSettingsSection({
   show,
   setShow,
   collapsible,
+  onReprocessAllVideos,
+  onRegenerateAllThumbnails,
+  reprocessingAllVideos,
+  regeneratingAllThumbnails,
+  maintenanceResult,
 }: VideoProcessingSettingsSectionProps) {
   const t = useTranslations('settings')
 
@@ -127,6 +146,95 @@ export function VideoProcessingSettingsSection({
           The progressive ladder always starts at 480p for fast first playback, then climbs to the chosen cap (or the source resolution in Auto mode).
         </p>
       </div>
+      )}
+
+      {/* 2.2.4+: Maintenance card. Only renders when both handler
+          props are wired up — that's how the admin Settings page
+          opts in (and how we keep this component usable elsewhere
+          without forcing them to plumb the handlers through). */}
+      {!defaultSkipTranscoding && onReprocessAllVideos && onRegenerateAllThumbnails && (
+        <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+          <div className="space-y-1">
+            <h3 className="text-sm font-semibold">Maintenance</h3>
+            <p className="text-xs text-muted-foreground">
+              These operations act on every video across every project. Originals are never touched — only derived files (encoded previews / thumbnails) are refreshed.
+            </p>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-3 items-stretch">
+            {/* 2.2.4+: same flex-column trick as the per-project
+                settings card — flex-1 on the paragraph stretches it
+                to fill available space, pinning the Button to the
+                bottom regardless of description length. */}
+            <div className="flex flex-col p-3 rounded-md bg-background border">
+              <div className="flex items-center gap-2 mb-2">
+                <RefreshCw className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Re-process Videos</span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed flex-1 mb-3">
+                Smart sweep across every project: scans every video for missing quality tiers and only encodes the gaps. Already-finished tiers stay on disk and keep playing, and thumbnails are never touched.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onReprocessAllVideos}
+                disabled={reprocessingAllVideos || regeneratingAllThumbnails}
+                className="w-full"
+              >
+                {reprocessingAllVideos ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Reprocessing…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Re-process Videos
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <div className="flex flex-col p-3 rounded-md bg-background border">
+              <div className="flex items-center gap-2 mb-2">
+                <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Re-generate Thumbnails</span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed flex-1 mb-3">
+                Re-extracts a still frame for every video and writes it back. Lightweight — does not touch encoded tiers or playback.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onRegenerateAllThumbnails}
+                disabled={regeneratingAllThumbnails || reprocessingAllVideos}
+                className="w-full"
+              >
+                {regeneratingAllThumbnails ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Enqueuing…
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="w-4 h-4 mr-2" />
+                    Re-generate Thumbnails
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {maintenanceResult && (
+            <div className="text-xs text-green-500">
+              {maintenanceResult.kind === 'reprocess'
+                ? `Queued ${maintenanceResult.count} video(s) for full re-process across all projects.`
+                : `Queued ${maintenanceResult.count} thumbnail(s) for regeneration across all projects.`}
+            </div>
+          )}
+        </div>
       )}
 
       {/* 1.5.8: Apply Preview LUT global default hidden. State + DB

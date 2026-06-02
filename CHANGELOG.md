@@ -17,6 +17,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 
+## [2.2.4] - 2026-06-02
+
+Maintenance UX release. Fixes a thumbnail-loss bug in the
+reprocess flow and elevates Reprocess + Re-generate Thumbnails
+to dedicated buttons in both Project Settings and Global Settings.
+
+### Fixed
+
+- **Player ignored project's `previewResolution` cap on HLS path** —
+  setting Default Preview Resolution to 720p on a project still
+  opened videos at 1080p (or 2160p) whenever the underlying tier
+  files existed in storage. Root cause was on the hls.js MANIFEST_PARSED
+  side: both the initial attach and the in-place reload pinned to
+  `levels.length - 1` (= highest available) unconditionally,
+  ignoring the `defaultQuality` prop the parent already passes
+  down. The MP4 fallback path had honoured the cap since 1.3.x;
+  HLS slipped through. Added a pure `pickInitialHlsLevelIdx`
+  helper at file scope that respects the same precedence as the
+  MP4 path — user runtime pick > project `previewResolution` cap
+  > highest available — and wired it into both MANIFEST_PARSED
+  handlers. To keep the in-place reload (which lives in a
+  `useCallback([])`) reading fresh state, also added
+  `defaultQualityRef` + `qualityChoiceRef` mirrors with the same
+  pattern the file already uses for `hlsUrlRef`. Concrete win:
+  a project set to 720p now opens every video at 720p even if
+  the 1080p HLS variant happens to be on disk, matching what the
+  MP4 path and the visible "Default Preview Resolution" setting
+  already implied.
+- **Thumbnail not regenerated after Re-process Videos** — the
+  Project Settings → Video Processing flow always nulled
+  `Video.thumbnailPath` before enqueueing `prepare-video`, but
+  `prepare-video` itself only re-rendered + uploaded the
+  thumbnail file without writing the path back to the row.
+  Net effect: every video survived a reprocess with an empty
+  card in the grid, even though the JPG was sitting in storage
+  exactly where it should have been. `prepare-video-processor`
+  now captures the path returned by `processThumbnail` and
+  persists it on `Video.thumbnailPath` (best-effort, P2025
+  tolerated). Existing videos missing thumbnails after a
+  pre-2.2.4 reprocess can be recovered with the new
+  Re-generate Thumbnails button below.
+
+### Added
+
+- **Smart Re-process Videos** — the new "Re-process Videos"
+  button (and its global counterpart) is now SURGICAL by default.
+  For each READY/ERROR video the endpoint computes the full
+  expected tier ladder from the source's stored width/height +
+  the project's `previewResolution`, compares against the tiers
+  already present (union of `completedTiers` JSON + legacy
+  `preview*Path` columns), and enqueues encode-tier jobs ONLY
+  for the missing tiers. Already-finished tiers and their MP4
+  / HLS files are left in place — the per-tier append + finalize
+  flow merges the new ones in. Videos that are already complete
+  (missing-tier-set = empty) are silently skipped. The destructive
+  pre-2.2.4 behaviour is still available by passing
+  `{ forceFull: true }` to the endpoint (no UI exposure yet —
+  the dedicated UI button always uses smart mode). Concrete win:
+  a project with 30 videos missing 1080p only encodes 30× 1080p
+  instead of 30× (480p + 720p + 1080p) — ~3× faster, and the
+  existing 480p / 720p tiers stay playable throughout the
+  maintenance sweep.
+- **Smart Re-process never touches thumbnails** — explicit
+  guarantee, documented inline at the smart-path call site in
+  both endpoints. The Prisma `update` block intentionally omits
+  `thumbnailPath` from its `data:`, no `deleteFile()` runs in
+  the smart path, and `encode-tier-processor` +
+  `finalize-video-processor` never reference the column.
+  Thumbnails and encoded tiers travel on strictly independent
+  code paths so a Re-process sweep can't accidentally blank
+  a card image — that's what the dedicated "Re-generate
+  Thumbnails" button is for.
+- **Re-process Videos** + **Re-generate Thumbnails** buttons —
+  Project Settings → Video Processing and Global Settings →
+  Video Processing both gain a "Maintenance" card with the two
+  buttons sitting side-by-side under Default Preview Resolution.
+  Each button is gated by its own ConfirmDialog (destructive
+  variant for Reprocess, default variant for Regen Thumbnails).
+  Save Changes no longer offers reprocess as a side effect —
+  the old ReprocessModal-on-settings-change flow was confusing
+  and easy to miss, and is gone.
+- **`src/lib/tier-planning.ts`** — pure helper with
+  `computeExpectedTiers(w, h, previewResolution)` and
+  `detectCompletedTiers(row)`. Mirrors the worker's
+  `computeProgressiveTiers` (same 90% tier-tolerance, same
+  "auto floor at 720p" rule) but with no ffmpeg / storage
+  dependencies so API routes can import it.
+- **`POST /api/projects/[id]/regenerate-thumbnails`** — enqueues
+  a new lightweight `regenerate-thumbnail` job for every READY
+  video in the project. The job re-downloads the original
+  (reusing the cached `/tmp/<videoId>-original` when present),
+  re-extracts a still frame, and persists the new `thumbnailPath`.
+  Crucially does NOT touch `status`, `plannedTiers`,
+  `completedTiers`, or any preview paths — purely a thumbnail
+  refresh.
+- **`POST /api/settings/regenerate-thumbnails`** — global
+  catalog-wide sweep. Same per-video logic, fanned out across
+  every (non-trash) project.
+- **`POST /api/settings/reprocess-all-videos`** — global
+  reprocess. Mirrors `/api/projects/[id]/reprocess` but spans
+  the entire catalog. Heavy destructive operation — gated by
+  the global ConfirmDialog.
+- **`regenerate-thumbnail` job type** in `queue.ts` +
+  `regenerate-thumbnail-processor.ts` + dispatch in
+  `worker/index.ts`. Priority 700 (after FINALIZE=500) so a
+  multi-thousand-video sweep never delays in-flight tier
+  encoding for fresh uploads.
+
+### Changed
+
+- Project Settings → Video Processing no longer pops the
+  `ReprocessModal` on save when processing-related fields
+  change. The dedicated Maintenance buttons replace it. The
+  `ReprocessModal` component is still mounted but never
+  triggered programmatically — easy to revert if anyone wants
+  the old behaviour back, but the kept state vars default to
+  inert.
+
 ## [2.2.3] - 2026-06-02
 
 Polish release after 2.2.2 — fixes a per-poll thumbnail token leak

@@ -163,14 +163,35 @@ export async function processPrepareVideo(job: Job<PrepareVideoJob>) {
     // — well before the first 480p lands. The upload route already
     // produced an instant thumbnail in local-mode; this is a
     // refresh (same path) so the result is identical.
+    //
+    // 2.2.4+: capture the path and persist it to `Video.thumbnailPath`.
+    // Without this write the upload-route path holds for new uploads
+    // (because the row already points at the right file) but the
+    // reprocess flow — which nulls `thumbnailPath` before re-enqueue
+    // — left the row pointing at NULL even though the file was
+    // re-generated successfully. The grid then showed the empty
+    // placeholder until the next manual re-upload.
     try {
-      await processThumbnail(
+      const newThumbnailPath = await processThumbnail(
         videoId,
         projectId,
         videoInfo.path,
         videoInfo.metadata.duration,
         tempFiles,
       )
+      try {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: { thumbnailPath: newThumbnailPath },
+        })
+      } catch (writeErr: any) {
+        // P2025 means the row was deleted between our metadata
+        // update above and now — silently drop the write; the
+        // tier processors will hit the same P2025 and exit.
+        if (writeErr?.code !== 'P2025') {
+          logError(`[WORKER] Persist thumbnailPath for ${videoId} failed:`, writeErr)
+        }
+      }
     } catch (err) {
       // Best-effort — a failed thumbnail doesn't block encoding.
       logError(`[WORKER] Eager thumbnail failed for ${videoId}:`, err)

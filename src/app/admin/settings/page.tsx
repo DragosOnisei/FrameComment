@@ -16,6 +16,7 @@ import { ProjectDefaultsSection } from '@/components/settings/ProjectDefaultsSec
 import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsSection'
 import { BlocklistSection } from '@/components/settings/BlocklistSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface Settings {
   id: string
@@ -105,6 +106,17 @@ export default function GlobalSettingsPage() {
   const [testEmailSending, setTestEmailSending] = useState(false)
   const [testEmailResult, setTestEmailResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [testEmailAddress, setTestEmailAddress] = useState('')
+
+  // 2.2.4+: global maintenance state. The two buttons live inside
+  // <VideoProcessingSettingsSection> via opt-in props; their actual
+  // API calls + confirm dialogs are owned here so the section
+  // component stays presentational and the busy state cooperates
+  // with the existing save spinner.
+  const [reprocessingAllVideos, setReprocessingAllVideos] = useState(false)
+  const [regeneratingAllThumbnails, setRegeneratingAllThumbnails] = useState(false)
+  const [showGlobalReprocessConfirm, setShowGlobalReprocessConfirm] = useState(false)
+  const [showGlobalRegenThumbsConfirm, setShowGlobalRegenThumbsConfirm] = useState(false)
+  const [globalMaintenanceResult, setGlobalMaintenanceResult] = useState<{ kind: 'reprocess' | 'regen-thumbs'; count: number } | null>(null)
 
   // Form state for language
   const [language, setLanguage] = useState('en')
@@ -720,6 +732,41 @@ export default function GlobalSettingsPage() {
     adminNotificationDay, setAdminNotificationDay,
   }
 
+  // 2.2.4+: global maintenance handlers. Each pops a ConfirmDialog
+  // before kicking off the API call so an accidental click can't
+  // nuke encode work or trigger a multi-thousand-video sweep.
+  async function handleConfirmGlobalReprocess() {
+    setShowGlobalReprocessConfirm(false)
+    setReprocessingAllVideos(true)
+    setError('')
+    try {
+      const res: any = await apiPost('/api/settings/reprocess-all-videos', {})
+      const count = typeof res?.count === 'number' ? res.count : 0
+      setGlobalMaintenanceResult({ kind: 'reprocess', count })
+      setTimeout(() => setGlobalMaintenanceResult(null), 6000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enqueue reprocess')
+    } finally {
+      setReprocessingAllVideos(false)
+    }
+  }
+
+  async function handleConfirmGlobalRegenThumbs() {
+    setShowGlobalRegenThumbsConfirm(false)
+    setRegeneratingAllThumbnails(true)
+    setError('')
+    try {
+      const res: any = await apiPost('/api/settings/regenerate-thumbnails', {})
+      const count = typeof res?.count === 'number' ? res.count : 0
+      setGlobalMaintenanceResult({ kind: 'regen-thumbs', count })
+      setTimeout(() => setGlobalMaintenanceResult(null), 6000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enqueue thumbnail regen')
+    } finally {
+      setRegeneratingAllThumbnails(false)
+    }
+  }
+
   const videoProcessingProps = {
     defaultPreviewResolution, setDefaultPreviewResolution,
     defaultSkipTranscoding, setDefaultSkipTranscoding,
@@ -729,6 +776,13 @@ export default function GlobalSettingsPage() {
     defaultWatermarkOpacity, setDefaultWatermarkOpacity,
     defaultWatermarkFontSize, setDefaultWatermarkFontSize,
     defaultApplyPreviewLut, setDefaultApplyPreviewLut,
+    // 2.2.4+: opt-in maintenance handlers (rendered as the
+    // "Maintenance" card inside the section component).
+    onReprocessAllVideos: () => setShowGlobalReprocessConfirm(true),
+    onRegenerateAllThumbnails: () => setShowGlobalRegenThumbsConfirm(true),
+    reprocessingAllVideos,
+    regeneratingAllThumbnails,
+    maintenanceResult: globalMaintenanceResult,
   }
 
   const projectDefaultsProps = {
@@ -894,6 +948,27 @@ export default function GlobalSettingsPage() {
           </Button>
         </div>
       </div>
+
+      {/* 2.2.4+: Global maintenance confirm dialogs. Destructive
+          variant for reprocess (re-encodes the entire catalog);
+          default variant for regen thumbs (lightweight, never
+          affects playback). */}
+      <ConfirmDialog
+        open={showGlobalReprocessConfirm}
+        onOpenChange={setShowGlobalReprocessConfirm}
+        title="Re-process every video across every project?"
+        description="Smart sweep — for each video the missing quality tiers (480p / 720p / 1080p / 2160p, capped at the project's Default Preview Resolution) get encoded. Already-finished tiers and videos that already have the full ladder are skipped. Originals AND thumbnails are never touched."
+        confirmLabel="Re-process all"
+        onConfirm={handleConfirmGlobalReprocess}
+      />
+      <ConfirmDialog
+        open={showGlobalRegenThumbsConfirm}
+        onOpenChange={setShowGlobalRegenThumbsConfirm}
+        title="Re-generate every thumbnail across every project?"
+        description="A still frame will be re-extracted for every video and saved as its card thumbnail. Custom thumbnails are preserved. Encoded tiers and playback are not affected — purely cosmetic refresh."
+        confirmLabel="Re-generate all"
+        onConfirm={handleConfirmGlobalRegenThumbs}
+      />
     </div>
   )
 }

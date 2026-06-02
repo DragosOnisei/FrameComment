@@ -5,6 +5,7 @@ import {
   PrepareVideoJob,
   EncodeTierJob,
   FinalizeVideoJob,
+  RegenerateThumbnailJob,
   AssetProcessingJob,
   ProjectUploadProcessingJob,
   ExternalNotificationJob,
@@ -19,6 +20,7 @@ import { processVideo } from './video-processor'
 import { processPrepareVideo } from './prepare-video-processor'
 import { processEncodeTier } from './encode-tier-processor'
 import { processFinalizeVideo } from './finalize-video-processor'
+import { processRegenerateThumbnail } from './regenerate-thumbnail-processor'
 import { processAsset } from './asset-processor'
 import { processProjectUpload } from './project-upload-processor'
 import { processAdminNotifications } from './admin-notifications'
@@ -95,6 +97,10 @@ async function main() {
         return processEncodeTier(job as Job<EncodeTierJob>)
       case 'finalize-video':
         return processFinalizeVideo(job as Job<FinalizeVideoJob>)
+      case 'regenerate-thumbnail':
+        // 2.2.4+: maintenance job — priority 700 (post-FINALIZE) so
+        // a bulk sweep never delays an in-flight tier encode.
+        return processRegenerateThumbnail(job as Job<RegenerateThumbnailJob>)
       case 'process-video':
       default:
         // Legacy path — drains any 2.1.x jobs that were enqueued

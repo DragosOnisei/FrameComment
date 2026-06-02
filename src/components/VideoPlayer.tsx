@@ -66,6 +66,55 @@ interface VideoPlayerProps {
   fillContainer?: boolean // Fill parent container height (for full-viewport layouts)
 }
 
+/**
+ * 2.2.4+ pure helper — picks the index in `levels` we should start
+ * playback on for a fresh HLS attach (or an in-place reload that
+ * didn't specify an explicit pinned height).
+ *
+ * Decision order:
+ *   1. If the user has explicitly chosen a quality this session
+ *      (`qualityChoice !== 'auto'`), honour that.
+ *   2. Else, if the project's `previewResolution` (= `defaultQuality`)
+ *      is a concrete tier ('720p' etc), use it as a CAP.
+ *   3. Otherwise (both are 'auto'), pick the highest available —
+ *      same behaviour as a fresh page load before 2.2.4.
+ *
+ * Within levels we use the SAME `height >= targetH * 0.9` rule the
+ * worker uses for tier planning (90% tolerance for cinematic crops
+ * like 1920×1008). `findIndex` returns the FIRST level that clears
+ * the threshold; since hls.js lists levels in ascending height, that
+ * gives us the cheapest-bitrate variant that still satisfies the
+ * requested tier.
+ *
+ * Returns the highest available level as a safe fallback when no
+ * variant clears the threshold.
+ */
+function pickInitialHlsLevelIdx(
+  levels: Array<{ height?: number }>,
+  defaultQuality: string,
+  qualityChoice: string,
+): number {
+  if (!levels || levels.length === 0) return 0
+
+  const target =
+    qualityChoice && qualityChoice !== 'auto'
+      ? qualityChoice
+      : defaultQuality && defaultQuality !== 'auto'
+        ? defaultQuality
+        : null
+
+  if (!target) return levels.length - 1
+
+  const targetH =
+    target === '2160p' ? 2160 :
+    target === '1080p' ? 1080 :
+    target === '720p'  ? 720  :
+    480
+
+  const idx = levels.findIndex(l => (l?.height || 0) >= targetH * 0.9)
+  return idx >= 0 ? idx : levels.length - 1
+}
+
 export default function VideoPlayer({
   videos,
   projectId,
@@ -142,8 +191,19 @@ export default function VideoPlayer({
   // fetched master. The new MANIFEST_PARSED handler honours
   // `pendingPinnedHeightRef` so the new instance lands on the
   // exact tier the caller requested. If nothing's pinned, the
-  // handler picks highest — same behaviour as a fresh page load.
+  // handler falls back to `pickInitialHlsLevelIdx` (project cap
+  // + user preference) instead of always-highest.
   const pendingPinnedHeightRef = useRef<number | null>(null)
+
+  // 2.2.4+: refs mirroring `defaultQuality` (project setting) and
+  // `qualityChoice` (user runtime pick) so the `reloadHlsInPlace`
+  // callback — which lives inside a `useCallback([])` and therefore
+  // can't close over the live state — still reads fresh values when
+  // it runs. Without these, a tier-landed silent reload would always
+  // pick the highest level (the stale "no info" fallback) instead of
+  // honouring the project's previewResolution cap.
+  const defaultQualityRef = useRef<string>('720p')
+  const qualityChoiceRef = useRef<string>('auto')
 
   const reloadHlsInPlace = useCallback((targetHeight?: number) => {
     const video = videoRef.current
@@ -220,8 +280,15 @@ export default function VideoPlayer({
             )
             chosen = idx >= 0 ? idx : newHls.levels.length - 1
           } else {
-            // Frame.io behaviour: start at HIGHEST available.
-            chosen = newHls.levels.length - 1
+            // 2.2.4+: honour the project's previewResolution cap +
+            // the user's runtime pick when no explicit pin was set
+            // (e.g. silent reload after a new tier landed). Reads
+            // refs because this callback lives in a useCallback([]).
+            chosen = pickInitialHlsLevelIdx(
+              newHls.levels as any,
+              defaultQualityRef.current,
+              qualityChoiceRef.current,
+            )
           }
           newHls.nextLevel = chosen
           newHls.currentLevel = chosen
@@ -630,6 +697,16 @@ export default function VideoPlayer({
     hlsUrlRef.current = hlsUrl
   }, [hlsUrl])
 
+  // 2.2.4+: same trick for defaultQuality + qualityChoice so the
+  // hls.js MANIFEST_PARSED handlers (both initial attach + reload-
+  // in-place) read FRESH values when picking the start level.
+  useEffect(() => {
+    defaultQualityRef.current = defaultQuality
+  }, [defaultQuality])
+  useEffect(() => {
+    qualityChoiceRef.current = qualityChoice
+  }, [qualityChoice])
+
 
   // Load video URL with optimization
   useEffect(() => {
@@ -910,20 +987,27 @@ export default function VideoPlayer({
         const attachUrl = hlsUrlRef.current || videoUrl
         hls.loadSource(attachUrl)
 
-        // 1.9.4+ Phase B (Frame.io behaviour): on initial manifest
-        // parse, pin the player to the HIGHEST tier the master
-        // lists, THEN call startLoad() to begin fetching
-        // fragments. Because autoStartLoad:false was set in the
-        // Hls() config, no fragment has been requested yet, so
-        // when startLoad triggers the first request it comes
-        // from the pinned (top) level. End result: the user
-        // never sees the 480p → 720p → 1080p ABR ramp that the
-        // hls.js default would have produced.
+        // 1.9.4+ Phase B / 2.2.4+: on initial manifest parse, pin
+        // the player to the tier dictated by the project's
+        // `previewResolution` cap (`defaultQuality` prop) — or to
+        // the highest available when the project is set to "auto".
+        // THEN call startLoad() to begin fetching. Because
+        // autoStartLoad:false was set in the Hls() config, no
+        // fragment has been requested yet, so when startLoad
+        // triggers the first request it comes from the pinned
+        // level. End result: the user never sees the 480p → 720p
+        // → 1080p ABR ramp the hls.js default would produce, AND
+        // a project capped at 720p no longer opens at 1080p just
+        // because a stale 1080p tier still lives in storage.
         hls.once(Hls.Events.MANIFEST_PARSED, () => {
           if (!hls.levels || hls.levels.length === 0) return
-          const top = hls.levels.length - 1
-          hls.nextLevel = top
-          hls.currentLevel = top
+          const chosen = pickInitialHlsLevelIdx(
+            hls.levels as any,
+            defaultQuality,
+            qualityChoice,
+          )
+          hls.nextLevel = chosen
+          hls.currentLevel = chosen
           hls.startLoad(-1) // -1 = start from current playhead (0 on fresh load)
         })
 
