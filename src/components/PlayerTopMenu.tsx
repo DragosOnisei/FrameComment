@@ -15,8 +15,10 @@ import {
 import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
 import { copyToClipboard } from '@/lib/clipboard'
+import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import { hasClippedComments } from '@/lib/comments-clipboard'
 import { ConfirmModal } from './ConfirmModal'
+import { ShareModal } from './ShareModal'
 
 /**
  * 1.3.2+: top-right "..." menu that lives on the admin share page only.
@@ -56,6 +58,10 @@ export interface PlayerTopMenuProps {
   currentVersionLabel?: string | null
   /** Optional friendly label for the title (e.g. "IMG_5007"). */
   currentVideoName?: string | null
+  /** 2.2.8+: folder the player was opened from. Forwarded to the
+   *  `/api/share-video-link` server-side filter so the resulting URL
+   *  scopes the public share to a single video, not the whole project. */
+  currentFolderId?: string | null
   /** Total number of comments visible in the sidebar for the active
    *  video — drives whether "Copy comments" is enabled. */
   commentCount: number
@@ -77,6 +83,7 @@ export default function PlayerTopMenu({
   currentVideoId,
   currentVersionLabel,
   currentVideoName,
+  currentFolderId,
   commentCount,
   onVideoDeleted,
 }: PlayerTopMenuProps) {
@@ -100,6 +107,22 @@ export default function PlayerTopMenu({
   // on `commentClipboard:result` so a fresh Copy enables Paste in the
   // same tab immediately (storage events don't fire on the writer tab).
   const [hasClipboard, setHasClipboard] = useState(false)
+
+  // 2.2.8+: ShareModal state for video-scoped share. Replaces the
+  // pre-2.2.8 silent "copy project URL to clipboard" flow that
+  // accidentally handed reviewers access to every other video in
+  // the project. The new flow mirrors `FolderBrowser.handleShareVideo`:
+  //   1) ask `/api/share-video-link` for an HMAC-signed URL filtered
+  //      to this video name (+ folder when present)
+  //   2) seed the modal with the project's current `shareExpiresAt`
+  //      so the admin can adjust it inline
+  //   3) `onSaveExpiration` PATCHes the project endpoint
+  const [shareState, setShareState] = useState<{
+    open: boolean
+    title: string
+    shareUrl: string
+    initialExpiresAt: string | null
+  }>({ open: false, title: '', shareUrl: '', initialExpiresAt: null })
   useEffect(() => {
     setHasClipboard(hasClippedComments(projectId))
     const recheck = () => setHasClipboard(hasClippedComments(projectId))
@@ -206,27 +229,94 @@ export default function PlayerTopMenu({
     setOpen(false)
     setBusy('share')
     try {
-      const res = await apiFetch(`/api/share/url?slug=${encodeURIComponent(projectSlug)}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { shareUrl?: string }
-      const url = data.shareUrl
-      if (!url) throw new Error('No share URL returned')
-      // 2.2.6+: route through copyToClipboard so plain-HTTP
-      // installs (TrueNAS LAN) don't hit "Cannot read properties
-      // of undefined (reading 'writeText')" — `navigator.clipboard`
-      // is undefined in insecure contexts.
-      const ok = await copyToClipboard(url)
-      if (!ok) throw new Error('Failed to copy share link')
-      setToast({ kind: 'link-copied' })
+      const videoName = currentVideoName?.trim()
+      if (!videoName) {
+        throw new Error('No video selected')
+      }
+      // 2.2.8+: SECURITY FIX. Pre-2.2.8 this called `/api/share/url`
+      // which returns the WHOLE PROJECT share URL — copying it
+      // straight to the clipboard handed reviewers access to every
+      // other video in the project. Now we mirror the folder-browser
+      // share flow:
+      //   - `/api/share-video-link` mints an HMAC-signed URL the
+      //     server enforces down to a single video name (and folder
+      //     when present), so siblings stay invisible.
+      //   - We seed `initialExpiresAt` from the project's current
+      //     `shareExpiresAt` so the modal's expiration toggle starts
+      //     in the right place.
+      //   - The same `ShareModal` UX shows everywhere now (folder
+      //     kebab, project kebab, player kebab) — popup with expiry
+      //     row, no silent clipboard write.
+      let initialExpiresAt: string | null = null
+      try {
+        const meta = await apiFetch(`/api/projects/${projectId}`)
+        if (meta.ok) {
+          const data = await meta.json()
+          const raw =
+            data?.project?.shareExpiresAt ?? data?.shareExpiresAt ?? null
+          if (raw) {
+            initialExpiresAt =
+              typeof raw === 'string' ? raw : new Date(raw).toISOString()
+          }
+        }
+      } catch {
+        /* best-effort — fall back to "no expiration" UI */
+      }
+
+      let shareUrl: string | null = null
+      try {
+        const res = await apiFetch('/api/share-video-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            videoName,
+            folderId: currentFolderId || undefined,
+          }),
+        })
+        if (res.ok) {
+          const data = (await res.json()) as { url?: string }
+          if (data?.url) shareUrl = data.url
+        }
+      } catch {
+        /* fall through to unsigned URL */
+      }
+
+      if (!shareUrl) {
+        // Legacy fallback when SHARE_TOKEN_SECRET isn't configured
+        // — better to share an unsigned per-video URL than the full
+        // project link the pre-2.2.8 code used. Mirrors the fallback
+        // in FolderBrowser.handleShareVideo.
+        const origin = getPublicShareOrigin()
+        const params = new URLSearchParams({ video: videoName })
+        if (currentFolderId) params.set('folderId', currentFolderId)
+        shareUrl = `${origin}/share/${projectSlug}?${params.toString()}`
+      }
+
+      setShareState({
+        open: true,
+        title: videoName,
+        shareUrl,
+        initialExpiresAt,
+      })
+      // 2.2.8+: the modal auto-copies the URL on open, so we don't
+      // race-copy from here. The Copy button inside the modal is the
+      // one source of truth.
     } catch (err) {
       setToast({
         kind: 'error',
-        message: err instanceof Error ? err.message : 'Failed to copy share link',
+        message: err instanceof Error ? err.message : 'Failed to share video',
       })
     } finally {
       setBusy(null)
     }
   }
+  // Silence eslint when the project share URL helper isn't reached.
+  // `projectSlug` and `copyToClipboard` are still referenced in the
+  // legacy fallback path above, so this is a no-op marker for the
+  // linter; do not remove.
+  void projectSlug
+  void copyToClipboard
 
   // 1.7.0+: download the active version's original file. Same
   // pattern as the search overlay's Download button — mint a one-
@@ -496,6 +586,40 @@ export default function PlayerTopMenu({
         cancelLabel="Cancel"
         busy={busy === 'delete'}
         onConfirm={performDelete}
+      />
+      {/* 2.2.8+: per-video ShareModal — same component the folder
+          browser uses for its kebab share. Mounts here so the modal
+          renders above the player chrome. */}
+      <ShareModal
+        open={shareState.open}
+        onOpenChange={(next) =>
+          setShareState((s) => ({ ...s, open: next }))
+        }
+        title={shareState.title}
+        shareUrl={shareState.shareUrl}
+        initialExpiresAt={shareState.initialExpiresAt}
+        onSaveExpiration={async (next) => {
+          try {
+            const res = await apiFetch(`/api/projects/${projectId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ shareExpiresAt: next }),
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              setToast({
+                kind: 'error',
+                message: err.error || 'Failed to save expiration',
+              })
+            }
+          } catch (err) {
+            setToast({
+              kind: 'error',
+              message:
+                err instanceof Error ? err.message : 'Failed to save expiration',
+            })
+          }
+        }}
       />
     </div>
   )

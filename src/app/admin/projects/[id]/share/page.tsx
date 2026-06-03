@@ -1105,6 +1105,11 @@ function AdminSharePageInner() {
             currentVideoId={activeVideo?.id || null}
             currentVersionLabel={activeVersionLabel}
             currentVideoName={activeVideoName || null}
+            // 2.2.8+: forward the folder context that the player URL
+            // already carries (set when the admin opens a video from
+            // FolderBrowser). Used by `handleShare` to scope the
+            // signed share URL to a single video.
+            currentFolderId={backFolderId}
             commentCount={commentsForActiveVideo.length}
             onVideoDeleted={() => {
               // Whole version is gone — bounce back to the project page so

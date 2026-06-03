@@ -14,6 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.9] - 2026-06-03
+
+### Security
+
+- **CRITICAL: "Share Video" in the player kebab leaked the whole project**.
+  Pre-2.2.9 the player's "Share Video" action called `/api/share/url` which
+  returns the PROJECT share URL (`/share/<projectSlug>`) and silently
+  copied it to the clipboard. Anyone given that link could see every
+  video in the project, not just the one the admin thought they were
+  sharing. Reviewers pasted those links into chats believing they were
+  per-video — the side panel listed all siblings.
+
+  Now `PlayerTopMenu.handleShare` mirrors the folder-browser share flow:
+  hits `/api/share-video-link` for an HMAC-signed URL that the server
+  enforces down to a single video name (+ folder when present), opens
+  the same `ShareModal` used by every other share entry point (with the
+  expiration toggle pre-seeded from the project), and only writes to
+  the clipboard via the modal's Copy button. The fallback path (when
+  `SHARE_TOKEN_SECRET` isn't configured) now also returns a per-video
+  URL with `?video=NAME&folderId=…` instead of the bare project URL.
+
+  **Action for installs that may have shared kebab links**: rotate the
+  project's share slug (Project Settings → Share Link) on any project
+  whose video share link from the player was sent externally — old
+  links remain valid until then.
+
 ## [2.2.8] - 2026-06-03
 
 Re-tag of 2.2.7 (which was itself a re-tag of 2.2.6). Both prior
