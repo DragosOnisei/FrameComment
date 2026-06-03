@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.8] - 2026-06-03
+
+Re-tag of 2.2.7 (which was itself a re-tag of 2.2.6). Both prior
+attempts pushed the local lightweight git tag with `git push --follow-tags`,
+which silently ignores non-annotated tags — so the tag never reached
+GitHub, the `Release` workflow never ran on it, and the Docker image
+never landed on Hub. TrueNAS upgrades kept failing with `manifest
+unknown`. Same code, fresh tag, this time pushed explicitly so the
+release pipeline runs cleanly.
+
 ## [2.2.7] - 2026-06-03
 
 Re-tag of 2.2.6 — the 2.2.6 GitHub Actions Release workflow did not

@@ -1,7 +1,7 @@
 name: framecomment
 train: community
-version: 2.2.7
-app_version: 2.2.7
+version: 2.2.8
+app_version: 2.2.8
 title: FrameComment
 description: Self-hosted video review and approval platform for filmmakers and video professionals.
 home: https://github.com/DragosOnisei/FrameComment
