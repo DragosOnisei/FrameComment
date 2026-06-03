@@ -14,6 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-06-04
+
+### Fixed — production-only banner freeze
+
+- **Processing banner showed the same 75 % / HD+ snapshot across
+  every 3-second poll on TrueNAS prod**, while the per-video
+  quality menu (which reads a different endpoint) correctly showed
+  the next tier already at 28 %. Refresh didn't help. Local dev
+  never reproduced because Next.js dev mode disables route caching
+  and emits no-cache headers automatically.
+
+  Three belt-and-suspenders changes to `/api/processing-status`:
+    1. `export const dynamic = 'force-dynamic'` + `revalidate = 0`
+       so Next.js's static-analysis can't accidentally short-circuit
+       the route into the Data Cache. The handler IS dynamic
+       (`requireApiAdmin` reads request headers), but going through
+       the helper hid that from the analyser in some builds.
+    2. `Cache-Control: no-store, must-revalidate` on the response
+       so neither browsers nor any reverse proxy in front of the
+       app (TrueNAS's traefik, a CloudFlare tunnel, an nginx
+       terminator…) can memoise the JSON between polls.
+    3. `cache: 'no-store'` on the client-side `apiFetch` in
+       `ProcessingStatusContext` — mirrors the server header so
+       the browser's heuristic GET cache can't return the first
+       response to every subsequent fetch on the same URL.
+
 ## [2.3.0] - 2026-06-04
 
 ### Changed — annotation stroke

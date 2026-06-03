@@ -136,7 +136,15 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
   const fetchStatus = async () => {
     const seq = ++fetchSeqRef.current
     try {
-      const res = await apiFetch('/api/processing-status')
+      // 2.3.1+: `cache: 'no-store'` mirrors the server-side
+      // `Cache-Control: no-store` on /api/processing-status. The
+      // production-only freeze where the banner sat on the same
+      // 75% / HD+ snapshot across multiple polls was traced to
+      // the browser's heuristic GET cache returning the first
+      // response to every subsequent fetch. Local dev was
+      // immune because Next.js dev mode disables route caching
+      // and emits no-cache headers automatically.
+      const res = await apiFetch('/api/processing-status', { cache: 'no-store' })
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
       if (!res.ok) {
         // 401 means we got logged out — don't spam the console

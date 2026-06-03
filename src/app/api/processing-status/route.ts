@@ -6,6 +6,18 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
+// 2.3.1+: belt-and-suspenders against the production-only "banner
+// frozen at 75% HD+" bug. The handler IS dynamic — `requireApiAdmin`
+// reads request headers — but Next.js's static-analysis didn't
+// always detect that through the indirection, and prod was serving
+// the same snapshot to every 3-second poll from the Data Cache.
+// Local dev never saw it because dev disables route caching by
+// default. Setting `force-dynamic` makes the dynamic intent
+// explicit, and the `Cache-Control: no-store` header on the
+// response below blocks any browser / reverse-proxy from
+// memoising it on top.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 /**
  * 2.0.x+: lightweight roll-up of "what is the worker currently
@@ -313,16 +325,25 @@ export async function GET(request: NextRequest) {
       Promise.all(processingVideos.map(shape)),
     ])
 
-    return NextResponse.json({
-      uploading: {
-        count: uploadingCount,
-        videos: shapedUploading,
+    return NextResponse.json(
+      {
+        uploading: {
+          count: uploadingCount,
+          videos: shapedUploading,
+        },
+        processing: {
+          count: processingCount,
+          videos: shapedProcessing,
+        },
       },
-      processing: {
-        count: processingCount,
-        videos: shapedProcessing,
+      {
+        // 2.3.1+: explicit no-store so neither browsers nor any
+        // reverse proxy in front of the app (TrueNAS's traefik,
+        // a CloudFlare tunnel, an nginx terminator …) hold on to
+        // a snapshot between polls.
+        headers: { 'Cache-Control': 'no-store, must-revalidate' },
       },
-    })
+    )
   } catch (error) {
     logError('Error fetching processing status:', error)
     return NextResponse.json(
