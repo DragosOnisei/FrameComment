@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.7] - 2026-06-03
+
+Re-tag of 2.2.6 — the 2.2.6 GitHub Actions Release workflow did not
+publish the Docker image to Hub, so TrueNAS upgrades to 2.2.6 failed
+with `manifest unknown`. Same code, fresh tag so the release pipeline
+runs cleanly.
+
 ## [2.2.6] - 2026-06-03
 
 ### Fixed
