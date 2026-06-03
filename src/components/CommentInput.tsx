@@ -719,7 +719,21 @@ export default function CommentInput({
                     maxFiles={maxCommentAttachments}
                   />
                 )}
-                {allowClientAssetUpload && selectedVideoIdProp && onAttachmentAdded && (
+                {/* 2.3.0+: voice comments are NOT gated on
+                    `allowClientAssetUpload`. That flag controls
+                    generic file attachments (where clients could
+                    upload anything up to the global GB cap). Voice
+                    comments are inherent to the commenting flow —
+                    capped to 5 minutes by the recorder, recorded
+                    in-browser, and treated server-side as a comment
+                    payload rather than an arbitrary upload. Whoever
+                    can leave a text comment can leave a voice one.
+                    The matching server-side bypass lives in:
+                      - /api/videos/[id]/client-assets/route.ts
+                      - /api/uploads/[[...path]].ts
+                      - /lib/s3-upload-auth.ts
+                    Each special-cases `category === 'audio'`. */}
+                {selectedVideoIdProp && onAttachmentAdded && (
                   <VoiceRecorderButton
                     videoId={selectedVideoIdProp}
                     shareToken={shareToken || null}

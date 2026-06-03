@@ -83,8 +83,18 @@ export function ConfirmModal({
         className="sm:max-w-md p-5 sm:p-6 gap-0"
         hideClose
       >
-        <DialogHeader className="text-left">
-          <div className="flex items-start gap-3">
+        <DialogHeader className="text-left min-w-0">
+          {/* 2.3.0+: `min-w-0` on this flex container is what lets
+              the right-hand content column actually shrink below
+              its intrinsic width. Without it the flex item's
+              default `min-width: auto` kept the description column
+              at the width of the longest unbroken token (e.g. a
+              filename like
+              `260602_VDA_YT_EDU_NEWS_BILL_6047_BOGDAN_916_…`),
+              which pushed the whole dialog body past its
+              `max-w-md` and clipped the action buttons on the
+              right. */}
+          <div className="flex items-start gap-3 min-w-0">
             <div
               className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
                 destructive
@@ -104,7 +114,15 @@ export function ConfirmModal({
                 {title}
               </DialogTitle>
               {description && (
-                <div className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
+                // 2.3.0+: `[overflow-wrap:anywhere]` + `break-words`
+                // make long unbroken tokens (filenames, URLs) wrap
+                // INSIDE the description instead of forcing the
+                // dialog wider. The shared DialogDescription
+                // already has this rule, but ConfirmModal renders
+                // the description in a plain `<div>` because
+                // callers pass JSX nodes with their own structure
+                // — so we have to re-declare the wrap rule here.
+                <div className="mt-1.5 text-sm text-muted-foreground leading-relaxed [overflow-wrap:anywhere] break-words">
                   {description}
                 </div>
               )}
@@ -115,8 +133,11 @@ export function ConfirmModal({
         {/* Stack buttons full-width on phones; revert to side-by-side
             right-aligned at sm+. Confirm sits on TOP on mobile so the
             primary action is the easiest thumb-reach target — matches
-            standard iOS/Android sheet conventions. */}
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            standard iOS/Android sheet conventions.
+            2.3.0+: `flex-wrap` on the sm+ row lets the action pair
+            drop to a second line on narrow desktop widths instead
+            of clipping past the dialog's right edge. */}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
           <Button
             type="button"
             variant="outline"

@@ -119,6 +119,7 @@ const tusServer: Server = new Server({
             select: {
               uploadedBy: true,
               uploadedBySessionId: true,
+              category: true,
               video: { select: { projectId: true } },
             },
           })
@@ -139,13 +140,18 @@ const tusServer: Server = new Server({
             throw { status_code: 403, body: 'Asset does not belong to your session' }
           }
 
-          const project = await prisma.project.findUnique({
-            where: { id: sharePayload.projectId },
-            select: { allowClientAssetUpload: true },
-          })
+          // 2.3.0+: voice (category='audio') comments bypass the
+          // allowClientAssetUpload flag — see the rationale in
+          // /api/videos/[id]/client-assets/route.ts.
+          if (asset.category !== 'audio') {
+            const project = await prisma.project.findUnique({
+              where: { id: sharePayload.projectId },
+              select: { allowClientAssetUpload: true },
+            })
 
-          if (!project?.allowClientAssetUpload) {
-            throw { status_code: 403, body: 'File attachments are not enabled for this project' }
+            if (!project?.allowClientAssetUpload) {
+              throw { status_code: 403, body: 'File attachments are not enabled for this project' }
+            }
           }
         }
       }
@@ -420,37 +426,37 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
 
   logMessage(`[UPLOAD] Video ${videoId} upload complete, status updated to PROCESSING`)
 
-  // 1.9.4+ Phase A: instant thumbnail extraction runs BEFORE
-  // we queue the worker job so the still frame is visible the
-  // moment the folder grid renders — by the time the worker's
-  // ~2-minute 480p transcode finishes the thumbnail has long
-  // since been there. We race the extraction against a 15-second
-  // hard timeout so it can never block the upload response
-  // indefinitely; if it doesn't beat the timeout (CPU contention,
-  // disk pressure, weird codec), we fall through and let the
-  // worker generate the thumbnail later. Local-mode only — S3
-  // would require downloading the full original just for one
+  // 2.2.10+ ORDERING FIX: enqueue prepare-video FIRST, then kick
+  // off instant thumbnail in parallel. Pre-2.2.10 we awaited the
+  // instant thumbnail (with a 15 s timeout) BEFORE enqueueing —
+  // so for typical files the worker didn't even see the job for
+  // 3-8 s after the upload finished, which the user perceived as
+  // "nothing happens for 5-10 s after upload reaches 100%". Now
+  // the worker picks up `prepare-video` within milliseconds of
+  // the bytes landing; the upload-side instant thumbnail still
+  // runs (so the grid gets a frame within a couple seconds), it
+  // just doesn't gate the encode pipeline anymore. The worker's
+  // own thumbnail pass is idempotent on the same storage path,
+  // so a race between the two writes resolves to "same file" and
+  // doesn't break anything.
+  // 1.9.4+ Phase A: instant thumbnail extraction. Local-mode only
+  // — S3 would require downloading the full original just for one
   // frame, which doesn't pay back.
   if (!isS3Mode()) {
-    try {
-      await Promise.race([
-        initInstantThumbnail(video.id, video.projectId, video.originalStoragePath),
-        new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error('Instant thumbnail timeout')), 15000),
-        ),
-      ])
-    } catch (err) {
+    // Don't await — fire and let it complete in the background.
+    // Worker starts the heavy lifting in parallel.
+    void Promise.race([
+      initInstantThumbnail(video.id, video.projectId, video.originalStoragePath),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('Instant thumbnail timeout')), 15000),
+      ),
+    ]).catch((err) => {
       // Non-fatal: worker will generate a thumbnail later via its
       // own processThumbnail call. Log and continue.
       logError(`[UPLOAD] Instant thumbnail failed for ${videoId} (non-fatal):`, err)
-    }
+    })
   }
 
-  // Queue the worker job AFTER the instant thumbnail attempt.
-  // The instant pass is short (1-2 s for a typical 1080p source,
-  // bounded by the 15 s timeout above) so the worker only starts
-  // a moment later — well worth it for the immediate visual
-  // feedback in the folder grid.
   // 2.2.0+: enqueue prepare-video (priority 1) instead of the
   // legacy process-video. prepare-video does the cheap up-front
   // work (download, validate, probe, thumbnail, plan tiers) and

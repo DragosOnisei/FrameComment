@@ -69,7 +69,15 @@ export type AnnotationColor = (typeof ANNOTATION_COLORS)[number]
 // delicate mark instead of the old chunky 2.5 % stroke. Arrows keep
 // the dynamic scaling in `updateShape` so they still grow with drag
 // length, but their range was tightened to match.
-export const DEFAULT_STROKE_WIDTH = 0.004
+//
+// 2.3.0+: user feedback was that 0.004 looked too thin on real
+// frames — the rectangle and arrow barely registered against busy
+// backgrounds (interior of a car, foliage). Bumped a notch to
+// ~0.006 (≈ 7.7 px on 1280 px), still slimmer than the legacy
+// chunky stroke but enough to read at a glance. Arrow dynamic
+// range below was widened proportionally so short arrows don't
+// dip back into "too thin" territory.
+export const DEFAULT_STROKE_WIDTH = 0.006
 export const MIN_STROKE_WIDTH = 0.001
 export const MAX_STROKE_WIDTH = 0.05
 export const DEFAULT_OPACITY = 1

@@ -98,13 +98,23 @@ export function useAnnotationDrawing() {
       const tool = activeToolRef.current
       let newShape: Shape
 
-      // For drag-out shapes (arrow / line / rectangle) we start with a
-      // very thin stroke and let `updateShape` thicken it as the user
-      // drags. This avoids the "huge arrow on first click" effect.
+      // For ARROW we start very thin (0.005) and let `updateShape`
+      // thicken it as the user drags — that's the only tool whose
+      // `updateShape` actually recomputes strokeWidth from drag
+      // length.
+      //
+      // For LINE and RECTANGLE the old code also started at the
+      // thin 0.003 initial value, but `updateShape` for those
+      // shapes only updates `end` (no strokeWidth recalculation).
+      // Net effect: line + rectangle stayed pinned at 0.003 no
+      // matter what the user picked in the toolbar — the 2.3.0
+      // bump to DEFAULT_STROKE_WIDTH = 0.006 was silently ignored
+      // for those two tools (only freehand + arrow visibly got
+      // thicker). 2.3.0+ fixes that by routing line + rectangle
+      // through `strokeWidth` from the start, same as freehand,
+      // so all four tools honour the toolbar / default thickness.
       const initialStrokeWidth =
-        tool === 'arrow' || tool === 'line' || tool === 'rectangle'
-          ? 0.003
-          : strokeWidth
+        tool === 'arrow' ? 0.005 : strokeWidth
 
       if (tool === 'freehand') {
         const fh: FreehandShape = {
@@ -171,10 +181,15 @@ export function useAnnotationDrawing() {
         // stays delicate, a long one gets visibly thicker, matching
         // Frame.io. Range narrowed to 0.003..0.008 so even a fully
         // dragged-out arrow stays slim.
+        //
+        // 2.3.0+: nudged up to 0.005..0.011 (≈ same +50% bump the
+        // DEFAULT_STROKE_WIDTH got) so a short arrow doesn't read
+        // thinner than a freshly-drawn rectangle. Slope is the
+        // same so the "grows with drag" feel is unchanged.
         const dx = point.x - prev.start.x
         const dy = point.y - prev.start.y
         const length = Math.sqrt(dx * dx + dy * dy)
-        const dynamicWidth = Math.min(0.008, Math.max(0.003, 0.003 + length * 0.010))
+        const dynamicWidth = Math.min(0.011, Math.max(0.005, 0.005 + length * 0.010))
         updated = { ...prev, end: point, strokeWidth: dynamicWidth }
       } else if (prev.type === 'line' || prev.type === 'rectangle') {
         // 1.3.2+: lines and rectangles use a constant thin stroke

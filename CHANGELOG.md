@@ -14,6 +14,146 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-04
+
+### Changed — annotation stroke
+
+- **Bumped the default annotation stroke from 0.004 → 0.006** (≈ 5 px
+  → 7.7 px on a 1280 px render width). The Frame.io-style thin
+  default introduced in 1.3.2 read too delicate on busy frames
+  (vehicle interiors, foliage, anything bright) — a red rectangle
+  could disappear into a sun visor. New width is still slim
+  compared to the legacy chunky stroke but registers cleanly at a
+  glance. Arrow dynamic range (which grows with drag length)
+  shifted 0.003..0.008 → 0.005..0.011 with the same slope, so a
+  short arrow no longer reads thinner than a freshly-drawn
+  rectangle. The toolbar's thickness slider still spans the full
+  MIN..MAX range — only the per-tool default and the arrow scaling
+  changed.
+
+- **Fixed: line + rectangle were quietly ignoring the toolbar
+  thickness.** A leftover hardcoded `0.003` initial value in
+  `startShape` meant that even though the user (or the bumped
+  DEFAULT_STROKE_WIDTH) said "draw thicker", line and rectangle
+  spawned with a 0.003 stroke — and their `updateShape` only ever
+  touches the `end` point, never strokeWidth, so they stayed
+  hairline forever. Arrow got away with it because its
+  `updateShape` recomputes strokeWidth dynamically from drag
+  length. Now only ARROW keeps a thin spawn value (so it can grow
+  with the drag); line, rectangle, and freehand all start from
+  the toolbar's chosen thickness. End result: bumping
+  DEFAULT_STROKE_WIDTH to 0.006 now actually thickens every tool,
+  not just pen + arrow.
+
+### Fixed — modal layout
+
+- **Long filenames pushed the "Delete asset?" confirm dialog past
+  its own right edge** (clipping the action buttons so the Delete
+  label read "Delet"). Two missing rules: `ConfirmModal` rendered
+  the description body in a plain `<div>` rather than
+  `DialogDescription`, so the shared `[overflow-wrap:anywhere]`
+  rule from `dialog.tsx` never kicked in and an unbroken token
+  like `260602_VDA_YT_EDU_NEWS_BILL_6047_BOGDAN_916_…` couldn't
+  break to wrap. Added `[overflow-wrap:anywhere] break-words` on
+  that wrapper, `min-w-0` on the outer flex container so the
+  content column actually shrinks below intrinsic width, and
+  `sm:flex-wrap` on the action row so Cancel + Delete fall to a
+  second line on narrow desktop widths rather than clipping.
+
+  Affected every soft-delete confirmation (videos, folders,
+  projects), bulk-delete confirmations, and any other ConfirmModal
+  caller that interpolates a user-supplied name.
+
+### Changed — encoding pipeline pacing
+
+- **480p is now exclusive across the whole worker pool.** Previously
+  the breadth-first queue happily started 720p on one video while
+  480p was still encoding on another, which delayed the "first
+  watchable preview" that the share page depends on. Each
+  `encode-tier` job now spins inside an await loop until no other
+  480p job is active or waiting across the entire queue before any
+  non-480p tier proceeds. The gate uses a 250 ms tick (no more
+  defer-by-re-enqueue spam in the worker log) and lifts the instant
+  the last 480p drains, so 720p and 1080p still run in parallel
+  once 480p is universally complete.
+
+- **Status pip on the upload banner became an SVG progress ring.**
+  The square HD / HD+ / 4K chip now sits inside a circular stroke
+  that fills from 0 → 100 % of the currently-encoding tier. No
+  percentage number on the ring — the tier label stays the focus,
+  the ring just confirms progress is happening. Smoothness comes
+  from a 300 ms `stroke-dashoffset` transition.
+
+### Fixed — encoding pipeline UX
+
+- **Banner showed "All processing complete" after only SD finished.**
+  `computeSmoothProgressForVideo` was short-circuiting on
+  `status === 'READY'`, but the worker flips READY the moment 480p
+  is playable — the higher tiers were still queued. Smooth progress
+  now reads `completedTiers / plannedTiers` directly: the banner
+  reports `(completedCount + nextTierFraction) / planned.length` and
+  only declares "done" when every planned tier has landed.
+
+- **Re-entering a video mid-encode showed 100 % instead of real
+  progress.** Same root cause as above — the banner cache assumed
+  READY meant fully done. The new formula reflects the actual
+  ladder state on revisit.
+
+- **1-minute lull between SD finishing and the next tier starting.**
+  The 480p exclusive gate above replaces the previous "re-enqueue
+  the job at the back of the queue until 480p drains" strategy,
+  which left BullMQ idle for the duration of the BACKOFF until the
+  next polling tick. The intra-processor await loop hands off
+  instantly — the moment the last 480p completes, the held 720p
+  jobs unblock on their next 250 ms tick.
+
+- **5-10 s gap between upload reaching 100 % and encoding starting.**
+  The instant-thumbnail generation was awaited synchronously in
+  the TUS finalize handler, blocking the `prepare-video` enqueue
+  for the duration of the ffmpeg thumbnail extraction. Now it's
+  fire-and-forget (`void Promise.race([...]).catch(logError)`) so
+  the BullMQ job hits the queue the moment finalize returns. The
+  thumbnail still arrives but no longer holds up encoding.
+
+### Fixed — share-page client experience
+
+- **Clients on a shared link couldn't leave voice comments.** The mic
+  button was gated behind the project's "Allow client attachments"
+  toggle (`allowClientAssetUpload`), so unless the admin had also
+  flipped that on the project was effectively text-only for clients.
+  Voice comments are part of the commenting flow — capped to 5 minutes
+  by the recorder UI, recorded in-browser — not arbitrary file
+  uploads, so they shouldn't share the same permission gate.
+
+  The mic button now renders for any client who can comment. The
+  three server-side enforcement points (`/api/videos/[id]/client-
+  assets`, the TUS `/api/uploads`, and `lib/s3-upload-auth.ts`)
+  special-case `category === 'audio'` and let voice uploads through
+  even when `allowClientAssetUpload` is `false`. A 100 MB sanity cap
+  is enforced on the create-asset side — a 5 min webm/opus voice
+  message is typically <10 MB, so this blocks attempts to smuggle a
+  full-size video file in as "audio" while leaving real voice
+  messages untouched. Generic file attachments still respect the
+  project toggle.
+
+- **Quality menu showed the new tier checked but playback didn't
+  actually switch on the share page.** The 2.2.6 fix made the cheap
+  hls.js path (`hls.currentLevel = idx` after a strict NAME/height
+  match) reliable on admin but, on some hls.js builds and on Safari
+  in particular, the assignment silently no-ops without firing
+  `LEVEL_SWITCHED`. The menu's predictive badge update flipped to SD
+  (right) but the buffer kept playing HD (wrong).
+
+  Added a watchdog: after a non-`auto` click on the cheap path, we
+  attach a one-shot `LEVEL_SWITCHED` listener AND snapshot
+  `hls.currentLevel`. After 1.5 s, if hls.js neither fired the event
+  for the requested index nor moved `currentLevel`, we escalate to
+  `reloadHlsInPlace(targetH)` — the expensive destroy + re-attach
+  path that pins the new instance to the requested tier via a fresh
+  master fetch. End result: an explicit manual quality pick always
+  produces a visible variant change within ~2 s, regardless of
+  browser quirks.
+
 ## [2.2.9] - 2026-06-03
 
 ### Security

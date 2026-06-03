@@ -2,7 +2,7 @@ import { Job } from 'bullmq'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
-import { EncodeTierJob } from '../lib/queue'
+import { EncodeTierJob, getVideoQueue } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
 import { downloadFile } from '../lib/storage'
@@ -63,6 +63,84 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
 
   logMessage(`[WORKER] encode-tier ${tier} for ${videoId}`)
   debugLog('Encode-tier job data:', job.data)
+
+  // 2.2.9+: 480p EXCLUSIVE GATE.
+  //
+  // The user's mental model is: "give me the 480p preview as fast
+  // as possible, then go wild on the higher tiers in parallel."
+  // The breadth-first priority gap (10 vs 50 vs 100 vs 200) only
+  // helps when BullMQ has to PICK between waiting jobs; it does
+  // NOT prevent a non-480p from starting while a 480p is mid-
+  // encode in a sibling worker slot.
+  //
+  // 2.2.10 (this fix): replace the "defer-by-re-enqueue-with-1s-delay"
+  // version of the gate with a clean intra-processor await loop.
+  // The old shape produced multi-second log spam (a deferred 720p
+  // would wake, defer itself again, wake, defer again, …) and
+  // every wake-up still occupied a worker slot for the duration of
+  // the BullMQ pick-and-process cycle. The new shape is:
+  //
+  //   - When a non-480p job runs and sees ANY 480p still pending
+  //     (active OR waiting), it `await`s a 250ms sleep loop right
+  //     here in the processor.
+  //   - The worker slot stays on this single Job for the entire
+  //     wait — it doesn't get spammed back into the queue.
+  //   - When the last 480p finishes, the next loop iteration sees
+  //     no 480p remaining and falls through, and the encode starts
+  //     within ~250ms.
+  //
+  // The slot IS occupied while we wait, but in this codebase
+  // BullMQ priority puts 480p (priority 10) ahead of every
+  // non-480p (50/100/200), so if there's something more useful to
+  // run, BullMQ never picks the non-480p tier in the first place.
+  // The only time we reach this gate is when BullMQ already chose
+  // to give the slot to a non-480p job — i.e. there's literally
+  // no other 480p work to assign to it, and waiting is exactly
+  // what we want.
+  if (tier !== '480p') {
+    let waited = 0
+    while (true) {
+      let has480pPending = false
+      try {
+        const queue = getVideoQueue()
+        const [active, waiting] = await Promise.all([
+          queue.getActive(0, 200),
+          queue.getWaiting(0, 200),
+        ])
+        has480pPending = [...active, ...waiting].some((j) => {
+          if (j.name !== 'encode-tier') return false
+          if (j.id === job.id) return false
+          return (j.data as any)?.tier === '480p'
+        })
+      } catch (err) {
+        // Transient Redis blip — don't block the encode forever.
+        // Bail out of the wait loop and proceed; worst case we get
+        // a brief race with a sibling 480p, which is the pre-2.2.9
+        // behaviour, not a regression.
+        logError(
+          `[WORKER] 480p drain check failed for ${videoId} ${tier} — proceeding`,
+          err,
+        )
+        break
+      }
+      if (!has480pPending) break
+      // First time we notice we have to wait, log it ONCE. Don't
+      // log every tick (the old code logged every 1s and made the
+      // worker output unreadable on a single multi-tier upload).
+      if (waited === 0) {
+        logMessage(
+          `[WORKER] holding ${tier} for ${videoId} — waiting for 480p to drain`,
+        )
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      waited += 250
+    }
+    if (waited > 0) {
+      logMessage(
+        `[WORKER] resuming ${tier} for ${videoId} after ${(waited / 1000).toFixed(2)}s 480p wait`,
+      )
+    }
+  }
 
   const tempFiles: TempFiles = {}
   const start = Date.now()
@@ -261,6 +339,16 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
       `[WORKER] encode-tier ${tier} for ${videoId} done in ${((Date.now() - start) / 1000).toFixed(2)}s ` +
         `(${completedArr.length}/${refreshedPlanned.length} tiers)`,
     )
+
+    // 2.2.10+ (note): we used to promote delayed non-480p jobs at
+    // the end of every 480p run, because the gate's defer model
+    // left them sleeping in BullMQ's `delayed` set. The gate now
+    // uses an in-processor await loop instead (see top of file),
+    // so non-480p jobs never go into `delayed` in the first place
+    // — they just await right where they were picked. The wait
+    // breaks out of its own accord the next time this 480p
+    // finishes and the queue check returns false. No promote
+    // sweep needed.
   } catch (error: any) {
     if (error?.message === 'TranscodeAborted') {
       logMessage(`[WORKER] encode-tier ${tier} for ${videoId} aborted (row deleted)`)

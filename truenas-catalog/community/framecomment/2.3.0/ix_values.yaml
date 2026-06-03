@@ -1,0 +1,61 @@
+# ix_values.yaml — Default values used when the user has not overridden them
+# in the install form.
+
+timezone: Etc/UTC
+
+adminEmail: admin@framecomment.local
+adminPassword: ""
+adminName: Admin
+
+network:
+  webPort: 30041
+
+storage:
+  uploads:
+    type: ixVolume
+    ixVolumeConfig:
+      datasetName: uploads
+  postgresData:
+    type: ixVolume
+    ixVolumeConfig:
+      datasetName: postgres-data
+  redisData:
+    type: ixVolume
+    ixVolumeConfig:
+      datasetName: redis-data
+
+secrets:
+  postgresPassword: ""
+  redisPassword: ""
+  encryptionKey: ""
+  jwtSecret: ""
+  jwtRefreshSecret: ""
+  shareTokenSecret: ""
+
+s3:
+  enabled: false
+  endpoint: ""
+  bucket: ""
+  region: us-east-1
+  accessKeyId: ""
+  secretAccessKey: ""
+
+resources:
+  limits:
+    cpu: "2000m"
+    memory: "2Gi"
+
+# Image references (do not edit at install time — change via catalog upgrade).
+images:
+  app:
+    repository: dragosonisei/framecomment
+    tag: 2.3.0
+    pullPolicy: IfNotPresent
+  postgres:
+    repository: postgres
+    tag: 18-alpine
+    pullPolicy: IfNotPresent
+  redis:
+    repository: redis
+    tag: 8-alpine
+    pullPolicy: IfNotPresent

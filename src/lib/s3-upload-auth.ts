@@ -131,6 +131,7 @@ export async function verifyS3UploadAccess(
           storagePath: true,
           uploadedBy: true,
           uploadedBySessionId: true,
+          category: true,
           video: { select: { projectId: true } },
         },
       })
@@ -146,7 +147,12 @@ export async function verifyS3UploadAccess(
       if (asset.uploadedBySessionId !== sharePayload.sessionId) {
         return { errorResponse: NextResponse.json({ error: 'Asset does not belong to your session' }, { status: 403 }) }
       }
-      if (requireUploadPermission) {
+      // 2.3.0+: voice (category='audio') comments bypass the
+      // allowClientAssetUpload flag — see the matching gates in
+      // /api/videos/[id]/client-assets/route.ts and the TUS
+      // /api/uploads/[[...path]].ts. Voice messages are part of
+      // the commenting flow, not generic file uploads.
+      if (requireUploadPermission && asset.category !== 'audio') {
         const project = await prisma.project.findUnique({
           where: { id: sharePayload.projectId },
           select: { allowClientAssetUpload: true },

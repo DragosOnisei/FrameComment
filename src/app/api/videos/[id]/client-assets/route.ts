@@ -45,14 +45,6 @@ export async function POST(
 
     const project = video.project
 
-    // Check if client asset upload is enabled for this project
-    if (!project.allowClientAssetUpload) {
-      return NextResponse.json(
-        { error: videosMessages.fileAttachmentsNotEnabledForProject || 'File attachments are not enabled for this project' },
-        { status: 403 }
-      )
-    }
-
     // Auth via verifyProjectAccess with comment permission, no guests
     const accessCheck = await verifyProjectAccess(
       request,
@@ -128,6 +120,24 @@ export async function POST(
     const finalFileName = assetValidation.sanitizedFilename || sanitizedFileName
     const storagePath = `projects/${project.id}/videos/assets/${videoId}/client-${timestamp}-${finalFileName}`
     const category = assetValidation.detectedCategory || 'other'
+
+    // 2.3.0+: gate generic file attachments behind
+    // `allowClientAssetUpload`, but ALWAYS allow voice/audio
+    // comments. Voice comments are part of the commenting flow
+    // (capped to 5 min in the recorder UI, recorded in-browser),
+    // not arbitrary uploads, so they shouldn't require the
+    // attachments toggle to be on. The 100 MB cap is a sanity
+    // ceiling — a 5 min webm/opus voice message is typically
+    // <10 MB, so this comfortably covers real recordings while
+    // rejecting attempts to smuggle a video file as "audio".
+    const MAX_VOICE_BYTES = 100 * 1024 * 1024
+    const isVoiceComment = category === 'audio' && fileSize <= MAX_VOICE_BYTES
+    if (!project.allowClientAssetUpload && !isVoiceComment) {
+      return NextResponse.json(
+        { error: videosMessages.fileAttachmentsNotEnabledForProject || 'File attachments are not enabled for this project' },
+        { status: 403 }
+      )
+    }
 
     // Create database record (file will be uploaded via TUS)
     const asset = await prisma.videoAsset.create({

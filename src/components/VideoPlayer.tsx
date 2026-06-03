@@ -444,6 +444,47 @@ export default function VideoPlayer({
         hls.nextLevel = idx
         hls.loadLevel = idx
         hls.currentLevel = idx
+
+        // 2.3.0+ WATCHDOG: in some browsers / hls.js builds the
+        // cheap path doesn't actually flush the buffer — the user
+        // sees the menu update but playback continues on the old
+        // variant. Without a fallback they'd think the switch
+        // failed (this was the share-page regression report:
+        // "menu shows SD but video stays HD").
+        //
+        // Strategy: snapshot the current level + buffered ranges,
+        // give hls.js 1.5 s to actually do the switch (the buffer
+        // flush + first new-variant fragment takes 300-800 ms in
+        // the happy path), and if `hls.currentLevel` hasn't moved
+        // to `idx` AND no LEVEL_SWITCHED has fired, escalate to
+        // the expensive reload-in-place. The reload destroys the
+        // current instance and fetches a fresh master pinned to
+        // the requested tier — guaranteed visible switch.
+        let levelSwitchSeen = false
+        const onLevelSwitched = (_evt: any, data: any) => {
+          if (data?.level === idx) {
+            levelSwitchSeen = true
+          }
+        }
+        try {
+          hls.on('hlsLevelSwitched', onLevelSwitched)
+        } catch {
+          // If the event name isn't recognised by this build,
+          // the watchdog still works via the currentLevel check.
+        }
+        setTimeout(() => {
+          try {
+            hls.off('hlsLevelSwitched', onLevelSwitched)
+          } catch {
+            // ignore
+          }
+          const stillNotSwitched =
+            !levelSwitchSeen && hls.currentLevel !== idx
+          if (stillNotSwitched && hlsRef.current === hls) {
+            // Cheap path didn't take. Escalate.
+            reloadHlsInPlace(targetH)
+          }
+        }, 1500)
         return
       }
     }
@@ -456,7 +497,7 @@ export default function VideoPlayer({
     // Visually identical to the seamless ABR ramp-up the user
     // sees on a fresh page load.
     reloadHlsInPlace(targetH)
-  }, [])
+  }, [reloadHlsInPlace])
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
   const [videoDuration, setVideoDuration] = useState(0)
   const [currentTimeState, setCurrentTimeState] = useState(0)

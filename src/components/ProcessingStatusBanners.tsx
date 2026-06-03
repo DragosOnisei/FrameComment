@@ -91,11 +91,28 @@ function computeSmoothProgressForVideo(
     return up / 100
   }
   // Processing.
-  if (v.status === 'READY') return 1
+  //
+  // 2.2.10+: do NOT shortcut on `status === 'READY'`. The worker
+  // intentionally flips status to READY the moment 480p lands so
+  // the player can start streaming the low tier — but it then
+  // keeps encoding 720p / 1080p / 2160p in the background. The
+  // pre-2.2.10 shortcut returned 1.0 (i.e. "100% done") for those
+  // READY-but-still-encoding videos, which is what made the
+  // banner say "All processing complete" right after SD finished
+  // even though the worker had three tiers left to go, AND why
+  // re-entering the folder mid-encode showed 100% on the bar
+  // while the HD ring was still climbing. The honest answer is
+  // "fraction of plannedTiers that completedTiers covers, plus
+  // the smooth tick from the in-flight tier" — same shape for
+  // PROCESSING and READY-but-encoding rows.
   const planned = Array.isArray(v.plannedTiers)
     ? v.plannedTiers.filter((t): t is string => typeof t === 'string')
     : null
   if (!planned || planned.length === 0) {
+    // Legacy row with no per-tier ladder — fall back to whatever
+    // overall progress the worker reports. If the row is READY
+    // we still call it done (no per-tier visibility to refute it).
+    if (v.status === 'READY') return 1
     const fallback = Math.max(0, Math.min(100, v.processingProgress ?? 0))
     return fallback / 100
   }
@@ -105,6 +122,7 @@ function computeSmoothProgressForVideo(
       : [],
   )
   const completedCount = planned.filter((t) => completed.has(t)).length
+  if (completedCount >= planned.length) return 1
 
   const TIER_ORDER = ['480p', '720p', '1080p', '2160p']
   let nextTierFraction = 0
@@ -431,8 +449,8 @@ const TIER_LABEL: Record<string, string> = {
 // currently encoding (or about to encode).
 const TIER_ORDER = ['480p', '720p', '1080p', '2160p']
 
-function getInProgressTierLabel(video: ProcessingVideo): string | null {
-  // Uploading rows aren't encoding yet — no tier label to show.
+function getInProgressTier(video: ProcessingVideo): string | null {
+  // Uploading rows aren't encoding yet — no tier to surface.
   // The pip falls back to the legacy pulsing dot for those.
   if (video.status === 'UPLOADING') return null
 
@@ -443,19 +461,36 @@ function getInProgressTierLabel(video: ProcessingVideo): string | null {
     ? new Set(video.completedTiers.filter((t): t is string => typeof t === 'string'))
     : new Set<string>()
 
-  // Pre-2.2.0 rows have null tier arrays — no way to know the
-  // exact tier in flight. Fall back to the generic pulse.
   if (!planned || planned.length === 0) return null
 
-  // Walk the ladder in canonical order so a worker that finishes
-  // 480p + 720p but is still working on 1080p surfaces "HD+" even
-  // if `plannedTiers` is sorted differently for any reason.
   for (const tier of TIER_ORDER) {
     if (planned.includes(tier) && !completed.has(tier)) {
-      return TIER_LABEL[tier] || tier
+      return tier
     }
   }
   return null
+}
+
+function getInProgressTierLabel(video: ProcessingVideo): string | null {
+  const tier = getInProgressTier(video)
+  return tier ? TIER_LABEL[tier] || tier : null
+}
+
+/**
+ * 2.2.10+: 0..100 progress for the tier currently in flight on a
+ * processing row. Reads `transcodeProgressByTier[tier]` (same field
+ * the smooth banner progress is built on) and clamps to a 0..100
+ * range. Returns null when we have no per-tier data — the pip then
+ * falls back to its pre-2.2.10 static ring.
+ */
+function getInProgressTierPercent(video: ProcessingVideo): number | null {
+  const tier = getInProgressTier(video)
+  if (!tier) return null
+  const map = video.transcodeProgressByTier
+  if (!map || typeof map !== 'object') return null
+  const raw = (map as Record<string, unknown>)[tier]
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null
+  return Math.max(0, Math.min(100, raw))
 }
 
 function StatusPip({
@@ -469,6 +504,13 @@ function StatusPip({
 }) {
   const SIZE = 36
   const tierLabel = getInProgressTierLabel(video)
+  // 2.2.10+: read per-tier progress so the ring around the label
+  // fills 0..100 instead of staying a flat static border. Only
+  // applies when (a) we know which tier is in flight AND (b) the
+  // worker has reported at least one progress tick on it. Falls
+  // back to the static border otherwise (legacy rows, uploads,
+  // queued-but-not-yet-started, etc) so the visual is never blank.
+  const tierPercent = getInProgressTierPercent(video)
   const dotColour = active
     ? kind === 'upload'
       ? 'bg-primary'
@@ -479,6 +521,26 @@ function StatusPip({
       ? 'border-primary/40'
       : 'border-amber-500/40'
     : 'border-muted-foreground/20'
+  // SVG ring geometry. r=16 (just inside SIZE=36 minus the 2px
+  // stroke band), circumference = 2πr ≈ 100.53. We render the
+  // foreground stroke with `strokeDasharray=C` and
+  // `strokeDashoffset=C*(1 - pct/100)` so the visible arc length
+  // is `C*pct/100`. Rotated -90° so the arc starts at 12 o'clock
+  // and sweeps clockwise — same visual idiom as YouTube/Drive
+  // upload rings, and Frame.io's render progress.
+  const RING_RADIUS = 16
+  const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+  const showRing = tierLabel != null && tierPercent != null
+  const arcStrokeColour = active
+    ? kind === 'upload'
+      ? 'stroke-primary'
+      : 'stroke-amber-500'
+    : 'stroke-muted-foreground/40'
+  const trackStrokeColour = active
+    ? kind === 'upload'
+      ? 'stroke-primary/20'
+      : 'stroke-amber-500/20'
+    : 'stroke-muted-foreground/15'
   // 2.2.6+: when we know the tier in flight, swap the pulsing dot
   // for a YouTube-style quality label (SD / HD / HD+ / 4K). The
   // pulse moves up to the label colour so the row still reads as
@@ -506,14 +568,65 @@ function StatusPip({
       : 'Queued — waiting for a worker slot'
   return (
     <div
-      className={`shrink-0 relative rounded-full border ${ringColour} flex items-center justify-center`}
+      className={`shrink-0 relative rounded-full flex items-center justify-center ${
+        showRing ? '' : `border ${ringColour}`
+      }`}
       style={{ width: SIZE, height: SIZE }}
-      aria-label={labelAria}
-      title={labelTitle}
+      aria-label={
+        showRing
+          ? `${labelAria} — ${Math.round(tierPercent!)}%`
+          : labelAria
+      }
+      title={
+        showRing
+          ? `${labelTitle} (${Math.round(tierPercent!)}%)`
+          : labelTitle
+      }
     >
+      {/* 2.2.10+: SVG progress ring. Inset 2px from the box edge so
+          the stroke sits just inside the rounded container. Track
+          (faint background arc) draws the full circle; the
+          foreground arc draws `tierPercent` of it. */}
+      {showRing && (
+        <svg
+          className="absolute inset-0 -rotate-90"
+          width={SIZE}
+          height={SIZE}
+          viewBox={`0 0 ${SIZE} ${SIZE}`}
+          aria-hidden
+        >
+          <circle
+            cx={SIZE / 2}
+            cy={SIZE / 2}
+            r={RING_RADIUS}
+            fill="none"
+            strokeWidth={2}
+            className={trackStrokeColour}
+          />
+          <circle
+            cx={SIZE / 2}
+            cy={SIZE / 2}
+            r={RING_RADIUS}
+            fill="none"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            className={`${arcStrokeColour} transition-[stroke-dashoffset] duration-300 ease-out`}
+            style={{
+              strokeDasharray: RING_CIRCUMFERENCE,
+              strokeDashoffset:
+                RING_CIRCUMFERENCE * (1 - (tierPercent ?? 0) / 100),
+            }}
+          />
+        </svg>
+      )}
       {tierLabel ? (
         <span
-          className={`text-[10px] font-semibold tracking-tight tabular-nums ${textColour} ${active ? 'animate-pulse' : ''}`}
+          className={`relative text-[10px] font-semibold tracking-tight tabular-nums ${textColour} ${
+            // 2.2.10+: when the ring is doing the "alive" job, drop
+            // the pulse on the label — two pulses fighting each
+            // other looks busier than the actual work.
+            active && !showRing ? 'animate-pulse' : ''
+          }`}
         >
           {tierLabel}
         </span>
