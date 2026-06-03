@@ -127,6 +127,17 @@ export async function GET(request: NextRequest) {
           processingProgress: true,
           width: true,
           height: true,
+          // 2.2.6+: surface the tier ladder so the banner pip can
+          // show the actual quality being encoded (SD / HD / HD+ /
+          // 4K) instead of a generic pulsing dot.
+          plannedTiers: true,
+          completedTiers: true,
+          // 2.2.6+: per-tier ffmpeg progress map (eg
+          // `{"720p": 50}`). The processing banner uses it to
+          // paint a SMOOTH overall progress instead of the
+          // count-only `done/total` that previously sat at 0
+          // until the row flipped to READY and jumped to 100.
+          transcodeProgressByTier: true,
           project: { select: { id: true, title: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -172,6 +183,10 @@ export async function GET(request: NextRequest) {
           processingProgress: true,
           width: true,
           height: true,
+          // 2.2.6+: see UPLOADING select above.
+          plannedTiers: true,
+          completedTiers: true,
+          transcodeProgressByTier: true,
           project: { select: { id: true, title: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -270,6 +285,25 @@ export async function GET(request: NextRequest) {
         folderId: v.folderId,
         uploadProgress: v.uploadProgress,
         processingProgress: v.processingProgress,
+        // 2.2.6+: forward the tier ladder so the banner can show
+        // SD/HD/HD+/4K labels for the currently-encoding tier.
+        // Pass-through as `string[] | null` — the Video schema
+        // stores them as Json so they arrive as `unknown` from
+        // Prisma; the client filters down to strings.
+        plannedTiers: Array.isArray((v as any).plannedTiers)
+          ? ((v as any).plannedTiers as unknown[]).filter((x) => typeof x === 'string') as string[]
+          : null,
+        completedTiers: Array.isArray((v as any).completedTiers)
+          ? ((v as any).completedTiers as unknown[]).filter((x) => typeof x === 'string') as string[]
+          : null,
+        // 2.2.6+: forward the per-tier progress map. Defensive
+        // narrowing — Json column comes back as `unknown`; we
+        // only keep entries shaped `{ [tier]: number }`.
+        transcodeProgressByTier:
+          (v as any).transcodeProgressByTier &&
+          typeof (v as any).transcodeProgressByTier === 'object'
+            ? ((v as any).transcodeProgressByTier as Record<string, unknown>)
+            : null,
         isActive: effectiveActiveIds.has(v.id),
       }
     }

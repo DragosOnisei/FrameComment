@@ -428,9 +428,39 @@ export default function CommentSection({
         ? await apiFetch(url, { method: 'PATCH', headers: buildAuthedHeaders(), body })
         : await fetch(url, { method: 'PATCH', headers: buildAuthedHeaders(), body })
       if (!response.ok) {
-        throw new Error(`Failed to toggle resolved (HTTP ${response.status})`)
+        // 2.2.6+: pull the server's error message into the thrown
+        // Error so the catch in `MessageBubble.handleResolveToggle`
+        // can show the user WHY the toggle failed — not just a
+        // generic HTTP code. Common cases:
+        //   - 401: session expired (admin) / share token invalid (client)
+        //   - 403: guest viewer trying to resolve (allowGuest=false)
+        //   - 404: comment was deleted under us
+        //   - 429: rate-limited (30/min per browser)
+        let serverMessage = ''
+        try {
+          const payload = await response.json()
+          serverMessage = payload?.error || ''
+        } catch {
+          // No JSON body — keep the generic HTTP code below.
+        }
+        throw new Error(
+          serverMessage
+            ? `${serverMessage} (HTTP ${response.status})`
+            : `Failed to toggle resolved (HTTP ${response.status})`,
+        )
       }
       await fetchComments()
+      // 2.2.6+: notify the parent page (SharePageClient / admin
+      // share page) that comment state changed so it refetches via
+      // its own hook. Without this, the resolve flips in the DB
+      // and in our internal `localComments`, but the render keeps
+      // using the parent's `comments` prop (line 844 picks
+      // `comments` when its length > 0) — leaving the badge stale
+      // until the user hits F5. Edit + delete already dispatch the
+      // same event; resolve was the odd one out.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('commentDeleted'))
+      }
     },
     [isAdminView, buildAuthedHeaders, fetchComments],
   )
@@ -473,6 +503,69 @@ export default function CommentSection({
     },
     [clientSessionId],
   )
+
+  // 2.2.6+: comments filter dropdown — three discrete states the
+  // user picks by tapping the section title.
+  //   - 'all':        every comment (default)
+  //   - 'incomplete': only NOT-resolved comments
+  //   - 'completed':  only resolved comments (a "what got Done" view)
+  // Persists to localStorage per project so flipping one project's
+  // filter doesn't leak into another. Default is 'all' — most users
+  // want to see the whole list when they enter a project.
+  type CommentsFilter = 'all' | 'incomplete' | 'completed'
+  const COMMENTS_FILTER_LS_KEY = `framecomment:comments-filter:${projectId}`
+  const [commentsFilter, setCommentsFilterState] = useState<CommentsFilter>('all')
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  useEffect(() => {
+    try {
+      const cached = window.localStorage.getItem(COMMENTS_FILTER_LS_KEY)
+      if (cached === 'incomplete' || cached === 'completed' || cached === 'all') {
+        setCommentsFilterState(cached)
+      }
+    } catch {
+      /* localStorage might be disabled — ignore, default stays 'all' */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
+  const setCommentsFilter = useCallback((next: CommentsFilter) => {
+    setCommentsFilterState(next)
+    setFilterMenuOpen(false)
+    try {
+      window.localStorage.setItem(COMMENTS_FILTER_LS_KEY, next)
+    } catch {
+      /* swallow */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
+  // Click-outside-to-close for the filter dropdown. Both the
+  // desktop header and the mobile header tag their dropdown
+  // wrapper with `data-comments-filter`, so a single document
+  // listener handles both surfaces without us juggling two refs.
+  // Also closes on Escape so keyboard users get parity.
+  useEffect(() => {
+    if (!filterMenuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      if (target.closest('[data-comments-filter]')) return
+      setFilterMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFilterMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [filterMenuOpen])
+  const commentsFilterLabel =
+    commentsFilter === 'incomplete'
+      ? 'Incomplete comments'
+      : commentsFilter === 'completed'
+        ? 'Completed comments'
+        : 'All comments'
 
   // 1.2.0+: editable guest display name. Shown only to non-admin viewers
   // under the "Feedback & Discussion" header. Persists to localStorage so
@@ -852,8 +945,20 @@ export default function CommentSection({
     return mergedComments.filter(comment => comment.videoId === selectedVideoId)
   })()
 
+  // 2.2.6+: apply the comments filter ('all' | 'incomplete' |
+  // 'completed'). The DB row exists regardless of the filter — we
+  // just narrow what we show; flipping back to 'all' un-hides
+  // everything without a refetch. A parent that gets filtered out
+  // also hides its thread (no orphans).
+  const visibleComments =
+    commentsFilter === 'incomplete'
+      ? displayComments.filter((c: any) => !c.isResolved)
+      : commentsFilter === 'completed'
+        ? displayComments.filter((c: any) => !!c.isResolved)
+        : displayComments
+
   // Sort top-level comments chronologically
-  const sortedComments = [...displayComments].sort((a, b) => {
+  const sortedComments = [...visibleComments].sort((a, b) => {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   })
 
@@ -1108,7 +1213,63 @@ export default function CommentSection({
         <div className="flex items-center justify-between gap-2 min-w-0">
           <CardTitle className="text-foreground flex items-center gap-2 text-base sm:text-lg min-w-0">
             <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-            <span className="truncate">{t('feedbackAndDiscussion')}</span>
+            {/* 2.2.6+: title acts as a filter dropdown. Click flips
+                between All / Incomplete / Completed; the chevron is
+                the only affordance — the icon + text size stay the
+                same so the header reads identically when the menu
+                isn't open. */}
+            <div data-comments-filter className="relative min-w-0">
+              <button
+                type="button"
+                onClick={() => setFilterMenuOpen((v) => !v)}
+                className="inline-flex items-center gap-1 min-w-0 rounded-md px-1 -mx-1 py-0.5 hover:bg-muted/60 transition-colors"
+                aria-haspopup="menu"
+                aria-expanded={filterMenuOpen}
+              >
+                <span className="truncate">{commentsFilterLabel}</span>
+                <ChevronDown
+                  className={cn(
+                    'w-4 h-4 shrink-0 opacity-60 transition-transform',
+                    filterMenuOpen && 'rotate-180',
+                  )}
+                />
+              </button>
+              {filterMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full mt-1 z-30 min-w-[200px] rounded-md border border-border bg-popover shadow-lg py-1 text-sm"
+                >
+                  {(
+                    [
+                      { v: 'all', label: 'All comments' },
+                      { v: 'incomplete', label: 'Incomplete comments' },
+                      { v: 'completed', label: 'Completed comments' },
+                    ] as { v: CommentsFilter; label: string }[]
+                  ).map(({ v, label }) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setCommentsFilter(v)}
+                      role="menuitem"
+                      className={cn(
+                        'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
+                        v === commentsFilter
+                          ? 'bg-muted/60 text-foreground font-medium'
+                          : 'text-foreground/90 hover:bg-muted/40',
+                      )}
+                    >
+                      <Check
+                        className={cn(
+                          'w-3.5 h-3.5 shrink-0',
+                          v === commentsFilter ? 'opacity-100' : 'opacity-0',
+                        )}
+                      />
+                      <span className="whitespace-nowrap">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </CardTitle>
           <div className="flex items-center gap-0.5 shrink-0">
             <CommentsKebabMenu
@@ -1299,10 +1460,63 @@ export default function CommentSection({
             now has feature parity with desktop. */}
         {mobileCollapsible && (
           <div className="order-2 lg:hidden w-full px-3 py-2 flex items-center justify-between bg-muted/30">
-            <span className="text-sm font-medium flex items-center gap-2">
-              <MessageSquare className="w-4 h-4" />
-              {t('feedbackAndDiscussion')} ({sortedComments.length})
-            </span>
+            {/* 2.2.6+: mobile mirror of the desktop filter dropdown.
+                Same state + storage key, so flipping on one device
+                width persists to the other. */}
+            <div data-comments-filter className="relative">
+              <button
+                type="button"
+                onClick={() => setFilterMenuOpen((v) => !v)}
+                className="inline-flex items-center gap-1 text-sm font-medium rounded-md px-1 -mx-1 py-0.5 hover:bg-muted/60 transition-colors"
+                aria-haspopup="menu"
+                aria-expanded={filterMenuOpen}
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>{commentsFilterLabel}</span>
+                <span className="text-muted-foreground">({sortedComments.length})</span>
+                <ChevronDown
+                  className={cn(
+                    'w-4 h-4 shrink-0 opacity-60 transition-transform',
+                    filterMenuOpen && 'rotate-180',
+                  )}
+                />
+              </button>
+              {filterMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full mt-1 z-30 min-w-[200px] rounded-md border border-border bg-popover shadow-lg py-1 text-sm"
+                >
+                  {(
+                    [
+                      { v: 'all', label: 'All comments' },
+                      { v: 'incomplete', label: 'Incomplete comments' },
+                      { v: 'completed', label: 'Completed comments' },
+                    ] as { v: CommentsFilter; label: string }[]
+                  ).map(({ v, label }) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setCommentsFilter(v)}
+                      role="menuitem"
+                      className={cn(
+                        'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
+                        v === commentsFilter
+                          ? 'bg-muted/60 text-foreground font-medium'
+                          : 'text-foreground/90 hover:bg-muted/40',
+                      )}
+                    >
+                      <Check
+                        className={cn(
+                          'w-3.5 h-3.5 shrink-0',
+                          v === commentsFilter ? 'opacity-100' : 'opacity-0',
+                        )}
+                      />
+                      <span className="whitespace-nowrap">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <CommentsKebabMenu
               commentCount={displayComments.length}
               hasClipboard={hasClipboardForProject}

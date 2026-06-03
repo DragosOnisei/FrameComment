@@ -7,8 +7,24 @@ import { headers } from 'next/headers'
  * Priority: DB settings → Request headers (NextRequest or Server Component) → Error
  * Automatically detects headers from Server Components when request is not provided
  */
+/**
+ * 2.2.6+: defensive strip of trailing slash from the configured
+ * `appDomain`. The Settings UI explicitly says "no trailing slash"
+ * but users still type one, and the unguarded
+ * `${baseUrl}/share/${slug}` template then produces
+ * `https://framecomment.com//share/...` — works in most browsers
+ * but breaks reverse proxies / curl / Slack unfurls.
+ */
+function normaliseBase(url: string): string {
+  return url.replace(/\/+$/, '')
+}
+
 export async function getAppUrl(request?: NextRequest): Promise<string> {
-  // 1. Try database settings first
+  // 1. Try database settings first. This is the source of truth
+  // when set, because admins often run local dev against the
+  // production DB and explicitly WANT share links to point at the
+  // production host so they can be sent to clients straight from
+  // the local UI.
   try {
     const settings = await prisma.settings.findUnique({
       where: { id: 'default' },
@@ -16,7 +32,7 @@ export async function getAppUrl(request?: NextRequest): Promise<string> {
     })
 
     if (settings?.appDomain) {
-      return settings.appDomain
+      return normaliseBase(settings.appDomain)
     }
   } catch (error) {
     // DB not available, continue to request detection

@@ -67,6 +67,61 @@ export function ProcessingStatusBanners() {
 
 type BannerKind = 'upload' | 'processing'
 
+// 2.2.6+: smooth per-video progress fraction (0..1) for the
+// banner's overall bar. Mirrors the formula the player Quality
+// menu uses so the two surfaces agree at every poll cycle.
+//
+// For PROCESSING rows:
+//   - `plannedTiers.length` = denominator.
+//   - `completedTiers` contribute 1.0 each.
+//   - The next tier in the ladder NOT yet in `completedTiers`
+//     contributes `transcodeProgressByTier[tier] / 100`.
+//   - Fallback (legacy rows missing the JSON columns) →
+//     `processingProgress / 100`, which gives at least the
+//     coarse pre-2.2.0 behaviour.
+//
+// For UPLOADING rows: TUS-driven `uploadProgress / 100`. Falls
+// back to 0 when the row hasn't started receiving bytes yet.
+function computeSmoothProgressForVideo(
+  v: ProcessingVideo,
+  kind: BannerKind,
+): number {
+  if (kind === 'upload') {
+    const up = Math.max(0, Math.min(100, v.uploadProgress ?? 0))
+    return up / 100
+  }
+  // Processing.
+  if (v.status === 'READY') return 1
+  const planned = Array.isArray(v.plannedTiers)
+    ? v.plannedTiers.filter((t): t is string => typeof t === 'string')
+    : null
+  if (!planned || planned.length === 0) {
+    const fallback = Math.max(0, Math.min(100, v.processingProgress ?? 0))
+    return fallback / 100
+  }
+  const completed = new Set(
+    Array.isArray(v.completedTiers)
+      ? v.completedTiers.filter((t): t is string => typeof t === 'string')
+      : [],
+  )
+  const completedCount = planned.filter((t) => completed.has(t)).length
+
+  const TIER_ORDER = ['480p', '720p', '1080p', '2160p']
+  let nextTierFraction = 0
+  for (const tier of TIER_ORDER) {
+    if (planned.includes(tier) && !completed.has(tier)) {
+      const perTier = v.transcodeProgressByTier
+      const raw =
+        perTier && typeof perTier === 'object' ? (perTier as any)[tier] : null
+      if (typeof raw === 'number' && Number.isFinite(raw)) {
+        nextTierFraction = Math.max(0, Math.min(100, raw)) / 100
+      }
+      break
+    }
+  }
+  return (completedCount + nextTierFraction) / planned.length
+}
+
 function StatusBanner({
   kind,
   current,
@@ -86,7 +141,22 @@ function StatusBanner({
   // The HWM reset window in the context will hide the banner a
   // few seconds later.
   const isDone = current === 0 && hwm > 0
-  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null
+  // 2.2.6+: SMOOTH overall progress. Pre-2.2.6 this was just
+  // `done / total` — a count-based percent that sat at 0% until
+  // the row flipped to READY and jumped to 100. For a 1-video
+  // batch you'd literally never see any movement until the
+  // whole encode finished. Now we sum each in-flight video's
+  // SMOOTH per-tier progress (same formula the Quality menu
+  // uses inside the player) and add the count of finished
+  // videos, so the bar climbs continuously alongside ffmpeg.
+  const smoothInFlight = videos.reduce(
+    (acc, v) => acc + computeSmoothProgressForVideo(v, kind),
+    0,
+  )
+  const pct =
+    total > 0
+      ? Math.min(100, Math.round(((done + smoothInFlight) / total) * 100))
+      : null
 
   const Icon = isDone ? CheckCircle2 : kind === 'upload' ? Upload : Cog
   // 2.2.0+: the processing banner now reflects the new breadth-first
@@ -246,7 +316,7 @@ function VideoRow({ video, kind }: { video: ProcessingVideo; kind: BannerKind })
             <span className="truncate">{video.projectTitle || 'Untitled project'}</span>
           </div>
         </div>
-        <StatusPip kind={kind} active={isActive} />
+        <StatusPip kind={kind} active={isActive} video={video} />
       </Link>
     </li>
   )
@@ -346,8 +416,59 @@ function Thumb({ video }: { video: ProcessingVideo }) {
  * for a slot) sits static and muted. Combined with the row's
  * opacity wrapper the active row pops at a glance.
  */
-function StatusPip({ kind, active }: { kind: BannerKind; active: boolean }) {
+// 2.2.6+: tier-slug → YouTube-style quality label. Matches the
+// PlayerSettingsMenu quality badge so the user reads the same
+// vocabulary in both places.
+const TIER_LABEL: Record<string, string> = {
+  '480p': 'SD',
+  '720p': 'HD',
+  '1080p': 'HD+',
+  '2160p': '4K',
+}
+
+// 2.2.6+: ladder order. Used to detect the "next" tier in
+// `plannedTiers \ completedTiers` — that's what the worker is
+// currently encoding (or about to encode).
+const TIER_ORDER = ['480p', '720p', '1080p', '2160p']
+
+function getInProgressTierLabel(video: ProcessingVideo): string | null {
+  // Uploading rows aren't encoding yet — no tier label to show.
+  // The pip falls back to the legacy pulsing dot for those.
+  if (video.status === 'UPLOADING') return null
+
+  const planned = Array.isArray(video.plannedTiers)
+    ? video.plannedTiers.filter((t): t is string => typeof t === 'string')
+    : null
+  const completed = Array.isArray(video.completedTiers)
+    ? new Set(video.completedTiers.filter((t): t is string => typeof t === 'string'))
+    : new Set<string>()
+
+  // Pre-2.2.0 rows have null tier arrays — no way to know the
+  // exact tier in flight. Fall back to the generic pulse.
+  if (!planned || planned.length === 0) return null
+
+  // Walk the ladder in canonical order so a worker that finishes
+  // 480p + 720p but is still working on 1080p surfaces "HD+" even
+  // if `plannedTiers` is sorted differently for any reason.
+  for (const tier of TIER_ORDER) {
+    if (planned.includes(tier) && !completed.has(tier)) {
+      return TIER_LABEL[tier] || tier
+    }
+  }
+  return null
+}
+
+function StatusPip({
+  kind,
+  active,
+  video,
+}: {
+  kind: BannerKind
+  active: boolean
+  video: ProcessingVideo
+}) {
   const SIZE = 36
+  const tierLabel = getInProgressTierLabel(video)
   const dotColour = active
     ? kind === 'upload'
       ? 'bg-primary'
@@ -358,16 +479,49 @@ function StatusPip({ kind, active }: { kind: BannerKind; active: boolean }) {
       ? 'border-primary/40'
       : 'border-amber-500/40'
     : 'border-muted-foreground/20'
+  // 2.2.6+: when we know the tier in flight, swap the pulsing dot
+  // for a YouTube-style quality label (SD / HD / HD+ / 4K). The
+  // pulse moves up to the label colour so the row still reads as
+  // "active" at a glance. When we don't know (uploads, legacy rows
+  // without plannedTiers), keep the original generic pulse so the
+  // banner still communicates "something's happening".
+  const textColour = active
+    ? kind === 'upload'
+      ? 'text-primary'
+      : 'text-amber-500'
+    : 'text-muted-foreground/60'
+  const labelAria = tierLabel
+    ? active
+      ? `Encoding ${tierLabel}`
+      : `Queued — next tier ${tierLabel}`
+    : active
+      ? 'Active — worker started'
+      : 'Queued — waiting for a worker slot'
+  const labelTitle = tierLabel
+    ? active
+      ? `Currently encoding ${tierLabel}`
+      : `Queued — next tier ${tierLabel}`
+    : active
+      ? 'Active — worker just started this video'
+      : 'Queued — waiting for a worker slot'
   return (
     <div
       className={`shrink-0 relative rounded-full border ${ringColour} flex items-center justify-center`}
       style={{ width: SIZE, height: SIZE }}
-      aria-label={active ? 'Active — worker started' : 'Queued — waiting for a worker slot'}
-      title={active ? 'Active — worker just started this video' : 'Queued — waiting for a worker slot'}
+      aria-label={labelAria}
+      title={labelTitle}
     >
-      <span
-        className={`block w-1.5 h-1.5 rounded-full ${dotColour} ${active ? 'animate-pulse' : ''}`}
-      />
+      {tierLabel ? (
+        <span
+          className={`text-[10px] font-semibold tracking-tight tabular-nums ${textColour} ${active ? 'animate-pulse' : ''}`}
+        >
+          {tierLabel}
+        </span>
+      ) : (
+        <span
+          className={`block w-1.5 h-1.5 rounded-full ${dotColour} ${active ? 'animate-pulse' : ''}`}
+        />
+      )}
     </div>
   )
 }

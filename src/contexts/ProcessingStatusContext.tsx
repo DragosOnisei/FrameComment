@@ -54,6 +54,33 @@ export type ProcessingVideo = {
   /** 0..100. Overall transcode progress across all tiers for PROCESSING rows. */
   processingProgress: number
   /**
+   * 2.2.6+: tier ladder snapshot.
+   *
+   *   - `plannedTiers` is what `prepare-video` decided based on
+   *     the source resolution + project's previewResolution cap
+   *     (eg `["480p","720p","1080p"]`).
+   *   - `completedTiers` is the subset the worker has actually
+   *     finished encoding so far (eg `["480p"]`).
+   *
+   * Subtracting completedTiers from plannedTiers and taking the
+   * first remaining entry gives the tier currently being worked
+   * on — which is what the banner pip surfaces as SD/HD/HD+/4K.
+   * Both null on legacy rows produced before the 2.2.0 schema
+   * migration; the pip falls back to a generic pulse for those.
+   */
+  plannedTiers: string[] | null
+  completedTiers: string[] | null
+  /**
+   * 2.2.6+: per-tier ffmpeg progress, eg `{ "720p": 50 }`.
+   * Updated atomically by the worker on every ffmpeg progress
+   * tick. The banner reads this to paint a smooth overall
+   * progress; without it the bar stayed at 0% until the row
+   * flipped to READY and jumped straight to 100. NULL for
+   * pre-2.2.0 rows / freshly-uploaded rows the worker hasn't
+   * touched yet.
+   */
+  transcodeProgressByTier: Record<string, unknown> | null
+  /**
    * True when this video is currently being worked on by a BullMQ
    * processor (vs sitting in `wait` waiting for a free slot).
    * Derived from `queue.getActive()` on the server.

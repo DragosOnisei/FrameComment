@@ -14,6 +14,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.6] - 2026-06-03
+
+### Fixed
+
+- **HLS auto-pick 4K on refresh**: `admin/projects/[id]/share` page was
+  mapping `previewResolution === 'auto'` to a hard-coded `'1080p'` before
+  passing it to `VideoPlayer`. That mapping was correct in 1.9.4 when the
+  player couldn't read `'auto'`, but it became a bug once the player learned
+  to interpret `'auto'` as "pick the highest level the master.m3u8
+  advertises". On a fully-processed 4K clip the player got pinned to
+  `findIndex(height >= 972)` = 1080p forever; refreshing the page kept
+  opening at HD+ instead of climbing to the 2160p variant the
+  Quality menu was already showing. Now the share page passes
+  `previewResolution` through verbatim and the player honours `'auto'`.
+- **Manual quality switching from the gear menu**: the cheap path in
+  `handleQualityChoiceChange` used `levels.findIndex(l => l.height >= targetH * 0.9)`
+  on hls.js's ascending-by-bitrate array. When the master we attached only
+  contained higher tiers than the requested one (eg `[1080p, 2160p]` because
+  720p HLS hadn't landed yet), the threshold check happily matched the
+  HIGHER tier and silently pinned the player to it — clicking 720p left
+  playback at 1080p with the checkmark on 720p. The matching is now strict:
+  prefer hls.js's `level.name` / `attrs.NAME` (we emit `NAME="720p"` etc),
+  fall back to a tight `±15%` height window, and only then drop to the
+  expensive `reloadHlsInPlace` path. Same fix was applied to the reload
+  handler's `pendingPinnedHeightRef` lookup. Also set `nextLevel`,
+  `loadLevel`, AND `currentLevel` so the switch is unambiguous, and
+  predictively flip `resolvedPlaybackQuality` on click so the badge
+  doesn't lag.
+- **`Cannot read properties of undefined (reading 'writeText')` on Copy share link**:
+  `navigator.clipboard` is only defined in secure contexts (HTTPS,
+  http://localhost). FrameComment running on a LAN over plain HTTP (TrueNAS
+  reverse proxies, dev tunnels) hit the unguarded
+  `await navigator.clipboard.writeText(url)` call as soon as the user clicked
+  Share Video from the player kebab. New shared helper `src/lib/clipboard.ts`
+  wraps the modern API with a `document.execCommand('copy')` fallback on a
+  hidden textarea, and swaps every unguarded call site: `PlayerTopMenu`,
+  `ProjectActions`, `GlobalSearchOverlay`, `EmailTemplatesSection`,
+  `users/page`, `users/[id]/page`, `users/new/page`, `calendar/page`,
+  `projects/page`, `projects/new/page`, and `projects/[id]/settings/page`.
+- **Share page no longer renders for soft-deleted projects**:
+  `src/app/share/[token]/page.tsx` used `findUnique({ where: { slug: token } })`
+  without filtering `deletedAt`, so a trashed project's slug still passed the
+  SSR check. The client shell then mounted and immediately failed its
+  `/api/share/[token]` call (which DOES filter `deletedAt: null`) with a 401,
+  rendering as a generic "Link Not Found" with no obvious cause. Now the
+  server-side check uses `findFirst({ where: { slug, deletedAt: null } })`
+  and `notFound()` fires honestly.
+- **Trailing slash in `appDomain` no longer produces `//share/…`**:
+  `lib/url.ts` now strips a trailing slash from the configured
+  `appDomain` before composing share URLs. The Settings UI explicitly says
+  "no trailing slash" but typing one used to produce `https://framecomment.com//share/…`
+  — works in most browsers, breaks reverse proxies / curl / Slack unfurls.
+- **"Done" comments stayed marked until manual refresh**:
+  `CommentSection.handleResolveToggle` updated `localComments` after the
+  PATCH but the render uses the parent's `comments` prop when it's non-empty
+  (line 844). Edit + Delete already dispatched a `commentDeleted` window
+  event so the parent refetches via its hook; resolve was the odd one out.
+  Now resolve dispatches the same event and the badge flips instantly.
+- **Resolve failures no longer fail silently**: `MessageBubble.handleResolveToggle`
+  now catches the thrown error and shows a `window.alert` with the server's
+  message (401 / 403 / 404 / 429 etc), and `CommentSection.handleResolveToggle`
+  forwards the server's `error` string instead of just an HTTP code.
+
+### Added
+
+- **Comments filter dropdown** in the sidebar header. The "All comments"
+  title is now a clickable dropdown with three options: **All comments** /
+  **Incomplete comments** / **Completed comments**. The active choice gets
+  a check mark, the chevron flips when open, and Escape / click-outside
+  closes it. Persists to localStorage per project
+  (`framecomment:comments-filter:<projectId>`), so flipping on one project
+  doesn't leak into another. Mobile header has the same dropdown.
+- **Red X on resolved comments' resolve button**: when a comment is
+  already marked Done, the small circular chip in the action row flips
+  from a check to a red X. Several users were reading the existing
+  "thicker check" as "still pending" and clicking it felt like a
+  regression; the X makes "click to undo" unambiguous.
+
+### Changed
+
+- **Processing (Uploads + Encoding tiers) banner hidden on the player view**.
+  On `/admin/projects/[id]/share` the floating Processing banner used to
+  overlap the "Leave your comment" input in the bottom strip. Now hidden
+  while in the player; folder browser and project dashboard keep it.
+  Encoding progress is still visible from Settings. `DownloadBanners` stays
+  visible everywhere so an in-flight ZIP download is never lost.
+
+
+
 Planned for upcoming releases. See [GitHub Issues](https://github.com/DragosOnisei/FrameComment/issues)
 and [Discussions](https://github.com/DragosOnisei/FrameComment/discussions) for the live roadmap.
 

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Calendar, ChevronLeft, ChevronRight, Copy, RefreshCw, BarChart3, Check, Link2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
+import { copyToClipboard } from '@/lib/clipboard'
 import Link from 'next/link'
 
 interface CalendarProject {
@@ -83,7 +84,7 @@ export default function CalendarPage() {
   }
 
   function copyFeedUrl() {
-    navigator.clipboard.writeText(feedUrl)
+    void copyToClipboard(feedUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { copyToClipboard } from '@/lib/clipboard'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { apiPatch, apiPost, apiDelete, apiFetch } from '@/lib/api-client'
 import { startRegistration } from '@simplewebauthn/browser'
@@ -201,7 +202,7 @@ export default function EditUserPage() {
 
   const copyPassword = async () => {
     if (passwordData.password) {
-      await navigator.clipboard.writeText(passwordData.password)
+      await copyToClipboard(passwordData.password)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }

@@ -477,13 +477,23 @@ function AdminSharePageInner() {
 
           const transformedData = transformProjectData(projectData)
           setProject(transformedData)
-          // 1.9.4+ Phase A: "auto" is not a valid VideoPlayer
-          // default — map it to 1080p (the typical good-quality
-          // default for the player's quality picker). The actual
-          // tier the worker produces is still source-matched.
-          const playerDefault = projectData.previewResolution === 'auto'
-            ? '1080p'
-            : (projectData.previewResolution || '720p')
+          // 2.2.6+: pass `previewResolution` through VERBATIM —
+          // including the literal `'auto'`. The VideoPlayer's
+          // `pickInitialHlsLevelIdx` treats `'auto'` as "pick the
+          // highest level the master.m3u8 advertises", which is
+          // exactly what the user expects from a project with
+          // Default Preview Resolution = Auto. Pre-2.2.6 the
+          // share page rewrote `'auto'` to a hard `'1080p'`
+          // because the older player couldn't make sense of
+          // the literal — but that rewrite is now the bug: on a
+          // fully-processed 4K clip the player gets pinned to
+          // 1080p forever instead of climbing to 2160p (the
+          // user's complaint: "se opreste la 1080p ... nu si
+          // de la 1080p la 4K"). With this change the player
+          // reads `defaultQuality='auto'` and picks
+          // `levels.length - 1`, which is the 2160p variant
+          // when 4K HLS is ready.
+          const playerDefault = projectData.previewResolution || '720p'
           setDefaultQuality(playerDefault)
 
           if (!projectData.hideFeedback && !silent) {

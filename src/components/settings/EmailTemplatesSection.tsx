@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Mail, ChevronRight, RotateCcw, Save, Eye, Code, Copy, Check, AlertCircle, X, Braces, Building2, Image, Type, EyeOff } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Label } from '@/components/ui/label'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
@@ -193,7 +194,7 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
 
   // Copy placeholder to clipboard
   const handleCopyPlaceholder = useCallback((placeholder: string) => {
-    navigator.clipboard.writeText(placeholder)
+    void copyToClipboard(placeholder)
     setCopiedPlaceholder(placeholder)
     setTimeout(() => setCopiedPlaceholder(null), 2000)
   }, [])

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslations, useLocale } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Trash2, ExternalLink, Archive, ArchiveRestore, RotateCcw, Send, Loader2, CheckCircle, BarChart3, FolderKanban, Copy, Check, Calendar, MoreVertical } from 'lucide-react'
@@ -320,7 +321,7 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
   // on the menu item.
   const handleCopyLink = () => {
     if (!shareUrl) return
-    navigator.clipboard.writeText(shareUrl).then(() => {
+    copyToClipboard(shareUrl).then(() => {
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 1500)
     })

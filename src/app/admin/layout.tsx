@@ -19,6 +19,16 @@ export default function AdminLayout({
   const headerRef = useRef<HTMLDivElement>(null)
   const pathname = usePathname()
   const hideHeader = pathname?.match(/^\/admin\/projects\/[^/]+\/share/)
+  // 2.2.6+: same predicate as `hideHeader` — when the admin is in
+  // the player view, the floating Processing (uploads + encoding)
+  // banner overlaps the "Leave your comment" input and the rest of
+  // the player chrome in the bottom strip. The user can still
+  // check encoding progress from Settings; we just stop rendering
+  // the banner here. DownloadBanners stays visible — an admin
+  // mid-download of a 5 GB zip needs to keep an eye on it even
+  // while reviewing a clip. Folder browser and project dashboard
+  // keep everything as before.
+  const hideFloatingBanners = !!hideHeader
 
   // Prevent caching of admin pages
   useEffect(() => {
@@ -82,7 +92,7 @@ export default function AdminLayout({
             </div>
             <SessionMonitor />
             <DownloadBanners />
-            <ProcessingStatusBanners />
+            {!hideFloatingBanners && <ProcessingStatusBanners />}
             <GlobalDropOverlay />
           </div>
         </ProcessingStatusProvider>

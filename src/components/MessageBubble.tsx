@@ -8,6 +8,7 @@ import {
   Brush,
   Pencil,
   Check,
+  X,
   MoreHorizontal,
 } from 'lucide-react'
 import DOMPurify from 'isomorphic-dompurify'
@@ -285,6 +286,22 @@ export default function MessageBubble({
     try {
       setResolving(true)
       await onResolveToggle(comment.id, !isResolved)
+    } catch (err) {
+      // 2.2.6+: surface resolve failures to the user. Pre-2.2.6 the
+      // catch was missing — if the PATCH 4xx'd (permission, expired
+      // session, etc) the promise rejected, the `void` swallowed it,
+      // the badge stayed un-toggled, and the user thought clicking
+      // "Done" did literally nothing. An alert is unrefined but
+      // strictly better than the silent failure; future iteration
+      // can replace it with a toast.
+      const message =
+        err instanceof Error ? err.message : 'Failed to mark comment'
+      if (typeof window !== 'undefined') {
+        // eslint-disable-next-line no-alert
+        window.alert(message)
+      }
+      // eslint-disable-next-line no-console
+      console.error('[MessageBubble] resolve toggle failed:', err)
     } finally {
       setResolving(false)
     }
@@ -561,7 +578,15 @@ export default function MessageBubble({
                   )}
 
                   {/* Mark as done — same circular chip as the kebab so the
-                      two sit balanced next to each other. */}
+                      two sit balanced next to each other.
+                      2.2.6+: when the comment is already resolved, the
+                      chip flips to a red X to make the "click to
+                      undo" affordance unambiguous. Previously it kept
+                      showing a check (just with a slightly thicker
+                      stroke) and several users read it as "still
+                      pending" — clicking made the green badge in the
+                      top corner disappear and felt like a regression
+                      instead of an undo. */}
                   {onResolveToggle && (
                     <button
                       type="button"
@@ -572,7 +597,7 @@ export default function MessageBubble({
                       disabled={resolving}
                       className={`inline-flex items-center justify-center w-7 h-7 rounded-full border bg-transparent transition-colors ${
                         isResolved
-                          ? 'border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10'
+                          ? 'border-red-500/40 text-red-600 hover:bg-red-500/10 hover:border-red-500/60'
                           : 'border-border text-muted-foreground hover:text-emerald-600 hover:bg-muted'
                       }`}
                       title={
@@ -587,10 +612,11 @@ export default function MessageBubble({
                       }
                       aria-pressed={isResolved}
                     >
-                      <Check
-                        className="w-4 h-4"
-                        strokeWidth={isResolved ? 3 : 2}
-                      />
+                      {isResolved ? (
+                        <X className="w-4 h-4" strokeWidth={2.5} />
+                      ) : (
+                        <Check className="w-4 h-4" strokeWidth={2} />
+                      )}
                     </button>
                   )}
                 </div>

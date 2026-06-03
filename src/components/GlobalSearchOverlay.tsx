@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
+import { copyToClipboard } from '@/lib/clipboard'
 import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
@@ -362,7 +363,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
         if (selected.folderId) params.set('folderId', selected.folderId)
         url = `${origin}/admin/projects/${selected.projectId}/share?${params.toString()}`
       }
-      await navigator.clipboard.writeText(url)
+      await copyToClipboard(url)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {

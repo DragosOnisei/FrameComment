@@ -11,6 +11,7 @@ import { FolderKanban, Plus, Eye, EyeOff, RefreshCw, Copy, Check, AlertCircle, I
 import { projectGradient } from '@/lib/project-gradient'
 import ProjectsList from '@/components/ProjectsList'
 import { apiFetch } from '@/lib/api-client'
+import { copyToClipboard } from '@/lib/clipboard'
 import { logError } from '@/lib/logging'
 import { useTranslations } from 'next-intl'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
@@ -99,7 +100,7 @@ export default function AdminPage() {
   }
 
   function handleCopyPassword() {
-    navigator.clipboard.writeText(sharePassword)
+    void copyToClipboard(sharePassword)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

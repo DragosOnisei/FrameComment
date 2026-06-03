@@ -209,11 +209,20 @@ let tokenExpiresAt = 0
 
 async function login() {
   log.verbose(`POST ${config.baseUrl}/api/auth/login`)
-  const res = await fetch(`${config.baseUrl}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: config.email, password: config.password }),
-  })
+  // 2.2.5+: wrap the login fetch in the same retry helper used by
+  // apiCall. Token-refresh hops happen every ~14 minutes during a
+  // long catalog upload — if even one of them hits a flaky moment
+  // the whole script used to crash. Retrying transient network
+  // errors lets the upload survive momentary server hiccups.
+  const res = await fetchWithRetry(
+    'POST /api/auth/login',
+    `${config.baseUrl}/api/auth/login`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: config.email, password: config.password }),
+    },
+  )
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`Login failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
@@ -235,11 +244,83 @@ async function ensureValidToken() {
   }
 }
 
+// 2.2.5+ resilience helper: detect transient network errors so the
+// JSON-API call layer can survive a server restart / WiFi blip /
+// router reboot mid-upload without killing the whole 30+ hour
+// transfer. `TypeError: fetch failed` from Node's undici has the
+// real cause hanging off `err.cause.code` (ECONNRESET, ECONNREFUSED,
+// EAI_AGAIN, ETIMEDOUT, ENOTFOUND, EPIPE, UND_ERR_SOCKET, etc).
+function isTransientNetworkError(err) {
+  if (!err) return false
+  const name = err.name || ''
+  const msg = err.message || ''
+  if (name === 'AbortError') return true
+  if (/fetch failed/i.test(msg)) return true
+  if (/socket hang up|connect timeout|connect ETIMEDOUT/i.test(msg)) return true
+  const code =
+    (err.cause && (err.cause.code || err.cause.errno)) ||
+    err.code ||
+    err.errno ||
+    ''
+  if (typeof code === 'string') {
+    return [
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'ECONNABORTED',
+      'EAI_AGAIN',
+      'ENOTFOUND',
+      'EPIPE',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'UND_ERR_SOCKET',
+      'UND_ERR_CONNECT_TIMEOUT',
+      'UND_ERR_HEADERS_TIMEOUT',
+      'UND_ERR_BODY_TIMEOUT',
+    ].includes(code)
+  }
+  return false
+}
+
+// Same backoff ladder TUS uses internally — keeps the API layer in
+// step with the resumable-upload retry behaviour the user already
+// experiences for the actual file transfer.
+const API_RETRY_DELAYS_MS = [1000, 3000, 5000, 10000, 30000, 60000]
+
+async function fetchWithRetry(label, url, init) {
+  let lastErr
+  for (let attempt = 0; attempt <= API_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await fetch(url, init)
+    } catch (err) {
+      lastErr = err
+      if (!isTransientNetworkError(err) || attempt === API_RETRY_DELAYS_MS.length) {
+        throw err
+      }
+      const delay = API_RETRY_DELAYS_MS[attempt]
+      const code = (err.cause && err.cause.code) || err.code || ''
+      log.warn(
+        `${label}: ${err.message}${code ? ` (${code})` : ''} — retrying in ${delay / 1000}s ` +
+          `(attempt ${attempt + 1}/${API_RETRY_DELAYS_MS.length})`,
+      )
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+  throw lastErr
+}
+
 async function apiCall(method, pathname, body) {
   await ensureValidToken()
   const url = `${config.baseUrl}${pathname}`
   log.verbose(`${method} ${pathname}`)
-  const res = await fetch(url, {
+  // 2.2.5+: wrap both the initial call AND the 401-refresh retry in
+  // `fetchWithRetry` so transient network errors during EITHER hop
+  // survive automatically. Pre-2.2.5 a single "fetch failed" here
+  // (server restarted while creating a video row, brief WiFi drop,
+  // etc.) killed the whole run — even though the script's state
+  // file would let you resume, that's still a manual step every
+  // few hours on a multi-day catalog upload.
+  const res = await fetchWithRetry(`${method} ${pathname}`, url, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -252,7 +333,7 @@ async function apiCall(method, pathname, body) {
     log.verbose('401 — refreshing token')
     accessToken = null
     await ensureValidToken()
-    const retryRes = await fetch(url, {
+    const retryRes = await fetchWithRetry(`${method} ${pathname} (auth retry)`, url, {
       method,
       headers: {
         Authorization: `Bearer ${accessToken}`,

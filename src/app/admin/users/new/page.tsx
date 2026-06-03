@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
+import { copyToClipboard } from '@/lib/clipboard'
 import { apiPost } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 
@@ -77,7 +78,7 @@ export default function NewUserPage() {
 
   const copyPassword = async () => {
     if (formData.password) {
-      await navigator.clipboard.writeText(formData.password)
+      await copyToClipboard(formData.password)
       setCopiedPassword(true)
       setTimeout(() => setCopiedPassword(false), 2000)
     }

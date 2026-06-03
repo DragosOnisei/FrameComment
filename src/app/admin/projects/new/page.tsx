@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Eye, EyeOff, RefreshCw, Copy, Check, Plus, X, Calendar } from 'lucide-react'
 import { apiPost, apiFetch } from '@/lib/api-client'
+import { copyToClipboard } from '@/lib/clipboard'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
 import { logError } from '@/lib/logging'
 import { generateSecurePassword } from '@/lib/password-utils'
@@ -58,7 +59,7 @@ export default function NewProjectPage() {
   }
 
   function handleCopyPassword() {
-    navigator.clipboard.writeText(sharePassword)
+    void copyToClipboard(sharePassword)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

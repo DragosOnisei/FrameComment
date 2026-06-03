@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Users, UserPlus, Edit, Trash2, Mail, User, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { copyToClipboard } from '@/lib/clipboard'
 import { apiDelete, apiFetch, apiPost, apiPatch } from '@/lib/api-client'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 import { startRegistration } from '@simplewebauthn/browser'
@@ -184,7 +185,7 @@ export default function UsersPage() {
   }
 
   const copyPassword = async (password: string) => {
-    await navigator.clipboard.writeText(password)
+    await copyToClipboard(password)
     setCopiedPassword(true)
     setTimeout(() => setCopiedPassword(false), 2000)
   }

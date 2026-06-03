@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
+import { copyToClipboard } from '@/lib/clipboard'
 import { hasClippedComments } from '@/lib/comments-clipboard'
 import { ConfirmModal } from './ConfirmModal'
 
@@ -210,7 +211,12 @@ export default function PlayerTopMenu({
       const data = (await res.json()) as { shareUrl?: string }
       const url = data.shareUrl
       if (!url) throw new Error('No share URL returned')
-      await navigator.clipboard.writeText(url)
+      // 2.2.6+: route through copyToClipboard so plain-HTTP
+      // installs (TrueNAS LAN) don't hit "Cannot read properties
+      // of undefined (reading 'writeText')" — `navigator.clipboard`
+      // is undefined in insecure contexts.
+      const ok = await copyToClipboard(url)
+      if (!ok) throw new Error('Failed to copy share link')
       setToast({ kind: 'link-copied' })
     } catch (err) {
       setToast({

@@ -9,9 +9,15 @@ interface SharePageProps {
 export default async function SharePage({ params }: SharePageProps) {
   const { token } = await params
 
-  // Server-side validation: check if slug exists and is not archived
-  const project = await prisma.project.findUnique({
-    where: { slug: token },
+  // Server-side validation: check if slug exists and is not archived.
+  // 2.2.6+: also filter `deletedAt: null` so soft-deleted (trashed)
+  // projects look like 404 from the moment SSR runs, instead of
+  // rendering the SharePageClient shell only to have its first API
+  // call land on a 401 and bounce the user to the not-found state
+  // (which is what users saw as "Link Not Found" after they trashed
+  // a project but forgot to clear the share link).
+  const project = await prisma.project.findFirst({
+    where: { slug: token, deletedAt: null } as any,
     select: { id: true, status: true },
   })
 

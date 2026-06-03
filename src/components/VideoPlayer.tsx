@@ -275,10 +275,28 @@ export default function VideoPlayer({
           const pinned = pendingPinnedHeightRef.current
           let chosen: number
           if (typeof pinned === 'number') {
-            const idx = newHls.levels.findIndex(
-              (l: any) => (l.height || 0) >= pinned * 0.9,
+            // 2.2.6+: strict ±15% height match (and NAME match
+            // when hls.js exposes it). Same fix as the cheap path
+            // in `handleQualityChoiceChange` — see the comment
+            // there for the bug we're sidestepping (old `>= * 0.9`
+            // happily picked a HIGHER tier when the requested one
+            // wasn't in the freshly-fetched master either).
+            const pinnedName =
+              pinned >= 2160 * 0.85 ? '2160p' :
+              pinned >= 1080 * 0.85 ? '1080p' :
+              pinned >= 720 * 0.85 ? '720p' :
+              '480p'
+            const byName = newHls.levels.findIndex((l: any) => {
+              const name = l?.name || l?.attrs?.NAME
+              return name === pinnedName
+            })
+            const byHeight = byName >= 0 ? byName : newHls.levels.findIndex(
+              (l: any) => {
+                const h = l?.height || 0
+                return h >= pinned * 0.85 && h <= pinned * 1.15
+              },
             )
-            chosen = idx >= 0 ? idx : newHls.levels.length - 1
+            chosen = byHeight >= 0 ? byHeight : newHls.levels.length - 1
           } else {
             // 2.2.4+: honour the project's previewResolution cap +
             // the user's runtime pick when no explicit pin was set
@@ -343,6 +361,22 @@ export default function VideoPlayer({
     const hls = hlsRef.current
     if (!video) return
 
+    // 2.2.6+: predictive badge update.
+    //
+    // Both the cheap (hls.currentLevel = idx) and the expensive
+    // (reloadHlsInPlace) paths can take a moment to settle —
+    // the cheap path waits for LEVEL_SWITCHED to fire, the
+    // expensive one for a brand-new MANIFEST_PARSED. In the
+    // worst case the badge sits on the previous tier for the
+    // half-second the buffer needs to flush, and the user's
+    // click looks like a no-op. Flipping the badge state right
+    // now reflects intent immediately; if the level switch
+    // somehow fails the resize listener will still correct it
+    // once the video element decodes the new variant.
+    if (q !== 'auto') {
+      setResolvedPlaybackQuality(q)
+    }
+
     if (q === 'auto') {
       // Auto = "pin to highest currently in hls.levels". Cheap
       // path, instant; no reload, no destroy.
@@ -360,12 +394,55 @@ export default function VideoPlayer({
       480
 
     if (hls && hls.levels && hls.levels.length > 0) {
-      const idx = hls.levels.findIndex((l: any) => (l.height || 0) >= targetH * 0.9)
+      // 2.2.6+ BUG FIX: pick the level whose tier MATCHES the
+      // request exactly, not "first level whose height clears a
+      // lowball threshold".
+      //
+      // Before: `findIndex(l => l.height >= targetH * 0.9)` on
+      // an ASCENDING-by-bitrate array would happily match a HIGHER
+      // tier when the requested one wasn't in the master. Concrete
+      // reproductions:
+      //   - hls.js attached with [1080p, 2160p]. User clicks 720p
+      //     → old code: `1080 >= 648` ✓ → idx=0 → stays on 1080p,
+      //     badge HD+ even though menu shows 720p ticked.
+      //   - hls.js attached with [720p, 1080p, 2160p]. User clicks
+      //     480p → old code: `720 >= 432` ✓ → idx=0 → stays on
+      //     720p, badge HD even though menu shows 480p ticked.
+      //
+      // Matching strategy:
+      //   1. NAME match — our master.m3u8 emits `NAME="480p"` etc,
+      //      so a level's `attrs.NAME` (or `.name`) is authoritative.
+      //   2. Strict height ±15% — falls back when hls.js builds
+      //      without exposing the NAME attr at all. ±15% lets
+      //      cinematic variants (e.g. 1920x1008 for 1080p) match
+      //      while still rejecting cross-tier hits.
+      //   3. -1 (no match) — caller drops to `reloadHlsInPlace`,
+      //      which fetches a fresh master.m3u8 (the worker may
+      //      have published the requested tier after we attached).
+      const findLevelIdx = () => {
+        // Pass 1: exact tier-name match.
+        const byName = hls.levels.findIndex((l: any) => {
+          const name = l?.name || l?.attrs?.NAME
+          return name === q
+        })
+        if (byName >= 0) return byName
+        // Pass 2: tight height window (±15%).
+        return hls.levels.findIndex((l: any) => {
+          const h = l?.height || 0
+          return h >= targetH * 0.85 && h <= targetH * 1.15
+        })
+      }
+      const idx = findLevelIdx()
       if (idx >= 0) {
         // Cheap path — tier already in hls.js's variant list.
-        // `nextLevel` switches at the next segment boundary
-        // (~6 s max), no buffer flush, no visible stall.
+        // Set all three knobs hls.js exposes so the switch is
+        // unambiguous regardless of which internal state machine
+        // the build version reads:
+        //   - nextLevel: applied at next fragment boundary
+        //   - loadLevel: which playlist to fetch next
+        //   - currentLevel: hard switch, flushes buffer, disables ABR
         hls.nextLevel = idx
+        hls.loadLevel = idx
         hls.currentLevel = idx
         return
       }

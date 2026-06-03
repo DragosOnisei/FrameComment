@@ -339,6 +339,21 @@ function FolderBrowserInner(
     groupName: string
     versions: SplitVersionRow[]
   }>({ open: false, groupName: '', versions: [] })
+  // 2.2.6+: optimistic drop placeholders. The moment a user drops
+  // files into the grid we push synthetic "uploading" cards here
+  // so the grid reflects the action instantly — pre-2.2.6 the user
+  // saw nothing until TUS uploaded a few % AND the server polled
+  // the new row, which on multi-GB files felt frozen. Each
+  // placeholder is matched against incoming `videoGroups` by
+  // normalised filename → as soon as the real row lands we drop
+  // the placeholder (the real card already has the bottom progress
+  // bar via ProcessingStatusContext, so the swap is visually
+  // continuous). Safety net: placeholders auto-expire after 90s in
+  // case server creation fails silently — wouldn't want a ghost
+  // card stuck on screen forever.
+  const [pendingDropPlaceholders, setPendingDropPlaceholders] = useState<
+    Array<{ localId: string; fileName: string; folderId: string; droppedAt: number }>
+  >([])
   const [showNewDialog, setShowNewDialog] = useState(false)
   // When true the New Folder dialog renders in "restricted" mode and
   // also asks for a password (used by the right-click context menu's
@@ -489,6 +504,32 @@ function FolderBrowserInner(
       window.removeEventListener('framecomment:folders-changed', handler)
     }
   }, [fetchFolders])
+
+  // 2.2.6+: helper used by every drop-into-current-folder path
+  // (empty-state, populated-grid container, breadcrumb home drop).
+  // Pushed in front of the actual `onUploadFiles` call so the
+  // synthetic cards render the same instant the browser fires
+  // `drop`.
+  const addPendingDropPlaceholders = useCallback(
+    (files: File[]) => {
+      if (!currentFolderId || !files.length) return
+      const droppedAt = Date.now()
+      const additions = files.map((f, i) => ({
+        // crypto.randomUUID exists in every browser supported by
+        // Next.js 16 — guarded just in case for older test runners.
+        localId: `pending:${droppedAt}:${i}:${
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? (crypto as any).randomUUID()
+            : Math.random().toString(36).slice(2)
+        }`,
+        fileName: f.name || `Untitled-${i + 1}`,
+        folderId: currentFolderId,
+        droppedAt,
+      }))
+      setPendingDropPlaceholders((prev) => [...additions, ...prev])
+    },
+    [currentFolderId],
+  )
 
   // ─── handlers ───────────────────────────────────────────────
   // Create a folder. When `password` is provided (the "New Restricted
@@ -946,6 +987,61 @@ function FolderBrowserInner(
     const sorted = groups.sort((a, b) => a.name.localeCompare(b.name))
     return sortMode === 'alphabetical-reverse' ? sorted.reverse() : sorted
   }, [videos, rootVideos, sortMode])
+
+  // 2.2.6+: prune drop placeholders. Two reasons to remove one:
+  //   (a) a real video row landed with a matching filename — the
+  //       real card already has the upload/processing bar so the
+  //       placeholder would just sit on top of it.
+  //   (b) auto-expiry after 90s — covers the case where the server
+  //       upload failed silently (network drop mid-TUS, etc) so we
+  //       don't leave a ghost card stuck on screen forever.
+  // Matching is done against the video's `originalFileName` (no
+  // path component) AND its plain `name` after stripping the
+  // extension, both lowercased.
+  useEffect(() => {
+    if (pendingDropPlaceholders.length === 0) return
+    const PLACEHOLDER_TTL_MS = 90_000
+    const now = Date.now()
+
+    const norm = (s: string | undefined | null) => {
+      if (!s) return ''
+      const trimmed = s.replace(/^.*[\\/]/, '') // strip any leading path
+      const dot = trimmed.lastIndexOf('.')
+      const base = dot > 0 ? trimmed.slice(0, dot) : trimmed
+      return base.trim().toLowerCase()
+    }
+
+    const realNames = new Set<string>()
+    for (const v of videoGroups) {
+      if ((v as any).originalFileName) realNames.add(norm((v as any).originalFileName))
+      if (v.name) realNames.add(norm(v.name))
+    }
+
+    setPendingDropPlaceholders((prev) => {
+      const filtered = prev.filter((p) => {
+        if (now - p.droppedAt > PLACEHOLDER_TTL_MS) return false
+        if (realNames.has(norm(p.fileName))) return false
+        return true
+      })
+      return filtered.length === prev.length ? prev : filtered
+    })
+  }, [videoGroups, pendingDropPlaceholders.length])
+
+  // 2.2.6+: backup sweep — even if `videoGroups` never changes (eg
+  // user dropped a file, walked away, server never created the row),
+  // re-evaluate every 5s so the placeholders eventually expire by
+  // the TTL rule above.
+  useEffect(() => {
+    if (pendingDropPlaceholders.length === 0) return
+    const id = setInterval(() => {
+      const now = Date.now()
+      setPendingDropPlaceholders((prev) => {
+        const filtered = prev.filter((p) => now - p.droppedAt <= 90_000)
+        return filtered.length === prev.length ? prev : filtered
+      })
+    }, 5_000)
+    return () => clearInterval(id)
+  }, [pendingDropPlaceholders.length])
 
   const handleOpenVideo = useCallback(
     (videoName: string) => {
@@ -2136,10 +2232,12 @@ function FolderBrowserInner(
           // No directory was dropped — fall back to the flat-files
           // path if the parent gave us a handler for it.
           if (canDropFiles && flatFiles.length) {
+            addPendingDropPlaceholders(flatFiles)
             onUploadFiles?.(flatFiles)
           }
         } catch (err) {
           if (canDropFiles && flatFiles.length) {
+            addPendingDropPlaceholders(flatFiles)
             onUploadFiles?.(flatFiles)
           }
         }
@@ -2148,6 +2246,7 @@ function FolderBrowserInner(
     }
 
     if (canDropFiles && flatFiles.length) {
+      addPendingDropPlaceholders(flatFiles)
       onUploadFiles?.(flatFiles)
     }
   }
@@ -2540,7 +2639,12 @@ function FolderBrowserInner(
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files || [])
-          if (files.length) onUploadFiles?.(files)
+          if (files.length) {
+            // 2.2.6+: mirror the drop-handler optimistic placeholders
+            // for the Upload Video(s) file-picker too — same UX win.
+            addPendingDropPlaceholders(files)
+            onUploadFiles?.(files)
+          }
           e.target.value = ''
         }}
       />
@@ -2571,7 +2675,10 @@ function FolderBrowserInner(
             onUploadFolderTree(entries)
           } else {
             const videoFiles = files.filter((f) => isAcceptedVideoFile(f))
-            if (videoFiles.length) onUploadFiles?.(videoFiles)
+            if (videoFiles.length) {
+              addPendingDropPlaceholders(videoFiles)
+              onUploadFiles?.(videoFiles)
+            }
           }
           e.target.value = ''
         }}
@@ -2636,6 +2743,46 @@ function FolderBrowserInner(
               onDownloadFolder={handleDownloadFolder}
             />
           ))}
+          {/* 2.2.6+: optimistic drop placeholders — instant feedback
+              the moment files enter the grid. Replaced by real
+              VideoCards as soon as the server-side row is observed
+              (matched by normalised filename in the prune effect). */}
+          {pendingDropPlaceholders.map((p) => {
+            const dot = p.fileName.lastIndexOf('.')
+            const displayName =
+              dot > 0 ? p.fileName.slice(0, dot) : p.fileName
+            return (
+              <div
+                key={p.localId}
+                className="rounded-lg overflow-hidden border border-border bg-card animate-in fade-in-0 duration-150"
+              >
+                <div className="aspect-video relative bg-black/40">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-muted-foreground">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-[10px]">Generating thumbnail…</span>
+                  </div>
+                  {/* Thin blue bar at the bottom edge of the cover —
+                      indeterminate (no TUS hook here yet), so it
+                      pulses left-right until the real card takes
+                      over and shows actual upload progress. */}
+                  <div className="absolute left-0 right-0 bottom-0 h-1 bg-primary/10">
+                    <div className="h-full w-1/3 bg-primary animate-[pulse_1.4s_ease-in-out_infinite] rounded-r-full" />
+                  </div>
+                </div>
+                <div className="px-2.5 py-2">
+                  <div
+                    className="text-xs font-medium truncate text-card-foreground"
+                    title={p.fileName}
+                  >
+                    {displayName || 'Uploading…'}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+                    Uploading…
+                  </div>
+                </div>
+              </div>
+            )
+          })}
           {(() => {
             // 1.0.9+: when the user drags a card that's part of a
             // selection of 2+, every selected card "comes along" —

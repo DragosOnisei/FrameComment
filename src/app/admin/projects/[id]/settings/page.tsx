@@ -13,6 +13,7 @@ import { CollapsibleSection } from '@/components/ui/collapsible-section'
 import { ReprocessModal } from '@/components/ReprocessModal'
 import ProjectCoverImage from '@/components/ProjectCoverImage'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { copyToClipboard } from '@/lib/clipboard'
 import { RecipientManager } from '@/components/RecipientManager'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
@@ -291,7 +292,7 @@ export default function ProjectSettingsPage() {
 
   const copyPassword = async () => {
     if (sharePassword) {
-      await navigator.clipboard.writeText(sharePassword)
+      await copyToClipboard(sharePassword)
       setCopiedPassword(true)
       setTimeout(() => setCopiedPassword(false), 2000)
     }
