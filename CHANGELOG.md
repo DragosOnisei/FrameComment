@@ -14,6 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-06-04
+
+### Fixed — TrueNAS update failures from postgres + redis healthcheck
+
+- **Updating the app on a busy TrueNAS box could fail with
+  `dependency failed to start: container framecomment-postgres
+  is unhealthy`**, even though postgres started successfully when
+  rolled back. The root cause was the absence of `start_period`
+  on the postgres + redis healthchecks in
+  `templates/docker-compose.yaml`. With `interval: 10s` and
+  `retries: 5`, every failed `pg_isready` (and every
+  `LOADING Redis is loading the dataset` reply from redis-cli
+  during AOF replay) counted toward the unhealthy threshold from
+  tick #1 — total budget 50 s. On a TrueNAS pool actively serving
+  ffmpeg encode jobs, postgres took longer than that to reach
+  "ready to accept connections" and got marked Error, cascading
+  the app + worker shutdown.
+
+  Added `start_period: 60s` to postgres and `start_period: 90s`
+  to redis. During the grace window failed health checks DON'T
+  count toward the unhealthy threshold; once the container is
+  healthy at least once, the normal interval/retries/timeout
+  pattern kicks in for ongoing monitoring. Generous on purpose —
+  it costs nothing on a fast install and prevents the cascade on
+  a slow one.
+
 ## [2.3.2] - 2026-06-04
 
 ### Fixed — banner freeze (follow-up to 2.3.1)
