@@ -1,0 +1,172 @@
+{#
+  docker-compose.yaml — TrueNAS SCALE Apps template (Jinja2).
+  Rendered against the values in ix_values.yaml + user input from questions.yaml.
+
+  This file is a template. iX's app loader (catalog-validation) will:
+  1. Resolve `ixVolume` / `hostPath` references via .ix.persistence helpers.
+  2. Auto-fill empty secrets via the SCALE secret-generator helper.
+  3. Render the compose to YAML and feed it to Docker.
+
+  For a first-class catalog submission this file should use iX's library
+  helpers; here we keep it readable so it doubles as a working starter.
+#}
+
+{% set values = ix_lib.base.utils.merge_dicts(ix_lib.base.utils.copy_defaults(ix_volumes), values) if ix_lib is defined else values %}
+
+{% macro generated_secret(provided, length=32) -%}
+{{ provided if provided else ix_lib.base.utils.secure_string(length) if ix_lib is defined else provided }}
+{%- endmacro %}
+
+x-common-env: &common-env
+  TZ: {{ values.timezone | default("Etc/UTC") }}
+  NODE_ENV: production
+
+services:
+  postgres:
+    image: {{ values.images.postgres.repository }}:{{ values.images.postgres.tag }}
+    restart: unless-stopped
+    user: "999:999"
+    environment:
+      POSTGRES_USER: framecomment
+      POSTGRES_PASSWORD: {{ generated_secret(values.secrets.postgresPassword) }}
+      POSTGRES_DB: framecomment
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # Postgres 18+ default PGDATA path changed; pin it for backward compatibility.
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - type: bind
+        source: {{ values.storage.postgresData.hostPathConfig.hostPath if values.storage.postgresData.type == "hostPath" else values.storage.postgresData.ixVolumeConfig.hostPath }}
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U framecomment"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # 2.3.3+: start_period gives postgres a 60 s "grace window"
+      # during which failing pg_isready checks DON'T count toward
+      # the unhealthy threshold. Without it, 5 retries x 10 s = 50 s
+      # was the entire budget, and on a busy TrueNAS box (worker
+      # encoding, heavy I/O on the pool) postgres routinely needed
+      # longer to reach "ready to accept connections" — the app
+      # update would then fail with `dependency failed to start:
+      # container framecomment-postgres is unhealthy`. Once
+      # postgres is healthy the regular interval/retries/timeout
+      # kick in for ongoing monitoring.
+      start_period: 60s
+
+  redis:
+    image: {{ values.images.redis.repository }}:{{ values.images.redis.tag }}
+    restart: unless-stopped
+    user: "568:568"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "{{ generated_secret(values.secrets.redisPassword) }}"]
+    volumes:
+      - type: bind
+        source: {{ values.storage.redisData.hostPathConfig.hostPath if values.storage.redisData.type == "hostPath" else values.storage.redisData.ixVolumeConfig.hostPath }}
+        target: /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "{{ generated_secret(values.secrets.redisPassword) }}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # 2.3.3+: 90 s grace window. Loading an appendonly.aof of a
+      # busy install (production has 70 k+ keys at this point) can
+      # take several seconds on first start, and redis answers
+      # `LOADING Redis is loading the dataset in memory` to any
+      # ping during that window — counted as a failed health check.
+      # On a stressed system the cumulative pre-grace failures used
+      # to exceed the 5-retry budget, marking the container Error
+      # and cascading the app + worker shutdown.
+      start_period: 90s
+
+  app:
+    image: {{ values.images.app.repository }}:{{ values.images.app.tag }}
+    restart: unless-stopped
+    user: "568:568"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      DATABASE_URL: "postgresql://framecomment:{{ generated_secret(values.secrets.postgresPassword) }}@postgres:5432/framecomment?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: {{ generated_secret(values.secrets.redisPassword) }}
+      STORAGE_ROOT: /app/uploads
+      ADMIN_EMAIL: {{ values.adminEmail }}
+      ADMIN_PASSWORD: {{ values.adminPassword }}
+      ADMIN_NAME: {{ values.adminName }}
+      ENCRYPTION_KEY: {{ generated_secret(values.secrets.encryptionKey, 32) }}
+      JWT_SECRET: {{ generated_secret(values.secrets.jwtSecret, 64) }}
+      JWT_REFRESH_SECRET: {{ generated_secret(values.secrets.jwtRefreshSecret, 64) }}
+      SHARE_TOKEN_SECRET: {{ generated_secret(values.secrets.shareTokenSecret, 64) }}
+      HTTPS_ENABLED: "false"
+      STORAGE_PROVIDER: {{ "s3" if values.s3.enabled else "local" }}
+      S3_ENDPOINT: {{ values.s3.endpoint }}
+      S3_BUCKET: {{ values.s3.bucket }}
+      S3_REGION: {{ values.s3.region }}
+      S3_ACCESS_KEY_ID: {{ values.s3.accessKeyId }}
+      S3_SECRET_ACCESS_KEY: {{ values.s3.secretAccessKey }}
+    ports:
+      - "{{ values.network.webPort }}:4321"
+    volumes:
+      - type: bind
+        source: {{ values.storage.uploads.hostPathConfig.hostPath if values.storage.uploads.type == "hostPath" else values.storage.uploads.ixVolumeConfig.hostPath }}
+        target: /app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:4321/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+    deploy:
+      resources:
+        limits:
+          cpus: "{{ values.resources.limits.cpu | replace('m', '') | float / 1000 if 'm' in values.resources.limits.cpu else values.resources.limits.cpu }}"
+          memory: "{{ values.resources.limits.memory }}"
+
+  worker:
+    image: {{ values.images.app.repository }}:{{ values.images.app.tag }}
+    restart: unless-stopped
+    user: "568:568"
+    command: ["npm", "run", "worker"]
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      # The worker's entrypoint waits for the app's /api/health to come
+      # up before BullMQ boots. In this compose the app service is
+      # called `app`, but the entrypoint defaults APP_HOST to
+      # `framecomment-app` (the name used in the root docker-compose.yml).
+      # Without this override the worker loops forever on a connection
+      # refused error, never starts, and every uploaded video sits at
+      # PROCESSING 0% with nothing consuming the queue.
+      APP_HOST: app
+      APP_PORT: "4321"
+      DATABASE_URL: "postgresql://framecomment:{{ generated_secret(values.secrets.postgresPassword) }}@postgres:5432/framecomment?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: {{ generated_secret(values.secrets.redisPassword) }}
+      STORAGE_ROOT: /app/uploads
+      ENCRYPTION_KEY: {{ generated_secret(values.secrets.encryptionKey, 32) }}
+      JWT_SECRET: {{ generated_secret(values.secrets.jwtSecret, 64) }}
+      JWT_REFRESH_SECRET: {{ generated_secret(values.secrets.jwtRefreshSecret, 64) }}
+      SHARE_TOKEN_SECRET: {{ generated_secret(values.secrets.shareTokenSecret, 64) }}
+      STORAGE_PROVIDER: {{ "s3" if values.s3.enabled else "local" }}
+      S3_ENDPOINT: {{ values.s3.endpoint }}
+      S3_BUCKET: {{ values.s3.bucket }}
+      S3_REGION: {{ values.s3.region }}
+      S3_ACCESS_KEY_ID: {{ values.s3.accessKeyId }}
+      S3_SECRET_ACCESS_KEY: {{ values.s3.secretAccessKey }}
+    volumes:
+      - type: bind
+        source: {{ values.storage.uploads.hostPathConfig.hostPath if values.storage.uploads.type == "hostPath" else values.storage.uploads.ixVolumeConfig.hostPath }}
+        target: /app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q 'npm run worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 6m

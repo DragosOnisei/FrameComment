@@ -124,20 +124,47 @@ function computeSmoothProgressForVideo(
   const completedCount = planned.filter((t) => completed.has(t)).length
   if (completedCount >= planned.length) return 1
 
-  const TIER_ORDER = ['480p', '720p', '1080p', '2160p']
-  let nextTierFraction = 0
-  for (const tier of TIER_ORDER) {
-    if (planned.includes(tier) && !completed.has(tier)) {
-      const perTier = v.transcodeProgressByTier
-      const raw =
-        perTier && typeof perTier === 'object' ? (perTier as any)[tier] : null
-      if (typeof raw === 'number' && Number.isFinite(raw)) {
-        nextTierFraction = Math.max(0, Math.min(100, raw)) / 100
-      }
-      break
-    }
+  // 2.3.3+: sum effective per-tier fractions. The old formula
+  // (`completedCount + nextTierFraction` for the FIRST not-completed
+  // tier) assumed strictly sequential encoding — fine in 2.2.x,
+  // wrong from 2.3.0 onward where after 480p drains the worker
+  // happily runs 720p + 1080p + 2160p in parallel.
+  //
+  // Concrete failure: after 720p + 1080p complete and the worker
+  // moves on to 2160p, there's a brief window where the next poll
+  // sees `completedTiers=["480p","720p"]` (1080p hasn't been
+  // atomically added yet) AND `transcodeProgressByTier={"1080p":100,
+  // "2160p":11}`. Old code picked 1080p (first not-completed),
+  // saw 100, returned (2 + 1)/4 = 75% — and froze there because
+  // the *next* poll inevitably had the same shape until 1080p was
+  // formally promoted to completedTiers seconds later. User-
+  // visible symptom: banner stuck at 75% HD+ while the in-video
+  // menu (which uses a different signal) already showed 4K at 11%.
+  //
+  // New shape: per-tier effective fraction. Each tier contributes
+  // 1.0 if it's in completedTiers OR its progress hit 100, else
+  // its raw progress / 100. Sum / total = honest overall progress
+  // that doesn't care which tiers run in parallel.
+  const perTier = v.transcodeProgressByTier
+  const readProgress = (tier: string): number => {
+    if (!perTier || typeof perTier !== 'object') return 0
+    const raw = (perTier as Record<string, unknown>)[tier]
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return 0
+    return Math.max(0, Math.min(100, raw))
   }
-  return (completedCount + nextTierFraction) / planned.length
+  let totalFraction = 0
+  for (const tier of planned) {
+    if (completed.has(tier)) {
+      totalFraction += 1
+      continue
+    }
+    const pct = readProgress(tier)
+    // A tier that reports 100 % progress but hasn't been formally
+    // promoted to completedTiers yet is effectively done — count
+    // it as 1.0 so the bar doesn't stall in the race window.
+    totalFraction += pct >= 100 ? 1 : pct / 100
+  }
+  return totalFraction / planned.length
 }
 
 function StatusBanner({
@@ -463,6 +490,44 @@ function getInProgressTier(video: ProcessingVideo): string | null {
 
   if (!planned || planned.length === 0) return null
 
+  // 2.3.3+: parallel-encoding-aware tier picker. From 2.3.0 on the
+  // worker can have 720p / 1080p / 2160p in flight simultaneously
+  // after 480p drains. Old code just returned the first planned
+  // tier that wasn't in completedTiers — wrong in two scenarios:
+  //
+  //   1. RACE WINDOW. 1080p finished encoding but the worker
+  //      hasn't atomically added it to completedTiers yet; 2160p
+  //      already shows fresh progress in transcodeProgressByTier.
+  //      Old picker returned 1080p, pip read HD+, user saw it
+  //      stuck on 1080p while playback inside the video already
+  //      showed 4K processing.
+  //   2. PARALLEL. 1080p at 80 %, 2160p at 20 % — both in flight,
+  //      old picker returned 1080p (closer to done). The user's
+  //      intuition is "show me what we're chasing", i.e. the
+  //      highest-tier in flight.
+  //
+  // New rule:
+  //   PASS 1: walk TIER_ORDER from HIGHEST to lowest. Return the
+  //   first planned, not-completed tier whose progress is in the
+  //   active range (>0 and <100). That's the "highest tier
+  //   currently being worked on".
+  //   PASS 2 (fallback): no tier has active progress yet (e.g.
+  //   between jobs). Return the first non-completed tier in
+  //   ascending order — same "next up" behaviour as before.
+  const perTier = video.transcodeProgressByTier
+  const readProgress = (tier: string): number | null => {
+    if (!perTier || typeof perTier !== 'object') return null
+    const raw = (perTier as Record<string, unknown>)[tier]
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
+  }
+  for (let i = TIER_ORDER.length - 1; i >= 0; i--) {
+    const tier = TIER_ORDER[i]
+    if (!planned.includes(tier) || completed.has(tier)) continue
+    const pct = readProgress(tier)
+    if (pct !== null && pct > 0 && pct < 100) {
+      return tier
+    }
+  }
   for (const tier of TIER_ORDER) {
     if (planned.includes(tier) && !completed.has(tier)) {
       return tier

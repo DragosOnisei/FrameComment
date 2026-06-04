@@ -14,6 +14,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.4] - 2026-06-04
+
+### Fixed — banner stuck on HD+ while video player already showed 4K
+
+- **Encoding-tiers banner froze on HD+ / 75 % once the worker
+  moved on to the 2160p tier**, even though the in-video Quality
+  menu correctly showed `2160p · 11 %` next to a spinning ring.
+  Caching wasn't the issue here (`?t=` buster from 2.3.2
+  guarantees fresh data) — the banner's per-tier logic just
+  predated the parallel-encoding pipeline from 2.3.0.
+
+  Two changes:
+    - `getInProgressTier` now walks `TIER_ORDER` from highest to
+      lowest and returns the first non-completed tier with an
+      active progress signal (`> 0` and `< 100`). The old loop
+      returned whichever non-completed tier appeared first in
+      ascending order, so during the race window where 1080p had
+      hit 100 % but `completedTiers` hadn't been atomically
+      promoted yet AND 2160p already had fresh progress, it kept
+      reporting HD+. Falls back to the first non-completed tier
+      when nothing is yet in flight (i.e. between jobs).
+    - The smooth bar progress now sums an **effective fraction
+      per tier** (1.0 if completed OR per-tier progress ≥ 100,
+      else `pct/100`) divided by total planned tiers. Old shape
+      `(completedCount + nextTierFraction) / planned.length`
+      assumed strictly sequential encoding and lost the
+      contribution of every tier in flight beyond the first one,
+      stalling at 75 % until the slowest tier finally promoted.
+
 ## [2.3.3] - 2026-06-04
 
 ### Fixed — TrueNAS update failures from postgres + redis healthcheck
