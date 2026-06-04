@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-06-04
+
+### Fixed — banner freeze (follow-up to 2.3.1)
+
+- **The `force-dynamic` + `Cache-Control: no-store` +
+  `cache: 'no-store'` trio from 2.3.1 still didn't fully unblock
+  the banner on TrueNAS prod**. The in-video Quality menu polled
+  fresh data the whole time and was the user's hint to the right
+  pattern: `/api/projects/[id]` is dynamic by URL (the `[id]`
+  segment changes per call site), so every cache layer in the
+  chain — browser memory, traefik, anything in front of the app —
+  treats each request as a distinct resource.
+  `/api/processing-status` has a static URL; even with the right
+  hints, some layer kept returning the first snapshot.
+  Adding a per-call `?t=<Date.now()>` query reproduces the same
+  "always-unique URL" effect at the client. No cache layer can
+  memoise a URL it's never seen before. This is the exact same
+  trick already used in `VideoPlayer.reloadHlsInPlace` to defeat
+  stale HLS masters.
+
 ## [2.3.1] - 2026-06-04
 
 ### Fixed — production-only banner freeze

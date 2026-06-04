@@ -136,15 +136,25 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
   const fetchStatus = async () => {
     const seq = ++fetchSeqRef.current
     try {
-      // 2.3.1+: `cache: 'no-store'` mirrors the server-side
-      // `Cache-Control: no-store` on /api/processing-status. The
-      // production-only freeze where the banner sat on the same
-      // 75% / HD+ snapshot across multiple polls was traced to
-      // the browser's heuristic GET cache returning the first
-      // response to every subsequent fetch. Local dev was
-      // immune because Next.js dev mode disables route caching
-      // and emits no-cache headers automatically.
-      const res = await apiFetch('/api/processing-status', { cache: 'no-store' })
+      // 2.3.2+: URL-level cache buster. The `cache: 'no-store'`
+      // hint + server `Cache-Control: no-store` from 2.3.1
+      // SHOULD be enough, but on prod (TrueNAS behind traefik,
+      // CloudFlare tunnels, …) the banner kept showing the same
+      // 75 % / HD+ snapshot across multiple polls — the in-video
+      // Quality menu, which polls `/api/projects/[id]` and
+      // therefore hits a different URL each render via the
+      // project id segment, never had the issue.
+      //
+      // Adding a per-call `?t=<timestamp>` query mirrors the
+      // "dynamic URL" trick the in-video poll relies on
+      // implicitly: each request is a fresh resource as far as
+      // every cache layer in the chain is concerned, so none of
+      // them can serve a memoised response. Same pattern as the
+      // `?_=${Date.now()}` we already use when reloading HLS
+      // masters mid-session.
+      const res = await apiFetch(`/api/processing-status?t=${Date.now()}`, {
+        cache: 'no-store',
+      })
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
       if (!res.ok) {
         // 401 means we got logged out — don't spam the console
