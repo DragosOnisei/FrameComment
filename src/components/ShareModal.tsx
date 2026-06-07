@@ -35,6 +35,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { apiFetch } from '@/lib/api-client'
+import { logError } from '@/lib/logging'
 
 export interface ShareModalProps {
   open: boolean
@@ -150,6 +152,95 @@ export function ShareModal({
     }
   }, [])
 
+  // 2.4.0+: Frame.io-style short link.
+  //
+  // When the modal opens, we ask the server to generate a tidy
+  // `https://<shortLinkDomain>/<slug>` URL that aliases the long
+  // `shareUrl`. If the admin has configured `Settings.shortLinkDomain`,
+  // we render and copy the short URL; otherwise we silently fall
+  // back to the long URL (no UX regression vs pre-2.4.0).
+  //
+  // The short link's expiration mirrors `initialExpiresAt` so a
+  // 7-day share also yields a 7-day short link. If the admin
+  // changes the expiration via this modal's toggle, the SHARE
+  // updates but the short link keeps its original expiry — matches
+  // Frame.io's own behaviour and avoids confusing slug churn.
+  //
+  // 2.4.0+ FIX: we use `shortResolved` (not `shortLoading`) as the
+  // "auto-copy may proceed" gate. Earlier draft started with
+  // `shortLoading = false`, which made the auto-copy effect run
+  // BEFORE the fetch effect had set it to true — clipboard got the
+  // long URL even though the modal eventually showed the short
+  // one. Flipping the polarity (start false → set true after the
+  // POST resolves, success OR failure) closes that race.
+  const [shortUrl, setShortUrl] = useState<string | null>(null)
+  const [shortResolved, setShortResolved] = useState(false)
+  const shortRequestedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!open) {
+      shortRequestedRef.current = null
+      setShortUrl(null)
+      setShortResolved(false)
+      return
+    }
+    if (!shareUrl) return
+    // Guard against double-fires on the same shareUrl — React strict
+    // mode + the modal's open-state effect would otherwise call this
+    // twice and create two slugs for the same link.
+    if (shortRequestedRef.current === shareUrl) return
+    shortRequestedRef.current = shareUrl
+
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/short-links', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetUrl: shareUrl,
+            expiresAt: initialExpiresDate
+              ? initialExpiresDate.toISOString()
+              : null,
+          }),
+        })
+        if (!res.ok) {
+          // Endpoint disabled, bad config, or auth issue — silently
+          // fall back to long URL. Don't surface an error to the
+          // admin; the long URL still works.
+          return
+        }
+        const data = (await res.json()) as {
+          shortUrl: string
+          shortDomainConfigured: boolean
+        }
+        // Only swap in the short URL when a real short-link domain
+        // is configured. Otherwise the server hands us a
+        // `<appDomain>/s/<slug>` which is LONGER than the original
+        // share URL and would feel like a regression.
+        if (data.shortDomainConfigured && data.shortUrl) {
+          setShortUrl(data.shortUrl)
+        }
+      } catch (err) {
+        logError('[ShareModal] short link creation failed:', err)
+      } finally {
+        // Flip the gate AFTER any state change above so the
+        // auto-copy effect re-runs with the freshly-resolved
+        // `displayUrl`. `try/finally` makes sure we don't trap
+        // the modal on a transient network error — failure
+        // path still flips this to true and we fall back to
+        // the long URL.
+        setShortResolved(true)
+      }
+    })()
+    // We intentionally exclude `initialExpiresDate` from the dep
+    // array — we only want to fire once per modal open. The user
+    // changing expiration mid-session doesn't regenerate the slug.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, shareUrl])
+
+  // The URL the user actually sees + copies. Short URL wins when
+  // available; otherwise we fall back to the original long URL.
+  const displayUrl = shortUrl || shareUrl
+
   const autoCopiedRef = useRef(false)
   useEffect(() => {
     if (!open) {
@@ -157,11 +248,18 @@ export function ShareModal({
       return
     }
     if (autoCopiedRef.current) return
+    // Wait until the short-link round-trip has resolved (success
+    // OR failure) before copying. Otherwise we'd copy the long
+    // URL into the clipboard for the brief window before the
+    // POST returns, even though the modal then renders the short
+    // one — leading to "modal shows fcmt.io/aBc but my clipboard
+    // has framecomment.com/share/…".
+    if (!shortResolved) return
     autoCopiedRef.current = true
-    void writeClipboard(shareUrl).then((ok) => {
+    void writeClipboard(displayUrl).then((ok) => {
       if (ok) setCopied(true)
     })
-  }, [open, shareUrl, writeClipboard])
+  }, [open, displayUrl, shortResolved, writeClipboard])
 
   // Reset the green check after a couple of seconds so the user can
   // re-copy without the modal needing to be re-opened.
@@ -187,9 +285,11 @@ export function ShareModal({
     // on open. No more native `window.prompt` fallback when the
     // clipboard API is blocked — the legacy textarea+execCommand
     // path runs invisibly instead.
-    const ok = await writeClipboard(shareUrl)
+    // 2.4.0+: copies the SHORT URL when one was successfully
+    // minted, falls back to the long URL otherwise.
+    const ok = await writeClipboard(displayUrl)
     if (ok) setCopied(true)
-  }, [shareUrl, writeClipboard])
+  }, [displayUrl, writeClipboard])
 
   const pickPreset = useCallback((p: Preset) => {
     const now = new Date()
@@ -248,7 +348,7 @@ export function ShareModal({
               className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
             />
             <Input
-              value={shareUrl}
+              value={displayUrl}
               readOnly
               onClick={(e) => (e.currentTarget as HTMLInputElement).select()}
               className="pl-8 pr-2 truncate font-mono text-xs"

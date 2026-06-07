@@ -3,7 +3,66 @@ import type { NextRequest } from 'next/server'
 
 const DANGEROUS_PROTOCOL = /^(javascript|data|vbscript):/i
 
+// 2.4.0+: Frame.io-style short-link host detector.
+//
+// When a request comes in on a configured short-link domain (e.g.
+// `fcmt.io`) we rewrite the path so the existing /s/[slug] Route
+// Handler resolves the slug and 302s to the long share URL.
+//
+// The configured domain comes from the SHORT_LINK_DOMAINS env var
+// (comma-separated). Reading the DB from inside the proxy would
+// add a round-trip on every request, so we keep this as a static
+// comparison and document that admins must set the env var when
+// they enable the feature in Settings.
+const SHORT_LINK_HOSTNAMES = new Set<string>(
+  (process.env.SHORT_LINK_DOMAINS || 'fcmt.io')
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean),
+)
+
+function maybeRewriteShortLink(request: NextRequest): NextResponse | null {
+  const host = (request.headers.get('host') || '').toLowerCase()
+  const hostname = host.split(':')[0]
+
+  if (!SHORT_LINK_HOSTNAMES.has(hostname)) return null
+
+  const url = request.nextUrl.clone()
+
+  // Leave the framework + API surface alone on the short domain.
+  // This means /api/health on fcmt.io still hits the actual
+  // handler (handy for liveness probes), and Next assets aren't
+  // misinterpreted as slugs.
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname === '/api' ||
+    url.pathname.startsWith('/_next/') ||
+    url.pathname === '/favicon.ico' ||
+    url.pathname === '/robots.txt' ||
+    url.pathname.startsWith('/s/')
+  ) {
+    return null
+  }
+
+  // Empty path → let the root page render, same as anywhere else.
+  if (url.pathname === '/' || url.pathname === '') return null
+
+  // Extract the slug — first path segment, no leading slashes.
+  const slug = url.pathname.replace(/^\/+/, '').split('/')[0]
+  if (!slug) return null
+
+  url.pathname = `/s/${slug}`
+  return NextResponse.rewrite(url)
+}
+
 export async function proxy(request: NextRequest) {
+  // 2.4.0+: short-link rewrite runs first so the rest of the
+  // proxy (CSP, returnUrl sanitisation, etc.) doesn't apply to
+  // the lookup path — it's just a DB read + 302, no HTML
+  // rendering, no nonce needed.
+  const shortLinkResponse = maybeRewriteShortLink(request)
+  if (shortLinkResponse) return shortLinkResponse
+
   const url = request.nextUrl
 
   // Sanitize returnUrl on the login page

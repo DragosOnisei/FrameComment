@@ -125,6 +125,9 @@ export async function PATCH(request: NextRequest) {
       smtpFromAddress,
       smtpSecure,
       appDomain,
+      // 2.4.0+: optional short-link domain for the Frame.io-style
+      // URL shortener (e.g. "fcmt.io"). Empty/null = feature off.
+      shortLinkDomain,
       defaultPreviewResolution,
       defaultSkipTranscoding,
       defaultWatermarkEnabled,
@@ -450,6 +453,11 @@ export async function PATCH(request: NextRequest) {
       smtpFromAddress,
       smtpSecure,
       appDomain,
+      // 2.4.0+: persist the short-link domain. The client should
+      // already have normalised it (strip scheme + trailing
+      // slash), but harmless to coerce empty-string back to null
+      // here for defensive cleanliness.
+      shortLinkDomain: shortLinkDomain || null,
       defaultPreviewResolution,
       defaultSkipTranscoding,
       defaultWatermarkEnabled,
@@ -509,6 +517,7 @@ export async function PATCH(request: NextRequest) {
         smtpFromAddress,
         smtpSecure,
         appDomain,
+        shortLinkDomain: shortLinkDomain || null,
         defaultPreviewResolution,
         defaultWatermarkText,
         maxUploadSizeGB: maxUploadSizeGB !== undefined && maxUploadSizeGB !== null ? Number(maxUploadSizeGB) : 1000,

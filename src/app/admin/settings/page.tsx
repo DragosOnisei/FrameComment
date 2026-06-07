@@ -33,6 +33,10 @@ interface Settings {
   smtpFromAddress: string | null
   smtpSecure: string | null
   appDomain: string | null
+  // 2.4.0+: optional Frame.io-style short-link domain (e.g.
+  // "fcmt.io") that fronts the URL shortener. Null = feature
+  // disabled, ShareModal copies the long URL like pre-2.4.0.
+  shortLinkDomain: string | null
   defaultPreviewResolution: string | null
   defaultSkipTranscoding: boolean | null
   defaultWatermarkEnabled: boolean | null
@@ -142,6 +146,8 @@ export default function GlobalSettingsPage() {
   const [smtpFromAddress, setSmtpFromAddress] = useState('')
   const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
   const [appDomain, setAppDomain] = useState('')
+  // 2.4.0+
+  const [shortLinkDomain, setShortLinkDomain] = useState('')
   const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('auto')
   const [defaultSkipTranscoding, setDefaultSkipTranscoding] = useState(false)
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
@@ -232,6 +238,7 @@ export default function GlobalSettingsPage() {
     setSmtpFromAddress(data.smtpFromAddress || '')
     setSmtpSecure(data.smtpSecure || 'STARTTLS')
     setAppDomain(data.appDomain || '')
+    setShortLinkDomain(data.shortLinkDomain || '')
     setDefaultPreviewResolution(data.defaultPreviewResolution || 'auto')
     setDefaultSkipTranscoding(data.defaultSkipTranscoding ?? false)
     setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
@@ -552,6 +559,12 @@ export default function GlobalSettingsPage() {
         smtpFromAddress: smtpFromAddress || null,
         smtpSecure: smtpSecure || 'STARTTLS',
         appDomain: appDomain || null,
+        // 2.4.0+: normalise the short-link domain by stripping any
+        // accidental https:// scheme and trailing slash so we
+        // always store a bare hostname like "fcmt.io".
+        shortLinkDomain: shortLinkDomain
+          ? shortLinkDomain.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+          : null,
         defaultPreviewResolution: defaultPreviewResolution || 'auto',
         defaultSkipTranscoding,
         defaultWatermarkEnabled: defaultWatermarkEnabled,
@@ -712,6 +725,7 @@ export default function GlobalSettingsPage() {
 
   const brandingProps = {
     companyName, setCompanyName, appDomain, setAppDomain,
+    shortLinkDomain, setShortLinkDomain,
     brandingLogoUrl: brandingLogoPreview, onUploadLogo: handleLogoUpload,
     onRemoveLogo: handleLogoRemove, logoUploading, logoError,
     emailHeaderStyle, setEmailHeaderStyle,

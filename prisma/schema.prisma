@@ -558,6 +558,16 @@ model Settings {
 
   // Domain Configuration
   appDomain String? // e.g., "https://yourdomain.com"
+  // 2.4.0+: short-link domain for Frame.io-style URL shortener.
+  // When set (e.g. "fcmt.io"), the "Share Video/Folder/Project"
+  // flow creates a ShortLink record + returns a tidy URL like
+  // `https://fcmt.io/aBc12XyZ` instead of the 200-character signed
+  // HMAC URL. The middleware translates `Host: fcmt.io` +
+  // `/<slug>` → 302 redirect to the resolved targetUrl. Stored as
+  // hostname only, no scheme or path: "fcmt.io" not
+  // "https://fcmt.io/". NULL = feature disabled, share modal copies
+  // the long URL like pre-2.4.0.
+  shortLinkDomain String?
 
   // Default Video Processing Settings
   // 1.9.4+ Phase A: "auto" lets the worker match the source —
@@ -896,6 +906,33 @@ model CalendarToken {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// 2.4.0+: Frame.io-style URL shortener.
+///
+/// Stores a tidy random slug → long signed URL mapping so the admin
+/// can share `https://fcmt.io/aBc12XyZ` instead of a 200-character
+/// HMAC monster. Resolution is one DB read on the short-link domain
+/// (e.g. `fcmt.io`) plus a 302 redirect — no auth required, the
+/// downstream URL carries its own signature + expiry.
+///
+/// `expiresAt` is copied from the share's expiration at creation
+/// time (e.g. a project share that expires in 7 days yields a short
+/// link that also dies in 7 days). NULL = no expiry (share lives
+/// forever, so does the short link).
+///
+/// Click tracking intentionally omitted in 2.4.0 per user request —
+/// we can add a `clicks` counter + last-access columns later without
+/// breaking anything.
+model ShortLink {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  targetUrl String    @db.Text
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([slug])
+  @@index([expiresAt])
 }
 
 // Client Directory - Individual Contacts

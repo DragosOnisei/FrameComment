@@ -11,6 +11,9 @@ interface BrandingSectionProps {
   setCompanyName: (value: string) => void
   appDomain: string
   setAppDomain: (value: string) => void
+  /** 2.4.0+: optional short-link domain (e.g. "fcmt.io"). */
+  shortLinkDomain: string
+  setShortLinkDomain: (value: string) => void
   brandingLogoUrl: string | null
   onUploadLogo: (file: File) => Promise<void>
   onRemoveLogo: () => Promise<void>
@@ -28,6 +31,8 @@ export function BrandingSection({
   setCompanyName,
   appDomain,
   setAppDomain,
+  shortLinkDomain,
+  setShortLinkDomain,
   brandingLogoUrl,
   onUploadLogo,
   onRemoveLogo,
@@ -134,6 +139,30 @@ export function BrandingSection({
         />
         <p className="text-xs text-muted-foreground">
           {t('appearance.appDomainHint')}
+        </p>
+      </div>
+
+      {/* 2.4.0+: Short-link domain for Frame.io-style tidy URLs.
+          Hardcoded English copy here on purpose — we'll move it
+          to i18n in a follow-up once the feature is battle-tested
+          and the UX is final. */}
+      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+        <Label htmlFor="shortLinkDomain">Short link domain</Label>
+        <Input
+          id="shortLinkDomain"
+          type="text"
+          value={shortLinkDomain}
+          onChange={(e) => setShortLinkDomain(e.target.value)}
+          placeholder="fcmt.io"
+        />
+        <p className="text-xs text-muted-foreground">
+          Optional dedicated domain that fronts the URL shortener
+          (Frame.io-style). When set, &quot;Copy share link&quot;
+          gives you a tidy{' '}
+          <code className="font-mono">https://{shortLinkDomain || 'fcmt.io'}/aBc12XyZ</code>{' '}
+          instead of the long signed URL. Point its DNS at this
+          app via a Cloudflare tunnel or your reverse proxy. Leave
+          empty to keep the long URL behaviour.
         </p>
       </div>
 

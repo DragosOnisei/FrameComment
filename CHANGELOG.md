@@ -14,6 +14,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-06
+
+### Added — Frame.io-style short links
+
+- **Tidy share URLs via a dedicated short-link domain.** Pre-2.4.0
+  every share copied a 200-character signed HMAC URL like
+  `https://framecomment.com/share/<slug>?video=…&v=…&sig=…&folderId=…`.
+  2.4.0 introduces a Frame.io-style shortener that maps each share
+  to an 8-character random slug behind a separate ultra-short
+  hostname (defaults to `fcmt.io`, configurable from Settings) so
+  the link the admin pastes into Slack / email reads like
+  `https://fcmt.io/aBc12XyZ` instead.
+
+  Architecture:
+    - New `ShortLink { slug, targetUrl, expiresAt }` table +
+      Prisma migration `20260606000000_short_links`.
+    - New `Settings.shortLinkDomain` column — bare hostname like
+      `fcmt.io`, null when the feature is off. UI under
+      Settings → Branding with an explanatory hint.
+    - `src/lib/short-link.ts` — 8-char slug generator over a
+      51-char URL-safe alphabet that excludes the
+      look-alike chars `0/O/o/1/I/l`. Collision retry loop with
+      a hard cap so we surface alphabet exhaustion instead of
+      looping forever.
+    - `POST /api/short-links` — admin-only endpoint, validates
+      `targetUrl` is a 2 KB-or-shorter `http(s)://` URL, copies
+      the share's expiration into the ShortLink row, returns
+      `{ shortUrl, shortDomainConfigured, targetUrl }`. Falls
+      back to `<appDomain>/s/<slug>` when no short domain is set,
+      so the slug still resolves either way.
+    - `GET /s/[slug]` Route Handler — single DB read, 302 to
+      `targetUrl`, 410 Gone when the short link is past
+      `expiresAt`, 404 when the slug is unknown. No click
+      tracking in 2.4.0 (per the user's spec — can add later
+      without a breaking change).
+    - Short-link rewrite in `src/proxy.ts` — when a request
+      lands on a hostname listed in `SHORT_LINK_DOMAINS` env var
+      (default `fcmt.io`), the path's first segment is rewritten
+      to `/s/<slug>` and the existing Route Handler takes over.
+      Runs before the CSP / returnUrl-sanitisation logic so
+      resolution stays fast. API + framework + asset paths
+      (`/api`, `/_next/`, `/favicon.ico`, …) bypass the rewrite.
+    - `ShareModal` integration — on open, fires `POST /api/short-links`
+      with the current share's expiration, and once the response
+      lands swaps the long URL for the short one in both the
+      visible input and the clipboard. If the short domain isn't
+      configured or the request fails, we silently keep the long
+      URL so there's no UX regression vs pre-2.4.0. Auto-copy
+      waits for `shortResolved` (set true after the POST resolves
+      success-or-failure) to avoid the race where the clipboard
+      received the long URL before the short one arrived.
+
+  **Why a separate domain instead of `<appDomain>/s/<slug>`:**
+  the URL on `<appDomain>/s/<slug>` is ~40 characters; the
+  Frame.io-style `fcmt.io/<slug>` is ~22. For a feature whose
+  whole point is the user-visible URL length, paying for the
+  short domain ($10-30/yr) is worth it. Self-hosters who don't
+  want the second domain can still leave `shortLinkDomain` null
+  and the feature stays off — share modals copy the long URL
+  exactly like before.
+
+  **Why slug length 8 over 6:** 51^8 ≈ 4.5×10^13 combinations
+  vs 51^6 ≈ 1.8×10^10. A self-hosted instance won't dent either,
+  but the longer slug gives a wider safety margin if we ever
+  enable click-tracking exports + the admin starts handing out
+  thousands of links per project.
+
 ## [2.3.4] - 2026-06-04
 
 ### Fixed — banner stuck on HD+ while video player already showed 4K
