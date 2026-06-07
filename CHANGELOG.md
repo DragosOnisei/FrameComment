@@ -14,6 +14,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-06-07
+
+### Fixed — TrueNAS update reliability (cement-fix)
+
+- **The recurring `Failed 'up' action ... container framecomment-
+  postgres is unhealthy` cascade on every TrueNAS update is over.**
+  2.3.3 introduced `start_period: 60s` for postgres + `90s` for
+  redis, but a `docker inspect` on the running container showed
+  `StartPeriod: 10000000000` (10 s) — i.e. the fix never reached
+  operators upgrading from older versions. TrueNAS caches each
+  app's rendered docker-compose locally on first install and
+  doesn't necessarily re-render from the catalog on every
+  release, so a template change in 2.3.3 only takes effect for
+  brand-new installs unless we force the cache to refresh.
+
+  2.4.1 leans into Docker Compose's belt-and-suspenders healthcheck
+  knobs:
+    - **`start_period: 300s` on postgres + `180s` on redis** —
+      generous worst-case grace covering cold-start crash
+      recovery, busy ZFS pool, parallel Prisma migration on the
+      app container.
+    - **`start_interval: 2s` on both** — during the grace window,
+      ping the health command every 2 s instead of every 10 s.
+      So the moment postgres / redis is actually ready, the
+      container flips to healthy and unblocks `depends_on:
+      service_healthy`. Best-case startup is ~2 s, worst-case
+      (still healthy) caps at the grace window.
+
+  Net effect: even on a stressed TrueNAS box mid-encode + a
+  long-running Prisma migration on the app, the postgres
+  container won't be marked Error before it's actually ready.
+
+  **Operator note:** after pulling 2.4.1, do a one-time *Refresh
+  All Catalogs* in TrueNAS (Apps → Discover Apps → kebab menu) so
+  the local docker-compose cache picks up the new healthcheck
+  values. Without the refresh the upgrade re-uses the old
+  10 s start_period.
+
 ## [2.4.0] - 2026-06-06
 
 ### Added — Frame.io-style short links
