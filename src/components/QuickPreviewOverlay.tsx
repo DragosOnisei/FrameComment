@@ -90,7 +90,82 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
     }
   }, [target])
 
+  // 2.5.2+: PRE-FETCH folder contents BEFORE the overlay mounts.
+  // The original implementation showed the modal frame instantly and
+  // let FolderPreviewBody render a "Loading…" state while it fetched
+  // /api/folders/[id] — that produced two visible flashes (the empty
+  // popup arriving, then the width snapping when tiles landed). Now
+  // the fetch runs while the overlay is still hidden, and the modal
+  // only mounts once `folderContents` is in hand — so the popup
+  // appears in one shot, already populated with real thumbnails. The
+  // tradeoff is a brief invisible delay between Space-press and the
+  // popup appearing; on a normal connection it's well under 200 ms.
+  const folderKey = target?.kind === 'folder' ? target.id : null
+  const [folderContents, setFolderContents] = useState<FolderContents | null>(null)
+  useEffect(() => {
+    if (!folderKey) {
+      setFolderContents(null)
+      return
+    }
+    // Reset to null so the modal stays hidden while we re-fetch when
+    // the target switches from one folder to another.
+    setFolderContents(null)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiFetch(`/api/folders/${folderKey}`)
+        if (!res.ok) {
+          if (!cancelled) setFolderContents({ folders: [], videos: [] })
+          return
+        }
+        const data = await res.json()
+        if (cancelled) return
+        const folderNode = (data && data.folder) || {}
+        const subFolders: FolderContents['folders'] = Array.isArray(folderNode?.subfolders)
+          ? folderNode.subfolders.map((f: any) => ({
+              id: f.id,
+              name: f.name,
+              itemCount: typeof f.itemCount === 'number' ? f.itemCount : undefined,
+              previewItems: Array.isArray(f.previewItems) ? f.previewItems : [],
+            }))
+          : []
+        // Dedupe stacked versions just like the search API does so
+        // a folder full of versioned exports doesn't surface every
+        // sibling on the preview grid.
+        const seen = new Map<string, any>()
+        const rawVideos: any[] = Array.isArray(folderNode?.videos) ? folderNode.videos : []
+        for (const v of rawVideos) {
+          const key = v.name as string
+          const existing = seen.get(key)
+          if (!existing || (v.version ?? 0) > (existing.version ?? 0)) {
+            seen.set(key, v)
+          }
+        }
+        const previewVideos = Array.from(seen.values()).map((v: any) => ({
+          id: v.id,
+          name: v.name,
+          thumbnailUrl: v.thumbnailUrl ?? null,
+          previewUrl: v.previewUrl ?? null,
+          storyboardUrl: v.storyboardUrl ?? null,
+          duration: typeof v.duration === 'number' ? v.duration : null,
+          mediaType: v.mediaType,
+        }))
+        setFolderContents({ folders: subFolders, videos: previewVideos })
+      } catch {
+        if (!cancelled) setFolderContents({ folders: [], videos: [] })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [folderKey])
+
   if (!target) return null
+
+  // 2.5.2+: While we prefetch a folder's contents, render NOTHING.
+  // The user pressed Space; the popup will appear in a moment with
+  // real tiles. No empty frame, no skeleton, no width snap.
+  if (target.kind === 'folder' && folderContents === null) return null
 
   return (
     <div
@@ -148,7 +223,12 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
         {target.kind === 'video' ? (
           <VideoPreviewBody video={target} />
         ) : (
-          <FolderPreviewBody folder={target} projectId={projectId} onClose={onClose} />
+          <FolderPreviewBody
+            folder={target}
+            projectId={projectId}
+            onClose={onClose}
+            contents={folderContents!}
+          />
         )}
       </div>
     </div>
@@ -408,15 +488,22 @@ function ScrubThumbnail({ video: v }: { video: FolderContents['videos'][number] 
  */
 function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
   const items = (previewItems ?? []).slice(0, 4)
+  // 2.5.2+: empty folders now show the same chunky centred glyph as
+  // FolderCard (w-14 instead of the old w-10), so a Quick Preview
+  // peek into a sub-folder reads consistently with the main folder
+  // grid up top.
   if (items.length === 0) {
     return (
       <div className="absolute inset-0 flex items-center justify-center" aria-hidden>
-        <FolderIcon className="w-10 h-10 text-primary/70" />
+        <FolderIcon className="w-14 h-14 text-primary/70" />
       </div>
     )
   }
+  // 2.5.2+: tile fill matches FolderCard's `bg-white/[0.03]` so the
+  // mosaic cells read as a frosted-glass surface, not as black boxes
+  // covering the popup's glass tint.
   const baseTile =
-    'overflow-hidden bg-black/30 dark:bg-black/40 flex items-center justify-center'
+    'overflow-hidden bg-white/[0.03] flex items-center justify-center'
   const tileKey = (t: PreviewTile) =>
     t.kind === 'video' ? `v:${t.videoId}` : `f:${t.folderId}`
   const renderTile = (t: PreviewTile, size: 'big' | 'small') => {
@@ -437,9 +524,11 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         />
       )
     }
+    // 2.5.2+: matches FolderCard's `w-10` / `w-7` so folder glyphs in
+    // a sub-folder's mosaic stay legible at Quick Preview tile size.
     return (
       <FolderIcon
-        className={`text-primary/70 ${size === 'big' ? 'w-8 h-8' : 'w-5 h-5'}`}
+        className={`text-primary/70 ${size === 'big' ? 'w-10 h-10' : 'w-7 h-7'}`}
       />
     )
   }
@@ -451,7 +540,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         </div>
       )}
       {items.length === 2 && (
-        <div className="grid grid-cols-2 gap-1 w-full h-full bg-white/[0.04]">
+        <div className="grid grid-cols-2 gap-1 w-full h-full">
           {items.map((it) => (
             <div key={tileKey(it)} className={baseTile}>
               {renderTile(it, 'small')}
@@ -460,7 +549,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         </div>
       )}
       {items.length === 3 && (
-        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-white/[0.04]">
+        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full">
           <div className={`${baseTile} row-span-2`}>
             {renderTile(items[0], 'big')}
           </div>
@@ -469,7 +558,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         </div>
       )}
       {items.length === 4 && (
-        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-white/[0.04]">
+        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full">
           {items.map((it) => (
             <div key={tileKey(it)} className={baseTile}>
               {renderTile(it, 'small')}
@@ -485,14 +574,17 @@ function FolderPreviewBody({
   folder,
   projectId,
   onClose,
+  contents,
 }: {
   folder: QuickPreviewFolder
   projectId?: string
   onClose: () => void
+  /** 2.5.2+: Contents are now pre-fetched by the parent overlay and
+   *  passed in as a prop, so the body renders fully-populated on
+   *  first paint — no loading state, no skeleton, no width snap. */
+  contents: FolderContents
 }) {
   const router = useRouter()
-  const [contents, setContents] = useState<FolderContents | null>(null)
-  const [loading, setLoading] = useState(true)
 
   // 1.7.0+: navigation handlers — double-click a sub-folder to
   // drill into its dedicated page; double-click a video to open
@@ -513,69 +605,6 @@ function FolderPreviewBody({
     router.push(`/admin/projects/${projectId}/share?${params.toString()}`)
     requestAnimationFrame(() => onClose())
   }
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    ;(async () => {
-      try {
-        const res = await apiFetch(`/api/folders/${folder.id}`)
-        if (!res.ok) {
-          if (!cancelled) setContents({ folders: [], videos: [] })
-          return
-        }
-        const data = await res.json()
-        if (cancelled) return
-        // The endpoint wraps everything in `{ folder, breadcrumb }`.
-        // Direct contents live as `folder.subfolders` and
-        // `folder.videos` — earlier draft of this component read
-        // `data.folders` / `data.videos` at the top level and
-        // always rendered "empty" because those keys don't exist.
-        const folderNode = (data && data.folder) || {}
-        const subFolders: FolderContents['folders'] = Array.isArray(folderNode?.subfolders)
-          ? folderNode.subfolders.map((f: any) => ({
-              id: f.id,
-              name: f.name,
-              itemCount: typeof f.itemCount === 'number' ? f.itemCount : undefined,
-              // The folder GET endpoint pre-computes the Frame.io
-              // mosaic tiles for every subfolder so a Quick Preview
-              // peek can render the same cover the actual folder
-              // card shows. Pass them through untouched.
-              previewItems: Array.isArray(f.previewItems) ? f.previewItems : [],
-            }))
-          : []
-        // Dedupe stacked versions just like the search API does so
-        // a folder full of versioned exports doesn't surface every
-        // sibling on the preview grid.
-        const seen = new Map<string, any>()
-        const rawVideos: any[] = Array.isArray(folderNode?.videos) ? folderNode.videos : []
-        for (const v of rawVideos) {
-          const key = v.name as string
-          const existing = seen.get(key)
-          if (!existing || (v.version ?? 0) > (existing.version ?? 0)) {
-            seen.set(key, v)
-          }
-        }
-        const previewVideos = Array.from(seen.values()).map((v: any) => ({
-          id: v.id,
-          name: v.name,
-          thumbnailUrl: v.thumbnailUrl ?? null,
-          previewUrl: v.previewUrl ?? null,
-          storyboardUrl: v.storyboardUrl ?? null,
-          duration: typeof v.duration === 'number' ? v.duration : null,
-          mediaType: v.mediaType,
-        }))
-        setContents({ folders: subFolders, videos: previewVideos })
-      } catch {
-        if (!cancelled) setContents({ folders: [], videos: [] })
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [folder.id])
 
   const subtitle = useMemo(() => {
     const parts: string[] = []
@@ -602,31 +631,25 @@ function FolderPreviewBody({
       </div>
       <div
         className="p-4 overflow-y-auto"
-        // Width is FIXED (not min/max) once we know how many tiles
-        // we have, so any layout change inside (e.g. a video tile's
-        // intrinsic dims showing through during hover-scrub) can't
-        // jostle the panel. The 1/2/3-tile breakpoints below pick a
-        // pixel-perfect width that fits the columns + 12px gaps + 32px
-        // padding without overflow, capped by viewport on narrow
-        // screens.
+        // Width is FIXED (not min/max) so any layout change inside
+        // (e.g. a video tile's intrinsic dims showing through during
+        // hover-scrub) can't jostle the panel. The 1/2/3-tile
+        // breakpoints below pick a pixel-perfect width that fits the
+        // columns + 12px gaps + 32px padding without overflow, capped
+        // by viewport on narrow screens. Because contents are pre-
+        // fetched by the parent, the width is correct on first paint.
         style={{
           maxHeight: '75vh',
-          width: contents
-            ? `min(95vw, ${
-                Math.min(3, Math.max(1, contents.folders.length + contents.videos.length)) === 1
-                  ? 360
-                  : Math.min(3, Math.max(1, contents.folders.length + contents.videos.length)) === 2
-                  ? 520
-                  : 720
-              }px)`
-            : 'min(95vw, 720px)',
+          width: `min(95vw, ${
+            Math.min(3, Math.max(1, contents.folders.length + contents.videos.length)) === 1
+              ? 360
+              : Math.min(3, Math.max(1, contents.folders.length + contents.videos.length)) === 2
+              ? 520
+              : 720
+          }px)`,
         }}
       >
-        {loading ? (
-          <div className="text-sm text-white/55 text-center py-8">
-            Loading…
-          </div>
-        ) : !contents || (contents.folders.length === 0 && contents.videos.length === 0) ? (
+        {contents.folders.length === 0 && contents.videos.length === 0 ? (
           <div className="text-sm text-white/55 text-center py-8">
             This folder is empty.
           </div>
@@ -676,7 +699,12 @@ function FolderPreviewBody({
                 className="min-w-0 rounded-md overflow-hidden ring-1 ring-white/10 bg-white/[0.04] flex flex-col cursor-pointer hover:ring-primary/40 hover:bg-white/[0.07] transition-colors"
                 title={`${f.name} — double-click to open`}
               >
-                <div className="relative aspect-video bg-black/30 dark:bg-black/40">
+                {/* 2.5.2+: same chunky-folder treatment as FolderCard
+                    — light glass fill (white/[0.03]) + bigger glyphs
+                    so the Quick Preview mosaic reads identically to
+                    the main folder grid tiles, instead of the old
+                    cramped icons on black. */}
+                <div className="relative aspect-video bg-white/[0.03]">
                   <FolderCover previewItems={f.previewItems} />
                 </div>
                 <div className="px-2 py-1.5 flex items-center gap-1.5 min-w-0">

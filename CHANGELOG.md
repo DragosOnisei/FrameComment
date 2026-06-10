@@ -14,6 +14,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-06-10
+
+### Quick Preview + Global Settings polish
+
+A small follow-up to v3.0.0 cleaning up two surfaces that didn't
+quite land the v2.5 glass treatment first time around.
+
+- **Quick Preview folder peek — zero-flash open**: opening a
+  folder's Quick Preview popup used to flash a wide "Loading…"
+  bar at the default 720 px width, then snap to whatever
+  narrower width the actual contents required (520 px for two
+  items, 360 px for one). Contents are now pre-fetched by the
+  parent overlay before the modal mounts, so the popup appears
+  in one shot at its final width with real thumbnails — no
+  empty frame, no skeleton, no width snap. The fetch is
+  cancellable: Esc / Space during the brief invisible delay
+  closes cleanly.
+- **Quick Preview sub-folder tiles use the chunky FolderCard
+  glyph**: sub-folder tiles inside the popup were rendering on a
+  flat `bg-black/30` box with small `w-5` / `w-8` glyphs,
+  reading as a separate visual treatment from the main folder
+  grid one level up. They now use the same recipe as FolderCard
+  — `bg-white/[0.03]` glass fill, `w-14` empty-state glyph,
+  `w-10` / `w-7` mosaic glyphs — so the Quick Preview reads as
+  a direct echo of the cards behind it instead of a different
+  component.
+- **Global Settings page is now boxed**: on wide monitors the
+  Appearance / Branding / Security panels were stretching
+  edge-to-edge, while Project Settings was already centred and
+  capped at `max-w-screen-2xl` (1536 px). Global Settings now
+  picks up the same `max-w-screen-2xl mx-auto w-full` wrapper,
+  so the sidebar + content panel sit centred with symmetric
+  margins. Independent scroll on the right pane is preserved —
+  the flex chain wasn't touched.
+
+### Notes
+
+- Schema: unchanged. No migrations.
+- API: unchanged. Pure UI polish on top of 3.0.0's glass system.
+
+---
+
 ## [3.0.0] - 2026-06-10
 
 ### Big v2.5 → v3.0 polish pass — frosted glass everywhere

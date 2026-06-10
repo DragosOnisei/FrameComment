@@ -888,8 +888,11 @@ export default function GlobalSettingsPage() {
           the right content pane gets its own vertical scrollbar so
           the sidebar nav stays anchored while long sections (Security,
           Notifications) scroll independently. On mobile the natural
-          page scroll is preserved (overflow-visible). */}
-      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6 lg:py-4 flex-1 min-h-0 flex flex-col">
+          page scroll is preserved (overflow-visible).
+          2.5.2+: `max-w-screen-2xl mx-auto w-full` to match Project
+          Settings — the panel is boxed and centred instead of
+          stretching edge-to-edge on wide monitors. */}
+      <div className="max-w-screen-2xl mx-auto w-full px-3 sm:px-4 lg:px-6 py-3 sm:py-6 lg:py-4 flex-1 min-h-0 flex flex-col">
         {error && (
           <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
             <p className="text-xs sm:text-sm text-destructive font-medium">{error}</p>
