@@ -23,11 +23,16 @@ function hashStringToInt(input: string): number {
 
 /**
  * Returns a CSS background string suitable for `style.background`
- * applied to a tile element. 1.2.0+: muted, dark palette only —
- * the previous vibrant scheme felt too loud once the dashboard
- * filled up with tiles. Same id → same gradient, but every output
- * sits in low-saturation territory with low lightness so the grid
- * reads as one calm family.
+ * applied to a tile element.
+ *
+ * 2.5.1+: palette narrowed to the cool half of the wheel
+ * (teal → blue → indigo → violet) so every gradient feels like
+ * a natural extension of the FrameComment brand blue. Saturation
+ * and lightness are still pinned to muted-dark territory so the
+ * grid reads as one calm family — just one that matches the v2.5
+ * glass + spotlight chrome instead of the legacy olive/charcoal.
+ *
+ * Same id → same gradient, every time.
  */
 export function projectGradient(id: string): string {
   const hash = hashStringToInt(id)
@@ -37,17 +42,18 @@ export function projectGradient(id: string): string {
   const b3 = (hash >> 16) & 0xff
   const b4 = (hash >> 24) & 0xff
 
-  // Wider hue arc now that the colours are dark — every hue reads
-  // as a neutral charcoal-with-a-tint instead of a bright primary.
-  const hueA = b1 % 360
-  const hueB = (hueA + 20 + (b2 % 40)) % 360 // 20–60° off
-  const angle = 100 + (b3 % 80) // 100°–180° tilt
-  // Saturation + lightness pinned to muted-dark territory.
-  // 18–28% saturation keeps a hint of colour without being vivid;
-  // 12–18% lightness sits in deep charcoal-to-near-black.
-  const sat = 18 + (b4 % 11) // 18–28%
-  const lightA = 12 + (b4 % 4) // 12–15%
-  const lightB = 16 + (b3 % 4) // 16–19%
+  // Cool-only hue arc: 190°–270° spans cyan → teal → sky → brand
+  // blue → indigo → violet. Excludes warm yellows / oranges /
+  // greens that clashed with the v2.5 brand blue + spotlight.
+  const hueA = 190 + (b1 % 81) // 190–270°
+  const hueB = (hueA + 14 + (b2 % 22)) % 360 // 14–36° hop along the arc
+  const angle = 110 + (b3 % 80) // 110°–190° tilt (top-left → bottom-right)
+  // Slightly more saturated than 1.2.0 so the blue actually
+  // reads as blue under glass, but still muted enough to sit
+  // behind cards / text without competing.
+  const sat = 26 + (b4 % 14) // 26–40%
+  const lightA = 14 + (b4 % 4) // 14–17%
+  const lightB = 18 + (b3 % 5) // 18–22%
 
   return `linear-gradient(${angle}deg, hsl(${hueA} ${sat}% ${lightA}%) 0%, hsl(${hueB} ${sat}% ${lightB}%) 100%)`
 }

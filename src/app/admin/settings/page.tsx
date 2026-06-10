@@ -17,6 +17,7 @@ import { SecuritySettingsSection } from '@/components/settings/SecuritySettingsS
 import { BlocklistSection } from '@/components/settings/BlocklistSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 
 interface Settings {
   id: string
@@ -621,6 +622,21 @@ export default function GlobalSettingsPage() {
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
 
+      // 2.5.0+: keep the in-page accent-color cache aligned with what
+      // we just persisted, so AccentColorProvider on the next page
+      // load reads the chosen color from localStorage even before the
+      // /api/settings/theme call returns. Also lets AppearanceSection's
+      // unmount-revert logic know that the current value IS the saved
+      // baseline now — we dispatch a window event for it to listen on.
+      try {
+        localStorage.setItem('adminAccentColor', accentColor || 'blue')
+        window.dispatchEvent(
+          new CustomEvent('accentcolor:saved', { detail: { accentColor: accentColor || 'blue' } }),
+        )
+      } catch {
+        // localStorage can throw in private mode — non-fatal.
+      }
+
       // Reload settings data to reflect changes
       const refreshResponse = await apiFetch('/api/settings')
       if (refreshResponse.ok) {
@@ -693,13 +709,9 @@ export default function GlobalSettingsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">{tc('loading')}</p>
-      </div>
-    )
-  }
+  // 2.5.0+: silent first-render — drop the centred "Loading…" text
+  // so opening Settings feels instant. The layout chrome stays put.
+  if (loading) return null
 
   const settingSections = [
     // 1.5.8: dropped "Project Defaults" from the sidebar. The
@@ -711,7 +723,11 @@ export default function GlobalSettingsPage() {
     { id: 'appearance', label: t('appearance.title'), icon: Palette },
     { id: 'branding', label: t('branding.title'), icon: Building2 },
     { id: 'privacy', label: t('privacy.title'), icon: ShieldCheck },
-    { id: 'notifications', label: t('notifications.title'), icon: Mail },
+    // 2.5.0+: Email & Push Notifications hidden from the sidebar
+    // — we don't ship managed delivery infrastructure for it yet.
+    // Props + state + JSX stay defined below so re-enabling is a
+    // single-line restore.
+    // { id: 'notifications', label: t('notifications.title'), icon: Mail },
     { id: 'video-processing', label: t('videoProcessing.title'), icon: Video },
     { id: 'security', label: t('security.title'), icon: Shield },
     { id: 'blocklist', label: t('blocklist.title'), icon: Ban },
@@ -837,31 +853,43 @@ export default function GlobalSettingsPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="mb-4 sm:mb-6">
-          {/* 1.3.0+: title shrinks + save button stays visible on
-              phones. The button keeps its label past sm: but is icon
-              only on `<sm`. */}
-          <div className="flex justify-between items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-xl sm:text-3xl font-bold flex items-center gap-2 min-w-0">
-                <SettingsIcon className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
-                <span className="truncate">{t('title')}</span>
-              </h1>
-              <p className="text-xs sm:text-base text-muted-foreground mt-1 truncate">
-                {t('description')}
-              </p>
-            </div>
+    <div className="flex-1 min-h-0 flex flex-col">
+      {/* 2.5.0+: title + Save button portalled into AdminTopBar
+          slots — same pattern as Projects / Users pages. The
+          subtitle stays in the body just under the section panel. */}
+      <TopbarLeftSlot>
+        <SettingsIcon size={20} className="text-primary shrink-0" />
+        <h1
+          className="font-semibold truncate"
+          style={{ fontSize: 18, lineHeight: '24px' }}
+        >
+          {t('title')}
+        </h1>
+      </TopbarLeftSlot>
+      <TopbarRightSlot>
+        <Button
+          onClick={handleSave}
+          variant="ghost"
+          size="sm"
+          disabled={saving}
+          className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+          }}
+        >
+          <Save className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
+        </Button>
+      </TopbarRightSlot>
 
-            {/* 1.5.8: top Save Changes button removed from Global
-                Settings — the same button at the bottom of the page
-                is the only one shown now, matching the Project
-                Settings clean-up. Paste the Button block back here
-                to restore. */}
-          </div>
-        </div>
-
+      {/* 2.5.0+: on desktop the page becomes a fixed-height column —
+          the right content pane gets its own vertical scrollbar so
+          the sidebar nav stays anchored while long sections (Security,
+          Notifications) scroll independently. On mobile the natural
+          page scroll is preserved (overflow-visible). */}
+      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6 lg:py-4 flex-1 min-h-0 flex flex-col">
         {error && (
           <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
             <p className="text-xs sm:text-sm text-destructive font-medium">{error}</p>
@@ -894,19 +922,30 @@ export default function GlobalSettingsPage() {
           <BillingSection show={showBilling} setShow={setShowBilling} />
         </div>
 
-        {/* Desktop: sidebar nav + content panel */}
-        <div className="hidden lg:flex gap-6">
+        {/* Desktop: sidebar nav + content panel with INDEPENDENT
+            scrolling on the right pane. Anchored to viewport via
+            calc(100vh - topbar - page padding) because the flex
+            chain above isn't reliably bounded by parent providers.
+            Topbar = var(--topbar-height) = 4rem, page padding
+            (py-4) = 2rem total. */}
+        <div className="hidden lg:flex gap-6 h-[calc(100vh-var(--topbar-height)-2rem)]">
           <div className="w-56 flex-shrink-0">
-            <nav className="space-y-1 sticky top-6">
+            <nav
+              className="space-y-1 p-2 rounded-xl bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)]"
+              style={{
+                backdropFilter: 'blur(20px) saturate(140%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+              }}
+            >
               {settingSections.map((section) => (
                 <button
                   key={section.id}
                   onClick={() => setActiveSection(section.id)}
                   className={cn(
-                    'w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center gap-2.5 transition-colors',
+                    'w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2.5 transition-colors',
                     activeSection === section.id
-                      ? 'bg-accent text-accent-foreground font-medium'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                      ? 'bg-primary/15 text-primary font-medium'
+                      : 'text-white/75 hover:text-white hover:bg-white/5'
                   )}
                 >
                   <section.icon className="w-4 h-4 flex-shrink-0" />
@@ -916,7 +955,7 @@ export default function GlobalSettingsPage() {
             </nav>
           </div>
 
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 overflow-y-auto pr-2 pb-6 custom-scrollbar">
             {activeSection === 'appearance' && (
               <AppearanceSection {...appearanceProps} show={true} setShow={() => {}} collapsible={false} />
             )}
@@ -949,18 +988,6 @@ export default function GlobalSettingsPage() {
           </div>
         </div>
 
-        {/* Bottom notifications + save */}
-        {/* 1.9.4+: the success / error banner used to render
-            BOTH above the content (top of the page) and again
-            here below it, so a save flash showed twice. Keeping
-            only the top instance — drop the duplicate below. */}
-
-        <div className="mt-6 sm:mt-8 pb-20 lg:pb-24 flex justify-end">
-          <Button onClick={handleSave} variant="default" disabled={saving} size="default">
-            <Save className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
-          </Button>
-        </div>
       </div>
 
       {/* 2.2.4+: Global maintenance confirm dialogs. Destructive

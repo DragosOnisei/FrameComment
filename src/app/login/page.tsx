@@ -14,7 +14,7 @@ import { startAuthentication, browserSupportsWebAuthnAutofill } from '@simpleweb
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser'
 import { logError, logMessage } from '@/lib/logging'
 import { setTokens, clearTokens } from '@/lib/token-store'
-import BrandLogo from '@/components/BrandLogo'
+import WordMark from '@/components/WordMark'
 
 function LoginForm() {
   const t = useTranslations('auth')
@@ -244,10 +244,19 @@ function LoginForm() {
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <BrandLogo height={64} className="mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-foreground">
-            {tc('viTransfer')}
-          </h1>
+          {/* 2.5.0+: WordMark replaces the icon-only BrandLogo + h1
+              pair. The stacked variant renders icon above the
+              "FrameComment" label (with "Comment" in the brand
+              blue), so the wordmark IS the title — no duplicate
+              heading needed. The h1 stays as a visually-hidden
+              landmark for screen readers + SEO. */}
+          <WordMark
+            variant="stacked"
+            iconSize={64}
+            className="mx-auto mb-4"
+            ariaHidden
+          />
+          <h1 className="sr-only">{tc('viTransfer')}</h1>
           <p className="text-sm text-muted-foreground mt-2">
             {tc('videoReviewTagline')}
           </p>
@@ -361,7 +370,12 @@ export default function LoginPage() {
     <Suspense fallback={
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
         <div className="text-center">
-          <BrandLogo height={64} className="mx-auto mb-4 animate-pulse" ariaHidden />
+          <WordMark
+            variant="stacked"
+            iconSize={64}
+            className="mx-auto mb-4 animate-pulse"
+            ariaHidden
+          />
         </div>
       </div>
     }>

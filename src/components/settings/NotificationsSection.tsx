@@ -19,12 +19,15 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
 
   return (
     <CollapsibleSection
-      className="border-border"
+      className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+      style={{
+        backdropFilter: 'blur(20px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+      }}
       title={t('notifications.title')}
-      description={t('notifications.description')}
       open={show}
       onOpenChange={setShow}
-      contentClassName="space-y-6 border-t pt-6"
+      contentClassName="space-y-6 border-t border-white/10 pt-6"
       collapsible={collapsible}
     >
           <div
@@ -38,10 +41,10 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
               aria-selected={activeTab === 'email'}
               aria-controls="notifications-tabpanel-email"
               className={[
-                'flex-1 px-3 py-2 text-sm font-medium rounded-md border transition-colors',
+                'flex-1 px-3 py-2 text-sm font-medium rounded-lg ring-1 transition-colors',
                 activeTab === 'email'
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-background text-muted-foreground border-border hover:bg-accent hover:text-foreground',
+                  ? 'bg-primary/15 text-primary ring-primary/40'
+                  : 'bg-white/[0.04] text-white/75 ring-white/10 hover:bg-white/[0.08] hover:text-white',
               ].join(' ')}
               onClick={() => setActiveTab('email')}
             >
@@ -81,7 +84,7 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
 
           {activeTab === 'email' && (
             <div id="notifications-tabpanel-email" role="tabpanel" className="space-y-4">
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-white/55">
                 {t('notifications.emailDescription')}
               </div>
               <EmailSettingsContent {...emailProps} />
@@ -89,7 +92,7 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
           )}
           {activeTab === 'external' && (
             <div id="notifications-tabpanel-external" role="tabpanel" className="space-y-4">
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-white/55">
                 {t('notifications.pushDescription')}
               </div>
               <ExternalNotificationsContent active={show && activeTab === 'external'} showIntro={false} />
@@ -97,7 +100,7 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
           )}
           {activeTab === 'browser' && (
             <div id="notifications-tabpanel-browser" role="tabpanel" className="space-y-4">
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-white/55">
                 {t('notifications.browserPushDescription')}
               </div>
               <WebPushSection active={show && activeTab === 'browser'} />

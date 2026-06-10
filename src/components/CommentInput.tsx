@@ -421,7 +421,11 @@ export default function CommentInput({
   }
 
   return (
-    <div className="border-t border-border p-3 sm:p-4 bg-card flex-shrink-0 min-w-0">
+    // 2.5.1+: composer wrapper goes transparent so the page's
+    // `spotlight-bg` wash (and the CommentSection card's accent
+    // gradient) bleed through to the input area. Border kept as a
+    // hairline white divider matching the rest of the glass system.
+    <div className="border-t border-white/10 p-3 sm:p-4 flex-shrink-0 min-w-0">
       {/* Restriction Warning */}
       {currentVideoRestricted && restrictionMessage && (
         <div className="mb-3 p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
@@ -491,12 +495,12 @@ export default function CommentInput({
         </div>
       )}
 
-      {/* Show read-only name indicator when OTP authenticated */}
+      {/* Show read-only name indicator when OTP authenticated — 2.5.1+ glass */}
       {!currentVideoRestricted && showAuthorInput && isOtpAuthenticated && authorName && (
         <div className="mb-3">
-          <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 border border-border rounded-md">
+          <div className="flex items-center gap-2 px-3 py-2 bg-white/[0.06] ring-1 ring-white/10 rounded-md">
             <InitialsAvatar name={authorName} size="sm" />
-            <span className="text-sm text-foreground font-medium">
+            <span className="text-sm text-white font-medium">
               {t('commentingAs')} <span className="font-semibold">{authorName}</span>
             </span>
           </div>
@@ -511,10 +515,13 @@ export default function CommentInput({
       {/* Message Input */}
       {!currentVideoRestricted && (
         <>
-          {/* Pending annotation indicator */}
+          {/* Pending annotation indicator — 2.5.1+ glass pill, accent-tinted */}
           {pendingAnnotation && (
             <div className="mb-2">
-              <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded-md text-xs text-blue-600 dark:text-blue-400">
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-[hsl(var(--spotlight-tint))] ring-1 ring-[hsl(var(--spotlight-tint)/0.30)]"
+                style={{ backgroundColor: 'hsl(var(--spotlight-tint) / 0.12)' }}
+              >
                 <Pencil className="w-3 h-3" />
                 {t('drawingAttached')}
                 {onClearAnnotation && (
@@ -531,21 +538,21 @@ export default function CommentInput({
             </div>
           )}
 
-          {/* Pending attachment chips */}
+          {/* Pending attachment chips — 2.5.1+ glass pills */}
           {pendingAttachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {pendingAttachments.map((att) => (
                 <span
                   key={att.assetId}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 bg-muted/40 border border-border/50 rounded-md text-xs text-foreground"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-white/90 bg-white/[0.06] ring-1 ring-white/10"
                 >
-                  <Paperclip className="w-3 h-3 text-muted-foreground" />
+                  <Paperclip className="w-3 h-3 text-white/55" />
                   <span className="truncate max-w-[120px]">{att.fileName}</span>
                   {onRemoveAttachment && (
                     <button
                       type="button"
                       onClick={() => onRemoveAttachment(att.assetId)}
-                      className="text-muted-foreground hover:text-foreground ml-0.5"
+                      className="text-white/55 hover:text-white ml-0.5"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -563,7 +570,34 @@ export default function CommentInput({
             The action row sits below within the same wrapper, separated
             only by spacing — no internal divider, no double-box look.
           */}
-          <div className="rounded-lg border border-border bg-transparent px-3 py-2 focus-within:border-primary/60 transition-colors">
+          {/*
+            2.5.1+: glass card surface for the composer — same
+            language as the comment cards & dropdowns. Hairline
+            white/10 ring at rest, hover lifts the tint slightly,
+            and focus-within paints a brand-accent ring (driven by
+            `--spotlight-tint`) so the user gets a clear active
+            cue while typing. Inner radial bleed in the top-left
+            corner so the composer reads as a glass panel sitting
+            on the comments sidebar, not a flat bar.
+          */}
+          <div
+            className="rounded-xl bg-white/[0.05] ring-1 ring-white/10 hover:bg-white/[0.07] hover:ring-white/15 focus-within:bg-white/[0.07] px-3 py-2 transition-colors shadow-[0_8px_24px_-14px_rgba(0,0,0,0.6)]"
+            style={{
+              backgroundImage:
+                'radial-gradient(120% 70% at 0% 0%, hsl(var(--spotlight-tint) / 0.14) 0%, hsl(var(--spotlight-tint) / 0.04) 45%, transparent 75%)',
+            }}
+            onFocusCapture={(e) => {
+              // Paint the brand-accent ring via inline style so we
+              // win over the base ring without a Tailwind arbitrary
+              // value that wouldn't pick up `--spotlight-tint`.
+              ;(e.currentTarget as HTMLDivElement).style.boxShadow =
+                '0 0 0 1px hsl(var(--spotlight-tint) / 0.45), 0 8px 24px -14px rgba(0,0,0,0.6)'
+            }}
+            onBlurCapture={(e) => {
+              ;(e.currentTarget as HTMLDivElement).style.boxShadow =
+                '0 8px 24px -14px rgba(0,0,0,0.6)'
+            }}
+          >
             <div className="flex items-start gap-2 min-w-0">
               {!currentVideoRestricted && (
                 // 1.2.0+: Inline timestamp chip — Frame.io-style, ALWAYS
@@ -702,8 +736,8 @@ export default function CommentInput({
                     aria-label={t('drawOnVideo')}
                     className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       pendingAnnotation
-                        ? 'bg-primary/15 text-primary hover:bg-primary/20'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                        ? 'bg-[hsl(var(--spotlight-tint)/0.18)] text-[hsl(var(--spotlight-tint))] ring-1 ring-[hsl(var(--spotlight-tint)/0.35)] hover:bg-[hsl(var(--spotlight-tint)/0.25)]'
+                        : 'text-white/60 hover:text-white hover:bg-white/[0.08]'
                     }`}
                   >
                     <PenTool className="w-4 h-4" />

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Mic, Square, Trash2, Check, Loader2, ChevronDown, Play, Pause, Send } from 'lucide-react'
 import * as tus from 'tus-js-client'
 import {
@@ -142,15 +143,55 @@ export default function VoiceRecorderButton({
   // 1.9.1+: device picker popover open state + outside-click ref.
   const [showDevicePicker, setShowDevicePicker] = useState(false)
   const devicePickerRef = useRef<HTMLDivElement>(null)
+  // 2.5.1+: ref on the chevron trigger so the portalled popover can
+  // compute a viewport-fixed position anchored to it.
+  const devicePickerTriggerRef = useRef<HTMLButtonElement>(null)
+  const devicePickerPopoverRef = useRef<HTMLDivElement>(null)
+  const [devicePickerCoords, setDevicePickerCoords] = useState<{
+    left: number
+    bottom: number
+  } | null>(null)
   useEffect(() => {
     if (!showDevicePicker) return
+    // Click anywhere outside BOTH the trigger AND the portalled
+    // popover closes the picker. We have to check the popover ref
+    // explicitly because it lives under document.body now — the
+    // original devicePickerRef wrapper no longer contains it.
     const onDown = (e: MouseEvent) => {
-      if (!devicePickerRef.current?.contains(e.target as Node)) {
-        setShowDevicePicker(false)
-      }
+      const target = e.target as Node
+      if (devicePickerRef.current?.contains(target)) return
+      if (devicePickerPopoverRef.current?.contains(target)) return
+      setShowDevicePicker(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
+  }, [showDevicePicker])
+  // Compute / refresh the popover position whenever it opens or the
+  // page scrolls / resizes underneath it.
+  useEffect(() => {
+    if (!showDevicePicker) return
+    const compute = () => {
+      const el = devicePickerTriggerRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      // Anchor the popover so its LEFT edge sits ~60 px to the
+      // LEFT of the trigger — a moderate shift that puts the
+      // popover comfortably inside the comments sidebar without
+      // drifting too far from the chevron. Clamp at 8 px from the
+      // viewport edge so it never bleeds off the screen on narrow
+      // layouts.
+      setDevicePickerCoords({
+        left: Math.max(8, rect.left - 60),
+        bottom: window.innerHeight - rect.top + 8,
+      })
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
   }, [showDevicePicker])
   // Live waveform: a small ring of recent volume samples (0..1) for animation.
   const [waveSamples, setWaveSamples] = useState<number[]>(Array(24).fill(0.05))
@@ -684,7 +725,7 @@ export default function VoiceRecorderButton({
             type="button"
             onClick={startRecording}
             disabled={disabled || isUploading}
-            className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-2 rounded-md text-white/60 hover:text-white hover:bg-white/[0.08] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title={
               selectedLabel
                 ? `Record voice message (${selectedLabel})`
@@ -703,10 +744,11 @@ export default function VoiceRecorderButton({
               see clutter. */}
           {audioDevices.length > 1 && (
             <button
+              ref={devicePickerTriggerRef}
               type="button"
               onClick={() => setShowDevicePicker((v) => !v)}
               disabled={disabled || isUploading}
-              className="p-1 -ml-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+              className="p-1 -ml-1 rounded-md text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors disabled:opacity-50"
               title="Choose microphone"
               aria-label="Choose microphone"
               aria-haspopup="menu"
@@ -715,12 +757,33 @@ export default function VoiceRecorderButton({
               <ChevronDown className="w-3 h-3" />
             </button>
           )}
-          {showDevicePicker && audioDevices.length > 0 && (
+          {showDevicePicker && audioDevices.length > 0 && devicePickerCoords && typeof document !== 'undefined' && createPortal(
+            // 2.5.1+: PORTAL to document.body so the frosted-glass
+            // backdrop-filter actually samples the real UI behind
+            // the popover, not the comments sidebar's already-
+            // glassed surface. (Any ancestor with backdrop-filter,
+            // transform, filter, etc. forms a "backdrop root" — the
+            // popover's blur then samples that empty root instead
+            // of the page beneath. Portalling to body sidesteps
+            // every ancestor.)
             <div
+              ref={devicePickerPopoverRef}
               role="menu"
-              className="absolute bottom-full left-0 mb-1 min-w-[220px] max-w-[280px] rounded-lg border border-border bg-popover text-popover-foreground shadow-xl p-1 z-50"
+              className="fixed min-w-[260px] max-w-[320px] rounded-lg ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1 pr-2 z-[200] text-white animate-in fade-in-0 slide-in-from-bottom-1 duration-150"
+              style={{
+                left: devicePickerCoords.left,
+                bottom: devicePickerCoords.bottom,
+                backgroundColor: 'rgba(22, 37, 51, 0.35)',
+                backgroundImage:
+                  'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.20) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
+                backdropFilter: 'blur(40px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                transform: 'translate3d(0, 0, 0)',
+                willChange: 'backdrop-filter, transform',
+                isolation: 'isolate',
+              }}
             >
-              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <div className="px-2 py-1.5 pr-3 text-[10px] uppercase tracking-wide text-white/55">
                 Microphone
               </div>
               {audioDevices.map((d, i) => {
@@ -736,18 +799,48 @@ export default function VoiceRecorderButton({
                       setSelectedDeviceId(d.deviceId)
                       setShowDevicePicker(false)
                     }}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left hover:bg-accent transition-colors ${
-                      isSelected ? 'text-foreground' : 'text-muted-foreground'
-                    }`}
+                    className="w-full flex items-center gap-2 px-2 pr-4 py-1.5 rounded-md text-xs text-left transition-colors"
+                    style={
+                      isSelected
+                        ? {
+                            backgroundColor:
+                              'hsl(var(--spotlight-tint) / 0.20)',
+                            boxShadow:
+                              'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.45)',
+                          }
+                        : undefined
+                    }
+                    onMouseEnter={(e) => {
+                      if (!isSelected)
+                        (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                          'rgba(255,255,255,0.08)'
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected)
+                        (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                          ''
+                    }}
                   >
-                    <span className="w-4 h-4 shrink-0 flex items-center justify-center">
-                      {isSelected && <Check className="w-3.5 h-3.5" />}
+                    <span
+                      className="w-4 h-4 shrink-0 flex items-center justify-center"
+                      style={
+                        isSelected
+                          ? { color: 'hsl(var(--spotlight-tint))' }
+                          : undefined
+                      }
+                    >
+                      {isSelected && <Check className="w-3.5 h-3.5" strokeWidth={2.5} />}
                     </span>
-                    <span className="truncate">{label}</span>
+                    <span
+                      className={`truncate ${isSelected ? 'text-white' : 'text-white/80'}`}
+                    >
+                      {label}
+                    </span>
                   </button>
                 )
               })}
-            </div>
+            </div>,
+            document.body
           )}
           {error && (
             <span className="ml-2 text-xs text-destructive">{error}</span>
@@ -760,31 +853,50 @@ export default function VoiceRecorderButton({
     )
   }
 
-  // Recording state: live duration + waveform + stop button
+  // Recording state: live duration + waveform + stop button.
+  // 2.5.1+: glass v2.5 — wrapper is the same white-tint + hairline
+  // ring used elsewhere in the composer, with an accent-tinted
+  // radial bleed driven by --spotlight-tint so the bars feel like
+  // they're sitting on top of a soft blue glow. The waveform bars
+  // themselves use --spotlight-tint so they react to the user's
+  // chosen accent. Red is kept ONLY on the live-recording dot
+  // (universal "REC" affordance) and the Stop pill, because those
+  // are semantic cues, not chrome.
   if (isRecording) {
     const remaining = Math.max(0, MAX_DURATION_SECONDS - duration)
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/40 min-w-0 flex-1">
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.06] ring-1 ring-white/10 shadow-[0_6px_18px_-12px_rgba(0,0,0,0.45)] min-w-0 flex-1"
+        style={{
+          backgroundImage:
+            'radial-gradient(120% 80% at 0% 50%, hsl(var(--spotlight-tint) / 0.15) 0%, hsl(var(--spotlight-tint) / 0.04) 50%, transparent 80%)',
+        }}
+      >
         <span className="relative flex h-2 w-2 shrink-0">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
         </span>
-        <span className="text-xs font-mono text-foreground tabular-nums shrink-0">
+        <span className="text-xs font-mono text-white tabular-nums shrink-0">
           {formatDuration(duration)}
         </span>
-        {/* Waveform fills the available width — at narrow widths it
-            simply renders fewer/thinner bars, never overflows. */}
+        {/* Waveform fills the available width — bars react to voice
+            via the analyser RMS sampled in the recording effect.
+            Tint follows the active accent. */}
         <div className="flex items-end gap-[2px] h-5 flex-1 min-w-0 overflow-hidden">
           {waveSamples.map((v, i) => (
             <div
               key={i}
-              className="flex-1 bg-red-400 rounded-sm transition-all duration-75 min-w-0"
-              style={{ height: `${Math.max(8, Math.min(100, v * 220))}%` }}
+              className="flex-1 rounded-sm transition-all duration-75 min-w-0"
+              style={{
+                height: `${Math.max(8, Math.min(100, v * 220))}%`,
+                backgroundColor: 'hsl(var(--spotlight-tint))',
+                boxShadow: '0 0 6px hsl(var(--spotlight-tint) / 0.55)',
+              }}
             />
           ))}
         </div>
         {remaining < 30 && (
-          <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
+          <span className="text-[10px] text-white/55 shrink-0 hidden sm:inline">
             {Math.floor(remaining)}s left
           </span>
         )}
@@ -810,12 +922,22 @@ export default function VoiceRecorderButton({
   // icon we didn't ask for). A hidden <audio> drives playback;
   // the bars dye left-to-right with `bg-primary` as it plays.
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/40 border border-border min-w-0 flex-1">
+    // 2.5.1+: glass preview chip — same wrapper language as the
+    // recording chip above, so the transition from "REC" to "preview"
+    // doesn't break the visual frame. Subtle radial accent in the
+    // left half keeps continuity with the rest of the v2.5 surfaces.
+    <div
+      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.06] ring-1 ring-white/10 shadow-[0_6px_18px_-12px_rgba(0,0,0,0.45)] min-w-0 flex-1"
+      style={{
+        backgroundImage:
+          'radial-gradient(120% 80% at 0% 50%, hsl(var(--spotlight-tint) / 0.12) 0%, hsl(var(--spotlight-tint) / 0.03) 55%, transparent 85%)',
+      }}
+    >
       <button
         type="button"
         onClick={togglePlayback}
         disabled={isUploading || !previewUrl}
-        className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 text-foreground transition-colors disabled:opacity-50"
+        className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-white/[0.10] hover:bg-white/[0.18] ring-1 ring-white/15 text-white transition-colors disabled:opacity-50"
         title={isPlaying ? 'Pause' : 'Play'}
         aria-label={isPlaying ? 'Pause' : 'Play'}
       >
@@ -825,32 +947,43 @@ export default function VoiceRecorderButton({
           <Play className="w-3 h-3 ml-[1px]" fill="currentColor" />
         )}
       </button>
-      {/* 1.9.1+: continuous-line scrubber instead of bars (per user
-          request). Outer container is the full click/touch target
-          with px-2 inset so the thumb's 12 px circle never gets
-          clipped at the ends. Inner relative wrapper hosts the
-          background track, the filled portion, and the draggable
-          thumb. rAF drives playbackProgress at 60 fps while
-          playing, so no CSS transition is needed — the thumb glides
-          smoothly without the choppy stop/start that the 4-6 Hz
-          onTimeUpdate produced. Transition is also omitted during
-          active scrub so the thumb tracks the cursor 1:1. */}
+      {/* 1.9.1+: continuous-line scrubber. 2.5.1+: track + thumb
+          re-skinned for v2.5. Track is a hairline white line so
+          the accent-tinted fill reads cleanly against it; thumb is
+          a translucent glass ball with a white stroke (per user
+          request: "biluta ca un geam cu stroke alb"). The fill
+          itself uses --spotlight-tint so it tracks the user's
+          chosen accent. */}
       <div
         ref={previewBarsRef}
         onMouseDown={handlePreviewMouseDown}
         onTouchStart={handlePreviewTouchStart}
         className="relative h-5 flex-1 min-w-0 cursor-pointer touch-none flex items-center px-2"
       >
-        <div className="relative w-full h-[3px] rounded-full bg-muted-foreground/40">
+        <div className="relative w-full h-[3px] rounded-full bg-white/15">
           <div
-            className="absolute inset-y-0 left-0 bg-primary rounded-full"
-            style={{ width: `${playbackProgress * 100}%` }}
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{
+              width: `${playbackProgress * 100}%`,
+              backgroundColor: 'hsl(var(--spotlight-tint))',
+              boxShadow: '0 0 8px hsl(var(--spotlight-tint) / 0.45)',
+            }}
           />
           <div
-            className="absolute top-1/2 w-3 h-3 rounded-full bg-primary shadow-md ring-2 ring-background pointer-events-none"
+            className="absolute top-1/2 w-3.5 h-3.5 rounded-full pointer-events-none"
             style={{
               left: `${playbackProgress * 100}%`,
               transform: 'translate(-50%, -50%)',
+              // Frosted-glass ball: translucent white interior, crisp
+              // white outline, and a soft glow tinted with the accent
+              // so the thumb still reads as "active" without being a
+              // solid blue dot.
+              backgroundColor: 'rgba(255, 255, 255, 0.18)',
+              border: '1.5px solid rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(6px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(6px) saturate(140%)',
+              boxShadow:
+                '0 0 0 1px hsl(var(--spotlight-tint) / 0.35), 0 2px 8px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
             }}
           />
         </div>
@@ -859,7 +992,7 @@ export default function VoiceRecorderButton({
         type="button"
         onClick={cancel}
         disabled={isUploading}
-        className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-accent transition-colors disabled:opacity-50 shrink-0"
+        className="p-1.5 rounded-md text-white/55 hover:text-red-400 hover:bg-white/[0.08] transition-colors disabled:opacity-50 shrink-0"
         title="Discard recording"
         aria-label="Discard recording"
       >

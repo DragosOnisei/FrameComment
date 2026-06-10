@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useTranslations, useLocale } from 'next-intl'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -54,6 +55,32 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
   const tc = useTranslations('common')
   const tn = useTranslations('nav')
   const locale = useLocale()
+  const router = useRouter()
+
+  /**
+   * 2.5.1+: Frame.io-style enter-on-double-click for project tiles.
+   * Mirrors the FolderCard / VideoCard behaviour the rest of the
+   * admin uses — a single click on a tile is now a no-op (room to
+   * grow into multi-select later), only a double-click drills into
+   * the project. Cmd/Ctrl-click and middle-click still open the
+   * project in a new tab, same affordance the old `<Link>` gave.
+   */
+  const handleProjectClick = (e: React.MouseEvent, projectId: string) => {
+    if (e.metaKey || e.ctrlKey || e.button === 1) {
+      window.open(`/admin/projects/${projectId}`, '_blank', 'noopener')
+    }
+    // Otherwise: do nothing. Double-click handles the actual nav.
+  }
+  const handleProjectAuxClick = (e: React.MouseEvent, projectId: string) => {
+    // Middle-click on a non-anchor element doesn't trigger `click`
+    // in most browsers — `auxClick` does. Open in a new tab.
+    if (e.button === 1) {
+      window.open(`/admin/projects/${projectId}`, '_blank', 'noopener')
+    }
+  }
+  const handleProjectDoubleClick = (projectId: string) => {
+    router.push(`/admin/projects/${projectId}`)
+  }
   // 1.7.2+: sort mode now comes from the shared admin sort store
   // (useAdminSortMode). The toggle UI lives in AdminHeader, next
   // to the view-mode toggle. We narrow the union to the two
@@ -146,7 +173,14 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
         // size below; kebab lives in the footer next to the
         // "Updated 2h ago" timestamp. A "New Project" placeholder sits
         // at the end of the grid so creating one feels in-flow.
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        // 2.5.0 (revised): looser grid so each tile has room for a
+        // chunky icon + two lines of meta without truncation.
+        //
+        // 2.5.1+: bumped one column at every desktop breakpoint
+        // (lg→4, xl→5, 2xl→6) so wide displays can pack 6 tiles
+        // per row instead of 5. Cards stay the same shape — they
+        // just shrink proportionally to fit the extra column.
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
           {sortedProjects.map((project) => {
             const folderCount = project._count?.folders ?? 0
             const sizeLabel = formatBytes(project.totalSize)
@@ -154,80 +188,153 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
               !!project.sharePassword ||
               (project.authMode && project.authMode !== 'NONE')
 
+            const videoCount = project._count?.videos ?? 0
             return (
-              <div key={project.id} className="group">
-                <Link
-                  href={`/admin/projects/${project.id}`}
-                  className="block relative aspect-square rounded-xl overflow-hidden ring-1 ring-border/40 hover:ring-border transition-[box-shadow,outline]"
+              <div
+                key={project.id}
+                className="group relative"
+                data-project-tile
+              >
+                {/* 2.5.0 (revised): two-zone integrated card. Logo /
+                    cover stays at a clean aspect-square so the brand
+                    art isn't stretched into a portrait frame, and the
+                    meta (title + folder/video count + timestamp) sits
+                    in its own info strip BELOW the cover, all wrapped
+                    in one rounded frame. A short dark fade bleeds out
+                    of the cover into the info strip so the seam reads
+                    as a single continuous panel, not two stacked
+                    rectangles. */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  // 2.5.1+: `mousedown` preventDefault blocks the
+                  // browser from focusing the div on mouse click —
+                  // a focusable div (`tabIndex=0`) otherwise paints
+                  // the default blue focus ring as soon as the
+                  // pointer presses it. Suppressing focus on click
+                  // is the same trick MUI / Radix use for "button-
+                  // like containers that shouldn't look pressed".
+                  // The keyboard handler below still focuses
+                  // properly via Tab, so a11y survives.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => handleProjectClick(e, project.id)}
+                  onAuxClick={(e) => handleProjectAuxClick(e, project.id)}
+                  onDoubleClick={() => handleProjectDoubleClick(project.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      handleProjectDoubleClick(project.id)
+                    }
+                  }}
+                  // 2.5.1+: NO focus ring, NO outline, NO webkit tap
+                  // highlight — click on the tile is meant to feel
+                  // inert. Double-click is what actually navigates.
+                  className="block rounded-xl overflow-hidden ring-1 ring-border/40 hover:ring-border transition-[box-shadow,outline] cursor-pointer outline-none focus:outline-none focus-visible:outline-none select-none [-webkit-tap-highlight-color:transparent]"
                   aria-label={project.title}
                 >
-                  {/* 1.2.0+: prefer an uploaded cover image; fall back
-                      to the deterministic gradient. The cover image is
-                      admin-gated (bearer token), so we route through
-                      ProjectCoverImage which fetches via apiFetch +
-                      blob URL instead of a naked <img src> that would
-                      401. When a cover exists we render a neutral
-                      muted backdrop underneath (NOT the gradient) so
-                      the user never sees the wrong-colour gradient
-                      flash before their cover loads, and no gradient
-                      edge bleeds out from behind the image on hover. */}
-                  {(project as any).coverImagePath ? (
-                    <>
-                      <div className="absolute inset-0 bg-muted" />
-                      <ProjectCoverImage
-                        projectId={project.id}
-                        cacheKey={
-                          project.updatedAt
-                            ? new Date(project.updatedAt).getTime()
-                            : undefined
-                        }
-                        className="absolute inset-0 w-full h-full object-cover"
+                  {/* Top: square cover / logo zone. */}
+                  <div className="relative aspect-square">
+                    {(project as any).coverImagePath ? (
+                      <>
+                        <div className="absolute inset-0 bg-muted" />
+                        <ProjectCoverImage
+                          projectId={project.id}
+                          cacheKey={
+                            project.updatedAt
+                              ? new Date(project.updatedAt).getTime()
+                              : undefined
+                          }
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      </>
+                    ) : (
+                      <div
+                        className="absolute inset-0"
+                        style={{ background: projectGradient(project.id) }}
                       />
-                    </>
-                  ) : (
-                    // 1.2.0+: hover-zoom dropped at the user's request
-                    // for a calmer dashboard — the tile still
-                    // brightens its ring on hover, that's enough.
+                    )}
+
+                    {/* Bottom fade — short gradient that bleeds the
+                        cover into the info strip. Tinted to the same
+                        dark-blue ink (#13181d) as the info strip
+                        below so the cover-to-info seam reads as a
+                        single continuous panel, not a black slab
+                        clipped onto a coloured tile. */}
                     <div
-                      className="absolute inset-0"
-                      style={{ background: projectGradient(project.id) }}
+                      className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent to-[#13181d]/65 pointer-events-none"
+                      aria-hidden
                     />
-                  )}
-                  {isLocked && (
-                    <span
-                      className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded-md bg-black/40 text-white backdrop-blur-sm"
-                      title="Password protected"
-                      aria-label="Password protected"
-                    >
-                      <Lock className="w-3.5 h-3.5" />
-                    </span>
-                  )}
-                </Link>
-                <div className="mt-2 flex items-start gap-2 min-w-0">
-                  <div className="flex-1 min-w-0">
-                    <Link
-                      href={`/admin/projects/${project.id}`}
-                      className="block text-sm font-semibold text-foreground truncate hover:underline"
+
+                    {/* Lock pip — kept on top-LEFT so the kebab takes
+                        the conventional top-right corner. */}
+                    {isLocked && (
+                      <span
+                        className="absolute top-2 left-2 inline-flex items-center justify-center w-7 h-7 rounded-md bg-black/40 text-white backdrop-blur-sm"
+                        title="Password protected"
+                        aria-label="Password protected"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Bottom: info strip. Dark-blue ink (#13181d) at
+                      80% opacity — softer than pure black, lets the
+                      spotlight glow behind the card register on the
+                      edges. White text hierarchy stays the same:
+                      title bold, stats at 80%, timestamp at 60%. */}
+                  <div className="bg-[#13181d]/80 px-4 py-3.5">
+                    <div
+                      className="text-white text-base font-semibold truncate"
                       title={project.title}
                     >
                       {project.title}
-                    </Link>
-                    <div className="text-xs text-muted-foreground tabular-nums mt-0.5 truncate">
-                      {folderCount} {folderCount === 1 ? 'folder' : 'folders'} · {sizeLabel}
                     </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                    {/* 2.5.0 (revised): the stats line gets a hard
+                        title attribute so the FULL string survives
+                        even when an unusually long size label (e.g.
+                        "1,024 GB") forces a single-line truncate at
+                        narrow grid columns. The flex / gap-x-1.5
+                        layout naturally wraps to a second row
+                        instead of clipping if there's not enough
+                        room. */}
+                    <div
+                      className="text-white/80 text-xs tabular-nums mt-1 flex flex-wrap gap-x-1.5"
+                      title={`${folderCount} ${folderCount === 1 ? 'folder' : 'folders'} · ${videoCount} ${videoCount === 1 ? 'video' : 'videos'} · ${sizeLabel}`}
+                    >
+                      <span>{folderCount} {folderCount === 1 ? 'folder' : 'folders'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{videoCount} {videoCount === 1 ? 'video' : 'videos'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{sizeLabel}</span>
+                    </div>
+                    <div className="text-white/55 text-[11px] mt-1 truncate">
                       Updated {formatRelativeTime(project.updatedAt)}
                     </div>
                   </div>
-                  <ProjectCardKebab
-                    projectId={project.id}
-                    projectSlug={project.slug}
-                    projectTitle={project.title}
-                    projectStatus={project.status}
-                    projectFolderCount={project._count?.folders ?? 0}
-                    projectVideoCount={project._count?.videos ?? 0}
-                    onMutated={onProjectMutated}
-                  />
+                </div>
+
+                {/* Kebab is a sibling of the card wrapper (not inside it) so
+                    clicks on its trigger don't bubble up and follow
+                    the card href. Positioned over the tile's top-
+                    right corner. Solid dark fill (no backdrop blur)
+                    keeps it legible on any cover — backdrop-filter
+                    creates a containing block for `position: fixed`
+                    in modern browsers, which would nail the kebab
+                    dropdown to this wrapper instead of the viewport
+                    and make it open hundreds of pixels off-screen. */}
+                <div className="absolute top-2 right-2 z-10">
+                  <div className="rounded-md bg-black/55 text-white">
+                    <ProjectCardKebab
+                      projectId={project.id}
+                      projectSlug={project.slug}
+                      projectTitle={project.title}
+                      projectStatus={project.status}
+                      projectFolderCount={project._count?.folders ?? 0}
+                      projectVideoCount={project._count?.videos ?? 0}
+                      onMutated={onProjectMutated}
+                    />
+                  </div>
                 </div>
               </div>
             )
@@ -242,7 +349,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
             <button
               type="button"
               onClick={onNewProject}
-              className="group flex flex-col items-center justify-center aspect-square rounded-xl border border-dashed border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:border-border transition-colors"
+              className="group flex flex-col items-center justify-center h-full min-h-[200px] rounded-xl border border-dashed border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:border-border transition-colors"
               aria-label={t('newProject')}
             >
               <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-muted/60 group-hover:bg-muted transition-colors">
@@ -253,7 +360,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
           ) : (
             <Link
               href="/admin/projects/new"
-              className="group flex flex-col items-center justify-center aspect-square rounded-xl border border-dashed border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:border-border transition-colors"
+              className="group flex flex-col items-center justify-center h-full min-h-[200px] rounded-xl border border-dashed border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:border-border transition-colors"
               aria-label={t('newProject')}
             >
               <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-muted/60 group-hover:bg-muted transition-colors">
@@ -264,11 +371,29 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
           )}
         </div>
       ) : (
-        /* Table View */
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between px-3 sm:px-5 py-2.5 border-b bg-muted/30">
+        /* Table View — 2.5.1+: full v2.5 frosted glass recipe to
+           match Project Settings panels, banners, and dialogs.
+           Was on a flat `bg-[#13181d]/65` before; bumped to the
+           same translucent navy + spotlight-tinted radial wash +
+           40px backdrop blur the rest of the v2.5 system uses, so
+           the table sits in the same lit-glass surface family as
+           the rest of the admin UI. */
+        <div
+          className="rounded-xl overflow-hidden ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.55)] text-white"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="flex items-center justify-between px-3 sm:px-5 py-2.5 border-b border-white/10 bg-white/[0.03]">
             <span className="text-sm font-medium">{tn('projects')}</span>
-            <span className="text-xs text-muted-foreground">{sortedProjects.length} {t('projectsCount')}</span>
+            <span className="text-xs text-white/55">{sortedProjects.length} {t('projectsCount')}</span>
           </div>
           {/* Table Header — status column removed (1.0.6+); videos &
               comments columns swapped for folders & total size.
@@ -277,25 +402,42 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
               Project Settings if the workflow needs them).
               1.3.0+: tighter side padding on phones; the header row
               hides on `<sm` since only Name + kebab show there. */}
-          <div className="hidden sm:flex items-center gap-4 px-3 sm:px-5 py-2 text-xs text-muted-foreground bg-muted/20 border-b">
+          <div className="hidden sm:flex items-center gap-4 px-3 sm:px-5 py-2 text-xs text-white/55 bg-white/[0.02] border-b border-white/10">
             <span className="flex-1 min-w-0">{tc('name')}</span>
             <span className="w-20 text-center hidden lg:block">Folders</span>
+            <span className="w-20 text-center hidden lg:block">Videos</span>
             <span className="w-24 text-right hidden lg:block">Size</span>
             <span className="w-24 hidden xl:block">{tc('created')}</span>
             <span className="w-24 hidden lg:block">{tc('updated')}</span>
             <span className="w-8"></span>
           </div>
-          <div className="divide-y">
+          <div className="divide-y divide-white/10">
             {sortedProjects.map((project) => {
               const folderCount = project._count?.folders ?? 0
+              const videoCount = project._count?.videos ?? 0
               const sizeLabel = formatBytes(project.totalSize)
               const hasCover = !!(project as any).coverImagePath
 
               return (
-                <Link
+                <div
                   key={project.id}
-                  href={`/admin/projects/${project.id}`}
-                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm hover:bg-accent/30 transition-colors"
+                  role="button"
+                  tabIndex={0}
+                  // See grid view: preventDefault on mousedown blocks
+                  // the focus that the browser would otherwise apply
+                  // to a focusable div on click. No focus = no flash.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => handleProjectClick(e, project.id)}
+                  onAuxClick={(e) => handleProjectAuxClick(e, project.id)}
+                  onDoubleClick={() => handleProjectDoubleClick(project.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      handleProjectDoubleClick(project.id)
+                    }
+                  }}
+                  className="flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm hover:bg-white/5 transition-colors cursor-pointer outline-none focus:outline-none focus-visible:outline-none select-none [-webkit-tap-highlight-color:transparent]"
+                  aria-label={project.title}
                 >
                   {/* 1.2.0+: tiny rounded thumbnail before the title,
                       Frame.io-style. Cover image when uploaded, else
@@ -322,13 +464,14 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                       />
                     )}
                   </div>
-                  <span className="flex-1 min-w-0 font-medium truncate">{project.title}</span>
-                  <span className="w-20 text-center text-xs text-muted-foreground tabular-nums hidden lg:block">{folderCount}</span>
-                  <span className="w-24 text-right text-xs text-muted-foreground tabular-nums hidden lg:block">{sizeLabel}</span>
-                  <span className="w-24 text-xs text-muted-foreground hidden xl:block">
+                  <span className="flex-1 min-w-0 font-medium truncate text-white">{project.title}</span>
+                  <span className="w-20 text-center text-xs text-white/65 tabular-nums hidden lg:block">{folderCount}</span>
+                  <span className="w-20 text-center text-xs text-white/65 tabular-nums hidden lg:block">{videoCount}</span>
+                  <span className="w-24 text-right text-xs text-white/65 tabular-nums hidden lg:block">{sizeLabel}</span>
+                  <span className="w-24 text-xs text-white/55 hidden xl:block">
                     {formatDate(project.createdAt)}
                   </span>
-                  <span className="w-24 text-xs text-muted-foreground hidden lg:block">
+                  <span className="w-24 text-xs text-white/55 hidden lg:block">
                     {formatDate(project.updatedAt)}
                   </span>
                   <ProjectCardKebab
@@ -340,7 +483,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                     projectVideoCount={project._count?.videos ?? 0}
                     onMutated={onProjectMutated}
                   />
-                </Link>
+                </div>
               )
             })}
 
@@ -352,9 +495,9 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
               <button
                 type="button"
                 onClick={onNewProject}
-                className="w-full flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors text-left"
+                className="w-full flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm text-white/55 hover:text-white hover:bg-white/5 transition-colors text-left"
               >
-                <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center">
+                <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-white/20 bg-white/[0.03] flex items-center justify-center">
                   <Plus className="w-4 h-4" />
                 </div>
                 <span className="flex-1 min-w-0 font-medium">{t('newProject')}</span>
@@ -362,16 +505,16 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
             ) : (
               <Link
                 href="/admin/projects/new"
-                className="w-full flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
+                className="w-full flex items-center gap-3 sm:gap-4 px-3 sm:px-5 py-2.5 sm:py-3 text-sm text-white/55 hover:text-white hover:bg-white/5 transition-colors"
               >
-                <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-border/60 bg-muted/30 flex items-center justify-center">
+                <div className="w-8 h-8 shrink-0 rounded-md border border-dashed border-white/20 bg-white/[0.03] flex items-center justify-center">
                   <Plus className="w-4 h-4" />
                 </div>
                 <span className="flex-1 min-w-0 font-medium">{t('newProject')}</span>
               </Link>
             )}
           </div>
-        </Card>
+        </div>
       )}
     </>
   )

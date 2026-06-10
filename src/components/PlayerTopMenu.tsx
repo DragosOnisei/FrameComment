@@ -435,17 +435,18 @@ export default function PlayerTopMenu({
         aria-expanded={open}
         className={`
           inline-flex items-center justify-center
-          p-2 rounded-lg border border-border bg-background
-          hover:bg-accent transition-colors shadow-sm
-          ${open ? 'bg-accent' : ''}
+          p-2 rounded-lg ring-1 transition-colors
+          ${open
+            ? 'bg-white/[0.12] ring-white/20 text-white'
+            : 'bg-white/[0.06] ring-white/10 hover:bg-white/[0.12] hover:ring-white/20 text-white/85 hover:text-white'}
         `}
         title="More actions"
         aria-label="More actions"
       >
         {busy ? (
-          <Loader2 className="h-5 w-5 text-foreground animate-spin" />
+          <Loader2 className="h-5 w-5 animate-spin" />
         ) : (
-          <MoreVertical className="h-5 w-5 text-foreground" />
+          <MoreVertical className="h-5 w-5" />
         )}
       </button>
 
@@ -477,27 +478,32 @@ export default function PlayerTopMenu({
         <div
           role="menu"
           ref={popoverRef}
-          // 1.3.2+: portalled to document.body. The parent ThumbnailReel
-          // toolbar already has `backdrop-blur-sm`, which on iOS Safari
-          // creates a "backdrop root" that prevents any descendant's
-          // backdrop-filter from sampling pixels behind the toolbar —
-          // result: blur silently no-ops. Rendering at body level
-          // escapes that root so the filter actually reaches the video.
-          // The viewport-anchored `position: fixed` keeps the popover
-          // glued to the kebab trigger's bottom-right corner.
+          // 2.5.1+: TRUE frosted glass — low-opacity navy base so
+          // the backdrop-blur of what's behind reads clearly,
+          // accent-tinted radial bleed in the top-left + heavy
+          // blur. GPU layer hints (translate3d / will-change /
+          // isolation) keep backdrop-filter from no-op'ing over
+          // <video> in Chrome. Matches the mic picker and All
+          // comments dropdown so every popover speaks the same
+          // visual language.
           className="
             fixed z-[100] min-w-[260px]
-            text-popover-foreground
-            ring-1 ring-border shadow-[0_8px_30px_rgba(0,0,0,0.55)]
+            text-white
+            ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)]
             rounded-xl p-1
             animate-in fade-in-0 slide-in-from-top-1 duration-150
           "
           style={{
             top: anchor.top,
             right: anchor.right,
-            backgroundColor: 'hsl(var(--card) / 0.65)',
-            backdropFilter: 'blur(20px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            backgroundColor: 'rgba(22, 37, 51, 0.35)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
           }}
         >
           {/* ─── Share / Delete (page-level video actions).
@@ -511,7 +517,7 @@ export default function PlayerTopMenu({
             disabled={!!busy}
             className="
               w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
-              hover:bg-muted transition-colors text-left whitespace-nowrap
+              hover:bg-white/[0.08] transition-colors text-left whitespace-nowrap
               disabled:opacity-40 disabled:cursor-not-allowed
             "
           >
@@ -528,7 +534,7 @@ export default function PlayerTopMenu({
             disabled={!currentVideoId || busy === 'download'}
             className="
               w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
-              hover:bg-muted transition-colors text-left whitespace-nowrap
+              hover:bg-white/[0.08] transition-colors text-left whitespace-nowrap
               disabled:opacity-40 disabled:cursor-not-allowed
             "
           >
@@ -548,7 +554,7 @@ export default function PlayerTopMenu({
               w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
               transition-colors text-left whitespace-nowrap
               ${canDelete
-                ? 'hover:bg-destructive/10 text-destructive'
+                ? 'hover:bg-destructive/15 text-destructive'
                 : 'opacity-40 cursor-not-allowed'}
             `}
           >

@@ -7,7 +7,7 @@ import { Project } from '@prisma/client'
 import { copyToClipboard } from '@/lib/clipboard'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { Trash2, ExternalLink, Archive, ArchiveRestore, RotateCcw, Send, Loader2, CheckCircle, BarChart3, FolderKanban, Copy, Check, Calendar, MoreVertical } from 'lucide-react'
+import { Trash2, ExternalLink, Archive, ArchiveRestore, RotateCcw, Send, Loader2, CheckCircle, BarChart3, FolderKanban, Copy, Check, Calendar, MoreVertical, Settings as SettingsIcon } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -358,8 +358,11 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
           <div
             role="menu"
             // 1.3.1+: Frame.io-style smart popover (see VideoCard).
-            style={menuStyle}
-            className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+            // 2.5.0+: solid `#162533` fill + white text + hairline
+            // white/10 ring, matching the FolderCard kebab so the
+            // whole admin chrome reads as one design family.
+            style={{ ...menuStyle, backgroundColor: '#162533' }}
+            className="z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
           >
             {shareUrl && (
               <button
@@ -371,7 +374,7 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                   // copied-state flash before it auto-closes.
                   setTimeout(() => setMenuOpen(false), 800)
                 }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
               >
                 {linkCopied ? (
                   <Check className="w-4 h-4 shrink-0 text-success" />
@@ -389,14 +392,14 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                   setMenuOpen(false)
                   window.open(shareUrl, '_blank', 'noopener,noreferrer')
                 }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
               >
                 <ExternalLink className="w-4 h-4 shrink-0" />
                 {tc('open')}
               </button>
             )}
             {(shareUrl) && (
-              <div className="my-1 h-px bg-border/50" role="separator" />
+              <div className="my-1 h-px bg-white/10" role="separator" />
             )}
             {readyVideos.length > 0 && (
               <button
@@ -414,7 +417,7 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                     ? t('noRecipientsEmail')
                     : ''
                 }
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Send className="w-4 h-4 shrink-0" />
                 {t('sendNotification')}
@@ -427,11 +430,25 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                 setMenuOpen(false)
                 handleViewSharePage()
               }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
             >
               <ExternalLink className="w-4 h-4 shrink-0" />
               {t('viewSharePage')}
             </button>
+                    {/* 2.5.0+: Project Settings entry, moved here from
+                        the inline topbar action. */}
+                    <button
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        router.push(`/admin/projects/${project.id}/settings`)
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
+                    >
+                      <SettingsIcon className="w-4 h-4 shrink-0" />
+                      {t('projectSettings')}
+                    </button>
                     <button
                       role="menuitem"
                       type="button"
@@ -439,7 +456,7 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                         setMenuOpen(false)
                         router.push(`/admin/projects/${project.id}/analytics`)
                       }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
                     >
                       <BarChart3 className="w-4 h-4 shrink-0" />
                       {t('viewAnalytics')}
@@ -461,7 +478,7 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                             ? t('approveFirst')
                             : ''
                         }
-                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {project.status === 'APPROVED' ? (
                           <>
@@ -484,7 +501,7 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                         handleToggleArchive()
                       }}
                       disabled={isArchiving}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left disabled:opacity-50"
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left disabled:opacity-50"
                     >
                       {project.status === 'ARCHIVED' ? (
                         <>
@@ -498,7 +515,7 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                         </>
                       )}
                     </button>
-                    <div className="my-1 h-px bg-border/50" role="separator" />
+                    <div className="my-1 h-px bg-white/10" role="separator" />
             <button
               role="menuitem"
               type="button"

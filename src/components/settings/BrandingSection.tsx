@@ -49,32 +49,36 @@ export function BrandingSection({
 
   return (
     <CollapsibleSection
-      className="border-border"
+      className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+      style={{
+        backdropFilter: 'blur(20px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+      }}
       title={t('branding.title')}
-      description={t('branding.description')}
       open={show}
       onOpenChange={setShow}
-      contentClassName="space-y-4 border-t pt-4"
+      contentClassName="space-y-4 border-t border-white/10 pt-4"
       collapsible={collapsible}
     >
       {/* Company Name */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-        <Label htmlFor="companyName">{t('appearance.companyName')}</Label>
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+        <Label htmlFor="companyName" className="text-white">{t('appearance.companyName')}</Label>
         <Input
           id="companyName"
           type="text"
           value={companyName}
           onChange={(e) => setCompanyName(e.target.value)}
           placeholder={t('appearance.companyNamePlaceholder')}
+          className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-white/55">
           {t('appearance.companyNameHint')}
         </p>
       </div>
 
       {/* Custom Logo Upload */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-        <Label>{t('appearance.customLogo')}</Label>
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+        <Label className="text-white">{t('appearance.customLogo')}</Label>
         <input
           ref={fileInputRef}
           type="file"
@@ -89,18 +93,18 @@ export function BrandingSection({
           }}
         />
         <div className="flex items-center gap-4">
-          <div className="w-24 h-16 rounded-xl border border-border bg-card flex items-center justify-center overflow-hidden">
+          <div className="w-24 h-16 rounded-xl bg-white/[0.04] ring-1 ring-white/10 flex items-center justify-center overflow-hidden">
             {brandingLogoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={brandingLogoUrl} alt={t('appearance.logoPreview')} className="w-full h-full object-contain" />
             ) : (
-              <ImageIcon className="w-6 h-6 text-muted-foreground" />
+              <ImageIcon className="w-6 h-6 text-white/45" />
             )}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-card text-sm hover:border-primary/60 hover:text-primary transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.06] ring-1 ring-white/10 text-white text-sm hover:bg-white/[0.1] hover:ring-white/20 transition-colors disabled:opacity-50"
               onClick={() => fileInputRef.current?.click()}
               disabled={logoUploading}
             >
@@ -109,7 +113,7 @@ export function BrandingSection({
             </button>
             <button
               type="button"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-card text-sm text-destructive hover:border-destructive/60 hover:text-destructive transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.06] ring-1 ring-white/10 text-red-400 text-sm hover:bg-red-500/10 hover:ring-red-500/30 transition-colors disabled:opacity-50"
               onClick={onRemoveLogo}
               disabled={!brandingLogoUrl || logoUploading}
             >
@@ -119,50 +123,47 @@ export function BrandingSection({
           </div>
         </div>
         {logoError ? (
-          <p className="text-xs text-destructive font-medium">{logoError}</p>
+          <p className="text-xs text-red-400 font-medium">{logoError}</p>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-white/55">
             {t('appearance.logoHint')}
           </p>
         )}
       </div>
 
       {/* Application Domain */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-        <Label htmlFor="appDomain">{t('appearance.appDomain')}</Label>
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+        <Label htmlFor="appDomain" className="text-white">{t('appearance.appDomain')}</Label>
         <Input
           id="appDomain"
           type="text"
           value={appDomain}
           onChange={(e) => setAppDomain(e.target.value)}
           placeholder={t('appearance.appDomainPlaceholder')}
+          className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-white/55">
           {t('appearance.appDomainHint')}
         </p>
       </div>
 
-      {/* 2.4.0+: Short-link domain for Frame.io-style tidy URLs.
-          Hardcoded English copy here on purpose — we'll move it
-          to i18n in a follow-up once the feature is battle-tested
-          and the UX is final. */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-        <Label htmlFor="shortLinkDomain">Short link domain</Label>
+      {/* 2.4.0+: Short-link domain for Frame.io-style tidy URLs. */}
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+        <Label htmlFor="shortLinkDomain" className="text-white">Short link domain</Label>
         <Input
           id="shortLinkDomain"
           type="text"
           value={shortLinkDomain}
           onChange={(e) => setShortLinkDomain(e.target.value)}
           placeholder="fcmt.io"
+          className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-white/55">
           Optional dedicated domain that fronts the URL shortener
           (Frame.io-style). When set, &quot;Copy share link&quot;
           gives you a tidy{' '}
-          <code className="font-mono">https://{shortLinkDomain || 'fcmt.io'}/aBc12XyZ</code>{' '}
-          instead of the long signed URL. Point its DNS at this
-          app via a Cloudflare tunnel or your reverse proxy. Leave
-          empty to keep the long URL behaviour.
+          <code className="font-mono text-white/75">https://{shortLinkDomain || 'fcmt.io'}/aBc12XyZ</code>{' '}
+          instead of the long signed URL.
         </p>
       </div>
 

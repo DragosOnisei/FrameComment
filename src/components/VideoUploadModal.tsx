@@ -898,7 +898,22 @@ function UploadBannerView({
         aria-live="polite"
       >
         <div
-          className="pointer-events-auto w-[340px] rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.4)] animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden"
+          // 2.5.1+: v2.5 frosted glass — match ProcessingStatusBanners
+          // and DownloadBanners so the stack reads as a single
+          // family of glass cards (the user complained that this
+          // upload banner still looked "old" while the encoding
+          // banner already had the glass refresh).
+          className="pointer-events-auto w-[340px] rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
           role="status"
         >
           {/* Header — click anywhere on the row (except the X) to
@@ -917,22 +932,22 @@ function UploadBannerView({
                 setExpanded((v) => !v)
               }
             }}
-            className="w-full text-left p-3 flex items-start gap-2.5 hover:bg-muted/40 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="w-full text-left p-3 flex items-start gap-2.5 hover:bg-white/[0.06] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             aria-expanded={expanded}
             aria-label={`${allCompleted ? t('completed') : t('uploadVideos')}. ${done} / ${total} done. Click to ${expanded ? 'collapse' : 'expand'}.`}
           >
             <div className="shrink-0 mt-0.5">
               {allCompleted ? (
-                <CheckCircle2 className="w-4 h-4 text-green-500" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-300" />
               ) : (
                 <Upload className="w-4 h-4 text-primary" />
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-card-foreground truncate">
+              <div className="text-sm font-medium text-white truncate">
                 {allCompleted ? t('completed') : t('uploadVideos')}
               </div>
-              <div className="text-[11px] text-muted-foreground truncate tabular-nums">
+              <div className="text-[11px] text-white/55 truncate tabular-nums">
                 {done} / {total} done
               </div>
             </div>
@@ -943,7 +958,7 @@ function UploadBannerView({
                   e.stopPropagation()
                   handleClose()
                 }}
-                className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors"
                 aria-label={tc('done')}
                 title={tc('done')}
               >
@@ -954,22 +969,22 @@ function UploadBannerView({
           {/* Progress bar. Uses the average completion across
               all queued uploads as a coarse roll-up. */}
           <div className="px-3 pb-3">
-            <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-1 w-full rounded-full bg-white/10 overflow-hidden">
               <div
                 className={cn(
                   'h-full rounded-full transition-all duration-300 ease-out',
-                  allCompleted ? 'bg-green-500' : 'bg-primary',
+                  allCompleted ? 'bg-emerald-400' : 'bg-primary',
                 )}
                 style={{ width: `${overallPct}%` }}
               />
             </div>
-            <div className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+            <div className="mt-1 text-[10px] text-white/55 tabular-nums">
               {overallPct}%
             </div>
           </div>
           {expanded && (
-            <div className="border-t border-border max-h-[260px] overflow-y-auto">
-              <ul className="divide-y divide-border">
+            <div className="border-t border-white/10 max-h-[260px] overflow-y-auto">
+              <ul className="divide-y divide-white/10">
                 {pendingUploads.map((upload) => (
                   <UploadRow
                     key={upload.id}
@@ -1005,26 +1020,26 @@ function UploadRow({
   // Lazily-imported only inside this row because the parent
   // banner doesn't need it. Keeps the bundle slim.
   return (
-    <li className="flex items-start gap-2.5 px-3 py-2 hover:bg-muted/40 transition-colors">
+    <li className="flex items-start gap-2.5 px-3 py-2 hover:bg-white/[0.06] transition-colors">
       <div className="shrink-0 mt-0.5">
         {upload.status === 'completed' ? (
-          <CheckCircle2 className="w-4 h-4 text-green-500" />
+          <CheckCircle2 className="w-4 h-4 text-emerald-300" />
         ) : upload.status === 'error' ? (
-          <X className="w-4 h-4 text-red-500" />
+          <X className="w-4 h-4 text-red-300" />
         ) : upload.paused ? (
-          <Pause className="w-4 h-4 text-amber-500" />
+          <Pause className="w-4 h-4 text-amber-400" />
         ) : (
           <Video className="w-4 h-4 text-primary" />
         )}
       </div>
       <div className="flex-1 min-w-0">
         <div
-          className="text-xs font-medium text-card-foreground truncate"
+          className="text-xs font-medium text-white truncate"
           title={upload.videoName || upload.file.name}
         >
           {upload.videoName || upload.file.name}
         </div>
-        <div className="text-[10px] text-muted-foreground truncate tabular-nums">
+        <div className="text-[10px] text-white/55 truncate tabular-nums">
           {upload.status === 'completed'
             ? formatFileSize(upload.file.size)
             : upload.status === 'error'
@@ -1036,11 +1051,11 @@ function UploadRow({
                 }`}
         </div>
         {(upload.status === 'uploading' || upload.status === 'pending') && (
-          <div className="mt-1 h-1 w-full rounded-full bg-muted overflow-hidden">
+          <div className="mt-1 h-1 w-full rounded-full bg-white/10 overflow-hidden">
             <div
               className={cn(
                 'h-full rounded-full transition-all',
-                upload.paused ? 'bg-amber-500' : 'bg-primary',
+                upload.paused ? 'bg-amber-400' : 'bg-primary',
               )}
               style={{ width: `${upload.progress}%` }}
             />
@@ -1052,7 +1067,7 @@ function UploadRow({
           <button
             type="button"
             onClick={onPauseResume}
-            className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            className="p-1 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors"
             aria-label={upload.paused ? 'Resume' : 'Pause'}
             title={upload.paused ? 'Resume' : 'Pause'}
           >
@@ -1063,7 +1078,7 @@ function UploadRow({
           <button
             type="button"
             onClick={onRetry}
-            className="text-[10px] px-1.5 py-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            className="text-[10px] px-1.5 py-0.5 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors"
             title={tc('retry')}
           >
             {tc('retry')}
@@ -1073,7 +1088,7 @@ function UploadRow({
           <button
             type="button"
             onClick={onRemove}
-            className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            className="p-1 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors"
             aria-label={tc('remove')}
             title={tc('remove')}
           >

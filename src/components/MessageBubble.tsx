@@ -329,14 +329,24 @@ export default function MessageBubble({
     >
       <div
         onClick={handleBubbleClick}
+        // 2.5.1+: glass card. Drops `bg-card/50 + border` for the
+        // v2.5 white-tint + hairline-ring pattern used everywhere
+        // else (project cards, folder cards, profile sections).
+        // Hover lifts the tint; focused / annotation-targeted
+        // state uses the brand-blue accent ring.
         className={`group relative cursor-pointer transition-colors py-3 px-3 ${
           isReply
-            ? 'rounded-md hover:bg-muted/30'
-            : 'rounded-lg border border-border bg-card/50 hover:bg-card/70'
+            ? 'rounded-md hover:bg-white/[0.04]'
+            : 'rounded-xl bg-white/[0.04] ring-1 ring-white/10 hover:bg-white/[0.08] hover:ring-white/15 shadow-[0_6px_18px_-12px_rgba(0,0,0,0.5)]'
         } ${
-          isAnnotationFocused
-            ? 'bg-primary/10 ring-1 ring-primary/30'
-            : ''
+          // 2.5.1+: drop hard-coded primary tint here — the
+          // `.comment-card.is-selected` global rule paints the
+          // accent-tinted glass surface so the focused / selected
+          // state stays in sync with the user's chosen accent and
+          // the rest of the v2.5 system. Annotation focus still
+          // gets a slightly brighter base bg as a hint, with the
+          // ring delegated to .is-selected when it eventually fires.
+          isAnnotationFocused ? 'bg-white/[0.08]' : ''
         } ${isResolved ? 'opacity-70' : ''} comment-card`}
       >
         {hasReplies && (
@@ -349,10 +359,10 @@ export default function MessageBubble({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm font-semibold text-foreground truncate">
+              <span className="text-sm font-semibold text-white truncate">
                 {effectiveAuthorName || t('anonymous')}
               </span>
-              <span className="text-[11px] text-muted-foreground flex-shrink-0">
+              <span className="text-[11px] text-white/55 flex-shrink-0">
                 {formatMessageTime(comment.createdAt)}
               </span>
               {/*
@@ -523,7 +533,12 @@ export default function MessageBubble({
                     the kebab menu if the picker is still desired.
                   */}
 
-                  {/* Kebab → Edit / Delete (rounded chip, matches Frame.io). */}
+                  {/* Kebab → Edit / Delete. 2.5.1+: v2.5 glass styling to
+                      match CommentsKebabMenu / PlayerTopMenu / FolderCard.
+                      Trigger = soft white tint + hairline ring. Dropdown
+                      = solid `#162533` + ring-white/10 (backdrop-blur
+                      doesn't compose reliably in this stacking context
+                      so we go solid like the rest of the dropdowns). */}
                   {(canEdit || onDelete) && (
                     <div ref={menuRef} className="relative">
                       <button
@@ -532,7 +547,9 @@ export default function MessageBubble({
                           e.stopPropagation()
                           setMenuOpen((v) => !v)
                         }}
-                        className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-border bg-transparent hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                        className={`inline-flex items-center justify-center w-7 h-7 rounded-full bg-white/[0.06] ring-1 ring-white/10 hover:bg-white/[0.12] hover:ring-white/20 transition-colors text-white/65 hover:text-white ${
+                          menuOpen ? 'bg-white/[0.12] ring-white/20 text-white' : ''
+                        }`}
                         title={t('moreActions') || 'More'}
                         aria-label={t('moreActions') || 'More'}
                       >
@@ -541,7 +558,19 @@ export default function MessageBubble({
                       {menuOpen && (
                         <div
                           role="menu"
-                          className="absolute right-0 top-full mt-1 z-30 min-w-[140px] rounded-md border border-border bg-popover shadow-md py-1"
+                          className="absolute right-0 top-full mt-1 z-30 min-w-[160px] rounded-lg ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1 text-white animate-in fade-in-0 slide-in-from-top-1 duration-150 overflow-hidden"
+                          // True glass surface: lighter navy base + accent
+                          // radial bleed in the top-left so the dropdown
+                          // reads as a translucent panel sitting on top of
+                          // the comments sidebar, not the same flat slab
+                          // as the comment card behind it.
+                          style={{
+                            backgroundColor: 'rgba(28, 44, 64, 0.92)',
+                            backgroundImage:
+                              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                            backdropFilter: 'blur(20px) saturate(150%)',
+                            WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+                          }}
                           onClick={(e) => e.stopPropagation()}
                         >
                           {canEdit && onEdit && (
@@ -551,11 +580,11 @@ export default function MessageBubble({
                                 setMenuOpen(false)
                                 handleStartEdit()
                               }}
-                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-muted transition-colors"
+                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-white hover:bg-white/[0.10] transition-colors text-left"
                               role="menuitem"
                             >
-                              <Pencil className="w-3.5 h-3.5" />
-                              {t('editComment') || 'Edit'}
+                              <Pencil className="w-3.5 h-3.5 shrink-0" />
+                              <span className="flex-1">{t('editComment') || 'Edit'}</span>
                             </button>
                           )}
                           {onDelete && (
@@ -565,11 +594,11 @@ export default function MessageBubble({
                                 setMenuOpen(false)
                                 onDelete()
                               }}
-                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors"
+                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors text-left"
                               role="menuitem"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              {t('deleteComment') || 'Delete'}
+                              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                              <span className="flex-1">{t('deleteComment') || 'Delete'}</span>
                             </button>
                           )}
                         </div>
@@ -595,10 +624,10 @@ export default function MessageBubble({
                         void handleResolveToggle()
                       }}
                       disabled={resolving}
-                      className={`inline-flex items-center justify-center w-7 h-7 rounded-full border bg-transparent transition-colors ${
+                      className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-colors ${
                         isResolved
-                          ? 'border-red-500/40 text-red-600 hover:bg-red-500/10 hover:border-red-500/60'
-                          : 'border-border text-muted-foreground hover:text-emerald-600 hover:bg-muted'
+                          ? 'bg-red-500/10 ring-1 ring-red-500/30 text-red-400 hover:bg-red-500/20 hover:ring-red-500/50 hover:text-red-300'
+                          : 'bg-white/[0.06] ring-1 ring-white/10 text-white/65 hover:bg-emerald-500/15 hover:ring-emerald-400/40 hover:text-emerald-300'
                       }`}
                       title={
                         isResolved

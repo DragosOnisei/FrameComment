@@ -12,7 +12,6 @@ import {
   Pencil,
   Trash2,
   Share2,
-  ArrowRight,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
 import { formatBytes } from '@/lib/project-gradient'
@@ -170,6 +169,12 @@ export default function FolderCard({
   const [menuOpen, setMenuOpen] = useState(false)
   const [isHoveredDropTarget, setIsHoveredDropTarget] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 2.5.0+: dropdown is rendered inline as a child of menuRef now
+  // (the wrapper's backdrop-filter was dropped so position:fixed
+  // resolves to the viewport again), so we no longer need a separate
+  // popover ref — kept the variable to avoid breaking the outside-
+  // click logic that still references it via the optional chain.
+  const popoverRef = useRef<HTMLDivElement>(null)
   // 1.3.1+: Frame.io-style smart-positioned kebab popover. See VideoCard
   // for the rationale — anchored to the kebab via viewport coords and
   // clamped inside the screen edges.
@@ -240,7 +245,13 @@ export default function FolderCard({
     if (!menuOpen) return
     const onPointerDown = (e: MouseEvent | TouchEvent) => {
       if (!menuRef.current) return
-      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+      const target = e.target as Node
+      // Treat clicks on either the kebab wrapper OR the portaled menu
+      // as "inside" so the menu doesn't close before its own items'
+      // handlers fire.
+      const insideKebab = menuRef.current.contains(target)
+      const insidePopover = popoverRef.current?.contains(target) ?? false
+      if (!insideKebab && !insidePopover) setMenuOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMenuOpen(false)
@@ -349,20 +360,28 @@ export default function FolderCard({
       }}
       className={`
         group relative flex flex-col
-        rounded-xl border bg-card cursor-pointer
+        rounded-xl cursor-pointer
         transition-all
         focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60
         ${isBeingDragged
-          ? 'opacity-40 border-border/50 scale-[0.98]'
+          ? 'opacity-40 ring-1 ring-white/5 bg-white/[0.02] scale-[0.98]'
           : isHoveredDropTarget
-            ? 'border-primary/80 ring-2 ring-primary/30 bg-primary/5'
+            ? 'ring-2 ring-primary/40 bg-primary/10'
             : isSelected
-              ? 'border-primary ring-2 ring-primary/40'
+              ? 'ring-2 ring-primary/50 bg-primary/10'
               : isPotentialDropTarget || isPotentialVideoDropTarget
-                ? 'border-primary/40 ring-1 ring-primary/20'
-                : 'border-border/50 hover:border-border hover:shadow-md'
+                ? 'ring-1 ring-primary/30 bg-white/[0.04]'
+                : 'ring-1 ring-white/10 bg-white/[0.04] hover:bg-white/[0.06] hover:ring-white/20 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)]'
         }
       `}
+      // 2.5.0+: dropped inline `backdropFilter` here. The wrapper's
+      // `bg-white/[0.04]` tint + the page-wide `.spotlight-bg`
+      // gradient already give the card a glassy feel, and removing
+      // backdrop-filter means this element no longer creates a
+      // CSS containing block — which lets the kebab dropdown use
+      // `position: fixed` correctly (the gradient stays painted
+      // behind it, so its OWN backdrop-blur lands the frosted glass
+      // effect, same as ProjectCardKebab).
       data-folder-id={id}
     >
       {/* Frame.io-style cover (1.0.7+) — takes the full card width
@@ -371,7 +390,7 @@ export default function FolderCard({
           folders fall back to the plain folder glyph centred in the
           cover area. Visually it now matches VideoCard so folders
           and videos read as one consistent grid. */}
-      <div className="relative aspect-video w-full bg-muted/30 rounded-t-xl overflow-hidden">
+      <div className="relative aspect-video w-full bg-white/[0.03] rounded-t-xl overflow-hidden">
         <FolderCover previewItems={previewItems} />
         {/* Multi-select checkbox (1.1.0+). Always visible on folder
             cards — request from the user so picking folders is one
@@ -431,7 +450,7 @@ export default function FolderCard({
               aria-label="Folder name"
             />
           ) : (
-            <div className="text-base font-semibold text-foreground truncate" title={name}>
+            <div className="text-base font-semibold text-white truncate" title={name}>
               {name}
             </div>
           )}
@@ -440,7 +459,7 @@ export default function FolderCard({
               from the Projects Dashboard. Falls back to just the
               count on the public client share page (no admin
               endpoint there). */}
-          <div className="text-xs text-muted-foreground mt-1 tabular-nums">
+          <div className="text-xs text-white/55 mt-1 tabular-nums">
             {itemCount === 1 ? '1 item' : `${itemCount} items`}
             {totalSize != null && Number(totalSize) > 0 && (
               <> · {formatBytes(totalSize)}</>
@@ -463,10 +482,15 @@ export default function FolderCard({
                 return
               }
               const rect = kebabRef.current?.getBoundingClientRect()
-              if (rect) setMenuStyle(computePopoverStyle(rect))
+              // 2.5.0+: width tuned for the LONGEST possible label,
+              // which in bulk-select mode is "New Folder with N items"
+              // — easily 23+ characters at 3-digit counts. ~240px
+              // keeps every item on a single line so the body never
+              // sprouts a horizontal scrollbar.
+              if (rect) setMenuStyle(computePopoverStyle(rect, { width: 240 }))
               setMenuOpen(true)
             }}
-            className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            className="rounded-md p-1.5 text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             title="More actions"
@@ -477,13 +501,18 @@ export default function FolderCard({
           {menuOpen && (
             <div
               role="menu"
-              // 1.3.1+: positioned via inline style (computed from
-              // kebab bounding rect on open) — Frame.io style smart
-              // popover that floats over adjacent cards and stays
-              // clamped inside the viewport.
-              style={menuStyle}
-              className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+              // 2.5.0+: solid `#162533` per user request — backdrop
+              // glass effect couldn't land in this DOM context (some
+              // ancestor disables backdrop-filter for descendants),
+              // so we stop fighting it and go with a flat dark fill
+              // that matches the rest of the v2.5 chrome.
+              style={{
+                ...menuStyle,
+                backgroundColor: '#162533',
+              }}
+              className="z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
               onClick={(e) => e.stopPropagation()}
+              ref={popoverRef}
             >
               {/* 1.1.0+ menu order:
                   1. Download · Share
@@ -498,7 +527,7 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onBulkDownload!()
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Download className="w-4 h-4 shrink-0" />
                   {bulkSelectionCount > 1
@@ -519,7 +548,7 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onDownloadFolder!(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Download className="w-4 h-4 shrink-0" />
                   Download folder
@@ -533,14 +562,14 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onShare!(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Share2 className="w-4 h-4 shrink-0" />
                   Share folder
                 </button>
               )}
               {(showDownload || showSingleDownload || showShare) && (showDuplicate || showRename) && (
-                <div className="my-1 h-px bg-border/50" role="separator" />
+                <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {showDuplicate && (
                 <button
@@ -550,7 +579,7 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onDuplicate!(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Copy className="w-4 h-4 shrink-0" />
                   {isBulk ? `Duplicate ${bulkSelectionCount} items` : 'Duplicate'}
@@ -564,14 +593,14 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onRename!(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Pencil className="w-4 h-4 shrink-0" />
                   Rename
                 </button>
               )}
               {(showDuplicate || showRename) && (onMoveUp || showNewFolder) && (
-                <div className="my-1 h-px bg-border/50" role="separator" />
+                <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onMoveUp && (
                 <button
@@ -581,7 +610,7 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onMoveUp(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <ArrowUpFromLine className="w-4 h-4 shrink-0" />
                   {isBulk
@@ -597,7 +626,7 @@ export default function FolderCard({
                     setMenuOpen(false)
                     onNewFolderWithSelection!()
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <FolderPlus className="w-4 h-4 shrink-0" />
                   {bulkSelectionCount > 1
@@ -606,7 +635,7 @@ export default function FolderCard({
                 </button>
               )}
               {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showDownload || showSingleDownload || showShare) && (
-                <div className="my-1 h-px bg-border/50" role="separator" />
+                <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onDelete && (
                 <button
@@ -626,11 +655,6 @@ export default function FolderCard({
           )}
         </div>
         )}
-      </div>
-
-      {/* "Open" affordance on hover, visible on focus too */}
-      <div className="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity text-muted-foreground">
-        <ArrowRight className="w-4 h-4" />
       </div>
 
       {/* Hidden: keep slug accessible for future drag-drop / copy-link */}
@@ -673,8 +697,14 @@ function FolderCover({
     )
   }
 
+  // 2.5.0+: tile backgrounds tuned for the new frosted-glass card.
+  // The old `bg-black/30/40` covered the parent card's glass tint
+  // with a hard dark fill, so every mosaic cell read as a black box
+  // instead of a glass surface. White/0.03 lets the spotlight + card
+  // glass show through while still giving each cell enough contrast
+  // to separate visually.
   const baseTile =
-    'overflow-hidden bg-black/30 dark:bg-black/40 flex items-center justify-center'
+    'overflow-hidden bg-white/[0.03] flex items-center justify-center'
 
   type Tile = NonNullable<FolderCardProps['previewItems']>[number]
   const tileKey = (t: Tile) =>
@@ -719,7 +749,7 @@ function FolderCover({
         </div>
       )}
       {items.length === 2 && (
-        <div className="grid grid-cols-2 gap-1 w-full h-full bg-card">
+        <div className="grid grid-cols-2 gap-1 w-full h-full">
           {items.map((it) => (
             <div key={tileKey(it)} className={baseTile}>
               {renderTile(it, 'small')}
@@ -728,7 +758,7 @@ function FolderCover({
         </div>
       )}
       {items.length === 3 && (
-        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-card">
+        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full">
           <div className={`${baseTile} row-span-2`}>
             {renderTile(items[0], 'big')}
           </div>
@@ -737,7 +767,7 @@ function FolderCover({
         </div>
       )}
       {items.length === 4 && (
-        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-card">
+        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full">
           {items.map((it) => (
             <div key={tileKey(it)} className={baseTile}>
               {renderTile(it, 'small')}

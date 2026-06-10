@@ -50,6 +50,9 @@ export async function GET(request: NextRequest) {
         id: user.id,
         email: user.email,
         name: user.name,
+        // 2.5.1+: surface the profile avatar so the sidebar avatar
+        // circle + the Profile page can render without extra fetches.
+        avatarUrl: user.avatarUrl ?? null,
         role: user.role,
       },
     })

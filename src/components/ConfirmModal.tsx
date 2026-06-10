@@ -80,26 +80,27 @@ export function ConfirmModal({
       }}
     >
       <DialogContent
-        className="sm:max-w-md p-5 sm:p-6 gap-0"
+        // 2.5.0+: frosted-glass shell — same recipe used across all
+        // v2.5 modals (TemplateModal, NewFolderDialog, etc.). The
+        // overlay is transparent so the page behind stays visible
+        // (no dark wash), and the dialog itself is the visible
+        // surface with a hairline white-10 ring + soft outward
+        // shadow.
+        overlayClassName="bg-transparent"
+        className="sm:max-w-md p-5 sm:p-6 gap-0 bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.65)]"
+        style={{
+          backdropFilter: 'blur(20px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+        }}
         hideClose
       >
         <DialogHeader className="text-left min-w-0">
-          {/* 2.3.0+: `min-w-0` on this flex container is what lets
-              the right-hand content column actually shrink below
-              its intrinsic width. Without it the flex item's
-              default `min-width: auto` kept the description column
-              at the width of the longest unbroken token (e.g. a
-              filename like
-              `260602_VDA_YT_EDU_NEWS_BILL_6047_BOGDAN_916_…`),
-              which pushed the whole dialog body past its
-              `max-w-md` and clipped the action buttons on the
-              right. */}
           <div className="flex items-start gap-3 min-w-0">
             <div
-              className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+              className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ring-1 ${
                 destructive
-                  ? 'bg-destructive/15 text-destructive'
-                  : 'bg-primary/15 text-primary'
+                  ? 'bg-destructive/15 text-destructive ring-destructive/30'
+                  : 'bg-primary/15 text-primary ring-primary/30'
               }`}
               aria-hidden="true"
             >
@@ -110,19 +111,11 @@ export function ConfirmModal({
               )}
             </div>
             <div className="min-w-0 flex-1 pt-0.5">
-              <DialogTitle className="text-base sm:text-lg font-semibold leading-tight">
+              <DialogTitle className="text-base sm:text-lg font-semibold leading-tight text-white">
                 {title}
               </DialogTitle>
               {description && (
-                // 2.3.0+: `[overflow-wrap:anywhere]` + `break-words`
-                // make long unbroken tokens (filenames, URLs) wrap
-                // INSIDE the description instead of forcing the
-                // dialog wider. The shared DialogDescription
-                // already has this rule, but ConfirmModal renders
-                // the description in a plain `<div>` because
-                // callers pass JSX nodes with their own structure
-                // — so we have to re-declare the wrap rule here.
-                <div className="mt-1.5 text-sm text-muted-foreground leading-relaxed [overflow-wrap:anywhere] break-words">
+                <div className="mt-1.5 text-sm text-white/65 leading-relaxed [overflow-wrap:anywhere] break-words">
                   {description}
                 </div>
               )}
@@ -130,23 +123,19 @@ export function ConfirmModal({
           </div>
         </DialogHeader>
 
-        {/* Stack buttons full-width on phones; revert to side-by-side
-            right-aligned at sm+. Confirm sits on TOP on mobile so the
-            primary action is the easiest thumb-reach target — matches
-            standard iOS/Android sheet conventions.
-            2.3.0+: `flex-wrap` on the sm+ row lets the action pair
-            drop to a second line on narrow desktop widths instead
-            of clipping past the dialog's right edge. */}
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             disabled={busy}
             onClick={() => {
               onOpenChange(false)
               onCancel?.()
             }}
-            className="w-full sm:w-auto"
+            // 2.5.0+: Cancel matches the NewFolderDialog Cancel —
+            // glass tile + ring so it reads as a peer to the
+            // primary action, not as plain text.
+            className="w-full sm:w-auto text-white/90 bg-white/[0.06] hover:bg-white/[0.12] hover:text-white ring-1 ring-white/15 hover:ring-white/25 border-0"
           >
             {cancelLabel}
           </Button>
@@ -157,7 +146,10 @@ export function ConfirmModal({
             onClick={async () => {
               await onConfirm()
             }}
-            className="w-full sm:w-auto"
+            // Force white text on the primary action so it reads
+            // clearly against the destructive red / brand blue fill.
+            style={{ color: '#ffffff' }}
+            className="w-full sm:w-auto font-semibold"
             autoFocus
           >
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

@@ -328,9 +328,13 @@ export default function TrashPage() {
           // the dark background.
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="shrink-0 sm:h-10 sm:px-4 text-destructive hover:text-destructive border-destructive/40 hover:border-destructive hover:bg-destructive/10"
+            // 2.5.0+: destructive glass — `bg-destructive/15` tint
+            // + ring keep the dangerous action visually distinct
+            // without using a solid red fill that would clash with
+            // the rest of the v2.5 chrome.
+            className="shrink-0 sm:h-10 sm:px-4 bg-destructive/15 hover:bg-destructive/25 ring-1 ring-destructive/30 hover:ring-destructive/50 text-destructive hover:text-destructive border-0 focus-visible:ring-destructive/60 focus-visible:ring-offset-0"
             onClick={handleEmptyTrash}
             aria-label="Empty Trash"
           >
@@ -354,10 +358,21 @@ export default function TrashPage() {
       )}
 
       {!loading && !error && items.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-border/50 bg-card/40 p-8 sm:p-16 text-center">
-          <Trash2 className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground/40" />
-          <p className="mt-4 text-sm text-muted-foreground">
-            Trash is empty.
+        // 2.5.0+: frosted-glass empty state, same vocabulary as the
+        // rest of the v2.5 chrome. White/0.04 tint + ring + soft
+        // outward shadow give the surface depth without competing
+        // with the spotlight gradient. Brand-tinted glass disc holds
+        // the trash icon so the surface reads "purposefully empty",
+        // not "missing content".
+        <div className="rounded-2xl bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] p-10 sm:p-16 text-center">
+          <div className="mx-auto inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-primary/15 ring-1 ring-primary/30">
+            <Trash2 className="w-8 h-8 sm:w-10 sm:h-10 text-primary" />
+          </div>
+          <p className="mt-6 text-base font-medium text-white">
+            Trash is empty
+          </p>
+          <p className="mt-1.5 text-sm text-white/55">
+            Deleted projects and folders will appear here.
           </p>
         </div>
       )}
@@ -366,10 +381,13 @@ export default function TrashPage() {
         <div className="space-y-8 min-w-0">
           {projectGroups.map((group) => (
             <section key={group.projectId} className="min-w-0">
-              <h2 className="text-xs uppercase tracking-wide text-muted-foreground mb-3">
+              <h2 className="text-xs uppercase tracking-wide text-white/55 mb-3">
                 {group.projectTitle}
               </h2>
-              <div className="rounded-xl border border-border/50 bg-card divide-y divide-border/40 overflow-hidden min-w-0">
+              {/* 2.5.0+: frosted-glass panel with hairline white-10
+                  divider between rows — matches the table view on
+                  Projects dashboard and the settings panes. */}
+              <div className="rounded-xl bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] divide-y divide-white/10 overflow-hidden min-w-0">
                 {group.roots.map((node) => (
                   <TrashRow
                     key={`${node.kind}:${node.id}`}
@@ -384,16 +402,10 @@ export default function TrashPage() {
                   />
                 ))}
               </div>
-              {group.projectId && (
-                <div className="mt-2 text-xs text-muted-foreground">
-                  <Link
-                    href={`/admin/projects/${group.projectId}`}
-                    className="hover:text-foreground"
-                  >
-                    Go to project →
-                  </Link>
-                </div>
-              )}
+              {/* 2.5.0+: dropped the "Go to project →" link — the
+                  user can click the project chip on any restored
+                  item to navigate, and we want this surface to
+                  stay focused on the trash actions only. */}
             </section>
           ))}
         </div>
@@ -471,7 +483,7 @@ function TrashRow({
           <button
             type="button"
             onClick={() => onToggleCollapsed(node.id)}
-            className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors shrink-0"
+            className="rounded-md p-1 text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors shrink-0"
             aria-label={collapsed ? 'Expand folder' : 'Collapse folder'}
           >
             {collapsed ? (
@@ -484,7 +496,7 @@ function TrashRow({
           <span className="w-6 h-6 shrink-0" />
         )}
 
-        <div className="relative w-16 h-10 rounded-md bg-muted/40 ring-1 ring-border/30 overflow-hidden flex items-center justify-center shrink-0">
+        <div className="relative w-16 h-10 rounded-md bg-white/[0.04] ring-1 ring-white/10 overflow-hidden flex items-center justify-center shrink-0">
           {node.kind === 'video' && node.thumbnailUrl ? (
             <img
               src={node.thumbnailUrl}
@@ -495,28 +507,28 @@ function TrashRow({
           ) : isFolder ? (
             <FolderIcon className="w-5 h-5 text-primary/70" />
           ) : (
-            <FilmIcon className="w-5 h-5 text-muted-foreground" />
+            <FilmIcon className="w-5 h-5 text-white/55" />
           )}
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium truncate">
+          <div className="text-sm font-medium truncate text-white">
             {node.name}
             {node.kind === 'video' &&
               typeof node.versionCount === 'number' &&
               node.versionCount > 1 && (
-                <span className="ml-2 text-xs text-muted-foreground tabular-nums">
+                <span className="ml-2 text-xs text-white/55 tabular-nums">
                   · {node.versionCount} versions
                 </span>
               )}
             {isFolder && hasChildren && (
-              <span className="ml-2 text-xs text-muted-foreground tabular-nums">
+              <span className="ml-2 text-xs text-white/55 tabular-nums">
                 · {node.children.length}{' '}
                 {node.children.length === 1 ? 'item' : 'items'}
               </span>
             )}
           </div>
-          <div className="text-xs text-muted-foreground truncate">
+          <div className="text-xs text-white/55 truncate">
             From: {node.parent?.name ?? '—'} ·{' '}
             {daysLeft(node.expiresAt)} day
             {daysLeft(node.expiresAt) === 1 ? '' : 's'} left
@@ -524,13 +536,18 @@ function TrashRow({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* 2.5.0+: glass-style action buttons — same recipe as the
+              other v2.5 row actions. Restore stays neutral white,
+              the permanent-delete X gets a red tint via the
+              destructive token so it reads as the dangerous path. */}
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="ghost"
             disabled={busy}
             onClick={() => onRestore(node)}
             aria-label="Restore"
+            className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0"
           >
             {busy ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -539,14 +556,15 @@ function TrashRow({
             )}
             <span className="hidden sm:inline">Restore</span>
           </Button>
-          {/* 1.3.1+: outlined Delete button so it reads as a real
-              action on phones — the previous ghost variant blended
-              into the dark row and looked invisible. */}
           <Button
             type="button"
             size="sm"
-            variant="outline"
-            className="text-destructive hover:text-destructive border-destructive/40 hover:border-destructive hover:bg-destructive/10"
+            variant="ghost"
+            // 2.5.0+: focus-visible ring forced to destructive too,
+            // otherwise the default brand-blue focus ring bleeds
+            // into the red icon and reads as a mixed cyan tint on
+            // click/keyboard focus.
+            className="bg-destructive/15 hover:bg-destructive/25 ring-1 ring-destructive/30 hover:ring-destructive/50 text-destructive hover:text-destructive border-0 focus-visible:ring-destructive/60 focus-visible:ring-offset-0"
             disabled={busy}
             onClick={() => onPermanentDelete(node)}
             aria-label="Delete permanently"

@@ -1,0 +1,345 @@
+# questions.yaml — Configuration form rendered by TrueNAS SCALE Apps UI.
+# Schema reference: https://www.truenas.com/docs/scale/scaletutorials/apps/
+
+groups:
+  - name: FrameComment Configuration
+    description: Initial admin account and locale settings.
+  - name: Network Configuration
+    description: Where the FrameComment web UI is exposed.
+  - name: Storage Configuration
+    description: Host paths or ix-volumes for application data.
+  - name: Secrets
+    description: Cryptographic secrets. Leave blank to have TrueNAS generate them.
+  - name: Object Storage (S3)
+    description: Optional. If enabled, video files are stored in an S3-compatible bucket instead of the local volume.
+  - name: Resources
+    description: CPU and memory reservations.
+
+portals:
+  web_portal:
+    protocols:
+      - http
+    host:
+      - 0.0.0.0
+    ports:
+      - 30041
+    path: /
+
+questions:
+  # ---------- FrameComment Configuration ----------
+  - variable: timezone
+    label: Time Zone
+    description: Time zone used by the application and worker.
+    group: FrameComment Configuration
+    schema:
+      type: string
+      default: Etc/UTC
+      $ref:
+        - definitions/timezone
+
+  - variable: adminEmail
+    label: Admin Email
+    description: First admin user created on first boot. Cannot be changed via this form afterwards.
+    group: FrameComment Configuration
+    schema:
+      type: string
+      required: true
+      valid_chars: ^[\w!#$%&'*+/=?`{|}~^.-]+@[\w.-]+\.[A-Za-z]{2,}$
+      valid_chars_error: Must be a valid email address.
+
+  - variable: adminPassword
+    label: Admin Password
+    description: "Initial admin password. Strongly recommended: change after first login."
+    group: FrameComment Configuration
+    schema:
+      type: string
+      required: true
+      private: true
+      min_length: 12
+      max_length: 200
+
+  - variable: adminName
+    label: Admin Display Name
+    description: Optional display name for the first admin user.
+    group: FrameComment Configuration
+    schema:
+      type: string
+      default: Admin
+
+  # ---------- Network ----------
+  - variable: network
+    label: ""
+    group: Network Configuration
+    schema:
+      type: dict
+      attrs:
+        - variable: webPort
+          label: Web UI Port (Node Port)
+          description: External port. Container listens on 4321 internally.
+          schema:
+            type: int
+            default: 30041
+            required: true
+            min: 9000
+            max: 65535
+            $ref:
+              - definitions/nodePort
+
+  # ---------- Storage ----------
+  - variable: storage
+    label: ""
+    group: Storage Configuration
+    schema:
+      type: dict
+      attrs:
+        - variable: uploads
+          label: Uploads (videos, project files)
+          description: Persistent storage for /app/uploads.
+          schema:
+            type: dict
+            attrs:
+              - variable: type
+                label: Type
+                schema:
+                  type: string
+                  default: ixVolume
+                  enum:
+                    - value: ixVolume
+                      description: ixVolume (TrueNAS-managed, recommended)
+                    - value: hostPath
+                      description: Host Path (existing dataset)
+              - variable: ixVolumeConfig
+                label: ixVolume Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "ixVolume"]]
+                  $ref:
+                    - normalize/ixVolume
+                  attrs:
+                    - variable: datasetName
+                      label: Dataset Name
+                      schema:
+                        type: string
+                        default: uploads
+                        immutable: true
+              - variable: hostPathConfig
+                label: Host Path Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "hostPath"]]
+                  attrs:
+                    - variable: hostPath
+                      label: Host Path
+                      schema:
+                        type: hostpath
+                        required: true
+
+        - variable: postgresData
+          label: PostgreSQL Data
+          schema:
+            type: dict
+            attrs:
+              - variable: type
+                label: Type
+                schema:
+                  type: string
+                  default: ixVolume
+                  enum:
+                    - value: ixVolume
+                      description: ixVolume (TrueNAS-managed, recommended)
+                    - value: hostPath
+                      description: Host Path
+              - variable: ixVolumeConfig
+                label: ixVolume Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "ixVolume"]]
+                  $ref:
+                    - normalize/ixVolume
+                  attrs:
+                    - variable: datasetName
+                      label: Dataset Name
+                      schema:
+                        type: string
+                        default: postgres-data
+                        immutable: true
+              - variable: hostPathConfig
+                label: Host Path Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "hostPath"]]
+                  attrs:
+                    - variable: hostPath
+                      label: Host Path
+                      schema:
+                        type: hostpath
+                        required: true
+
+        - variable: redisData
+          label: Redis Data
+          schema:
+            type: dict
+            attrs:
+              - variable: type
+                label: Type
+                schema:
+                  type: string
+                  default: ixVolume
+                  enum:
+                    - value: ixVolume
+                      description: ixVolume (TrueNAS-managed, recommended)
+                    - value: hostPath
+                      description: Host Path
+              - variable: ixVolumeConfig
+                label: ixVolume Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "ixVolume"]]
+                  $ref:
+                    - normalize/ixVolume
+                  attrs:
+                    - variable: datasetName
+                      label: Dataset Name
+                      schema:
+                        type: string
+                        default: redis-data
+                        immutable: true
+              - variable: hostPathConfig
+                label: Host Path Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "hostPath"]]
+                  attrs:
+                    - variable: hostPath
+                      label: Host Path
+                      schema:
+                        type: hostpath
+                        required: true
+
+  # ---------- Secrets ----------
+  - variable: secrets
+    label: ""
+    group: Secrets
+    schema:
+      type: dict
+      attrs:
+        - variable: postgresPassword
+          label: PostgreSQL Password
+          description: Leave blank to generate. Save a copy — it is encrypted in the running app.
+          schema:
+            type: string
+            private: true
+            default: ""
+            min_length: 0
+        - variable: redisPassword
+          label: Redis Password
+          description: Leave blank to generate.
+          schema:
+            type: string
+            private: true
+            default: ""
+            min_length: 0
+        - variable: encryptionKey
+          label: Encryption Key (base64, 32 bytes)
+          description: Leave blank to generate. Once set, do not change without backing up data.
+          schema:
+            type: string
+            private: true
+            default: ""
+            min_length: 0
+        - variable: jwtSecret
+          label: JWT Secret
+          description: Leave blank to generate.
+          schema:
+            type: string
+            private: true
+            default: ""
+            min_length: 0
+        - variable: jwtRefreshSecret
+          label: JWT Refresh Secret
+          description: Leave blank to generate.
+          schema:
+            type: string
+            private: true
+            default: ""
+            min_length: 0
+        - variable: shareTokenSecret
+          label: Share Token Secret
+          description: Leave blank to generate.
+          schema:
+            type: string
+            private: true
+            default: ""
+            min_length: 0
+
+  # ---------- Object Storage ----------
+  - variable: s3
+    label: Use S3-compatible Object Storage
+    description: When enabled, video files are stored in an external S3-compatible bucket. Otherwise FrameComment uses the local Uploads volume.
+    group: Object Storage (S3)
+    schema:
+      type: dict
+      attrs:
+        - variable: enabled
+          label: Enabled
+          schema:
+            type: boolean
+            default: false
+        - variable: endpoint
+          label: S3 Endpoint
+          description: e.g. https://s3.us-east-1.amazonaws.com or your MinIO URL.
+          schema:
+            type: string
+            show_if: [["enabled", "=", true]]
+            default: ""
+        - variable: bucket
+          label: Bucket
+          schema:
+            type: string
+            show_if: [["enabled", "=", true]]
+            default: ""
+        - variable: region
+          label: Region
+          schema:
+            type: string
+            show_if: [["enabled", "=", true]]
+            default: us-east-1
+        - variable: accessKeyId
+          label: Access Key ID
+          schema:
+            type: string
+            private: true
+            show_if: [["enabled", "=", true]]
+            default: ""
+        - variable: secretAccessKey
+          label: Secret Access Key
+          schema:
+            type: string
+            private: true
+            show_if: [["enabled", "=", true]]
+            default: ""
+
+  # ---------- Resources ----------
+  - variable: resources
+    label: ""
+    group: Resources
+    schema:
+      type: dict
+      attrs:
+        - variable: limits
+          label: Limits
+          schema:
+            type: dict
+            attrs:
+              - variable: cpu
+                label: CPU
+                description: Maximum CPU. Example "2000m" = 2 cores.
+                schema:
+                  type: string
+                  default: "2000m"
+              - variable: memory
+                label: Memory
+                description: Maximum memory. Example "2Gi".
+                schema:
+                  type: string
+                  default: "2Gi"

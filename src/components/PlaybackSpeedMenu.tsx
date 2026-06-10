@@ -64,6 +64,7 @@ export default function PlaybackSpeedMenu({
 
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
+      {/* 2.5.1+: glass v2.5 trigger pill + dropdown. */}
       <button
         ref={triggerRef}
         type="button"
@@ -73,12 +74,12 @@ export default function PlaybackSpeedMenu({
         title="Playback speed"
         className={`
           inline-flex items-center justify-center
-          h-7 px-2 rounded-md
+          h-7 px-2.5 rounded-md
           text-xs font-mono tabular-nums font-medium
-          transition-colors
+          ring-1 transition-colors
           ${open
-            ? 'bg-white/15 text-white'
-            : 'bg-white/5 text-white/90 hover:bg-white/10 hover:text-white'}
+            ? 'bg-white/[0.14] ring-white/25 text-white'
+            : 'bg-white/[0.06] ring-white/10 text-white/85 hover:bg-white/[0.12] hover:ring-white/20 hover:text-white'}
         `}
       >
         {formatSpeed(value)}
@@ -87,16 +88,16 @@ export default function PlaybackSpeedMenu({
       {open && (
         <div
           role="menu"
-          className="
-            absolute bottom-full mb-2 left-1/2 -translate-x-1/2
-            z-50 min-w-[180px]
-            bg-black/95 backdrop-blur-md
-            ring-1 ring-white/15 shadow-2xl
-            rounded-lg p-1
-            animate-in fade-in-0 slide-in-from-bottom-1 duration-150
-          "
+          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 min-w-[180px] ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] rounded-lg p-1 text-white animate-in fade-in-0 slide-in-from-bottom-1 duration-150"
+          style={{
+            backgroundColor: 'rgba(28, 44, 64, 0.95)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.18) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
+            backdropFilter: 'blur(20px) saturate(150%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+          }}
         >
-          <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-white/50">
+          <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-white/55">
             Playback speed
           </div>
           <div className="grid grid-cols-1 gap-0.5">
@@ -112,18 +113,39 @@ export default function PlaybackSpeedMenu({
                     onChange(s)
                     setOpen(false)
                   }}
-                  className={`
-                    flex items-center justify-between
-                    px-3 py-1.5 rounded-md text-sm font-mono tabular-nums
-                    transition-colors
-                    ${isActive
-                      ? 'bg-primary/30 text-white'
-                      : 'text-white/85 hover:bg-white/10 hover:text-white'}
-                  `}
+                  className="flex items-center justify-between px-3 py-1.5 rounded-md text-sm font-mono tabular-nums transition-colors"
+                  style={
+                    isActive
+                      ? {
+                          backgroundColor: 'hsl(var(--spotlight-tint) / 0.30)',
+                          color: '#fff',
+                          boxShadow:
+                            'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.45)',
+                        }
+                      : undefined
+                  }
+                  onMouseEnter={(e) => {
+                    if (!isActive)
+                      (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                        'rgba(255,255,255,0.08)'
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive)
+                      (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                        ''
+                  }}
                 >
-                  <span>{formatSpeed(s)}</span>
+                  <span className={isActive ? 'text-white' : 'text-white/85'}>
+                    {formatSpeed(s)}
+                  </span>
                   {isActive && (
-                    <span aria-hidden className="text-primary text-[10px]">●</span>
+                    <span
+                      aria-hidden
+                      className="text-[10px]"
+                      style={{ color: 'hsl(var(--spotlight-tint))' }}
+                    >
+                      ●
+                    </span>
                   )}
                 </button>
               )

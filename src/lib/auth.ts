@@ -14,6 +14,11 @@ export interface AuthUser {
   id: string
   email: string
   name: string | null
+  // 2.5.1+: data: URL string for the inline-stored profile avatar.
+  // Optional — undefined when the caller selected the legacy field
+  // set (id/email/name/role only). Nullable when the user simply
+  // has no avatar yet, in which case the UI falls back to initials.
+  avatarUrl?: string | null
   role: string
 }
 
@@ -334,7 +339,9 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
+    // 2.5.1+: include `avatarUrl` so the session payload carries it
+    // back to the client without an extra round-trip.
+    select: { id: true, email: true, name: true, avatarUrl: true, role: true },
   })
 
   if (user) {

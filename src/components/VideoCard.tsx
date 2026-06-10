@@ -596,16 +596,14 @@ export default function VideoCard({
         e.preventDefault()
         onStackOnto(sourceId, id)
       }}
-      className={`group relative flex flex-col rounded-xl border bg-card cursor-pointer transition-all hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
+      className={`group relative flex flex-col rounded-xl bg-white/[0.04] cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] ${
         isBeingDragged
-          ? 'opacity-40 border-border/50 scale-[0.98]'
+          ? 'opacity-40 ring-1 ring-white/10 scale-[0.98]'
           : isStackHover
-            ? 'border-primary ring-2 ring-primary/60 bg-primary/5'
+            ? 'ring-2 ring-primary/60 bg-primary/10'
             : isSelected
-              ? 'border-primary ring-2 ring-primary/40'
-              : isPotentialStackTarget
-                ? 'border-border'
-                : 'border-border/50 hover:border-border'
+              ? 'ring-2 ring-primary/50'
+              : 'ring-1 ring-white/10 hover:ring-white/20 hover:shadow-[0_12px_28px_-12px_rgba(0,0,0,0.7)]'
       }`}
       data-video-id={id}
     >
@@ -616,7 +614,7 @@ export default function VideoCard({
           portrait 4:5 → black bars top/bottom. Matches Frame.io. */}
       <div
         ref={coverRef}
-        className="relative aspect-video bg-black rounded-t-xl overflow-hidden"
+        className="relative aspect-video bg-black/40 rounded-t-xl overflow-hidden"
         onMouseEnter={() => canScrub && setPreviewArmed(true)}
         onMouseMove={handleScrub}
         onPointerMove={handleScrub}
@@ -632,7 +630,7 @@ export default function VideoCard({
             alt=""
             draggable={false}
             onError={() => setThumbErrored(true)}
-            className="absolute inset-0 w-full h-full object-contain"
+            className="absolute inset-0 w-full h-full object-contain rounded-t-xl"
           />
         ) : isProcessing && !isImage ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground/70">
@@ -657,7 +655,7 @@ export default function VideoCard({
             while the cursor is hovering the cover. */}
         {hasStoryboard && (
           <div
-            className={`absolute inset-0 pointer-events-none transition-opacity ${
+            className={`absolute inset-0 pointer-events-none transition-opacity rounded-t-xl ${
               scrubFraction !== null ? 'opacity-100' : 'opacity-0'
             }`}
             style={storyboardStyle}
@@ -676,7 +674,7 @@ export default function VideoCard({
               setPreviewReady(true)
               if (scrubFraction !== null) applyScrub(scrubFraction)
             }}
-            className={`absolute inset-0 w-full h-full object-contain pointer-events-none transition-opacity ${
+            className={`absolute inset-0 w-full h-full object-contain pointer-events-none transition-opacity rounded-t-xl ${
               previewReady && scrubFraction !== null
                 ? 'opacity-100'
                 : 'opacity-0'
@@ -684,9 +682,12 @@ export default function VideoCard({
           />
         )}
         {/* Approved tick (bottom-left), version tag (top-right) and
-            duration badge (bottom-right) overlay the cover. */}
+            duration badge (bottom-right) overlay the cover. 2.5.0+:
+            version tag picks up the v2.5 frosted-glass vocabulary
+            so it visually composes with the rest of the chrome
+            instead of feeling like a heavy black tab. */}
         {versionTag && (
-          <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/65 text-white text-xs font-medium tabular-nums backdrop-blur-sm">
+          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-white/10 text-white text-[11px] font-medium tabular-nums ring-1 ring-white/15 backdrop-blur-md">
             {versionTag}
           </span>
         )}
@@ -708,9 +709,10 @@ export default function VideoCard({
             Encoding HD…
           </span>
         )}
-        {/* Multi-select checkbox (1.0.6+). Visible on hover, or
-            always when this card is selected or any sibling is
-            (handled by FolderBrowser passing `onToggleSelect`). */}
+        {/* Multi-select checkbox (1.0.6+). 2.5.0+: glass when idle
+            (transparent + hairline ring + backdrop-blur), brand
+            blue when active — matches the FolderCard checkbox so
+            the two card types pair visually in a mixed selection. */}
         {onToggleSelect && (
           <button
             type="button"
@@ -718,10 +720,10 @@ export default function VideoCard({
               e.stopPropagation()
               onToggleSelect(id)
             }}
-            className={`absolute top-2 left-2 z-10 inline-flex items-center justify-center w-5 h-5 rounded transition-colors ${
+            className={`absolute top-2 left-2 z-10 inline-flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
               isSelected
-                ? 'bg-primary text-white'
-                : 'bg-black/40 text-white border border-white/60 backdrop-blur-sm hover:bg-black/60'
+                ? 'bg-primary text-white ring-1 ring-primary/60'
+                : 'bg-white/10 text-white ring-1 ring-white/40 backdrop-blur-md hover:bg-white/20'
             }`}
             aria-pressed={isSelected}
             aria-label={isSelected ? 'Deselect video' : 'Select video'}
@@ -767,22 +769,26 @@ export default function VideoCard({
         )}
       </div>
 
-      {/* Footer: name + meta + kebab. 1.1.0+: explicit light-gray
-          tint so the video footer reads as visually distinct from
-          the flat folder cards next to it in the grid. Uses zinc
-          shades directly instead of the (very subtle) `muted`
-          token so the contrast lands in both light and dark mode. */}
-      <div className="flex items-start gap-2 p-4 bg-zinc-200 dark:bg-zinc-800 rounded-b-xl">
+      {/* Footer: name + meta + kebab. 2.5.0+ glass refresh — drops
+          the opaque zinc tint in favour of a low-opacity white wash
+          so the footer reads as one continuous surface with the
+          cover above. Text steps to the v2.5 white hierarchy
+          (`text-white` primary / `text-white/55` meta). */}
+      <div className="flex items-start gap-2 p-4 rounded-b-xl">
         <div className="flex-1 min-w-0">
+          {/* 2.5.0+: footer recipe sincronizat cu FolderCard —
+              `p-4` peste tot + `text-base font-semibold` name +
+              `text-xs mt-1` meta. Așa video, folder și New Folder
+              ajung la exact aceeași înălțime în grid. */}
           <div
-            className="text-base font-semibold text-foreground truncate"
+            className="text-base font-semibold text-white truncate"
             title={name}
           >
             {name}
           </div>
           {subtext && (
             <div
-              className="text-xs text-muted-foreground mt-1 truncate"
+              className="text-xs text-white/55 mt-1 truncate"
               title={subtext}
             >
               {subtext}
@@ -814,10 +820,13 @@ export default function VideoCard({
               // its phone-friendly popover that floats over adjacent
               // cards instead of overflowing off-screen.
               const rect = kebabRef.current?.getBoundingClientRect()
-              if (rect) setMenuStyle(computePopoverStyle(rect))
+              // 2.5.0+: pin width to ~240px so bulk-aware labels
+              // ("New Folder with N items", "Duplicate N items")
+              // never overflow into a horizontal scrollbar.
+              if (rect) setMenuStyle(computePopoverStyle(rect, { width: 240 }))
               setMenuOpen(true)
             }}
-            className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            className="rounded-md p-1.5 text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             title="More actions"
@@ -832,8 +841,8 @@ export default function VideoCard({
               // kebab bounding rect on open) so the menu can float
               // freely over adjacent cards and stay clamped inside the
               // viewport on phones — Frame.io style.
-              style={menuStyle}
-              className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+              style={{ ...menuStyle, backgroundColor: '#162533' }}
+              className="z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.65)] p-1"
               onClick={(e) => e.stopPropagation()}
             >
               {/* 1.1.0+ menu order:
@@ -849,7 +858,7 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onDownload!(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Download className="w-4 h-4 shrink-0" />
                   {isBulk ? `Download ${bulkSelectionCount} items` : 'Download'}
@@ -863,14 +872,14 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onShare!(id, name)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Share2 className="w-4 h-4 shrink-0" />
                   Share video
                 </button>
               )}
               {(showDownload || showShare) && (showDuplicate || showRename || showSplit) && (
-                <div className="my-1 h-px bg-border/50" role="separator" />
+                <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {showDuplicate && (
                 <button
@@ -880,7 +889,7 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onDuplicate!(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Copy className="w-4 h-4 shrink-0" />
                   {isBulk ? `Duplicate ${bulkSelectionCount} items` : 'Duplicate'}
@@ -894,7 +903,7 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onRename!(id, name)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Pencil className="w-4 h-4 shrink-0" />
                   Rename
@@ -908,14 +917,14 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onSplitVersions!(id, name)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Scissors className="w-4 h-4 shrink-0" />
                   Split versions
                 </button>
               )}
               {(showDuplicate || showRename || showSplit) && (onMoveUp || showNewFolder) && (
-                <div className="my-1 h-px bg-border/50" role="separator" />
+                <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onMoveUp && (
                 <button
@@ -925,7 +934,7 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onMoveUp(id)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <ArrowUpFromLine className="w-4 h-4 shrink-0" />
                   {isBulk
@@ -941,7 +950,7 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onNewFolderWithSelection!()
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <FolderPlus className="w-4 h-4 shrink-0" />
                   {bulkSelectionCount > 1
@@ -950,7 +959,7 @@ export default function VideoCard({
                 </button>
               )}
               {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showDownload || showShare) && (
-                <div className="my-1 h-px bg-border/50" role="separator" />
+                <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onDelete && (
                 <button
@@ -960,7 +969,7 @@ export default function VideoCard({
                     setMenuOpen(false)
                     onDelete(id, name)
                   }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/10 text-destructive text-left whitespace-nowrap"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/15 text-destructive text-left whitespace-nowrap"
                 >
                   <Trash2 className="w-4 h-4 shrink-0" />
                   {isBulk ? `Delete ${bulkSelectionCount} items` : 'Delete'}

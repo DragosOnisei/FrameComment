@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Comment, Video } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
@@ -516,6 +517,37 @@ export default function CommentSection({
   const COMMENTS_FILTER_LS_KEY = `framecomment:comments-filter:${projectId}`
   const [commentsFilter, setCommentsFilterState] = useState<CommentsFilter>('all')
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  // 2.5.1+: trigger ref + viewport-fixed coords so we can portal
+  // the dropdown to document.body. Backdrop-filter on the parent
+  // CommentSection card forms a backdrop root that prevents an
+  // in-place popover from sampling the real page behind — the
+  // portal sidesteps every ancestor.
+  const filterTriggerRef = useRef<HTMLButtonElement>(null)
+  const [filterMenuCoords, setFilterMenuCoords] = useState<{
+    left: number
+    top: number
+  } | null>(null)
+  useEffect(() => {
+    if (!filterMenuOpen) return
+    const compute = () => {
+      const el = filterTriggerRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      // Below the trigger, aligned to its left edge, clamped 8 px
+      // from the right viewport edge for narrow layouts.
+      setFilterMenuCoords({
+        left: Math.max(8, Math.min(window.innerWidth - 240, rect.left)),
+        top: rect.bottom + 6,
+      })
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
+  }, [filterMenuOpen])
   useEffect(() => {
     try {
       const cached = window.localStorage.getItem(COMMENTS_FILTER_LS_KEY)
@@ -1207,7 +1239,27 @@ export default function CommentSection({
 
   return (
     <>
-    <Card className="bg-card border-0 flex flex-col h-full lg:max-h-full rounded-none lg:rounded-lg overflow-hidden" data-comment-section>
+    {/* 2.5.1+: glass sidebar — same `bg-white/[0.04]` + hairline
+        ring vocabulary used by AdminSidebar + Profile cards, plus
+        an inline radial gradient (top-left) that mirrors the
+        light-spot wash on the admin shell. Driven by
+        `--spotlight-tint` so the glow follows the user's chosen
+        accent colour, not a hard-coded blue. */}
+    <Card
+      className="border-0 flex flex-col h-full lg:max-h-full rounded-none lg:rounded-2xl overflow-hidden bg-white/[0.06] ring-1 ring-white/15 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)] text-white"
+      style={{
+        // Stronger accent-tinted glow in the top-left corner so the
+        // sidebar reads as a glass panel ABOVE the page spotlight,
+        // not as a flat grey rectangle. The radial gradient uses
+        // `--spotlight-tint` so the colour tracks the user's chosen
+        // accent.
+        backgroundImage:
+          'radial-gradient(140% 70% at 0% 0%, hsl(var(--spotlight-tint) / 0.18) 0%, hsl(var(--spotlight-tint) / 0.06) 35%, transparent 70%)',
+        backdropFilter: 'blur(18px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(18px) saturate(140%)',
+      }}
+      data-comment-section
+    >
       {/* Desktop: Show header at top, Mobile: Hide header (will show below input) */}
       <CardHeader className={cn("flex-shrink-0 px-3 py-3 sm:px-4 sm:py-4", mobileCollapsible && "hidden lg:block")}>
         <div className="flex items-center justify-between gap-2 min-w-0">
@@ -1220,24 +1272,47 @@ export default function CommentSection({
                 isn't open. */}
             <div data-comments-filter className="relative min-w-0">
               <button
+                ref={filterTriggerRef}
                 type="button"
                 onClick={() => setFilterMenuOpen((v) => !v)}
-                className="inline-flex items-center gap-1 min-w-0 rounded-md px-1 -mx-1 py-0.5 hover:bg-muted/60 transition-colors"
+                // 2.5.1+: glass trigger matching the v2.5 pill
+                // pattern (search bar, version dropdown, etc.).
+                className="inline-flex items-center gap-1 min-w-0 rounded-md px-2 py-1 -mx-1 hover:bg-white/[0.08] transition-colors text-white"
                 aria-haspopup="menu"
                 aria-expanded={filterMenuOpen}
               >
                 <span className="truncate">{commentsFilterLabel}</span>
                 <ChevronDown
                   className={cn(
-                    'w-4 h-4 shrink-0 opacity-60 transition-transform',
+                    'w-4 h-4 shrink-0 opacity-70 transition-transform',
                     filterMenuOpen && 'rotate-180',
                   )}
                 />
               </button>
-              {filterMenuOpen && (
+              {filterMenuOpen && filterMenuCoords && typeof document !== 'undefined' && createPortal(
+                // 2.5.1+: PORTAL to document.body so the frosted-
+                // glass backdrop-filter actually samples the real
+                // page behind (the comments sidebar Card has its
+                // own backdrop-filter, which would otherwise form
+                // a backdrop root and break the blur). Tagged with
+                // `data-comments-filter` so the outside-click
+                // handler treats it as "inside".
                 <div
+                  data-comments-filter
                   role="menu"
-                  className="absolute left-0 top-full mt-1 z-30 min-w-[200px] rounded-md border border-border bg-popover shadow-lg py-1 text-sm"
+                  className="fixed z-[200] min-w-[220px] rounded-lg ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1 text-sm text-white animate-in fade-in-0 slide-in-from-top-1 duration-150"
+                  style={{
+                    left: filterMenuCoords.left,
+                    top: filterMenuCoords.top,
+                    backgroundColor: 'rgba(22, 37, 51, 0.35)',
+                    backgroundImage:
+                      'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.20) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
+                    backdropFilter: 'blur(40px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                    transform: 'translate3d(0, 0, 0)',
+                    willChange: 'backdrop-filter, transform',
+                    isolation: 'isolate',
+                  }}
                 >
                   {(
                     [
@@ -1245,29 +1320,59 @@ export default function CommentSection({
                       { v: 'incomplete', label: 'Incomplete comments' },
                       { v: 'completed', label: 'Completed comments' },
                     ] as { v: CommentsFilter; label: string }[]
-                  ).map(({ v, label }) => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setCommentsFilter(v)}
-                      role="menuitem"
-                      className={cn(
-                        'w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
-                        v === commentsFilter
-                          ? 'bg-muted/60 text-foreground font-medium'
-                          : 'text-foreground/90 hover:bg-muted/40',
-                      )}
-                    >
-                      <Check
-                        className={cn(
-                          'w-3.5 h-3.5 shrink-0',
-                          v === commentsFilter ? 'opacity-100' : 'opacity-0',
-                        )}
-                      />
-                      <span className="whitespace-nowrap">{label}</span>
-                    </button>
-                  ))}
-                </div>
+                  ).map(({ v, label }) => {
+                    const isActive = v === commentsFilter
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setCommentsFilter(v)}
+                        role="menuitem"
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors whitespace-nowrap"
+                        style={
+                          isActive
+                            ? {
+                                backgroundColor:
+                                  'hsl(var(--spotlight-tint) / 0.22)',
+                                boxShadow:
+                                  'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.45)',
+                              }
+                            : undefined
+                        }
+                        onMouseEnter={(e) => {
+                          if (!isActive)
+                            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                              'rgba(255,255,255,0.08)'
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isActive)
+                            (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                              ''
+                        }}
+                      >
+                        <Check
+                          className="w-3.5 h-3.5 shrink-0"
+                          strokeWidth={2.5}
+                          style={{
+                            opacity: isActive ? 1 : 0,
+                            color: isActive
+                              ? 'hsl(var(--spotlight-tint))'
+                              : undefined,
+                          }}
+                        />
+                        <span
+                          className={cn(
+                            'whitespace-nowrap',
+                            isActive ? 'text-white' : 'text-white/85',
+                          )}
+                        >
+                          {label}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>,
+                document.body
               )}
             </div>
           </CardTitle>

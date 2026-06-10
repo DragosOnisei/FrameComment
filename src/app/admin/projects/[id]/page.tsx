@@ -11,7 +11,8 @@ import FolderBrowser, {
 import AdminVideoManager, { type AdminVideoManagerHandle } from '@/components/AdminVideoManager'
 import ProjectActions from '@/components/ProjectActions'
 import ProjectUploadsBlock from '@/components/ProjectUploadsBlock'
-import { ArrowLeft, FolderPlus, Settings, FolderUp } from 'lucide-react'
+import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
+import { ArrowLeft, FolderUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
@@ -257,13 +258,12 @@ export default function ProjectPage() {
   }, [project?.slug])
 
 
-  if (loading) {
-    return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">{tc('loading')}</p>
-      </div>
-    )
-  }
+  // 2.5.0+: render nothing while the first fetch is in flight instead
+  // of flashing a centred "Loading…" placeholder — the sidebar +
+  // topbar stay mounted from the layout, so users perceive an
+  // instant navigation. The fetch resolves quickly enough that an
+  // empty pane reads as "page rendering", not "page broken".
+  if (loading) return null
 
   if (!project) {
     return (
@@ -282,64 +282,45 @@ export default function ProjectPage() {
   const iconBadgeIconClassName = 'w-4 h-4 text-primary'
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        {/* 1.3.0+: top action bar is now phone-friendly. On `<sm` the
-            buttons are icon-only with no min-width so they all fit
-            on one row even at 360px. From sm: up, the labels return
-            and a 150px floor restores the desktop look. */}
-        <div className="mb-4 sm:mb-6 flex items-center justify-between gap-2">
-          <Link href="/admin/projects">
-            <Button
-              variant="outline"
-              size="sm"
-              className="sm:size-default sm:h-10 sm:px-4 sm:min-w-[150px]"
-              aria-label="Back"
-            >
-              <ArrowLeft className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Back</span>
-            </Button>
-          </Link>
-          <div className="flex items-center gap-2">
-            {/* 1.7.0+: the Grid / Table toggle that lived here was
-                moved to AdminHeader so the same control flips both
-                this view and the projects dashboard. */}
-            {/* New Folder hoisted up here (1.0.9+) so it sits alongside
-                Project settings instead of inline next to the
-                breadcrumb. Driven through the FolderBrowser ref. */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="sm:h-10 sm:px-4 sm:min-w-[150px]"
-              onClick={() => folderBrowserRef.current?.openNewFolderDialog()}
-              aria-label="New Folder"
-            >
-              <FolderPlus className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">New Folder</span>
-            </Button>
-            <Link href={`/admin/projects/${id}/settings`}>
-              <Button
-                variant="outline"
-                size="sm"
-                className="sm:h-10 sm:px-4 sm:min-w-[150px]"
-                aria-label={t('projectSettings')}
-              >
-                <Settings className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">{t('projectSettings')}</span>
-              </Button>
-            </Link>
-            {/* Project kebab (1.0.6+) — Send Notification, View Admin
-                Share Page, View Analytics, Copy share link, Approve /
-                Archive / Delete. Replaces the entire right sidebar. */}
-            <ProjectActions
-              project={project}
-              videos={project.videos}
-              onRefresh={fetchProject}
-              shareUrl={shareUrl}
-              recipients={project.recipients || []}
-            />
-          </div>
-        </div>
+    // 2.5.0+: drop the `bg-background` solid — it was covering the
+    // layout's spotlight gradient, which is what gives the frosted
+    // glass cards (FolderCard, VideoCard) their depth + light source.
+    // The page is now transparent and just floats on top of the global
+    // light spot. Also dropped `max-w-screen-2xl mx-auto` so the grid
+    // flows flush-left next to the sidebar (Frame.io-style) instead
+    // of being centred with empty margins on wide screens.
+    <div className="flex-1 min-h-0">
+      {/* 2.5.0+: action bar lives in the global topbar via portal
+          slots so each page header reuses the same row. Back goes
+          left (next to where Projects title sat); New Folder +
+          Project Settings + the ProjectActions kebab go right. */}
+      <TopbarLeftSlot>
+        <Link href="/admin/projects">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:size-default md:h-10 md:px-4 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-4 h-4 md:mr-2" />
+            <span className="hidden md:inline">Back</span>
+          </Button>
+        </Link>
+      </TopbarLeftSlot>
+      <TopbarRightSlot>
+        {/* 2.5.0+: New Folder lives as an in-grid tile next to the
+            folder cards (Frame.io / Projects-dashboard style). Project
+            Settings moved into the ProjectActions kebab. Topbar right
+            slot keeps only the kebab now. */}
+        <ProjectActions
+          project={project}
+          videos={project.videos}
+          onRefresh={fetchProject}
+          shareUrl={shareUrl}
+          recipients={project.recipients || []}
+        />
+      </TopbarRightSlot>
+      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
 
         {/* Frame.io-clean project view (1.0.6+): the page is just the
             folder grid. Everything else (client info, share link, due

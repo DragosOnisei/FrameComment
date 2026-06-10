@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward } from 'lucide-react'
@@ -9,6 +10,7 @@ import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatComm
 import { isRangeEditActive } from '@/lib/comment-range-edit'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
+import { AudioAttachment } from './CommentAttachments'
 import type { SafeZonePreset } from './SafeZoneOverlay'
 
 type CommentWithReplies = Comment & {
@@ -62,6 +64,10 @@ interface CustomVideoControlsProps {
   rulersEnabled?: boolean
   onRulersEnabledChange?: (on: boolean) => void
   onDownloadStill?: () => void
+  /** 2.5.1+: forwarded to AudioAttachment in the timeline popover so
+   *  voice comments play correctly under both share + admin
+   *  contexts. */
+  shareToken?: string | null
 }
 
 // Frame.io-style timeline marker colours (1.0.7+) — fully opaque
@@ -169,6 +175,19 @@ interface MarkerData {
   colorKey: string
   content: string
   position: number
+  /** 2.5.1+: if the comment carries a voice/audio attachment we
+   *  surface it on the marker so the timeline popover can render an
+   *  inline player. We only need enough info for the AudioAttachment
+   *  component to fetch the signed URL — id is the key, the rest is
+   *  metadata shown on the chip. */
+  audioAsset: {
+    id: string
+    fileName: string
+    fileSize: string
+    fileType: string
+    category: string | null
+    createdAt: string
+  } | null
 }
 
 interface RangeBarData {
@@ -210,6 +229,7 @@ export default function CustomVideoControls({
   rulersEnabled,
   onRulersEnabledChange,
   onDownloadStill,
+  shareToken = null,
 }: CustomVideoControlsProps) {
   const t = useTranslations('controls')
   const tComments = useTranslations('comments')
@@ -335,6 +355,31 @@ export default function CustomVideoControls({
   const timelineRef = useRef<HTMLDivElement>(null)
   const volumeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const touchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 2.5.1+: live viewport rect of the currently-hovered avatar
+  // marker. Drives the portalled popover's fixed coordinates so it
+  // sits directly above the avatar even though it renders under
+  // document.body. We refresh on hover, scroll, and resize.
+  const markerRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const [popoverRect, setPopoverRect] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (!hoveredMarkerId) {
+      setPopoverRect(null)
+      return
+    }
+    const compute = () => {
+      const el = markerRefs.current.get(hoveredMarkerId)
+      if (!el) return
+      setPopoverRect(el.getBoundingClientRect())
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
+  }, [hoveredMarkerId])
 
   // Pending in/out range for the comment composer. Driven by the
   // useCommentManagement hook via the commentRangeStateChanged window
@@ -522,6 +567,19 @@ export default function CustomVideoControls({
         const rawContent = comment.content ?? ''
         const normalizedContent = rawContent.replace(/[<>]/g, ' ')
 
+        // 2.5.1+: pick the first audio attachment off the comment
+        // (voice messages are recorded one-at-a-time so realistically
+        // there's only ever one). If none, audioAsset stays null.
+        const assets: any[] = Array.isArray((comment as any).assets)
+          ? (comment as any).assets
+          : []
+        const audio = assets.find(
+          (a) =>
+            a &&
+            (a.category === 'audio' ||
+              (typeof a.fileType === 'string' && a.fileType.startsWith('audio/'))),
+        )
+
         return {
           id: comment.id,
           timestamp,
@@ -529,11 +587,17 @@ export default function CustomVideoControls({
           initials: initialsFromName(effectiveAuthorName),
           colorKey,
           content: normalizedContent.slice(0, 100),
-          // Don't clamp the position — playhead isn't clamped either, so
-          // clamping the chip would visibly desync them. We accept that
-          // chips at the very edges might be half-cropped; the click
-          // target on the visible half remains hover-able.
           position: Math.min(100, Math.max(0, (timestamp / videoDuration) * 100)),
+          audioAsset: audio
+            ? {
+                id: String(audio.id),
+                fileName: String(audio.fileName ?? 'voice.webm'),
+                fileSize: String(audio.fileSize ?? '0'),
+                fileType: String(audio.fileType ?? 'audio/webm'),
+                category: audio.category ?? 'audio',
+                createdAt: String(audio.createdAt ?? new Date().toISOString()),
+              }
+            : null,
         }
       })
       .sort((a, b) => a.timestamp - b.timestamp)
@@ -913,7 +977,19 @@ export default function CustomVideoControls({
   }
 
   return (
-    <div className="bg-black px-2 sm:px-3 py-2">
+    // 2.5.1+: TRUE frosted glass — no in-bar accent radial; the
+    // page's `.spotlight-bg-tr` wash (anchored top-right) supplies
+    // the blue tint that bleeds through this translucent surface
+    // via backdrop-filter. The bar itself stays neutral so it
+    // doesn't compete with the page-level light source.
+    <div
+      className="px-2 sm:px-3 py-2 border-t border-white/10"
+      style={{
+        backgroundColor: 'rgba(30, 48, 72, 0.40)',
+        backdropFilter: 'blur(32px) saturate(170%)',
+        WebkitBackdropFilter: 'blur(32px) saturate(170%)',
+      }}
+    >
       {/* Timeline Container.
           1.9.1+: dropped the `px-1` that used to be here. The
           avatar row below already has `px-1`, but the avatar's
@@ -968,9 +1044,11 @@ export default function CustomVideoControls({
                 playback was speeding up/slowing down between
                 samples. */}
             <div
-              className="absolute inset-y-0 left-0 bg-primary"
+              className="absolute inset-y-0 left-0"
               style={{
                 width: `${displayedProgress}%`,
+                backgroundColor: 'hsl(var(--spotlight-tint))',
+                boxShadow: '0 0 8px hsl(var(--spotlight-tint) / 0.4)',
                 transition: 'width 200ms linear',
               }}
             />
@@ -1275,8 +1353,34 @@ export default function CustomVideoControls({
                 }}
                 data-comment-popover
               >
+                {/*
+                  2.5.1+: glass v2.5 avatar — keep the saturated
+                  user-colour identity but layer a soft white-glass
+                  sheen on top so the chip reads as a frosted bead
+                  rather than a flat dot. The colours.bg solid sits
+                  behind, an overlay gradient + inset white highlight
+                  on top, crisp white outer ring for the "stroke alb"
+                  feel that the rest of the v2.5 system uses.
+                  Slightly smaller text (8/9 px) per user request so
+                  the bead feels more refined.
+                */}
+                {/*
+                  2.5.1+: glass v2.5 avatar — keep the saturated
+                  user-colour identity but layer a soft white-glass
+                  sheen on top via an inner clipped wrapper. The
+                  stacked-count badge MUST sit on the OUTER button
+                  (no overflow clip there) so it can overflow the
+                  avatar boundary and stay visible at -top-1 -right-1.
+                */}
                 <button
                   type="button"
+                  ref={(el) => {
+                    // 2.5.1+: register the avatar button so the
+                    // portalled popover can read its viewport rect
+                    // and position itself with `position: fixed`.
+                    if (el) markerRefs.current.set(primaryMarker.id, el)
+                    else markerRefs.current.delete(primaryMarker.id)
+                  }}
                   onClick={(e) => handleMarkerClick(primaryMarker, e)}
                   onTouchEnd={(e) => handleMarkerTouchEnd(primaryMarker, e)}
                   onMouseEnter={() => handleMarkerMouseEnter(primaryMarker.id)}
@@ -1285,23 +1389,50 @@ export default function CustomVideoControls({
                   className={`
                     relative flex items-center justify-center
                     w-4 h-4 sm:w-[18px] sm:h-[18px]
-                    rounded-full ring-1
+                    rounded-full
                     font-semibold select-none
                     transition-all duration-150 ease-out
                     hover:scale-110
                     active:scale-95
                     focus:outline-none focus-visible:ring-2 focus-visible:ring-white
-                    ${colors.bg} ${colors.ring} ${colors.text}
-                    ${isHovered ? 'scale-110 shadow-xl z-30' : 'z-10'}
+                    ${isHovered ? 'scale-110 z-30' : 'z-10'}
                   `}
                   aria-label={`Comment by ${primaryMarker.authorName || tComments('anonymous')} at ${formatTime(primaryMarker.timestamp)}`}
                 >
-                  <span className="text-[9px] sm:text-[10px] font-semibold leading-none">
+                  {/* Inner glass disc — owns the colour, the rounded
+                      clip and the gradient sheen. Badge lives OUTSIDE
+                      this wrapper so it isn't clipped. */}
+                  <span
+                    aria-hidden
+                    className={`absolute inset-0 rounded-full overflow-hidden ${colors.bg}`}
+                    style={{
+                      boxShadow: isHovered
+                        ? 'inset 0 0 0 1px rgba(255,255,255,0.95), 0 0 0 2px rgba(0,0,0,0.4), 0 4px 14px rgba(0,0,0,0.45)'
+                        : 'inset 0 0 0 1px rgba(255,255,255,0.85), 0 0 0 1px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.4)',
+                    }}
+                  >
+                    {/* Translucent white sheen tilted from the
+                        top-left, so the bead reads as a glass dome. */}
+                    <span
+                      className="absolute inset-0 pointer-events-none"
+                      style={{
+                        backgroundImage:
+                          'linear-gradient(135deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.18) 45%, rgba(255,255,255,0) 75%)',
+                        boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.18)',
+                      }}
+                    />
+                  </span>
+                  <span
+                    className={`relative text-[8px] sm:text-[9px] font-semibold leading-none ${colors.text}`}
+                    style={{
+                      textShadow: '0 1px 1px rgba(0,0,0,0.35)',
+                    }}
+                  >
                     {primaryMarker.initials}
                   </span>
 
                   {isStacked && (
-                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 bg-foreground text-background text-[8px] font-bold rounded-full flex items-center justify-center shadow-md">
+                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 bg-white text-black text-[8px] font-bold rounded-full flex items-center justify-center shadow-md ring-1 ring-black/30 z-10">
                       {group.length}
                     </span>
                   )}
@@ -1317,62 +1448,67 @@ export default function CustomVideoControls({
                     body with no line-clamp.
                     On desktop the original compact tooltip above the
                     avatar is kept. */}
-                {isHovered && (() => {
-                  // 1.3.1+: on phones the card must be centred on the
-                  // VIEWPORT, not on the avatar marker. We compute the
-                  // marker's centre in viewport pixels and shift the
-                  // card by the inverse so the card sits dead-centre
-                  // regardless of where the marker is on the timeline.
-                  const avatarCenterX =
-                    12 + (primaryMarker.position / 100) * (viewportWidth - 24)
-                  const centeringShift = viewportWidth / 2 - avatarCenterX
+                {isHovered && popoverRect && typeof document !== 'undefined' && (() => {
+                  // 2.5.1+: PORTAL to document.body. Backdrop-filter
+                  // cannot sample <video> pixels when any ancestor
+                  // creates a "backdrop root" (transform / filter /
+                  // another backdrop-filter / etc.). The avatar
+                  // wrapper has `transform: translateX(-50%)` and
+                  // the CustomVideoControls bar has its own
+                  // backdrop-filter — between them, the popover's
+                  // backdrop was sampling an empty parent layer and
+                  // the blur looked like plain transparency.
+                  // Rendering via createPortal under document.body
+                  // takes the popover out of every troublesome
+                  // ancestor; position: fixed coords come straight
+                  // from the avatar's getBoundingClientRect.
                   const isMobile = viewportWidth < 640
-                  return (
+                  const POPOVER_W = isMobile
+                    ? Math.min(360, viewportWidth - 80)
+                    : 260
+                  // Center on the avatar by default; clamp inside
+                  // the viewport with an 8 px gutter so a marker at
+                  // either edge doesn't push the card off-screen.
+                  const avatarCenterX =
+                    popoverRect.left + popoverRect.width / 2
+                  let left = avatarCenterX - POPOVER_W / 2
+                  if (isMobile) {
+                    // Mobile: center the card on the viewport so a
+                    // marker on the far side of a long video still
+                    // shows a centered popover.
+                    left = (viewportWidth - POPOVER_W) / 2
+                  }
+                  left = Math.max(
+                    8,
+                    Math.min(viewportWidth - POPOVER_W - 8, left),
+                  )
+                  // Position the popover ABOVE the avatar with a
+                  // small gap. Mobile gets more breathing room so
+                  // the user's finger doesn't sit under it.
+                  const gap = isMobile ? 40 : 12
+                  return createPortal(
                   <div
                     data-comment-popover
-                    // 1.3.1+: keep the popover open while the mouse is
-                    // hovering it (so the user can reach the Prev/Next
-                    // buttons without it disappearing). Without these
-                    // handlers the popover would dismiss the moment
-                    // the mouse left the avatar marker.
                     onMouseEnter={() => handleMarkerMouseEnter(primaryMarker.id)}
                     onMouseLeave={handleMarkerMouseLeave}
-                    className={`
-                      absolute z-[200]
-                      text-card-foreground ring-1 ring-border
-                      rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.55)]
-                      backdrop-blur-sm overflow-hidden
-                      left-1/2 p-3
-                      sm:left-auto sm:translate-x-0 ${getTooltipAlignmentDesktop(primaryMarker.position)}
-                      animate-in fade-in-0 slide-in-from-bottom-1 duration-150
-                    `}
-                    style={
-                      isMobile
-                        ? {
-                            width: viewportWidth - 80,
-                            maxWidth: 360,
-                            bottom: 'calc(100% + 40px)',
-                            transform: `translateX(calc(-50% + ${centeringShift}px))`,
-                            // 1.3.1+: 50 % opacity on the card surface
-                            // so the video / annotations underneath stay
-                            // clearly visible behind the popover.
-                            backgroundColor: 'hsl(var(--card) / 0.5)',
-                          }
-                        : {
-                            // 1.3.1+: same Frame.io-style transparent
-                            // card on desktop. We DO NOT set `transform`
-                            // here so the Tailwind alignment classes
-                            // (`sm:left-0` / `sm:right-0` /
-                            // `sm:left-1/2 sm:-translate-x-1/2`) take
-                            // over and clamp the card inside the
-                            // viewport instead of letting a marker at
-                            // the start of the timeline push half the
-                            // popover off-screen.
-                            width: 260,
-                            bottom: 'calc(100% + 8px)',
-                            backgroundColor: 'hsl(var(--card) / 0.5)',
-                          }
-                    }
+                    className="fixed z-[200] text-white ring-1 ring-white/15 rounded-2xl shadow-[0_18px_44px_-10px_rgba(0,0,0,0.75)] overflow-hidden p-3 animate-in fade-in-0 slide-in-from-bottom-1 duration-150"
+                    style={{
+                      left,
+                      top: popoverRect.top - gap,
+                      transform: 'translateY(-100%)',
+                      width: POPOVER_W,
+                      // Glass v2.5: 35 % navy base so the blurred
+                      // video underneath reads clearly through it,
+                      // accent radial in the top-left, then a
+                      // strong backdrop blur. With the portal
+                      // escaping every backdrop-root, the blur now
+                      // actually samples the video pixels.
+                      backgroundColor: 'rgba(20, 30, 46, 0.35)',
+                      backgroundImage:
+                        'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                      backdropFilter: 'blur(28px) saturate(180%)',
+                      WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+                    }}
                     // 1.3.2+: horizontal swipe navigation across the
                     // ENTIRE timeline (not just the current stack).
                     // The threshold is unchanged at 40 px; the only
@@ -1473,60 +1609,111 @@ export default function CustomVideoControls({
                           key={`${marker.id}:${stackAnimSeq}`}
                           className={slideClass}
                         >
+                          {/* 2.5.1+: header row — avatar (glass dome,
+                              same treatment as the timeline marker),
+                              author name, stacked counter pill and
+                              timestamp chip in glass v2.5 language. */}
                           <div className="flex items-center gap-2 mb-1.5 sm:mb-1">
                             <div
-                              className={`w-6 h-6 sm:w-5 sm:h-5 rounded-full ring-1 flex items-center justify-center text-[10px] sm:text-[8px] font-semibold shrink-0 ${markerColors.bg} ${markerColors.ring} ${markerColors.text}`}
+                              className={`relative w-6 h-6 sm:w-5 sm:h-5 rounded-full flex items-center justify-center font-semibold shrink-0 ${markerColors.bg}`}
+                              style={{
+                                boxShadow:
+                                  'inset 0 0 0 1px rgba(255,255,255,0.85), 0 0 0 1px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.45)',
+                              }}
                             >
-                              {marker.initials}
+                              <span
+                                aria-hidden
+                                className="absolute inset-0 rounded-full pointer-events-none"
+                                style={{
+                                  backgroundImage:
+                                    'linear-gradient(135deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.18) 45%, rgba(255,255,255,0) 75%)',
+                                }}
+                              />
+                              <span
+                                className={`relative text-[10px] sm:text-[9px] leading-none ${markerColors.text}`}
+                                style={{
+                                  textShadow: '0 1px 1px rgba(0,0,0,0.4)',
+                                }}
+                              >
+                                {marker.initials}
+                              </span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold text-xs sm:text-[10px] truncate block">
+                              <span className="font-semibold text-xs sm:text-[10px] text-white truncate block">
                                 {marker.authorName || tComments('anonymous')}
                               </span>
                             </div>
-                            {/* Stacked count chip (only when the
-                                marker actually has siblings). Sits
-                                top-right next to the timestamp. */}
+                            {/* Stacked counter — glass pill.
+                                2.5.1+: dropped the yellow timestamp
+                                chip on the right per user request.
+                                The popover only fires for stacked
+                                groups in practice, so the counter
+                                alone tells the user where they are. */}
                             {group.length > 1 && (
-                              <span className="inline-flex items-center justify-center min-w-[28px] h-[18px] px-1.5 rounded-full bg-muted/80 text-foreground text-[10px] font-semibold tabular-nums shrink-0">
+                              <span className="inline-flex items-center justify-center min-w-[30px] h-[18px] px-1.5 rounded-full bg-white/[0.10] ring-1 ring-white/15 text-white text-[10px] font-semibold tabular-nums shrink-0">
                                 {safeIndex + 1}/{group.length}
                               </span>
                             )}
-                            {/* 1.3.1+: yellow Frame.io timestamp chip
-                                on every breakpoint — desktop tooltip
-                                now uses the same translucent card UI
-                                as mobile. */}
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-warning/20 text-warning text-[10px] font-mono font-medium shrink-0">
-                              {formatTime(marker.timestamp)}
-                            </span>
                           </div>
-                          <p className="text-sm sm:text-xs leading-relaxed break-all sm:break-words whitespace-pre-wrap">
-                            {marker.content || 'No content'}
-                          </p>
-                          {/* 1.3.2+: hint is shown only when this
-                              stack has 2+ comments. A single comment
-                              at this timestamp gets a clean popover
-                              with no navigation chrome — even if
-                              there are other comments at OTHER
-                              timestamps on the timeline (the user can
-                              still click those markers directly). */}
+                          {/*
+                            2.5.1+: voice comments show an inline
+                            glass audio player instead of the
+                            generic "No content" fallback. If the
+                            comment ALSO has text we render both —
+                            text first, then the player below.
+                          */}
+                          {marker.content ? (
+                            <p className="pt-2.5 text-sm sm:text-xs text-white/90 leading-relaxed break-all sm:break-words whitespace-pre-wrap">
+                              {marker.content}
+                            </p>
+                          ) : !marker.audioAsset ? (
+                            <p className="pt-2.5 text-sm sm:text-xs text-white/55 italic leading-relaxed">
+                              No content
+                            </p>
+                          ) : null}
+                          {marker.audioAsset && (
+                            <div
+                              className="pt-2.5"
+                              // 2.5.1+: stop all interaction events
+                              // from bubbling to the popover's
+                              // outer click / touch / swipe handlers.
+                              // Without this, hitting Play (or
+                              // grabbing the scrubber thumb) would
+                              // also fire the popover's
+                              // tap-to-advance, which unmounts the
+                              // audio player mid-interaction and
+                              // makes it look like the popover
+                              // "disappeared". stopPropagation on
+                              // both mousedown/click + touchstart/end
+                              // covers desktop + mobile.
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                            >
+                              <AudioAttachment
+                                asset={marker.audioAsset}
+                                videoId={videoId}
+                                shareToken={shareToken}
+                              />
+                            </div>
+                          )}
                           {group.length > 1 && (
-                            <p className="sm:hidden text-[10px] text-muted-foreground mt-2 text-center">
+                            <p className="sm:hidden text-[10px] text-white/55 mt-2 text-center">
                               Tap or swipe to see other comments
                             </p>
                           )}
-                          {/* Desktop prev/next arrows for stacks —
-                              same rule as the mobile hint: only when
-                              this stack actually has multiple
-                              comments to cycle through. */}
+                          {/* 2.5.1+: Prev / Next — glass pills with a
+                              soft outward shadow so they read as a
+                              layer floating ABOVE the popover surface
+                              (per the user's "umbra ca sa fie layer"
+                              request). Brand-accent ring on hover so
+                              the affordance pops without overpowering. */}
                           {group.length > 1 && (
-                            <div className="hidden sm:flex items-center justify-between gap-2 mt-3 pt-3 border-t border-border/50">
+                            <div className="hidden sm:flex items-center justify-between gap-2 mt-3 pt-3 border-t border-white/10">
                               <button
                                 type="button"
                                 onClick={(e) => {
-                                  // Stop bubble so the popover's own
-                                  // tap-to-advance click handler
-                                  // doesn't also fire and overshoot.
                                   e.stopPropagation()
                                   goToAdjacentComment(
                                     'prev',
@@ -1535,7 +1722,7 @@ export default function CustomVideoControls({
                                     groupedMarkers,
                                   )
                                 }}
-                                className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-muted/60 text-foreground ring-1 ring-border hover:bg-muted hover:ring-foreground/30 transition-colors"
+                                className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] ring-1 ring-white/15 text-white hover:bg-white/[0.14] hover:ring-[hsl(var(--spotlight-tint)/0.45)] transition-colors shadow-[0_4px_12px_-4px_rgba(0,0,0,0.55)]"
                                 aria-label="Previous comment"
                               >
                                 ← Prev
@@ -1551,7 +1738,7 @@ export default function CustomVideoControls({
                                     groupedMarkers,
                                   )
                                 }}
-                                className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-muted/60 text-foreground ring-1 ring-border hover:bg-muted hover:ring-foreground/30 transition-colors"
+                                className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] ring-1 ring-white/15 text-white hover:bg-white/[0.14] hover:ring-[hsl(var(--spotlight-tint)/0.45)] transition-colors shadow-[0_4px_12px_-4px_rgba(0,0,0,0.55)]"
                                 aria-label="Next comment"
                               >
                                 Next →
@@ -1561,7 +1748,8 @@ export default function CustomVideoControls({
                         </div>
                       )
                     })()}
-                  </div>
+                  </div>,
+                  document.body
                   )
                 })()}
               </div>
@@ -1582,7 +1770,7 @@ export default function CustomVideoControls({
         <div className="flex items-center gap-0.5 sm:gap-1 flex-1 min-w-0">
           <button
             onClick={onPlayPause}
-            className="p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
+            className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
             aria-label={isPlaying ? t('pauseVideo') : t('playVideo')}
             title={isPlaying ? `${t('pauseVideo')} (Ctrl+Space)` : `${t('playVideo')} (Ctrl+Space)`}
           >
@@ -1631,7 +1819,7 @@ export default function CustomVideoControls({
           >
             <button
               onClick={onToggleMute}
-              className="p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
+              className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
               aria-label={isMuted ? t('unmute') : t('mute')}
               title={isMuted ? t('unmute') : t('mute')}
             >
@@ -1650,44 +1838,73 @@ export default function CustomVideoControls({
                 the audio updates exactly like before. The wrapper
                 fades + slides on showVolume just like the previous
                 input did. Hidden on mobile — tap icon mutes. */}
+            {/*
+              2.5.1+ FIX: the slider was unhittable because the thin
+              3 px track is the only mouseDown target — at volume = 1
+              half the thumb sits OUTSIDE the track's bounds, and the
+              thumb itself had `pointer-events-none`. Now the OUTER
+              wrapper owns the click/drag handler and provides a
+              taller (h-5) invisible hit area, while the thin track
+              + fill + thumb live inside as visual children. Thumb
+              still computes its position from the inner track ref so
+              the math is unchanged. The wrapper width is what fades
+              in/out — the inner ref stays a stable element.
+            */}
             <div
-              ref={volumeTrackRef}
+              onMouseDown={handleVolumePointerDown}
+              className={`hidden sm:flex items-center h-5 cursor-pointer transition-[width,opacity,margin] duration-200 ease-out ${
+                showVolume
+                  ? 'w-20 opacity-100 pointer-events-auto ml-1'
+                  : 'w-0 opacity-0 pointer-events-none ml-0'
+              }`}
               role="slider"
               aria-valuemin={0}
               aria-valuemax={1}
               aria-valuenow={isMuted ? 0 : volume}
               aria-label="Volume"
               tabIndex={showVolume ? 0 : -1}
-              onMouseDown={handleVolumePointerDown}
-              className={`hidden sm:block relative h-1 rounded-full bg-white/20 cursor-pointer transition-[width,opacity,margin] duration-200 ease-out ${
-                showVolume
-                  ? 'w-20 opacity-100 pointer-events-auto ml-1'
-                  : 'w-0 opacity-0 pointer-events-none ml-0'
-              }`}
             >
-              {/* Filled portion (blue line up to current volume). */}
               <div
-                className="absolute inset-y-0 left-0 bg-primary rounded-full pointer-events-none"
-                style={{
-                  width: `${(isMuted ? 0 : volume) * 100}%`,
-                  transition: isDraggingVolume
-                    ? 'none'
-                    : 'width 200ms linear',
-                }}
-              />
-              {/* Thumb (blue ball). Same 200ms linear transition on
-                  `left` as the timeline playhead, disabled during
-                  active drag so it tracks the cursor 1:1. */}
-              <div
-                className="absolute top-1/2 w-3 h-3 bg-primary rounded-full shadow-sm pointer-events-none"
-                style={{
-                  left: `${(isMuted ? 0 : volume) * 100}%`,
-                  transform: 'translate(-50%, -50%)',
-                  transition: isDraggingVolume
-                    ? 'none'
-                    : 'left 200ms linear',
-                }}
-              />
+                ref={volumeTrackRef}
+                className="relative h-[3px] w-full rounded-full bg-white/15"
+              >
+                {/* Accent-tinted fill, follows --spotlight-tint. */}
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full pointer-events-none"
+                  style={{
+                    width: `${(isMuted ? 0 : volume) * 100}%`,
+                    backgroundColor: 'hsl(var(--spotlight-tint))',
+                    boxShadow: '0 0 6px hsl(var(--spotlight-tint) / 0.45)',
+                    transition: isDraggingVolume
+                      ? 'none'
+                      : 'width 200ms linear',
+                  }}
+                />
+                {/*
+                  Glass thumb — translucent WHITE-dominant interior
+                  + crisp white stroke. Higher base opacity (0.55)
+                  than the audio scrubber thumb so it still reads as
+                  glass even when the accent fill sits directly
+                  behind it; on the audio player the thumb sits on
+                  a near-black card so 0.18 was enough.
+                */}
+                <div
+                  className="absolute top-1/2 w-3.5 h-3.5 rounded-full pointer-events-none"
+                  style={{
+                    left: `${(isMuted ? 0 : volume) * 100}%`,
+                    transform: 'translate(-50%, -50%)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+                    border: '1.5px solid rgba(255, 255, 255, 0.98)',
+                    backdropFilter: 'blur(6px) saturate(140%)',
+                    WebkitBackdropFilter: 'blur(6px) saturate(140%)',
+                    boxShadow:
+                      '0 0 0 1px hsl(var(--spotlight-tint) / 0.35), 0 2px 8px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
+                    transition: isDraggingVolume
+                      ? 'none'
+                      : 'left 200ms linear',
+                  }}
+                />
+              </div>
             </div>
 
           </div>
@@ -1738,7 +1955,7 @@ export default function CustomVideoControls({
 
           <button
             onClick={onToggleFullscreen}
-            className="p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
+            className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
             aria-label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
             title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
           >

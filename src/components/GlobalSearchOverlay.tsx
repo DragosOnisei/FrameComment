@@ -398,7 +398,10 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
 
   return (
     <div
-      className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-sm flex flex-col items-stretch"
+      // 2.5.0+: no dim scrim — the same call we made for the
+      // template modal. Page underneath stays visible and the
+      // floating cards below carry the frosted-glass look.
+      className="fixed inset-0 z-[100] bg-transparent flex flex-col items-stretch"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -406,11 +409,20 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
       aria-modal="true"
       aria-label="Global video search"
     >
-      {/* Top search bar */}
+      {/* Top search bar — frosted-glass pill, same recipe as the
+          template modal's panels: ~6% white tint, inline 20px blur
+          + saturate(140%), hairline ring + soft outward shadow.
+          Explicit inline backdrop-filter so it never gets purged. */}
       <div className="w-full max-w-screen-2xl mx-auto px-3 sm:px-6 pt-3 sm:pt-6 shrink-0">
-        <div className="bg-card border border-border rounded-xl shadow-elevation-lg overflow-hidden">
+        <div
+          className="rounded-xl overflow-hidden bg-white/[0.06] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+          style={{
+            backdropFilter: 'blur(40px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(140%)',
+          }}
+        >
           <div className="flex items-center gap-3 px-4 py-3">
-            <Search className="w-5 h-5 text-muted-foreground shrink-0" />
+            <Search className="w-5 h-5 text-white/55 shrink-0" />
             <input
               ref={inputRef}
               type="text"
@@ -420,20 +432,20 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
               }}
               onKeyDown={handleInputKeyDown}
               placeholder="Search videos by name…"
-              className="flex-1 bg-transparent outline-none border-0 text-base placeholder:text-muted-foreground"
+              className="flex-1 bg-transparent outline-none border-0 text-base text-white placeholder:text-white/45"
               aria-label="Search videos"
             />
             {loading && (
-              <Loader2 className="w-4 h-4 text-muted-foreground animate-spin shrink-0" />
+              <Loader2 className="w-4 h-4 text-white/55 animate-spin shrink-0" />
             )}
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-md hover:bg-accent transition-colors shrink-0"
+              className="p-1.5 rounded-md text-white/55 hover:text-white hover:bg-white/5 transition-colors shrink-0"
               aria-label="Close search"
               title="Close (Esc)"
             >
-              <X className="w-4 h-4 text-muted-foreground" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -447,24 +459,29 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
         <div className="flex-1 w-full max-w-screen-2xl mx-auto px-3 sm:px-6 py-3 sm:py-4 overflow-hidden min-h-0">
           <div
             ref={panelRef}
-            className="h-full grid grid-cols-1 md:grid-cols-[var(--search-left-w)_4px_1fr] gap-0 bg-card border border-border rounded-xl shadow-elevation-lg overflow-hidden"
+            className="h-full grid grid-cols-1 md:grid-cols-[var(--search-left-w)_4px_1fr] gap-0 rounded-xl overflow-hidden bg-white/[0.06] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
             style={
               {
                 // Custom property drives the left column width on
                 // desktop; below md it collapses to a single column
                 // via the grid-cols-1 default above.
                 ['--search-left-w' as any]: `${leftWidth}px`,
+                // 2.5.0+: explicit inline backdrop-filter so the
+                // frosted blur lands even if a Tailwind utility
+                // got purged. Same recipe as the template modal.
+                backdropFilter: 'blur(40px) saturate(140%)',
+                WebkitBackdropFilter: 'blur(40px) saturate(140%)',
               } as React.CSSProperties
             }
           >
             {/* Left rail */}
             <div className="overflow-y-auto flex flex-col min-h-0">
               {results.length === 0 && !loading && (
-                <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+                <div className="px-4 py-6 text-sm text-white/55 text-center">
                   No videos match &ldquo;{trimmedQuery}&rdquo;.
                 </div>
               )}
-              <div className="divide-y divide-border/30">
+              <div className="divide-y divide-white/10">
                 {results.map((r) => {
                   const active = r.id === selectedId
                   return (
@@ -473,18 +490,21 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                       type="button"
                       onClick={() => setSelectedId(r.id)}
                       onDoubleClick={() => navigateToVideo(r)}
+                      // 2.5.0+: brand-blue tint for the active
+                      // row (same recipe as the sidebar's active
+                      // link). Neutral white-5 hover for the rest.
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                         active
-                          ? 'bg-accent text-accent-foreground'
-                          : 'hover:bg-accent/50'
+                          ? 'bg-primary/15 text-primary'
+                          : 'hover:bg-white/5 text-white/85'
                       }`}
                     >
                       <ResultThumbnail r={r} small />
                       <div className="flex-1 min-w-0">
-                        <div className={`text-sm font-medium truncate ${active ? '' : ''}`}>
+                        <div className="text-sm font-medium truncate">
                           {r.name}
                         </div>
-                        <div className="text-xs text-muted-foreground truncate">
+                        <div className={`text-xs truncate ${active ? 'text-primary/70' : 'text-white/55'}`}>
                           {r.projectName || 'Unknown project'}
                           {r.folderName ? ` · ${r.folderName}` : ''}
                           {r.mediaType !== 'IMAGE' && r.duration > 0
@@ -500,7 +520,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                   at the cap so the admin can refine the query — the
                   list itself is already fully scrollable. */}
               {total > results.length && (
-                <div className="px-4 py-2.5 text-[11px] text-muted-foreground text-center border-t border-border/50">
+                <div className="px-4 py-2.5 text-[11px] text-white/55 text-center border-t border-white/10">
                   Showing top {results.length} of {total} — refine your search to narrow down
                 </div>
               )}
@@ -536,7 +556,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
               title="Drag to resize • double-click to reset"
             >
               <span
-                className={`block w-px h-full bg-border/50 group-hover:bg-primary/60 transition-colors ${
+                className={`block w-px h-full bg-white/10 group-hover:bg-primary/60 transition-colors ${
                   isDragging ? 'bg-primary w-0.5' : ''
                 }`}
               />
@@ -549,7 +569,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                 grows a horizontal scrollbar. */}
             <div className="overflow-y-auto overflow-x-hidden min-h-0 min-w-0">
               {!showPanel ? null : !selected ? (
-                <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                <div className="h-full flex items-center justify-center text-sm text-white/55">
                   {loading ? 'Searching…' : 'Select a result to see details.'}
                 </div>
               ) : (
@@ -704,10 +724,10 @@ function DetailsPane({
             unbroken tokens like uppercase filenames) lets a long
             title fall to a second line when the right pane shrinks
             instead of overflowing horizontally. */}
-        <h2 className="text-lg font-semibold leading-tight break-words [overflow-wrap:anywhere]">
+        <h2 className="text-lg font-semibold leading-tight break-words [overflow-wrap:anywhere] text-white">
           {r.name}
         </h2>
-        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1 break-words [overflow-wrap:anywhere]">
+        <p className="text-xs text-white/55 mt-1 flex items-center gap-1 break-words [overflow-wrap:anywhere]">
           <FolderOpen className="w-3.5 h-3.5 shrink-0" />
           <span className="min-w-0">
             {r.projectName || 'Unknown project'}
@@ -736,16 +756,19 @@ function DetailsPane({
           shouldn't happen at desktop widths. `shrink-0` on each
           button prevents Tailwind's default flex shrink from
           chopping a button's label when space is tight. */}
-      <div className="flex flex-nowrap gap-2 pt-2 border-t border-border/50">
+      <div className="flex flex-nowrap gap-2 pt-3 border-t border-white/10">
+        {/* 2.5.0+: action chips share the modal's frosted-glass
+            vocabulary — white-7 tinted, hairline white-10 ring,
+            shadow for depth. Same recipe as the YT/UGC cards. */}
         <button
           type="button"
           onClick={onCopyUrl}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-background hover:bg-accent text-sm transition-colors shrink-0"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md ring-1 ring-white/10 bg-white/[0.07] hover:bg-white/[0.12] hover:ring-white/20 text-white text-sm transition-all shadow-[0_2px_8px_-4px_rgba(0,0,0,0.4)] shrink-0"
           title="Copy share link"
         >
           {copied ? (
             <>
-              <Check className="w-4 h-4 text-green-500" /> Copied
+              <Check className="w-4 h-4 text-green-400" /> Copied
             </>
           ) : (
             <>
@@ -757,7 +780,7 @@ function DetailsPane({
           type="button"
           onClick={onDownload}
           disabled={downloadBusy}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-background hover:bg-accent text-sm transition-colors disabled:opacity-60 shrink-0"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md ring-1 ring-white/10 bg-white/[0.07] hover:bg-white/[0.12] hover:ring-white/20 text-white text-sm transition-all shadow-[0_2px_8px_-4px_rgba(0,0,0,0.4)] disabled:opacity-60 shrink-0"
           title="Download original file"
         >
           {downloadBusy ? (
@@ -770,10 +793,7 @@ function DetailsPane({
         <button
           type="button"
           onClick={onView}
-          // Visually identical to Copy URL / Download — neutral
-          // outlined chip, no primary highlight. `shrink-0` so the
-          // label stays whole at narrow pane widths.
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-background hover:bg-accent text-sm transition-colors shrink-0"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md ring-1 ring-white/10 bg-white/[0.07] hover:bg-white/[0.12] hover:ring-white/20 text-white text-sm transition-all shadow-[0_2px_8px_-4px_rgba(0,0,0,0.4)] shrink-0"
           title="Open in project"
         >
           <ExternalLink className="w-4 h-4" />
@@ -787,7 +807,7 @@ function DetailsPane({
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 font-medium">
+      <div className="text-[10px] uppercase tracking-wide text-white/45 font-medium">
         {label}
       </div>
       {/* `overflow-wrap: anywhere` breaks the long filename strings

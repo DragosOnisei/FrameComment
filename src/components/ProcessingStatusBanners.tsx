@@ -233,22 +233,53 @@ function StatusBanner({
     kind === 'processing'
       ? videos.filter((v) => v.isActive).length || current
       : current
+  // 2.4.2+: simplified processing copy. On a 4000-video bulk
+  // backfill, "2 in progress · 400 / 3945 done" is hard to scan
+  // and the "in progress" number is dominated by worker
+  // concurrency rather than batch shape — the user only cares
+  // about overall progress through the queue. The expanded list
+  // is now filtered to ONLY the actively encoding rows (see the
+  // expanded panel below), so the user can still glance at which
+  // specific videos the worker is on without the header being
+  // crowded.
+  //
+  // Upload banner keeps its old shape because there's no
+  // "queued" concept on the client side — every UPLOADING row IS
+  // streaming bytes.
   const labelCount = isDone
     ? `${total} / ${total} done`
+    : kind === 'processing'
+    ? `${done} / ${total} done`
     : done > 0
     ? `${activeInFlight} in progress · ${done} / ${total} done`
     : `${activeInFlight} in progress`
 
   return (
     <div
-      className="pointer-events-auto w-[340px] rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.4)] animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden"
+      // 2.5.1+: v2.5 frosted glass — same vocabulary as
+      // GlassCalendar / ConfirmDialog / dropdowns. The previous
+      // `bg-card/95` was effectively opaque dark grey (#1f1f1f at
+      // 95%) and didn't read as glass. Now: translucent navy +
+      // spotlight-tinted radial wash + 40px backdrop blur. Ring
+      // (not border) so we don't fight the rounded-xl.
+      className="pointer-events-auto w-[340px] rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden"
+      style={{
+        backgroundColor: 'rgba(22, 37, 51, 0.62)',
+        backgroundImage:
+          'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+        backdropFilter: 'blur(40px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+        transform: 'translate3d(0, 0, 0)',
+        willChange: 'backdrop-filter, transform',
+        isolation: 'isolate',
+      }}
       role="status"
     >
       {/* Header row — click to expand the list. */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left p-3 flex items-start gap-2.5 hover:bg-muted/40 transition-colors"
+        className="w-full text-left p-3 flex items-start gap-2.5 hover:bg-white/[0.06] transition-colors"
         aria-expanded={expanded}
         aria-label={`${labelHead}. ${labelCount}. Click to ${expanded ? 'collapse' : 'expand'} the list.`}
       >
@@ -256,7 +287,7 @@ function StatusBanner({
           <Icon
             className={`w-4 h-4 ${
               isDone
-                ? 'text-green-500'
+                ? 'text-emerald-300'
                 : kind === 'upload'
                 ? 'text-primary'
                 : 'text-primary animate-spin [animation-duration:2.4s]'
@@ -264,14 +295,14 @@ function StatusBanner({
           />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-card-foreground truncate">
+          <div className="text-sm font-medium text-white truncate">
             {labelHead}
           </div>
-          <div className="text-[11px] text-muted-foreground truncate tabular-nums">
+          <div className="text-[11px] text-white/55 truncate tabular-nums">
             {labelCount}
           </div>
         </div>
-        <div className="shrink-0 -mt-0.5 -mr-0.5 p-1 text-muted-foreground">
+        <div className="shrink-0 -mt-0.5 -mr-0.5 p-1 text-white/55">
           {expanded ? (
             <ChevronDown className="w-3.5 h-3.5" />
           ) : (
@@ -283,35 +314,60 @@ function StatusBanner({
           either current>0 (HWM grew to match) or isDone (in which
           case we just paint 100%). */}
       <div className="px-3 pb-3">
-        <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+        <div className="h-1 w-full rounded-full bg-white/10 overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-300 ease-out ${
-              isDone ? 'bg-green-500' : 'bg-primary'
+              isDone ? 'bg-emerald-400' : 'bg-primary'
             }`}
             style={{ width: `${isDone ? 100 : pct ?? 0}%` }}
           />
         </div>
         {pct !== null && (
-          <div className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+          <div className="mt-1 text-[10px] text-white/55 tabular-nums">
             {isDone ? 100 : pct}%
           </div>
         )}
       </div>
-      {expanded && (
-        <div className="border-t border-border max-h-[260px] overflow-y-auto">
-          {videos.length === 0 ? (
-            <div className="px-3 py-4 text-[11px] text-muted-foreground text-center">
-              {isDone ? 'All done. The banner will close shortly.' : 'No videos in this state.'}
-            </div>
-          ) : (
-            <ul className="divide-y divide-border">
-              {videos.map((v) => (
-                <VideoRow key={v.id} video={v} kind={kind} />
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      {expanded && (() => {
+        // 2.4.2+: for the PROCESSING banner, the expanded list now
+        // shows ONLY the rows the worker is actively encoding —
+        // i.e. those marked `isActive` by the API (BullMQ
+        // getActive + oldest-N fallback). The previous behaviour
+        // listed every PROCESSING row with a 50% opacity dim on
+        // the queued ones, which on a 1300-video backfill turned
+        // into an unscrollable wall of greyed-out rows that all
+        // looked the same.
+        //
+        // Fallback: if NOTHING is marked active (worker between
+        // jobs, or the API hasn't replied yet) we fall back to
+        // the unfiltered list so the panel never appears empty
+        // for a healthy queue.
+        //
+        // Upload banner keeps its full list — there's no
+        // active/queued distinction client-side.
+        const visibleVideos =
+          kind === 'processing'
+            ? (() => {
+                const onlyActive = videos.filter((v) => v.isActive)
+                return onlyActive.length > 0 ? onlyActive : videos
+              })()
+            : videos
+        return (
+          <div className="border-t border-white/10 max-h-[260px] overflow-y-auto">
+            {visibleVideos.length === 0 ? (
+              <div className="px-3 py-4 text-[11px] text-white/55 text-center">
+                {isDone ? 'All done. The banner will close shortly.' : 'No videos in this state.'}
+              </div>
+            ) : (
+              <ul className="divide-y divide-white/10">
+                {visibleVideos.map((v) => (
+                  <VideoRow key={v.id} video={v} kind={kind} />
+                ))}
+              </ul>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -342,21 +398,21 @@ function VideoRow({ video, kind }: { video: ProcessingVideo; kind: BannerKind })
     <li>
       <Link
         href={href}
-        className={`flex items-center gap-2.5 px-3 py-2 hover:bg-muted/40 transition-colors ${
+        className={`flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.06] transition-colors ${
           isActive ? '' : 'opacity-50'
         }`}
       >
         <Thumb video={video} />
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium text-card-foreground truncate" title={`${video.name} ${video.versionLabel}`}>
+          <div className="text-xs font-medium text-white truncate" title={`${video.name} ${video.versionLabel}`}>
             {video.name}
             {video.versionLabel ? (
-              <span className="ml-1 text-[10px] text-muted-foreground font-normal">
+              <span className="ml-1 text-[10px] text-white/55 font-normal">
                 {video.versionLabel}
               </span>
             ) : null}
           </div>
-          <div className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+          <div className="text-[10px] text-white/55 truncate flex items-center gap-1">
             <FolderOpen className="w-2.5 h-2.5 shrink-0" />
             <span className="truncate">{video.projectTitle || 'Untitled project'}</span>
           </div>
@@ -414,7 +470,7 @@ function Thumb({ video }: { video: ProcessingVideo }) {
   if (!video.thumbnailUrl) {
     return (
       <div
-        className="shrink-0 rounded bg-muted"
+        className="shrink-0 rounded bg-white/10 ring-1 ring-white/10"
         style={{ width: Math.round(HEIGHT * (16 / 9)), height: HEIGHT }}
         aria-hidden="true"
       />
@@ -426,7 +482,7 @@ function Thumb({ video }: { video: ProcessingVideo }) {
     <img
       src={video.thumbnailUrl}
       alt=""
-      className="shrink-0 rounded object-cover bg-muted"
+      className="shrink-0 rounded object-cover bg-white/10 ring-1 ring-white/10"
       style={{ width: computedWidth, height: HEIGHT }}
       onLoad={(e) => {
         const img = e.currentTarget
@@ -579,13 +635,13 @@ function StatusPip({
   const dotColour = active
     ? kind === 'upload'
       ? 'bg-primary'
-      : 'bg-amber-500'
-    : 'bg-muted-foreground/40'
+      : 'bg-amber-400'
+    : 'bg-white/30'
   const ringColour = active
     ? kind === 'upload'
       ? 'border-primary/40'
-      : 'border-amber-500/40'
-    : 'border-muted-foreground/20'
+      : 'border-amber-400/40'
+    : 'border-white/15'
   // SVG ring geometry. r=16 (just inside SIZE=36 minus the 2px
   // stroke band), circumference = 2πr ≈ 100.53. We render the
   // foreground stroke with `strokeDasharray=C` and
@@ -599,13 +655,13 @@ function StatusPip({
   const arcStrokeColour = active
     ? kind === 'upload'
       ? 'stroke-primary'
-      : 'stroke-amber-500'
-    : 'stroke-muted-foreground/40'
+      : 'stroke-amber-400'
+    : 'stroke-white/30'
   const trackStrokeColour = active
     ? kind === 'upload'
       ? 'stroke-primary/20'
-      : 'stroke-amber-500/20'
-    : 'stroke-muted-foreground/15'
+      : 'stroke-amber-400/20'
+    : 'stroke-white/10'
   // 2.2.6+: when we know the tier in flight, swap the pulsing dot
   // for a YouTube-style quality label (SD / HD / HD+ / 4K). The
   // pulse moves up to the label colour so the row still reads as
@@ -615,8 +671,8 @@ function StatusPip({
   const textColour = active
     ? kind === 'upload'
       ? 'text-primary'
-      : 'text-amber-500'
-    : 'text-muted-foreground/60'
+      : 'text-amber-400'
+    : 'text-white/55'
   const labelAria = tierLabel
     ? active
       ? `Encoding ${tierLabel}`

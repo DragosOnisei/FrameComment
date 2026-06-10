@@ -178,8 +178,12 @@ export async function PATCH(request: NextRequest) {
 
     // SECURITY: Validate accent color
     if (accentColor !== undefined) {
+      // 2.5.0+: also accept a custom 6-digit hex string (#RRGGBB).
+      // The picker UI in Appearance writes lowercase hex; we still accept
+      // upper-case for resilience to manual edits.
       const validColors = ['blue', 'purple', 'green', 'orange', 'red', 'pink', 'teal', 'amber', 'stone', 'gold']
-      if (!validColors.includes(accentColor)) {
+      const isHex = typeof accentColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(accentColor)
+      if (!validColors.includes(accentColor) && !isHex) {
         return NextResponse.json(
           { error: settingsMessages.invalidAccentColor || 'Invalid accent color.' },
           { status: 400 }

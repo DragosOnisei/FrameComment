@@ -32,13 +32,23 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
->(({ className, children, hideClose = false, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    hideClose?: boolean
+    /**
+     * 2.5.0+: optional className passed through to the
+     * `DialogOverlay`. Lets a specific modal (e.g. the template
+     * picker) drop the default dim scrim by passing
+     * `bg-transparent`. With `twMerge` upstream, this overrides
+     * the default `bg-background/80` cleanly.
+     */
+    overlayClassName?: string
+  }
+>(({ className, children, hideClose = false, overlayClassName, ...props }, ref) => {
   const tc = useTranslations("common")
 
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(

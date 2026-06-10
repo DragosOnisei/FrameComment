@@ -87,12 +87,15 @@ export function VideoProcessingSettingsSection({
 
   return (
     <CollapsibleSection
-      className="border-border"
+      className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+      style={{
+        backdropFilter: 'blur(20px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+      }}
       title={t('videoProcessing.title')}
-      description={t('videoProcessing.description')}
       open={show}
       onOpenChange={setShow}
-      contentClassName="space-y-4 border-t pt-4"
+      contentClassName="space-y-4 border-t border-white/10 pt-4"
       collapsible={collapsible}
     >
       {/* 1.5.8: Skip Transcoding global default hidden — same
@@ -101,11 +104,11 @@ export function VideoProcessingSettingsSection({
           settings. State + DB column kept; remove `{false && ` to
           surface it again. */}
       {false && (
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <Label htmlFor="defaultSkipTranscoding">{t('videoProcessing.skipTranscoding')}</Label>
-            <p className="text-xs text-muted-foreground">{t('videoProcessing.skipTranscodingHint')}</p>
+            <p className="text-xs text-white/55">{t('videoProcessing.skipTranscodingHint')}</p>
           </div>
           <Switch id="defaultSkipTranscoding" checked={defaultSkipTranscoding} onCheckedChange={(checked) => {
             setDefaultSkipTranscoding(checked)
@@ -122,12 +125,12 @@ export function VideoProcessingSettingsSection({
       )}
 
       {!defaultSkipTranscoding && (
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         {/* 1.5.8: relabelled "Preview Resolution" → "Default Preview
             Resolution" to match the Project Settings copy. */}
-        <Label>Default Preview Resolution</Label>
+        <Label className="text-white">Default Preview Resolution</Label>
         <Select value={defaultPreviewResolution} onValueChange={setDefaultPreviewResolution}>
-          <SelectTrigger>
+          <SelectTrigger className="bg-white/[0.04] hover:bg-white/[0.08] border-0 ring-1 ring-white/10 text-white">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -142,7 +145,7 @@ export function VideoProcessingSettingsSection({
             <SelectItem value="2160p">{t('videoProcessing.resolution2160')}</SelectItem>
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-white/55">
           The progressive ladder always starts at 480p for fast first playback, then climbs to the chosen cap (or the source resolution in Auto mode).
         </p>
       </div>
@@ -153,10 +156,10 @@ export function VideoProcessingSettingsSection({
           opts in (and how we keep this component usable elsewhere
           without forcing them to plumb the handlers through). */}
       {!defaultSkipTranscoding && onReprocessAllVideos && onRegenerateAllThumbnails && (
-        <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+        <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
           <div className="space-y-1">
             <h3 className="text-sm font-semibold">Maintenance</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               These operations act on every video across every project. Originals are never touched — only derived files (encoded previews / thumbnails) are refreshed.
             </p>
           </div>
@@ -166,21 +169,20 @@ export function VideoProcessingSettingsSection({
                 settings card — flex-1 on the paragraph stretches it
                 to fill available space, pinning the Button to the
                 bottom regardless of description length. */}
-            <div className="flex flex-col p-3 rounded-md bg-background border">
+            <div className="flex flex-col p-3 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
               <div className="flex items-center gap-2 mb-2">
-                <RefreshCw className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Re-process Videos</span>
+                <RefreshCw className="w-4 h-4 text-white/55" />
+                <span className="text-sm font-medium text-white">Re-process Videos</span>
               </div>
-              <p className="text-xs text-muted-foreground leading-relaxed flex-1 mb-3">
+              <p className="text-xs text-white/55 leading-relaxed flex-1 mb-3">
                 Smart sweep across every project: scans every video for missing quality tiers and only encodes the gaps. Already-finished tiers stay on disk and keep playing, and thumbnails are never touched.
               </p>
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
                 onClick={onReprocessAllVideos}
                 disabled={reprocessingAllVideos || regeneratingAllThumbnails}
-                className="w-full"
+                className="w-full bg-white/[0.06] hover:bg-white/[0.12] text-white ring-1 ring-white/10 hover:ring-white/20 border-0 backdrop-blur-md"
               >
                 {reprocessingAllVideos ? (
                   <>
@@ -196,21 +198,20 @@ export function VideoProcessingSettingsSection({
               </Button>
             </div>
 
-            <div className="flex flex-col p-3 rounded-md bg-background border">
+            <div className="flex flex-col p-3 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
               <div className="flex items-center gap-2 mb-2">
-                <ImageIcon className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Re-generate Thumbnails</span>
+                <ImageIcon className="w-4 h-4 text-white/55" />
+                <span className="text-sm font-medium text-white">Re-generate Thumbnails</span>
               </div>
-              <p className="text-xs text-muted-foreground leading-relaxed flex-1 mb-3">
+              <p className="text-xs text-white/55 leading-relaxed flex-1 mb-3">
                 Re-extracts a still frame for every video and writes it back. Lightweight — does not touch encoded tiers or playback.
               </p>
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
                 onClick={onRegenerateAllThumbnails}
                 disabled={regeneratingAllThumbnails || reprocessingAllVideos}
-                className="w-full"
+                className="w-full bg-white/[0.06] hover:bg-white/[0.12] text-white ring-1 ring-white/10 hover:ring-white/20 border-0 backdrop-blur-md"
               >
                 {regeneratingAllThumbnails ? (
                   <>
@@ -240,11 +241,11 @@ export function VideoProcessingSettingsSection({
       {/* 1.5.8: Apply Preview LUT global default hidden. State + DB
           column kept; remove `{false && ` to expose. */}
       {false && !defaultSkipTranscoding && (
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <Label htmlFor="defaultApplyPreviewLut">{t('videoProcessing.applyPreviewLut')}</Label>
-            <p className="text-xs text-muted-foreground">{t('videoProcessing.applyPreviewLutHint')}</p>
+            <p className="text-xs text-white/55">{t('videoProcessing.applyPreviewLutHint')}</p>
           </div>
           <Switch id="defaultApplyPreviewLut" checked={defaultApplyPreviewLut} onCheckedChange={setDefaultApplyPreviewLut} />
         </div>
@@ -256,11 +257,11 @@ export function VideoProcessingSettingsSection({
           controls. All state + DB columns preserved; remove `{false &&`
           to surface again. */}
       {false && !defaultSkipTranscoding && (
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <Label htmlFor="watermarkEnabled">{t('videoProcessing.enableWatermarks')}</Label>
-            <p className="text-xs text-muted-foreground">{t('videoProcessing.enableWatermarksHint')}</p>
+            <p className="text-xs text-white/55">{t('videoProcessing.enableWatermarksHint')}</p>
           </div>
           <Switch id="watermarkEnabled" checked={defaultWatermarkEnabled} onCheckedChange={setDefaultWatermarkEnabled} />
         </div>
@@ -276,7 +277,7 @@ export function VideoProcessingSettingsSection({
                 placeholder={t('videoProcessing.watermarkPlaceholder')}
                 maxLength={100}
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-white/55">
                 {t('videoProcessing.watermarkHint')}
                 <br />
                 <span className="text-warning">{t('videoProcessing.watermarkCharsAllowed')}</span>
@@ -285,7 +286,7 @@ export function VideoProcessingSettingsSection({
 
             <div className="space-y-2">
               <Label>{t('videoProcessing.watermarkPositions')}</Label>
-              <p className="text-xs text-muted-foreground">{t('videoProcessing.watermarkPositionsHint')}</p>
+              <p className="text-xs text-white/55">{t('videoProcessing.watermarkPositionsHint')}</p>
               <div className="flex flex-wrap gap-2 mt-1">
                 {WATERMARK_POSITIONS.map((pos) => (
                   <button
@@ -295,7 +296,7 @@ export function VideoProcessingSettingsSection({
                     className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${
                       selectedPositions.includes(pos)
                         ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-muted/50 text-muted-foreground border-border hover:border-primary/50'
+                        : 'bg-muted/50 text-white/55 border-border hover:border-primary/50'
                     }`}
                   >
                     {t(`videoProcessing.position.${pos}`)}
@@ -321,7 +322,7 @@ export function VideoProcessingSettingsSection({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>{t('videoProcessing.watermarkOpacity')}</Label>
-                <span className="text-xs text-muted-foreground">{defaultWatermarkOpacity}%</span>
+                <span className="text-xs text-white/55">{defaultWatermarkOpacity}%</span>
               </div>
               <input
                 type="range"
@@ -332,7 +333,7 @@ export function VideoProcessingSettingsSection({
                 onChange={(e) => setDefaultWatermarkOpacity(Number(e.target.value))}
                 className="w-full accent-primary"
               />
-              <div className="flex justify-between text-xs text-muted-foreground">
+              <div className="flex justify-between text-xs text-white/55">
                 <span>{t('videoProcessing.opacitySubtle')}</span>
                 <span>{t('videoProcessing.opacityBold')}</span>
               </div>

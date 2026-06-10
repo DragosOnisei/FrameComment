@@ -62,11 +62,11 @@ export function ProjectDefaultsSection({
       collapsible={collapsible}
     >
       {/* ── Approval & Workflow ────────────────────────────────────────────── */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">
             <Label htmlFor="defaultClientCanApprove">{t('projectDefaults.defaultClientCanApprove')}</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('projectDefaults.defaultClientCanApproveHint')}
             </p>
           </div>
@@ -79,7 +79,7 @@ export function ProjectDefaultsSection({
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">
             <Label htmlFor="autoApproveProject">{t('videoProcessing.autoApprove')}</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('videoProcessing.autoApproveHint')}
             </p>
             <p className="text-xs text-warning mt-2">
@@ -91,7 +91,7 @@ export function ProjectDefaultsSection({
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">
             <Label htmlFor="defaultUsePreviewForApprovedPlayback">{t('videoProcessing.usePreviewApproved')}</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('videoProcessing.usePreviewApprovedHint')}
             </p>
           </div>
@@ -102,18 +102,18 @@ export function ProjectDefaultsSection({
           />
         </div>
         {defaultUsePreviewForApprovedPlayback && defaultWatermarkEnabled && (
-          <p className="text-xs text-muted-foreground italic">
+          <p className="text-xs text-white/55 italic">
             {t('videoProcessing.cleanPreviewNote')}
           </p>
         )}
       </div>
 
       {/* ── Client Access ─────────────────────────────────────────────────── */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">
             <Label htmlFor="defaultAllowAssetDownload">{t('projectDefaults.defaultAllowAssetDownload')}</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('projectDefaults.defaultAllowAssetDownloadHint')}
             </p>
           </div>
@@ -126,7 +126,7 @@ export function ProjectDefaultsSection({
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">
             <Label htmlFor="defaultAllowClientAssetUpload">{t('videoProcessing.clientAttachments')}</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('videoProcessing.clientAttachmentsHint')}
             </p>
           </div>
@@ -139,7 +139,7 @@ export function ProjectDefaultsSection({
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">
             <Label htmlFor="defaultAllowReverseShare">{t('projectDefaults.defaultAllowReverseShare')}</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('projectDefaults.defaultAllowReverseShareHint')}
             </p>
           </div>
@@ -152,11 +152,11 @@ export function ProjectDefaultsSection({
       </div>
 
       {/* ── Presentation ──────────────────────────────────────────────────── */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">
             <Label htmlFor="defaultShowClientTutorial">{t('projectDefaults.defaultShowClientTutorial')}</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('projectDefaults.defaultShowClientTutorialHint')}
             </p>
           </div>
@@ -177,7 +177,7 @@ export function ProjectDefaultsSection({
             <SelectItem value="AUTO">{t('videoProcessing.simpleTime')}</SelectItem>
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-white/55">
           {t('videoProcessing.timestampHint')}
         </p>
         </div>

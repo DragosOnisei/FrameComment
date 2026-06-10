@@ -16,7 +16,12 @@ interface ViewModeToggleProps {
 export default function ViewModeToggle({ value, onChange, className }: ViewModeToggleProps) {
   const t = useTranslations('controls')
   return (
-    <div className={cn('inline-flex items-center rounded-md border bg-card p-0.5', className)}>
+    <div className={cn('inline-flex items-center rounded-md bg-white/[0.06] backdrop-blur-md ring-1 ring-white/10 p-0.5', className)}>
+      {/* 2.5.0+: active variant now uses the brand-blue tint
+          (`bg-primary/15 text-primary`) — same recipe as the
+          highlighted Projects link in AdminSidebar — so the whole
+          chrome reads as one design family. Non-active hover
+          stays the neutral muted hint. */}
       <Button
         type="button"
         variant="ghost"
@@ -24,8 +29,8 @@ export default function ViewModeToggle({ value, onChange, className }: ViewModeT
         onClick={() => onChange('grid')}
         aria-pressed={value === 'grid'}
         className={cn(
-          'h-8 w-8 text-muted-foreground hover:bg-accent hover:text-foreground',
-          value === 'grid' && 'bg-accent text-foreground'
+          'h-8 w-8 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+          value === 'grid' && 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary'
         )}
         title={t('gridView')}
       >
@@ -39,8 +44,8 @@ export default function ViewModeToggle({ value, onChange, className }: ViewModeT
         onClick={() => onChange('table')}
         aria-pressed={value === 'table'}
         className={cn(
-          'h-8 w-8 text-muted-foreground hover:bg-accent hover:text-foreground',
-          value === 'table' && 'bg-accent text-foreground'
+          'h-8 w-8 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+          value === 'table' && 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary'
         )}
         title={t('tableView')}
       >

@@ -23,9 +23,11 @@ import { sanitizeSlug, generateRandomSlug, generateSecurePassword } from '@/lib/
 import { apiPatch, apiPost } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 import Link from 'next/link'
-import { ArrowLeft, Save, RefreshCw, Copy, Check, Calendar, FileText, Users, Share2, Video, Shield, Image as ImageIcon, Upload as UploadIcon, Trash2 } from 'lucide-react'
+import { ArrowLeft, Save, RefreshCw, Copy, Check, Calendar, FileText, Users, Share2, Video, Shield, Image as ImageIcon, Upload as UploadIcon, Trash2, Settings as SettingsIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTranslations } from 'next-intl'
+import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
+import { GlassCalendar } from '@/components/GlassCalendar'
 
 interface Project {
   id: string
@@ -160,6 +162,64 @@ export default function ProjectSettingsPage() {
   // "Link revoked" badge for a few seconds after a rotation — the
   // raw slug change wasn't obvious enough on its own.
   const [folderJustRevokedId, setFolderJustRevokedId] = useState<string | null>(null)
+  // 2.5.1+: GlassCalendar popover state for the per-folder share
+  // expiration. Only one calendar can be open at a time across the
+  // whole list — track the active folderId + the trigger button's
+  // viewport-anchored rect so the popover positions correctly.
+  const [calendarFolderId, setCalendarFolderId] = useState<string | null>(null)
+  const [calendarAnchor, setCalendarAnchor] = useState<DOMRect | null>(null)
+  // 2.5.1+: per-row "Copied" badge for the share-link copy button.
+  // Holds the folderId that was just copied, cleared after ~1.8s.
+  const [folderJustCopiedId, setFolderJustCopiedId] = useState<string | null>(null)
+  // 2.5.1+: cached short links per folder id. Populated by the
+  // effect below that mints (or reuses) a tidy
+  // `https://<shortDomain>/<slug>` for each shared folder when the
+  // list loads. If `Settings.shortLinkDomain` isn't configured, the
+  // map stays empty and the row falls back to the long URL — same
+  // behaviour as ShareModal.
+  const [folderShortLinks, setFolderShortLinks] = useState<Record<string, string>>({})
+
+  /**
+   * 2.5.1+: copy a folder's share link to the clipboard. Prefers the
+   * tidy short URL (`https://<shortDomain>/<slug>`) when the admin
+   * has configured `Settings.shortLinkDomain`; silently falls back
+   * to the long `/share/folder/<slug>` URL otherwise. Same pattern
+   * as ShareModal so the UX matches end-to-end.
+   */
+  async function copyFolderShareLink(folder: { id: string; slug: string }) {
+    const longUrl = `${window.location.origin}/share/folder/${folder.slug}`
+    // Prefer the cached short link — already minted by the effect
+    // above when the list loaded. Skips the network round-trip and
+    // matches whatever the row visually shows.
+    let toCopy = folderShortLinks[folder.id] || longUrl
+    if (!folderShortLinks[folder.id]) {
+      try {
+        const res = await apiFetch('/api/short-links', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: longUrl, expiresAt: null }),
+        })
+        if (res.ok) {
+          const data = (await res.json()) as {
+            shortUrl: string
+            shortDomainConfigured: boolean
+          }
+          if (data.shortDomainConfigured && data.shortUrl) {
+            toCopy = data.shortUrl
+            // Cache so subsequent renders show the short URL too.
+            setFolderShortLinks((prev) => ({ ...prev, [folder.id]: data.shortUrl }))
+          }
+        }
+      } catch {
+        // Silent fallback to long URL.
+      }
+    }
+    await copyToClipboard(toCopy)
+    setFolderJustCopiedId(folder.id)
+    window.setTimeout(() => {
+      setFolderJustCopiedId((prev) => (prev === folder.id ? null : prev))
+    }, 1800)
+  }
 
   /**
    * Update a single folder's share expiration. Pass a Date to set a
@@ -416,6 +476,64 @@ export default function ProjectSettingsPage() {
       cancelled = true
     }
   }, [projectId])
+
+  // 2.5.1+: mint a tidy `https://<shortDomain>/<slug>` short link
+  // for every folder in the shared list, so the Security rows can
+  // show the SAME link the admin gets from Copy in ShareModal
+  // (`https://fcmt.io/krhewABV`) instead of the long signed URL.
+  // The POST is idempotent server-side — same `targetUrl` reuses
+  // the existing short link, so re-running on every load doesn't
+  // create slug churn. Silently no-ops when `shortLinkDomain` is
+  // not configured (`shortDomainConfigured: false`) — the row then
+  // falls back to the long URL.
+  useEffect(() => {
+    if (sharedFolders.length === 0) return
+    if (typeof window === 'undefined') return
+    let cancelled = false
+    const origin = window.location.origin
+    void (async () => {
+      const results = await Promise.all(
+        sharedFolders.map(async (f) => {
+          if (folderShortLinks[f.id]) return [f.id, folderShortLinks[f.id]] as const
+          try {
+            const res = await apiFetch('/api/short-links', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                targetUrl: `${origin}/share/folder/${f.slug}`,
+                expiresAt: null,
+              }),
+            })
+            if (!res.ok) return [f.id, ''] as const
+            const data = (await res.json()) as {
+              shortUrl: string
+              shortDomainConfigured: boolean
+            }
+            if (data.shortDomainConfigured && data.shortUrl) {
+              return [f.id, data.shortUrl] as const
+            }
+            return [f.id, ''] as const
+          } catch {
+            return [f.id, ''] as const
+          }
+        }),
+      )
+      if (cancelled) return
+      setFolderShortLinks((prev) => {
+        const next = { ...prev }
+        for (const [id, url] of results) {
+          if (url) next[id] = url
+        }
+        return next
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- folderShortLinks
+    // intentionally omitted; we read inside the closure but only want to
+    // re-run when the folder list itself changes (rotations / new shares).
+  }, [sharedFolders])
 
   // Track if initial load is complete
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
@@ -701,16 +819,16 @@ export default function ProjectSettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">{tc('loading')}</p>
+      <div className="flex-1 min-h-0 flex items-center justify-center">
+        <p className="text-white/55">{tc('loading')}</p>
       </div>
     )
   }
 
   if (!project) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">{t('projectNotFound')}</p>
+      <div className="flex-1 min-h-0 flex items-center justify-center">
+        <p className="text-white/55">{t('projectNotFound')}</p>
       </div>
     )
   }
@@ -730,40 +848,79 @@ export default function ProjectSettingsPage() {
   ]
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="mb-4 sm:mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-              <Link href={`/admin/projects/${projectId}`}>
-                <Button variant="ghost" size="default" className="justify-start px-3">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  <span className="hidden sm:inline">{t('backToProject')}</span>
-                  <span className="sm:hidden">{tc('back')}</span>
-                </Button>
-              </Link>
-              <div className="min-w-0">
-                <h1 className="text-2xl sm:text-3xl font-bold">{t('projectSettings')}</h1>
-                <p className="text-sm sm:text-base text-muted-foreground mt-1 truncate">{project.title}</p>
-              </div>
-            </div>
+    <div className="flex-1 min-h-0">
+      {/* 2.5.1+: portal the page title block + Save Changes into the
+          shared AdminTopBar slots, same pattern as Global Settings /
+          Projects / Users. Back pill on the left next to the title,
+          Save Changes glass pill on the right. The body header below
+          is gone — the bottom Save button is gone too — so the only
+          way to save is the topbar action. */}
+      <TopbarLeftSlot>
+        <Link href={`/admin/projects/${projectId}`}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:size-default md:h-10 md:px-4 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md shrink-0"
+            aria-label={tc('back')}
+          >
+            <ArrowLeft className="w-4 h-4 md:mr-2" />
+            <span className="hidden md:inline">{tc('back')}</span>
+          </Button>
+        </Link>
+        <SettingsIcon size={20} className="text-primary shrink-0" />
+        <h1
+          className="font-semibold truncate text-white"
+          style={{ fontSize: 18, lineHeight: '24px' }}
+        >
+          {t('projectSettings')}
+        </h1>
+      </TopbarLeftSlot>
+      <TopbarRightSlot>
+        <Button
+          onClick={handleSave}
+          variant="ghost"
+          size="sm"
+          disabled={saving}
+          className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+          }}
+        >
+          <Save className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
+        </Button>
+      </TopbarRightSlot>
 
-            {/* 1.5.8: top Save Changes button removed — the same
-                button at the bottom of the page is enough and keeps
-                the header clean. To restore, paste the matching
-                Button block from line ~1830 here. */}
-          </div>
-        </div>
+      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+        {/* 2.5.1+: project name subtitle removed — the topbar pill
+            already shows the project context. The body now starts
+            directly with the section nav + panel. */}
 
         {error && (
-          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-destructive font-medium">{error}</p>
+          <div
+            className="mb-4 sm:mb-6 p-3 sm:p-4 rounded-lg ring-1 ring-red-400/30"
+            style={{
+              backgroundColor: 'rgba(248, 113, 113, 0.10)',
+              backdropFilter: 'blur(24px) saturate(160%)',
+              WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+            }}
+          >
+            <p className="text-xs sm:text-sm text-red-300 font-medium">{error}</p>
           </div>
         )}
 
         {success && (
-          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-success-visible border-2 border-success-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-success font-medium">{t('settingsSaved')}</p>
+          <div
+            className="mb-4 sm:mb-6 p-3 sm:p-4 rounded-lg ring-1 ring-emerald-400/30"
+            style={{
+              backgroundColor: 'rgba(52, 211, 153, 0.10)',
+              backdropFilter: 'blur(24px) saturate(160%)',
+              WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+            }}
+          >
+            <p className="text-xs sm:text-sm text-emerald-300 font-medium">{t('settingsSaved')}</p>
           </div>
         )}
 
@@ -771,34 +928,37 @@ export default function ProjectSettingsPage() {
         {(() => {
           const projectDetailsContent = (
             <>
-	              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-	                <div className="space-y-2">
-	                  <Label htmlFor="title">{t('titleLabel')}</Label>
-	                  <Input
-                    id="title"
-                    type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={t('titlePlaceholderShort')}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t('titleHint')}
-                  </p>
-                </div>
+	              {/* Project Title — own glass card to match the
+	                  Branding section layout (one field per card). */}
+	              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+	                <Label htmlFor="title" className="text-white">{t('titleLabel')}</Label>
+	                <Input
+                  id="title"
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder={t('titlePlaceholderShort')}
+                  className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
+                />
+                <p className="text-xs text-white/55">
+                  {t('titleHint')}
+                </p>
+              </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="description">{t('descriptionLabel')}</Label>
-                  <Textarea
-                    id="description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder={t('descriptionPlaceholderShort')}
-                    rows={3}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t('descriptionHint')}
-                  </p>
-                </div>
+              {/* Description — own glass card. */}
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+                <Label htmlFor="description" className="text-white">{t('descriptionLabel')}</Label>
+                <Textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={t('descriptionPlaceholderShort')}
+                  rows={3}
+                  className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
+                />
+                <p className="text-xs text-white/55">
+                  {t('descriptionHint')}
+                </p>
               </div>
 
               {/* 1.5.8: Custom Link + Share Link card hidden to declutter
@@ -807,7 +967,7 @@ export default function ProjectSettingsPage() {
                   resolving. Restore the UI by removing the `{false && `
                   wrapper. */}
               {false && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="useCustomSlug">{t('customLink')}</Label>
@@ -878,7 +1038,7 @@ export default function ProjectSettingsPage() {
                   endpoints unchanged); restore the UI by removing the
                   `{false && ` wrapper. */}
               {false && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="enableRevisions">{t('enableRevisionTracking')}</Label>
@@ -935,7 +1095,7 @@ export default function ProjectSettingsPage() {
                   them in the DB and reminders still fire. Restore the
                   UI by removing the `{false && ` wrapper. */}
               {false && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <Label htmlFor="dueDate" className="flex items-center gap-2">
                   <Calendar className="w-4 h-4" />
                   {t('dueDateLabel')}
@@ -988,7 +1148,7 @@ export default function ProjectSettingsPage() {
               {/* 1.5.8+: per-project cover image. Shown on the
                   Projects Dashboard tile. Removing falls back to the
                   deterministic gradient. */}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="space-y-0.5">
                   <Label className="flex items-center gap-2">
                     <ImageIcon className="w-4 h-4" />
@@ -1000,7 +1160,7 @@ export default function ProjectSettingsPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-background">
+                  <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md ring-1 ring-white/15 bg-white/[0.04]">
                     {coverExists ? (
                       <ProjectCoverImage
                         projectId={projectId}
@@ -1009,7 +1169,7 @@ export default function ProjectSettingsPage() {
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <ImageIcon className="h-7 w-7 text-muted-foreground/50" />
+                      <ImageIcon className="h-7 w-7 text-white/40" />
                     )}
                   </div>
 
@@ -1033,7 +1193,7 @@ export default function ProjectSettingsPage() {
                       size="sm"
                       disabled={coverUploading}
                       onClick={() => coverInputRef.current?.click()}
-                      className="gap-2"
+                      className="gap-2 bg-white/[0.04] hover:bg-white/[0.08] border-white/15 text-white shadow-none"
                     >
                       <UploadIcon className="h-4 w-4" />
                       {coverExists ? 'Change image' : 'Upload image'}
@@ -1045,7 +1205,12 @@ export default function ProjectSettingsPage() {
                         size="sm"
                         disabled={coverUploading}
                         onClick={handleCoverRemove}
-                        className="gap-2 text-destructive hover:text-destructive"
+                        className="gap-2 h-9 px-3 rounded-lg ring-1 ring-red-400/25 hover:ring-red-400/45 text-red-300 hover:text-red-200 shadow-none transition-all"
+                        style={{
+                          backgroundColor: 'rgba(248, 113, 113, 0.08)',
+                          backdropFilter: 'blur(12px) saturate(140%)',
+                          WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+                        }}
                       >
                         <Trash2 className="h-4 w-4" />
                         Remove
@@ -1055,10 +1220,10 @@ export default function ProjectSettingsPage() {
                 </div>
 
                 {coverError && (
-                  <p className="text-xs text-destructive">{coverError}</p>
+                  <p className="text-xs text-red-300">{coverError}</p>
                 )}
                 {coverUploading && !coverError && (
-                  <p className="text-xs text-muted-foreground">Uploading…</p>
+                  <p className="text-xs text-white/55">Uploading…</p>
                 )}
               </div>
             </>
@@ -1068,7 +1233,7 @@ export default function ProjectSettingsPage() {
           const clientInfoContent = (
             <>
               {/* Company/Brand Selection */}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="space-y-2">
                   <Label htmlFor="companyName">{t('companyBrandName')}</Label>
                   <CompanyNameInput
@@ -1095,7 +1260,7 @@ export default function ProjectSettingsPage() {
                 />
               </div>
 
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <ScheduleSelector
                   schedule={clientNotificationSchedule}
                   time={clientNotificationTime}
@@ -1114,7 +1279,7 @@ export default function ProjectSettingsPage() {
           const clientShareContent = (
             <>
               {/* ── Approval & Workflow ─────────────────────────────────── */}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="clientCanApprove">{t('allowClientApproval')}</Label>
@@ -1150,7 +1315,7 @@ export default function ProjectSettingsPage() {
               </div>
 
               {/* ── Client Access ────────────────────────────────────────── */}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowAssetDownload">{t('allowAssetDownloads')}</Label>
@@ -1195,7 +1360,7 @@ export default function ProjectSettingsPage() {
               </div>
 
               {/* ── Presentation ─────────────────────────────────────────── */}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="showClientTutorial">{t('showClientTutorial')}</Label>
@@ -1268,7 +1433,7 @@ export default function ProjectSettingsPage() {
                   preserved; remove `{false && ` to bring the toggle
                   back. */}
               {false && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="skipTranscoding">{t('skipTranscoding')}</Label>
@@ -1289,29 +1454,38 @@ export default function ProjectSettingsPage() {
               )}
 
               {!skipTranscoding && (
-	              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+	              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
 	                <div className="space-y-2">
 	                  {/* 1.5.8: relabelled "Preview Resolution" →
 	                      "Default Preview Resolution" so the page reads
 	                      cleanly with only this Video Processing field
 	                      remaining. */}
-	                  <Label>Default Preview Resolution</Label>
+	                  <Label className="text-white">Default Preview Resolution</Label>
 	                  <Select value={previewResolution} onValueChange={setPreviewResolution}>
-                    <SelectTrigger>
+                    <SelectTrigger className="bg-white/[0.04] border-white/15 text-white hover:bg-white/[0.06] hover:border-white/25 focus:ring-primary/60 transition-colors">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent
+                      className="border-0 ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] text-white"
+                      style={{
+                        backgroundColor: 'rgba(22, 37, 51, 0.55)',
+                        backgroundImage:
+                          'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                        backdropFilter: 'blur(24px) saturate(160%)',
+                        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+                      }}
+                    >
                       {/* 1.9.4+ Phase A: Auto matches the source — we
                           always start with a fast 480p tier, then
                           climb the ladder up to whatever the input
                           actually resolves at (no upscaling). */}
-                      <SelectItem value="auto">Auto (match source — recommended)</SelectItem>
-                      <SelectItem value="720p">{t('resolution720p')}</SelectItem>
-                      <SelectItem value="1080p">{t('resolution1080p')}</SelectItem>
-                      <SelectItem value="2160p">{t('resolution2160p')}</SelectItem>
+                      <SelectItem value="auto" className="text-white focus:bg-primary/15 focus:text-primary data-[state=checked]:text-primary">Auto (match source — recommended)</SelectItem>
+                      <SelectItem value="720p" className="text-white focus:bg-primary/15 focus:text-primary data-[state=checked]:text-primary">{t('resolution720p')}</SelectItem>
+                      <SelectItem value="1080p" className="text-white focus:bg-primary/15 focus:text-primary data-[state=checked]:text-primary">{t('resolution1080p')}</SelectItem>
+                      <SelectItem value="2160p" className="text-white focus:bg-primary/15 focus:text-primary data-[state=checked]:text-primary">{t('resolution2160p')}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-white/55">
                     The progressive ladder always starts at 480p for fast first playback, then climbs to the chosen cap (or the source resolution in Auto mode).
                   </p>
                 </div>
@@ -1326,10 +1500,10 @@ export default function ProjectSettingsPage() {
                   Default Preview Resolution dropdown, each gated
                   by its own ConfirmDialog. */}
               {!skipTranscoding && (
-                <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+                <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                   <div className="space-y-1">
-                    <h3 className="text-sm font-semibold">Maintenance</h3>
-                    <p className="text-xs text-muted-foreground">
+                    <h3 className="text-sm font-semibold text-white">Maintenance</h3>
+                    <p className="text-xs text-white/55">
                       Operations that act on every video already in this project. Originals on disk are never touched — both actions only refresh derived files (encoded previews / thumbnails).
                     </p>
                   </div>
@@ -1341,12 +1515,12 @@ export default function ProjectSettingsPage() {
                         Thumbnails description used to leave its button
                         floating mid-card while Re-process Videos sat at
                         the bottom — visually mismatched. */}
-                    <div className="flex flex-col p-3 rounded-md bg-background border">
+                    <div className="flex flex-col p-3 rounded-md ring-1 ring-white/10 bg-white/[0.03]">
                       <div className="flex items-center gap-2 mb-2">
-                        <RefreshCw className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-sm font-medium">Re-process Videos</span>
+                        <RefreshCw className="w-4 h-4 text-white/55" />
+                        <span className="text-sm font-medium text-white">Re-process Videos</span>
                       </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed flex-1 mb-3">
+                      <p className="text-xs text-white/55 leading-relaxed flex-1 mb-3">
                         Smart re-process: scans every video for missing quality tiers (480p / 720p / 1080p / 2160p, capped at the Default Preview Resolution above) and only encodes the gaps. Already-finished tiers stay on disk and keep playing, and thumbnails are never touched.
                       </p>
                       <Button
@@ -1355,7 +1529,7 @@ export default function ProjectSettingsPage() {
                         size="sm"
                         onClick={() => setShowReprocessConfirm(true)}
                         disabled={reprocessing || regeneratingThumbnails}
-                        className="w-full"
+                        className="w-full bg-white/[0.04] hover:bg-white/[0.08] border-white/15 text-white shadow-none"
                       >
                         {reprocessing ? (
                           <>
@@ -1371,12 +1545,12 @@ export default function ProjectSettingsPage() {
                       </Button>
                     </div>
 
-                    <div className="flex flex-col p-3 rounded-md bg-background border">
+                    <div className="flex flex-col p-3 rounded-md ring-1 ring-white/10 bg-white/[0.03]">
                       <div className="flex items-center gap-2 mb-2">
-                        <ImageIcon className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-sm font-medium">Re-generate Thumbnails</span>
+                        <ImageIcon className="w-4 h-4 text-white/55" />
+                        <span className="text-sm font-medium text-white">Re-generate Thumbnails</span>
                       </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed flex-1 mb-3">
+                      <p className="text-xs text-white/55 leading-relaxed flex-1 mb-3">
                         Re-extracts a still frame for every video and writes it back to the row. Lightweight — does not touch encoded tiers or playback. Use this when card grids show empty thumbnails after a maintenance pass.
                       </p>
                       <Button
@@ -1385,7 +1559,7 @@ export default function ProjectSettingsPage() {
                         size="sm"
                         onClick={() => setShowRegenThumbsConfirm(true)}
                         disabled={regeneratingThumbnails || reprocessing}
-                        className="w-full"
+                        className="w-full bg-white/[0.04] hover:bg-white/[0.08] border-white/15 text-white shadow-none"
                       >
                         {regeneratingThumbnails ? (
                           <>
@@ -1403,7 +1577,7 @@ export default function ProjectSettingsPage() {
                   </div>
 
                   {maintenanceResult && (
-                    <div className="text-xs text-green-500">
+                    <div className="text-xs text-emerald-300">
                       {maintenanceResult.kind === 'reprocess'
                         ? `Queued ${maintenanceResult.count} video(s) for full re-process.`
                         : `Queued ${maintenanceResult.count} thumbnail(s) for regeneration.`}
@@ -1418,7 +1592,7 @@ export default function ProjectSettingsPage() {
                   state and DB; remove `{false && ` to bring them back
                   to the UI when needed. */}
               {false && !skipTranscoding && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="watermarkEnabled">{t('enableWatermarks')}</Label>
@@ -1542,7 +1716,7 @@ export default function ProjectSettingsPage() {
                   of overriding per project. State + DB column kept;
                   remove `{false && ` to bring it back. */}
               {false && !skipTranscoding && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="applyPreviewLut">{t('applyPreviewLut')}</Label>
@@ -1564,7 +1738,7 @@ export default function ProjectSettingsPage() {
                   values are still honored — admins just don't change
                   it from here. Remove `{false && ` to expose. */}
               {false && (
-	              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+	              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
 	                <div className="space-y-2">
 	                  <Label>{t('authMethod')}</Label>
 	                  <Select value={authMode} onValueChange={setAuthMode}>
@@ -1616,7 +1790,7 @@ export default function ProjectSettingsPage() {
                   the share page; admins just don't toggle them from
                   here anymore. */}
               {false && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="guestMode">{t('guestMode')}</Label>
@@ -1676,7 +1850,7 @@ export default function ProjectSettingsPage() {
                   so admins can copy-paste it. Empty list = project
                   has no folders yet — we show a small placeholder
                   rather than rendering a blank card. */}
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="space-y-0.5">
                   <Label className="flex items-center gap-2">
                     <Share2 className="w-4 h-4" />
@@ -1688,15 +1862,15 @@ export default function ProjectSettingsPage() {
                 </div>
 
                 {folderShareError && (
-                  <p className="text-xs text-destructive">{folderShareError}</p>
+                  <p className="text-xs text-red-300">{folderShareError}</p>
                 )}
 
                 {sharedFolders.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">
+                  <p className="text-xs text-white/55 italic">
                     No folders in this project yet.
                   </p>
                 ) : (
-                  <ul className="divide-y divide-border rounded-md border border-border bg-background">
+                  <ul className="divide-y divide-white/10 rounded-md ring-1 ring-white/10 bg-white/[0.03]">
                     {sharedFolders.map((folder) => {
                       const expires = folder.shareExpiresAt
                         ? new Date(folder.shareExpiresAt)
@@ -1722,10 +1896,10 @@ export default function ProjectSettingsPage() {
                       }
                       const toneClass =
                         expiryTone === 'danger'
-                          ? 'text-destructive'
+                          ? 'text-red-300'
                           : expiryTone === 'warning'
-                          ? 'text-warning'
-                          : 'text-muted-foreground'
+                          ? 'text-amber-300'
+                          : 'text-white/55'
                       const isBusy = folderShareBusyId === folder.id
                       const isLimited = !!folder.shareExpiresAt
                       return (
@@ -1733,21 +1907,41 @@ export default function ProjectSettingsPage() {
                           key={folder.id}
                           className="flex flex-col gap-2 px-3 py-3"
                         >
-                          {/* Top row — folder name, slug, current
-                              expiry status. */}
+                          {/* Top row — folder name, full share URL with
+                              copy button, current expiry status. */}
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-3 min-w-0">
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium truncate">{folder.name}</p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                /share/folder/{folder.slug}
-                                {folder.hasPassword && ' · Password protected'}
-                                {folder.authMode === 'OTP' && ' · OTP'}
-                                {folder.authMode === 'BOTH' && ' · Password + OTP'}
-                              </p>
+                              <p className="text-sm font-medium truncate text-white">{folder.name}</p>
+                              <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                                <p className="text-xs text-white/55 truncate font-mono">
+                                  {folderShortLinks[folder.id]
+                                    || `${typeof window !== 'undefined' ? window.location.origin : ''}/share/folder/${folder.slug}`}
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => void copyFolderShareLink(folder)}
+                                  title={folderJustCopiedId === folder.id ? 'Copied!' : 'Copy share link'}
+                                  aria-label="Copy share link"
+                                  className="shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-md bg-white/[0.04] hover:bg-white/[0.10] ring-1 ring-white/15 hover:ring-white/25 text-white/70 hover:text-white transition-colors"
+                                >
+                                  {folderJustCopiedId === folder.id ? (
+                                    <Check className="w-3 h-3 text-emerald-300" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                              {(folder.hasPassword || folder.authMode === 'OTP' || folder.authMode === 'BOTH') && (
+                                <p className="text-[10px] uppercase tracking-wide text-white/40 mt-0.5">
+                                  {folder.hasPassword && 'Password protected'}
+                                  {folder.authMode === 'OTP' && 'OTP'}
+                                  {folder.authMode === 'BOTH' && 'Password + OTP'}
+                                </p>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 whitespace-nowrap">
                               {folderJustRevokedId === folder.id && (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-success-visible text-success font-medium">
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-400/15 ring-1 ring-emerald-400/30 text-emerald-300 font-medium">
                                   ✓ Link revoked — new URL active
                                 </span>
                               )}
@@ -1776,50 +1970,69 @@ export default function ProjectSettingsPage() {
                               }}
                               disabled={isBusy}
                             >
-                              <SelectTrigger className="h-8 w-[140px] text-xs">
+                              <SelectTrigger className="h-8 w-[140px] text-xs bg-white/[0.04] border-white/15 text-white hover:bg-white/[0.06] hover:border-white/25 focus:ring-primary/60 transition-colors">
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="unlimited">Unlimited</SelectItem>
-                                <SelectItem value="limited">Limited (date)</SelectItem>
+                              <SelectContent
+                                className="border-0 ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] text-white"
+                                style={{
+                                  backgroundColor: 'rgba(22, 37, 51, 0.55)',
+                                  backgroundImage:
+                                    'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                                  backdropFilter: 'blur(24px) saturate(160%)',
+                                  WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+                                }}
+                              >
+                                <SelectItem value="unlimited" className="text-white focus:bg-primary/15 focus:text-primary data-[state=checked]:text-primary">Unlimited</SelectItem>
+                                <SelectItem value="limited" className="text-white focus:bg-primary/15 focus:text-primary data-[state=checked]:text-primary">Limited (date)</SelectItem>
                               </SelectContent>
                             </Select>
 
                             {isLimited && (
-                              <Input
-                                type="date"
-                                value={
-                                  folder.shareExpiresAt
-                                    ? (() => {
-                                        const d = new Date(folder.shareExpiresAt)
-                                        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-                                      })()
-                                    : ''
-                                }
-                                onChange={(e) => {
-                                  const val = e.target.value
-                                  if (!val) return
-                                  // Anchor expiry at noon to dodge
-                                  // timezone-related "off by a day" edge
-                                  // cases for users near midnight.
-                                  void patchFolderShareExpiry(
-                                    folder.id,
-                                    new Date(`${val}T12:00:00.000Z`),
-                                  )
-                                }}
+                              <button
+                                type="button"
+                                data-glass-calendar-trigger
                                 disabled={isBusy}
-                                className="h-8 w-[160px] text-xs"
-                              />
+                                onClick={(e) => {
+                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                                  // Toggle: same folder twice = close.
+                                  if (calendarFolderId === folder.id) {
+                                    setCalendarFolderId(null)
+                                    setCalendarAnchor(null)
+                                  } else {
+                                    setCalendarFolderId(folder.id)
+                                    setCalendarAnchor(rect)
+                                  }
+                                }}
+                                className="h-8 px-3 text-xs inline-flex items-center gap-2 rounded-md bg-white/[0.04] hover:bg-white/[0.06] ring-1 ring-white/15 hover:ring-white/25 text-white focus-visible:outline-none focus-visible:ring-primary/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <Calendar className="w-3.5 h-3.5 text-white/70" />
+                                <span>
+                                  {folder.shareExpiresAt
+                                    ? new Date(folder.shareExpiresAt).toLocaleDateString(undefined, {
+                                        day: '2-digit',
+                                        month: 'short',
+                                        year: 'numeric',
+                                      })
+                                    : 'Pick date'}
+                                </span>
+                              </button>
                             )}
 
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-8 px-2 text-xs text-destructive hover:text-destructive ml-auto"
+                              className="h-8 px-3 text-xs gap-1.5 rounded-lg ring-1 ring-red-400/25 hover:ring-red-400/45 text-red-300 hover:text-red-200 shadow-none transition-all ml-auto"
+                              style={{
+                                backgroundColor: 'rgba(248, 113, 113, 0.08)',
+                                backdropFilter: 'blur(12px) saturate(140%)',
+                                WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+                              }}
                               onClick={() => setFolderToRevoke(folder)}
                               disabled={isBusy}
                             >
+                              <Trash2 className="w-3.5 h-3.5" />
                               Delete link
                             </Button>
                           </div>
@@ -1830,8 +2043,30 @@ export default function ProjectSettingsPage() {
                 )}
               </div>
 
+              {/* 2.5.1+: single GlassCalendar instance for all rows —
+                  portalled to body anyway, so we don't need one per
+                  row. `calendarFolderId` tracks which row is active. */}
+              <GlassCalendar
+                open={!!calendarFolderId}
+                anchorRect={calendarAnchor}
+                value={(() => {
+                  if (!calendarFolderId) return null
+                  const row = sharedFolders.find((r) => r.id === calendarFolderId)
+                  return row?.shareExpiresAt ? new Date(row.shareExpiresAt) : null
+                })()}
+                min={new Date()}
+                onChange={(next) => {
+                  if (!calendarFolderId) return
+                  void patchFolderShareExpiry(calendarFolderId, next)
+                }}
+                onClose={() => {
+                  setCalendarFolderId(null)
+                  setCalendarAnchor(null)
+                }}
+              />
+
               {(authMode === 'PASSWORD' || authMode === 'BOTH') && (
-              <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="space-y-2">
                   <Label htmlFor="password">{t('sharePagePassword')}</Label>
                   <div className="flex gap-2 w-full">
@@ -1848,7 +2083,7 @@ export default function ProjectSettingsPage() {
                       size="sm"
                       onClick={() => setSharePassword(generateSecurePassword())}
                       title={t('generatePassword')}
-                      className="h-10 w-10 p-0 flex-shrink-0"
+                      className="h-10 w-10 p-0 flex-shrink-0 bg-white/[0.04] hover:bg-white/[0.08] border-white/15 text-white shadow-none"
                     >
                       <RefreshCw className="w-4 h-4" />
                     </Button>
@@ -1859,10 +2094,10 @@ export default function ProjectSettingsPage() {
                         size="sm"
                         onClick={copyPassword}
                         title={copiedPassword ? tc('copied') : t('copyPassword')}
-                        className="h-10 w-10 p-0 flex-shrink-0"
+                        className="h-10 w-10 p-0 flex-shrink-0 bg-white/[0.04] hover:bg-white/[0.08] border-white/15 text-white shadow-none"
                       >
                         {copiedPassword ? (
-                          <Check className="w-4 h-4 text-green-500" />
+                          <Check className="w-4 h-4 text-emerald-300" />
                         ) : (
                           <Copy className="w-4 h-4" />
                         )}
@@ -1885,7 +2120,7 @@ export default function ProjectSettingsPage() {
             <>
               {/* Mobile: stacked collapsible cards */}
               <div className="lg:hidden space-y-4 sm:space-y-6">
-                <CollapsibleSection className="border-border" title={t('projectDetails')} description={t('projectDetailsDescription')} open={showProjectDetails} onOpenChange={setShowProjectDetails} contentClassName="space-y-4 border-t pt-4">
+                <CollapsibleSection className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white" style={{ backdropFilter: 'blur(20px) saturate(140%)', WebkitBackdropFilter: 'blur(20px) saturate(140%)' }} title={t('projectDetails')} description={t('projectDetailsDescription')} open={showProjectDetails} onOpenChange={setShowProjectDetails} contentClassName="space-y-4 border-t border-white/10 pt-4">
                   {projectDetailsContent}
                 </CollapsibleSection>
                 {/* 1.5.8: Client Information & Notifications and
@@ -1894,10 +2129,10 @@ export default function ProjectSettingsPage() {
                     (`clientInfoContent`, `clientShareContent`) are
                     still defined so existing state stays connected;
                     just not rendered. Restore by un-commenting. */}
-                <CollapsibleSection className="border-border" title={t('videoProcessing')} description={t('videoProcessingDescription')} open={showVideoProcessing} onOpenChange={setShowVideoProcessing} contentClassName="space-y-6 border-t pt-4">
+                <CollapsibleSection className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white" style={{ backdropFilter: 'blur(20px) saturate(140%)', WebkitBackdropFilter: 'blur(20px) saturate(140%)' }} title={t('videoProcessing')} description={t('videoProcessingDescription')} open={showVideoProcessing} onOpenChange={setShowVideoProcessing} contentClassName="space-y-6 border-t border-white/10 pt-4">
                   {videoProcessingContent}
                 </CollapsibleSection>
-                <CollapsibleSection className="border-border" title={t('security')} description={t('securityDescription')} open={showSecurity} onOpenChange={setShowSecurity} contentClassName="space-y-4 border-t pt-4">
+                <CollapsibleSection className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white" style={{ backdropFilter: 'blur(20px) saturate(140%)', WebkitBackdropFilter: 'blur(20px) saturate(140%)' }} title={t('security')} description={t('securityDescription')} open={showSecurity} onOpenChange={setShowSecurity} contentClassName="space-y-4 border-t border-white/10 pt-4">
                   {securityContent}
                 </CollapsibleSection>
               </div>
@@ -1905,16 +2140,22 @@ export default function ProjectSettingsPage() {
               {/* Desktop: sidebar nav + content panel */}
               <div className="hidden lg:flex gap-6">
                 <div className="w-56 flex-shrink-0">
-                  <nav className="space-y-1 sticky top-6">
+                  <nav
+                    className="space-y-1 p-2 rounded-xl bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] sticky top-6"
+                    style={{
+                      backdropFilter: 'blur(20px) saturate(140%)',
+                      WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+                    }}
+                  >
                     {settingSections.map((section) => (
                       <button
                         key={section.id}
                         onClick={() => setActiveSection(section.id)}
                         className={cn(
-                          'w-full text-left px-3 py-2.5 rounded-md text-sm flex items-center gap-2.5 transition-colors',
+                          'w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2.5 transition-colors',
                           activeSection === section.id
-                            ? 'bg-accent text-accent-foreground font-medium'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                            ? 'bg-primary/15 text-primary font-medium'
+                            : 'text-white/75 hover:text-white hover:bg-white/5'
                         )}
                       >
                         <section.icon className="w-4 h-4 flex-shrink-0" />
@@ -1926,7 +2167,7 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex-1 min-w-0">
                   {activeSection === 'project-details' && (
-                    <CollapsibleSection className="border-border" title={t('projectDetails')} description={t('projectDetailsDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-4 border-t pt-4">
+                    <CollapsibleSection className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white" style={{ backdropFilter: 'blur(20px) saturate(140%)', WebkitBackdropFilter: 'blur(20px) saturate(140%)' }} title={t('projectDetails')} description={t('projectDetailsDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-4 border-t border-white/10 pt-4">
                       {projectDetailsContent}
                     </CollapsibleSection>
                   )}
@@ -1940,12 +2181,12 @@ export default function ProjectSettingsPage() {
                       `activeSection === '…' && <CollapsibleSection>`
                       blocks back here. */}
                   {activeSection === 'video-processing' && (
-                    <CollapsibleSection className="border-border" title={t('videoProcessing')} description={t('videoProcessingDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-6 border-t pt-4">
+                    <CollapsibleSection className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white" style={{ backdropFilter: 'blur(20px) saturate(140%)', WebkitBackdropFilter: 'blur(20px) saturate(140%)' }} title={t('videoProcessing')} description={t('videoProcessingDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-6 border-t border-white/10 pt-4">
                       {videoProcessingContent}
                     </CollapsibleSection>
                   )}
                   {activeSection === 'security' && (
-                    <CollapsibleSection className="border-border" title={t('security')} description={t('securityDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-4 border-t pt-4">
+                    <CollapsibleSection className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white" style={{ backdropFilter: 'blur(20px) saturate(140%)', WebkitBackdropFilter: 'blur(20px) saturate(140%)' }} title={t('security')} description={t('securityDescription')} open={true} onOpenChange={() => {}} collapsible={false} contentClassName="space-y-4 border-t border-white/10 pt-4">
                       {securityContent}
                     </CollapsibleSection>
                   )}
@@ -1957,8 +2198,15 @@ export default function ProjectSettingsPage() {
 
         {/* Error notification at bottom */}
         {error && (
-          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-destructive-visible border-2 border-destructive-visible rounded-lg">
-            <p className="text-xs sm:text-sm text-destructive font-medium">{error}</p>
+          <div
+            className="mt-4 sm:mt-6 p-3 sm:p-4 rounded-lg ring-1 ring-red-400/30"
+            style={{
+              backgroundColor: 'rgba(248, 113, 113, 0.10)',
+              backdropFilter: 'blur(24px) saturate(160%)',
+              WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+            }}
+          >
+            <p className="text-xs sm:text-sm text-red-300 font-medium">{error}</p>
           </div>
         )}
 
@@ -1967,13 +2215,12 @@ export default function ProjectSettingsPage() {
             (rendered above the form) is enough and stays in view
             while users scroll back up to verify. */}
 
-        {/* Save button at bottom */}
-        <div className="mt-6 sm:mt-8 pb-20 lg:pb-24 flex justify-end">
-          <Button onClick={handleSave} variant="default" disabled={saving} size="lg" className="w-full sm:w-auto">
-            <Save className="w-4 h-4 mr-2" />
-            {saving ? tc('saving') : tc('saveChanges')}
-          </Button>
-        </div>
+        {/* 2.5.1+: bottom Save Changes button removed — the Save
+            Changes pill is portalled into the AdminTopBar's right
+            slot now, same UX as Global Settings. The bottom padding
+            stays so the floating banners (uploads / processing)
+            don't cover the last card. */}
+        <div className="pb-20 lg:pb-24" />
 
         {/* 2.2.4+: ReprocessModal still renders, but `showReprocessModal`
             is never set to true anywhere now — kept for any future

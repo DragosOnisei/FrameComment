@@ -26,10 +26,13 @@ export default function SortModeToggle({
   return (
     <div
       className={cn(
-        'inline-flex items-center rounded-md border bg-card p-0.5',
+        'inline-flex items-center rounded-md bg-white/[0.06] backdrop-blur-md ring-1 ring-white/10 p-0.5',
         className,
       )}
     >
+      {/* 2.5.0+: active variant matches ViewModeToggle — brand-blue
+          tint pulled from the sidebar's active-link recipe so the
+          chrome reads as one family. */}
       <Button
         type="button"
         variant="ghost"
@@ -37,8 +40,8 @@ export default function SortModeToggle({
         onClick={() => onChange('alphabetical')}
         aria-pressed={value === 'alphabetical'}
         className={cn(
-          'h-8 w-8 text-muted-foreground hover:bg-accent hover:text-foreground',
-          value === 'alphabetical' && 'bg-accent text-foreground',
+          'h-8 w-8 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+          value === 'alphabetical' && 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary',
         )}
         title="Sort A to Z"
       >
@@ -52,8 +55,8 @@ export default function SortModeToggle({
         onClick={() => onChange('alphabetical-reverse')}
         aria-pressed={value === 'alphabetical-reverse'}
         className={cn(
-          'h-8 w-8 text-muted-foreground hover:bg-accent hover:text-foreground',
-          value === 'alphabetical-reverse' && 'bg-accent text-foreground',
+          'h-8 w-8 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+          value === 'alphabetical-reverse' && 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary',
         )}
         title="Sort Z to A"
       >

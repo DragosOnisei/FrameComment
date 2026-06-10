@@ -2191,6 +2191,7 @@ export default function VideoPlayer({
                   rulersEnabled={rulersEnabled}
                   onRulersEnabledChange={setRulersEnabled}
                   onDownloadStill={handleDownloadStill}
+                  shareToken={shareToken}
                 />
               </div>
               )}

@@ -43,10 +43,23 @@ export function GlobalDropOverlay() {
       return Array.from(types).includes('Files')
     }
 
+    /**
+     * 2.5.1+: skip the floating overlay when the page already shows
+     * the FolderBrowser's big empty-state placeholder — that card is
+     * already the drop target, and stacking a second floating popup
+     * on top of it competes for attention without adding info. We
+     * marker the empty-state with `data-empty-drop-zone="true"` so
+     * this check stays decoupled from FolderBrowser's internals.
+     */
+    const hasEmptyDropZoneVisible = (): boolean => {
+      if (typeof document === 'undefined') return false
+      return !!document.querySelector('[data-empty-drop-zone="true"]')
+    }
+
     const onEnter = (e: DragEvent) => {
       if (!isFileDrag(e)) return
       counter++
-      if (counter === 1) setActive(true)
+      if (counter === 1 && !hasEmptyDropZoneVisible()) setActive(true)
     }
     const onLeave = (e: DragEvent) => {
       if (!isFileDrag(e)) return
@@ -82,10 +95,30 @@ export function GlobalDropOverlay() {
       className="fixed inset-0 z-[2147483600] pointer-events-none flex items-center justify-center animate-in fade-in duration-150"
       aria-hidden="true"
     >
-      <div className="flex flex-col items-center gap-4 text-primary rounded-2xl border-2 border-dashed border-primary/70 bg-background/95 backdrop-blur-md px-12 py-10 shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
-        <UploadCloud className="w-16 h-16" />
-        <p className="text-lg font-semibold">Drop files to upload</p>
-        <p className="text-xs text-muted-foreground max-w-[300px] text-center">
+      {/* 2.5.1+: v2.5 frosted glass refresh — same vocabulary as
+          ConfirmDialog / popovers (translucent navy + spotlight
+          radial tint + 40px backdrop blur). The icon sits in an
+          accent-tinted disc so it reads as the focal point even on
+          a busy background. Dashed border stays as the conventional
+          "drop here" signal but in primary/40 over the glass card. */}
+      <div
+        className="flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed border-primary/45 ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-12 py-10"
+        style={{
+          backgroundColor: 'rgba(22, 37, 51, 0.62)',
+          backgroundImage:
+            'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+          backdropFilter: 'blur(40px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          transform: 'translate3d(0, 0, 0)',
+          willChange: 'backdrop-filter, transform',
+          isolation: 'isolate',
+        }}
+      >
+        <div className="rounded-full bg-primary/15 ring-1 ring-primary/30 p-4">
+          <UploadCloud className="w-12 h-12 text-primary" />
+        </div>
+        <p className="text-lg font-semibold text-white">Drop files to upload</p>
+        <p className="text-xs text-white/65 max-w-[300px] text-center leading-relaxed">
           Drop video files or whole folders anywhere on this page —
           they&apos;ll start uploading to the project you&apos;re viewing.
         </p>

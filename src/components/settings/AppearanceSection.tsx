@@ -1,8 +1,10 @@
+import { useEffect, useRef } from 'react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
 import { Monitor, Moon, Sun, Check, Globe } from 'lucide-react'
 import { useTranslations } from 'next-intl'
+import { applyAccentColor } from '@/components/AccentColorProvider'
 
 const SUPPORTED_LANGUAGES = [
   { code: 'en' },
@@ -54,14 +56,89 @@ export function AppearanceSection({
     { value: 'dark', label: t('appearance.dark'), icon: Moon, description: t('appearance.darkDescription') },
   ]
 
+  // 2.5.0+: Live preview of accent color.
+  //
+  // The first render captures the accent color that was loaded from the
+  // server — that's our "baseline" to revert to if the user clicks
+  // around the swatches but then navigates away without saving. Each
+  // subsequent change to `accentColor` (the parent React state, mutated
+  // by clicking a swatch) writes the CSS variables on <html> via
+  // `applyAccentColor` so the whole app — sidebar highlight, brand-blue
+  // logo, glass-tinted active states, the top-left light spot
+  // (--spotlight-tint) — updates instantly.
+  //
+  // The save path is unchanged: the parent's Save Changes button POSTs
+  // the new color to /api/settings, which then survives a reload.
+  // Until the user saves, the page background only tracks the chosen
+  // hue in-memory; refreshing pulls back the persisted value.
+  const baselineAccentRef = useRef<string>(accentColor)
+  const userInteractedRef = useRef(false)
+
+  useEffect(() => {
+    // On every change to the selected swatch, push it to the DOM so the
+    // sidebar nav, brand-blue logo, glass active states + the top-left
+    // spotlight gradient all flip instantly. We skip only the no-op
+    // case where the value still matches the original baseline and the
+    // user hasn't touched the picker (avoids a redundant write right
+    // after the AccentColorProvider already applied the server value).
+    if (accentColor === baselineAccentRef.current && !userInteractedRef.current) {
+      return
+    }
+    applyAccentColor(accentColor as any)
+  }, [accentColor])
+
+  // Listen for the "save succeeded" event from the parent. That marks
+  // the current value as the new baseline so the unmount-revert
+  // doesn't undo a freshly persisted color.
+  useEffect(() => {
+    const onSaved = (e: Event) => {
+      const detail = (e as CustomEvent<{ accentColor: string }>).detail
+      if (detail?.accentColor) {
+        baselineAccentRef.current = detail.accentColor
+        userInteractedRef.current = false
+      }
+    }
+    window.addEventListener('accentcolor:saved', onSaved as EventListener)
+    return () => window.removeEventListener('accentcolor:saved', onSaved as EventListener)
+  }, [])
+
+  useEffect(() => {
+    // Revert on unmount if the user picked a swatch but never saved.
+    // Source of truth for "saved color" is localStorage, kept in sync
+    // by both AccentColorProvider (initial paint) and the save handler.
+    return () => {
+      if (!userInteractedRef.current) return
+      let savedColor = baselineAccentRef.current
+      try {
+        const cached = localStorage.getItem('adminAccentColor')
+        if (cached) savedColor = cached
+      } catch {
+        /* ignore */
+      }
+      if (savedColor && savedColor !== accentColor) {
+        applyAccentColor(savedColor as any)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
     <CollapsibleSection
-      className="border-border"
+      // 2.5.0+: frosted-glass section panel — same recipe used
+      // across the rest of the new chrome (sidebar nav, user
+      // cards, table view): 4% white tint, hairline white-10
+      // ring, soft outward shadow, and explicit inline
+      // backdrop-filter so the blur lands even if a Tailwind
+      // utility gets purged.
+      className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+      style={{
+        backdropFilter: 'blur(20px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+      }}
       title={t('appearance.title')}
-      description={t('appearance.description')}
       open={show}
       onOpenChange={setShow}
-      contentClassName="space-y-4 border-t pt-4"
+      contentClassName="space-y-4 border-t border-white/10 pt-4"
       collapsible={collapsible}
     >
       {/* 1.5.8: Application Language card hidden — only English is
@@ -93,40 +170,17 @@ export function AppearanceSection({
       </div>
       )}
 
-      {/* Theme Selection */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-        <Label>{t('appearance.defaultTheme')}</Label>
-        <div className="grid grid-cols-3 gap-2">
-          {themeOptions.map((option) => {
-            const Icon = option.icon
-            const isSelected = defaultTheme === option.value
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setDefaultTheme(option.value)}
-                className={`flex flex-col items-center gap-1 p-2 sm:p-3 rounded-lg border-2 transition-colors ${
-                  isSelected
-                    ? 'border-primary bg-primary/10'
-                    : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                }`}
-              >
-                <Icon className={`w-5 h-5 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
-                <span className={`text-xs sm:text-sm font-medium ${isSelected ? 'text-primary' : 'text-foreground'}`}>
-                  {option.label}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {t('appearance.themeToggleHint')}
-        </p>
-      </div>
+      {/* 2.5.1+: Default Theme block hidden — app is dark-only.
+          The state + setter stay wired in case we re-enable a theme
+          picker later, but the UI surface is removed so admins
+          don't see a control that doesn't actually change anything
+          for end users. */}
 
-      {/* Accent Color Selection */}
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-        <Label>{t('appearance.accentColor')}</Label>
+      {/* Accent Color Selection — nested floating glass card.
+          Active swatch is marked by the checkmark alone — no extra
+          outline ring. */}
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+        <Label className="text-white">{t('appearance.accentColor')}</Label>
         <div className="flex flex-wrap gap-3">
           {Object.entries(ACCENT_COLORS).map(([key, color]) => {
             const isSelected = accentColor === key
@@ -134,28 +188,86 @@ export function AppearanceSection({
               <button
                 key={key}
                 type="button"
-                onClick={() => setAccentColor(key)}
-                className={`group relative flex flex-col items-center gap-1.5 p-2 rounded-lg border-2 transition-all ${
-                  isSelected
-                    ? 'border-foreground'
-                    : 'border-transparent hover:border-border'
-                }`}
+                onClick={() => {
+                  // Mark that the user has manually changed colors so
+                  // the unmount-revert logic knows to roll back if
+                  // they leave without saving.
+                  userInteractedRef.current = true
+                  setAccentColor(key)
+                }}
+                className="group relative flex flex-col items-center gap-1.5 p-1"
                 title={color.name}
+                aria-label={color.name}
               >
                 <div
                   className="w-10 h-10 rounded-full flex items-center justify-center transition-transform group-hover:scale-110"
                   style={{ backgroundColor: color.hex }}
                 >
-                  {isSelected && <Check className="w-5 h-5 text-white" />}
+                  {isSelected && <Check className="w-5 h-5 text-white" strokeWidth={3} />}
                 </div>
-                <span className="text-xs text-muted-foreground">{t(`appearance.${key}` as any)}</span>
+                <span className="text-xs text-white/55">{t(`appearance.${key}` as any)}</span>
               </button>
             )
           })}
+
+          {/*
+            2.5.0+: Custom swatch. Click pops the native color picker
+            (we trigger the hidden <input type="color"> ref). The
+            picker fires `input` events live as the user drags through
+            the spectrum, so the whole admin chrome flashes the new
+            color in real time — same code path as a preset swatch
+            because applyAccentColor now also accepts a #RRGGBB hex.
+          */}
+          {(() => {
+            const isHexSelected =
+              typeof accentColor === 'string' && accentColor.startsWith('#')
+            const swatchBg = isHexSelected
+              ? accentColor
+              : 'conic-gradient(from 0deg, #ef4444, #f59e0b, #22c55e, #14b8a6, #007AFF, #8b5cf6, #ec4899, #ef4444)'
+            return (
+              <label
+                className="group relative flex flex-col items-center gap-1.5 p-1 cursor-pointer"
+                title="Custom"
+                aria-label="Custom color"
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center transition-transform group-hover:scale-110 ring-1 ring-white/10"
+                  style={{ background: swatchBg }}
+                >
+                  {isHexSelected && (
+                    <Check className="w-5 h-5 text-white drop-shadow" strokeWidth={3} />
+                  )}
+                </div>
+                <span className="text-xs text-white/55">Custom</span>
+                <input
+                  type="color"
+                  // Show whatever's currently selected, defaulting to
+                  // the blue preset's hex so the picker opens at a
+                  // sane starting point on first use.
+                  value={isHexSelected ? accentColor : ACCENT_COLORS.blue.hex}
+                  onInput={(e) => {
+                    // `onInput` runs continuously while the user drags
+                    // through the picker — drives the live preview.
+                    const next = (e.target as HTMLInputElement).value
+                    userInteractedRef.current = true
+                    setAccentColor(next)
+                  }}
+                  onChange={(e) => {
+                    // `onChange` fires when the picker closes / the
+                    // user commits. Same handler — covers browsers
+                    // (looking at you, Safari) that don't fire input
+                    // events live.
+                    const next = e.target.value
+                    userInteractedRef.current = true
+                    setAccentColor(next)
+                  }}
+                  className="sr-only"
+                  aria-label="Choose custom accent color"
+                />
+              </label>
+            )
+          })()}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {t('appearance.accentColorHint')}
-        </p>
       </div>
     </CollapsibleSection>
   )

@@ -11,6 +11,8 @@ import { useTranslations } from 'next-intl'
 import GlobalSearchOverlay from '@/components/GlobalSearchOverlay'
 import ViewModeToggle from '@/components/ViewModeToggle'
 import SortModeToggle from '@/components/SortModeToggle'
+import WordMark from '@/components/WordMark'
+import LogoMark from '@/components/LogoMark'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 
@@ -160,6 +162,27 @@ export default function AdminHeader() {
             centered within the leftover space. */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
           <div className="flex items-center gap-2 sm:gap-6 min-w-0">
+            {/* 2.5.0+: brand lockup. Links back to the projects
+                dashboard so the wordmark doubles as a "home"
+                affordance. On phones we collapse to just the icon
+                so the nav row still fits — the wordmark text re-
+                appears from sm: up where there's room. */}
+            <Link
+              href="/admin/projects"
+              className="flex items-center hover:opacity-90 transition-opacity shrink-0"
+              aria-label="FrameComment home"
+            >
+              {/* Full wordmark from sm: up. */}
+              <span className="hidden sm:inline">
+                <WordMark variant="horizontal" iconSize={26} ariaHidden />
+              </span>
+              {/* Phones get just the icon — the nav row is already
+                  tight; the wordmark text would push View toggle
+                  off-screen. */}
+              <span className="inline sm:hidden">
+                <LogoMark size={24} ariaHidden />
+              </span>
+            </Link>
             <nav className="flex gap-1 sm:gap-2 overflow-x-auto">
               {navLinks.map((link) => {
                 const Icon = link.icon

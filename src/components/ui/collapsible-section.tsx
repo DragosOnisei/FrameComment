@@ -13,6 +13,12 @@ export interface CollapsibleSectionProps {
   onOpenChange: (open: boolean) => void
   children: React.ReactNode
   className?: string
+  /**
+   * 2.5.0+: forwarded to the wrapping Card so callers can apply
+   * inline `backdropFilter` for the frosted-glass treatment used
+   * across the Settings page.
+   */
+  style?: React.CSSProperties
   headerClassName?: string
   contentClassName?: string
   iconClassName?: string
@@ -27,6 +33,7 @@ export function CollapsibleSection({
   onOpenChange,
   children,
   className,
+  style,
   headerClassName,
   contentClassName,
   iconClassName,
@@ -40,7 +47,7 @@ export function CollapsibleSection({
   }, [collapsible, onOpenChange, open])
 
   return (
-    <Card className={className}>
+    <Card className={className} style={style}>
       <CardHeader
         role={collapsible ? "button" : undefined}
         tabIndex={collapsible ? 0 : undefined}

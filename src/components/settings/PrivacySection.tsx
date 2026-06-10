@@ -27,22 +27,25 @@ export function PrivacySection({
 
   return (
     <CollapsibleSection
-      className="border-border"
+      className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+      style={{
+        backdropFilter: 'blur(20px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+      }}
       title={t('privacy.title')}
-      description={t('privacy.description')}
       open={show}
       onOpenChange={setShow}
-      contentClassName="space-y-4 border-t pt-4"
+      contentClassName="space-y-4 border-t border-white/10 pt-4"
       collapsible={collapsible}
     >
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
-            <Label className="flex items-center gap-2">
+            <Label className="flex items-center gap-2 text-white">
               <ShieldCheck className="w-4 h-4" />
               {t('appearance.privacyDisclosure')}
             </Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('appearance.privacyDisclosureDescription')}
             </p>
           </div>
@@ -53,15 +56,15 @@ export function PrivacySection({
         </div>
         {privacyDisclosureEnabled && (
           <div className="space-y-2">
-            <Label>{t('appearance.privacyDisclosureCustomText')}</Label>
+            <Label className="text-white">{t('appearance.privacyDisclosureCustomText')}</Label>
             <textarea
               value={privacyDisclosureText}
               onChange={(e) => setPrivacyDisclosureText(e.target.value)}
               placeholder={t('appearance.privacyDisclosurePlaceholder')}
               rows={4}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="w-full rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/55">
               {t('appearance.privacyDisclosureHint')}
             </p>
           </div>

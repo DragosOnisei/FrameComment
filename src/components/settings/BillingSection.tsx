@@ -102,16 +102,19 @@ export function BillingSection({
 
   return (
     <CollapsibleSection
-      className="border-border"
+      className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+      style={{
+        backdropFilter: 'blur(20px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+      }}
       title="Billing"
-      description="Usage-based billing summary. Charges happen at end of each month."
       open={show}
       onOpenChange={setShow}
-      contentClassName="space-y-4 border-t pt-4"
+      contentClassName="space-y-4 border-t border-white/10 pt-4"
       collapsible={collapsible}
     >
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 text-sm text-white/55">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading usage…
         </div>
@@ -123,14 +126,14 @@ export function BillingSection({
       {usage && (
         <>
           {/* Current month total */}
-          <div className="rounded-lg border border-border bg-muted/30 p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
+          <div className="rounded-xl ring-1 ring-white/10 bg-white/[0.04] p-4">
+            <p className="text-xs text-white/55 uppercase tracking-wide">
               Current month (estimate)
             </p>
-            <p className="text-3xl font-semibold text-foreground mt-1 tabular-nums">
+            <p className="text-3xl font-semibold text-white mt-1 tabular-nums">
               {formatCurrency(totalCost)}
             </p>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-xs text-white/55 mt-1">
               Billed on {nextBilling.toLocaleDateString('en-US', {
                 month: 'long',
                 day: 'numeric',
@@ -141,45 +144,45 @@ export function BillingSection({
 
           {/* Line-item breakdown */}
           <div className="space-y-2">
-            <div className="flex items-center gap-3 rounded-md border border-border bg-card/50 p-3">
-              <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-3 rounded-xl ring-1 ring-white/10 bg-white/[0.04] p-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/15 text-primary ring-1 ring-primary/30 flex items-center justify-center shrink-0">
                 <Users className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground">Users</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm font-medium text-white">Users</p>
+                <p className="text-xs text-white/55">
                   {usage.userCount.toLocaleString()} ×{' '}
                   {formatCurrency(usage.pricing.perUserPerMonth)}
                 </p>
               </div>
-              <p className="text-sm font-semibold text-foreground tabular-nums">
+              <p className="text-sm font-semibold text-white tabular-nums">
                 {formatCurrency(userCost)}
               </p>
             </div>
 
-            <div className="flex items-center gap-3 rounded-md border border-border bg-card/50 p-3">
-              <div className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-3 rounded-xl ring-1 ring-white/10 bg-white/[0.04] p-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/15 text-primary ring-1 ring-primary/30 flex items-center justify-center shrink-0">
                 <HardDrive className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground">Storage</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm font-medium text-white">Storage</p>
+                <p className="text-xs text-white/55">
                   {formatBytes(usage.storageBytes)} ({usedGiB.toFixed(2)} GB) ×{' '}
                   {formatCurrency(usage.pricing.perGigabytePerMonth)}/GB
                 </p>
               </div>
-              <p className="text-sm font-semibold text-foreground tabular-nums">
+              <p className="text-sm font-semibold text-white tabular-nums">
                 {formatCurrency(storageCost)}
               </p>
             </div>
           </div>
 
           {/* Next billing date */}
-          <div className="flex items-center gap-3 rounded-md border border-border p-3">
-            <Calendar className="w-4 h-4 text-muted-foreground shrink-0" />
+          <div className="flex items-center gap-3 rounded-xl ring-1 ring-white/10 bg-white/[0.04] p-3">
+            <Calendar className="w-4 h-4 text-white/55 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground">Next billing</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm font-medium text-white">Next billing</p>
+              <p className="text-xs text-white/55">
                 {nextBilling.toLocaleDateString('en-US', {
                   weekday: 'long',
                   month: 'long',
@@ -191,13 +194,18 @@ export function BillingSection({
           </div>
 
           {/* Payment method placeholder */}
-          <div className="flex items-center gap-3 rounded-md border border-dashed border-border p-3">
-            <CreditCard className="w-4 h-4 text-muted-foreground shrink-0" />
+          <div
+            className="flex items-center gap-3 rounded-xl bg-white/[0.03] p-3"
+            style={{
+              border: '1px dashed rgba(255,255,255,0.15)',
+            }}
+          >
+            <CreditCard className="w-4 h-4 text-white/55 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground">
+              <p className="text-sm font-medium text-white">
                 Payment method
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-white/55">
                 No payment method connected
               </p>
             </div>
@@ -205,14 +213,14 @@ export function BillingSection({
               type="button"
               disabled
               title="Stripe integration not yet implemented"
-              className="px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card text-muted-foreground opacity-60 cursor-not-allowed"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.04] ring-1 ring-white/10 text-white/55 opacity-60 cursor-not-allowed"
             >
               Connect Stripe
             </button>
           </div>
 
           {/* Pricing footnote */}
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-white/55">
             Tariff: {formatCurrency(usage.pricing.perUserPerMonth)} per user
             per month + {formatCurrency(usage.pricing.perGigabytePerMonth)} per
             GB per month. Storage counts every file the app holds, including

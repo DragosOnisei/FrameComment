@@ -2396,7 +2396,10 @@ function FolderBrowserInner(
                 {uploadMenuOpen && (
                   <div
                     role="menu"
-                    className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+                    // 2.5.0+: solid `#162533` glass-style dropdown,
+                    // matches the rest of the v2.5 menus.
+                    style={{ backgroundColor: '#162533' }}
+                    className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
                   >
                     <button
                       role="menuitem"
@@ -2473,21 +2476,28 @@ function FolderBrowserInner(
       )}
 
       {!loading && !error && !hasItems && (
-        // Frame.io-style empty state (1.0.6+). The container above
-        // handles OS-file drag/drop — here we only render the visual
-        // dashed border + CTA. At the project root we swap the CTA
-        // for "New Folder" since videos can't live at the root.
+        // 2.5.0+: frosted-glass empty state replaces the old dashed
+        // border. Same vocabulary as the rest of the v2.5 chrome —
+        // bg-white/[0.04] tint + hairline white-10 ring + soft
+        // outward shadow. Hover-over with an OS-file drag flips to
+        // a brand-blue tinted glass so the drop target reads clearly.
+        // 2.5.1+: `data-empty-drop-zone` lets the GlobalDropOverlay
+        // suppress its own popup when this big empty-state placeholder
+        // is already visible — the empty state IS the drop target,
+        // and stacking a second floating card on top of it just
+        // muddies the affordance.
         <div
-          className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-10 sm:py-20 px-4 sm:px-6 text-center min-h-[280px] sm:min-h-[400px] transition-colors ${
+          data-empty-drop-zone="true"
+          className={`flex flex-col items-center justify-center rounded-2xl py-10 sm:py-20 px-4 sm:px-6 text-center min-h-[280px] sm:min-h-[400px] transition-colors shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] ${
             isFileDropHover
-              ? 'border-primary/70 bg-primary/5'
-              : 'border-border/40 bg-card/30'
+              ? 'bg-primary/10 ring-1 ring-primary/40'
+              : 'bg-white/[0.04] ring-1 ring-white/10'
           }`}
         >
-          <div className="rounded-full bg-muted/50 p-5">
-            <UploadCloud className="w-12 h-12 text-muted-foreground/70" />
+          <div className="rounded-full bg-primary/15 ring-1 ring-primary/30 p-5">
+            <UploadCloud className="w-12 h-12 text-primary" />
           </div>
-          <p className="mt-5 text-sm text-muted-foreground">
+          <p className="mt-5 text-sm text-white/65">
             {currentFolderId
               ? 'Drag files and folders to begin.'
               : onUploadFolderTree
@@ -2509,7 +2519,10 @@ function FolderBrowserInner(
               {uploadMenuOpen && (
                 <div
                   role="menu"
-                  className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 min-w-[180px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+                  // 2.5.0+: solid `#162533` glass-style dropdown,
+                  // matches the rest of the v2.5 menus.
+                  style={{ backgroundColor: '#162533' }}
+                  className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 min-w-[180px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
                 >
                   <button
                     role="menuitem"
@@ -2518,7 +2531,7 @@ function FolderBrowserInner(
                       setUploadMenuOpen(false)
                       filesInputRef.current?.click()
                     }}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
                   >
                     <Files className="w-4 h-4 shrink-0" />
                     Upload files
@@ -2530,7 +2543,7 @@ function FolderBrowserInner(
                       setUploadMenuOpen(false)
                       folderInputRef.current?.click()
                     }}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted text-left"
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
                   >
                     <FolderIcon className="w-4 h-4 shrink-0" />
                     Upload folder
@@ -2556,35 +2569,43 @@ function FolderBrowserInner(
 
       {/* Floating multi-select action bar (1.0.6+). Appears at the
           bottom-center of the viewport when any video card is
-          selected. Mirrors Frame.io's selection toolbar — count on
-          the left, actions on the right, easy to dismiss with X. */}
+          selected. 2.5.0+ refresh: aligned with the rest of the
+          frosted-glass vocabulary — white-tinted glass pill with a
+          hairline ring, brand-blue count badge on the left, and
+          destructive-tinted Delete button on the right. */}
       {totalSelected > 0 && (
         <div
           data-selection-toolbar
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-1.5"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2"
         >
-          <div className="flex items-center gap-3 rounded-full bg-popover text-popover-foreground border border-border shadow-2xl pl-2 pr-2 py-1.5">
+          <div
+            className="flex items-center gap-1 rounded-full bg-white/[0.06] text-white ring-1 ring-white/10 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.65)] pl-2 pr-2 py-1.5"
+            style={{ backdropFilter: 'blur(20px) saturate(140%)', WebkitBackdropFilter: 'blur(20px) saturate(140%)' }}
+          >
             <button
               type="button"
               onClick={clearSelection}
-              className="rounded-full p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="rounded-full p-1.5 text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors"
               title="Clear selection"
               aria-label="Clear selection"
             >
               <X className="w-4 h-4" />
             </button>
-            <span className="text-sm font-medium px-1 select-none">
+            {/* Brand-blue count chip — mirrors the v2.5 "active" state
+                used on accent swatches, dropdown items, etc. so the
+                user reads at a glance that something is selected. */}
+            <span className="text-xs font-semibold tracking-tight px-2.5 h-7 inline-flex items-center rounded-full bg-primary/15 text-primary ring-1 ring-primary/30 select-none">
               {totalSelected}{' '}
-              {totalSelected === 1 ? 'item' : 'items'} selected
+              {totalSelected === 1 ? 'item' : 'items'}
             </span>
-            <div className="h-5 w-px bg-border" aria-hidden />
+            <div className="h-5 w-px bg-white/10 mx-1" aria-hidden />
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={handleBulkDownload}
               disabled={bulkBusy}
-              className="rounded-full"
+              className="rounded-full h-8 px-3 text-white/85 hover:text-white hover:bg-white/[0.08] disabled:opacity-50"
             >
               <Download className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">Download</span>
@@ -2595,21 +2616,30 @@ function FolderBrowserInner(
               size="sm"
               onClick={handleBulkDelete}
               disabled={bulkBusy}
-              className="rounded-full text-destructive hover:text-destructive hover:bg-destructive/10"
+              className="rounded-full h-8 px-3 text-destructive hover:text-destructive hover:bg-destructive/15 focus-visible:ring-destructive/60 focus-visible:ring-offset-0 disabled:opacity-50"
             >
               <Trash2 className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">Delete</span>
             </Button>
           </div>
           {/* 1.7.0+: discoverability hint for the Quick Preview
-              shortcut — editors don't know Space works as a peek
-              unless we tell them. Only shown when exactly one
-              item is selected (the only case where Space does
-              anything); fades in below the action pill so it
-              doesn't crowd the toolbar itself. */}
+              shortcut. 2.5.0+ glass refresh keeps it visually
+              quieter than the action pill above so the toolbar
+              reads as primary / hint as supporting. */}
           {totalSelected === 1 && (
-            <span className="text-[11px] text-muted-foreground bg-popover/80 border border-border/60 rounded-full px-2.5 py-0.5 shadow-sm select-none">
-              Press <kbd className="px-1 py-px rounded bg-muted text-foreground font-mono text-[10px]">Space</kbd> for quick preview
+            <span
+              className="text-[11px] text-white/65 ring-1 ring-white/10 rounded-full px-2.5 py-0.5 select-none shadow-[0_6px_16px_-10px_rgba(0,0,0,0.6)]"
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                backdropFilter: 'blur(16px) saturate(140%)',
+                WebkitBackdropFilter: 'blur(16px) saturate(140%)',
+              }}
+            >
+              Press{' '}
+              <kbd className="px-1 py-px rounded bg-white/10 text-white font-mono text-[10px] ring-1 ring-white/10">
+                Space
+              </kbd>{' '}
+              for quick preview
             </span>
           )}
         </div>
@@ -2701,7 +2731,7 @@ function FolderBrowserInner(
         // cards don't fill the entire screen each. 2 fits a 360-414px
         // viewport comfortably; we step up to 3 → 4 → 5 → 6 on bigger
         // viewports.
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 items-start">
           {sortedFolders.map((f) => (
             <FolderCard
               key={`folder:${f.id}`}
@@ -2743,6 +2773,7 @@ function FolderBrowserInner(
               onDownloadFolder={handleDownloadFolder}
             />
           ))}
+
           {/* 2.2.6+: optimistic drop placeholders — instant feedback
               the moment files enter the grid. Replaced by real
               VideoCards as soon as the server-side row is observed
@@ -2866,6 +2897,44 @@ function FolderBrowserInner(
               )
             })
           })()}
+
+          {/* 2.5.0+: in-flow "+ New Folder" tile, same recipe as the
+              Projects dashboard's "+ New Project" placeholder. Sits
+              at the END of the grid so the dashed tile always closes
+              the row and doesn't interrupt the natural reading order
+              of existing content. Visibil indiferent de selecție —
+              utilizatorii vor să poată crea un folder nou chiar și
+              când au deja câteva item-uri selectate, fără să fie
+              nevoiți să deselecteze mai întâi. Structura oglindește
+              VideoCard / FolderCard exact: aspect-video cover +
+              label footer pe `p-4` — așa tile-ul intră în grid la
+              aceeași dimensiune ca orice alt card. */}
+          <button
+            type="button"
+            onClick={() => {
+              setNewDialogRestricted(false)
+              setShowNewDialog(true)
+            }}
+            className="group flex flex-col rounded-xl ring-1 ring-dashed ring-white/15 bg-white/[0.02] hover:bg-white/[0.05] hover:ring-white/30 text-white/55 hover:text-white transition-colors text-left"
+            aria-label="New Folder"
+          >
+            <span className="relative aspect-video rounded-t-xl flex items-center justify-center">
+              <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/[0.06] ring-1 ring-white/10 group-hover:bg-white/[0.12] transition-colors">
+                <FolderPlus className="w-6 h-6" />
+              </span>
+            </span>
+            {/* Footer sincronizat 1:1 cu FolderCard ca înălțime
+                (`p-4` + `text-base font-semibold` name + `text-xs
+                mt-1` meta spacer), dar textul e centrat orizontal
+                în loc de left-aligned — pe placeholder-ul "+ New
+                Folder" centrul citește mai natural decât stânga,
+                care s-ar alinia la numele folderelor reale și ar
+                trage atenția în jos-stânga al tile-ului. */}
+            <span className="flex flex-col items-center p-4 rounded-b-xl">
+              <span className="text-base font-semibold">New Folder</span>
+              <span className="text-xs mt-1 invisible" aria-hidden>.</span>
+            </span>
+          </button>
         </div>
       )}
 

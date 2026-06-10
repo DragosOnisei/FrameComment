@@ -14,6 +14,239 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-06-10
+
+### Big v2.5 → v3.0 polish pass — frosted glass everywhere
+
+A long pass over every admin surface to align it with the
+v2.5 "frosted glass + spotlight" design system that landed in
+2.5.0. Most v2.x surfaces were either flat `bg-card` dark grey
+(`#1f1f1f`) or a slightly mixed `#13181d/65%` recipe; this
+release rolls every one of them onto the same vocabulary —
+translucent navy (`rgba(22, 37, 51, 0.62)`), a soft spotlight-
+tinted radial wash from the top-left, a 40px backdrop blur, a
+hairline white-15 ring and a heavy elevation shadow. Net
+effect: the admin stops feeling like a collage of panels and
+starts feeling like one cohesive lit room.
+
+The major version bump signals "the chrome is rewritten end-
+to-end" rather than any backwards-incompatible API change —
+data, settings, share URLs, projects, comments are all
+unchanged and migrate automatically.
+
+### Added — GlassCalendar shared component
+
+- **`src/components/GlassCalendar.tsx`** — extracted from the
+  inline calendar that landed in ShareModal (2.5.x) and
+  promoted to a reusable component so Project Settings →
+  Folder share links can use it too. Glass popover portalled
+  to body, month nav, today ring + selected day pill, Clear /
+  Today shortcuts. New `inDialog` prop forces
+  `pointer-events: auto` so the popover stays clickable when
+  rendered inside a Radix `Dialog modal={true}` (which
+  otherwise paints `pointer-events: none` on body and silently
+  swallows clicks on portalled descendants).
+
+### Changed — Project Settings page refresh
+
+- **Topbar slots** — title + Save Changes now portal into the
+  shared `AdminTopBar` slots (Back pill on the left, gear icon
+  + "Project Settings" title beside it, Save Changes glass pill
+  on the right). The bottom Save button was dropped.
+- **Sidebar nav (desktop)** — wrapped in its own glass
+  container with `bg-primary/15 text-primary` brand-blue active
+  pill, same recipe as Global Settings.
+- **CollapsibleSection panels** (Project Details, Video
+  Processing, Security) — switched from flat `border-border` to
+  the full v2.5 glass recipe. Two-stage bug: the initial
+  replace_all only caught the mobile renderer; desktop
+  CollapsibleSection invocations still carried `border-border`
+  and rendered as solid `#1f1f1f`. Fixed both.
+- **Inner cards** — flipped from `border + bg-muted/30` to
+  `p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10` and
+  pulled apart the Project Title + Description into separate
+  cards (one field per card).
+- **Inputs / textareas** — glass variant (`bg-white/[0.04]
+  border-white/10 focus-visible:ring-primary/60`). Labels
+  white, hints `text-white/55`.
+- **Folder share links** — full URL with app origin instead of
+  bare `/share/folder/<slug>`. Short links auto-minted via
+  `/api/short-links` when `Settings.shortLinkDomain` is
+  configured, so admins see the same `https://fcmt.io/abc123`
+  URL their clients receive, with a one-click Copy icon
+  button. The native `<input type="date">` was replaced by the
+  GlassCalendar trigger. "Delete link" became a red glass pill
+  with a Trash icon.
+- **Cover image** — preview thumb wrapped in glass ring,
+  Upload / Change image moved to glass outline, Remove turned
+  into a red-tinted glass pill.
+
+### Changed — Modals and overlays
+
+- **ConfirmDialog** — base modal repainted in v2.5 so every
+  "are you sure?" prompt (Delete project, Reprocess Videos,
+  Delete share link, etc.) inherits the glass treatment for
+  free. Overlay scrim softened from `bg-background/80` to
+  `bg-black/50` + 4px blur so the page glass stays partially
+  visible. Cancel button became a glass pill, AlertTriangle
+  icon ring picks up brand colours (`red-400/30` destructive,
+  `primary/30` default).
+- **QuickPreviewOverlay** — modal repainted in v2.5 glass,
+  close button became a glass pill, metadata strip switched to
+  white/55 text and white/10 backgrounds. Backdrop scrim
+  removed entirely (per design call — Quick Preview is a
+  glance, not a focus modal).
+- **TemplateModal** picker (YouTube / UGC) — trimmed to a
+  narrow `max-w-md` glance card. Right-pane template title +
+  marketing blurb dropped; only the tree preview survives.
+  Picker on the left becomes glass pills separated by a
+  hairline divider, footer Cancel / Use this template buttons
+  centered.
+- **GlobalDropOverlay** — glass card refresh, plus a new
+  smart-skip: when FolderBrowser is already rendering its big
+  "Drag files and folders to begin" empty-state placeholder,
+  the floating overlay no longer also appears on top. Wired by
+  tagging the empty-state with `data-empty-drop-zone`.
+
+### Changed — Floating banners and tables
+
+- **ProcessingStatusBanners** (Encoding + Upload),
+  **DownloadBanners**, **VideoUploadModal banner** — all three
+  floating bottom-right banners share the v2.5 glass recipe
+  now instead of the legacy `bg-card/95` flat dark wash.
+  Progress bar tracks → `bg-white/10`, completion swatch →
+  `bg-emerald-400`.
+- **ProjectsList table view** (Projects dashboard) — bumped
+  from `bg-[#13181d]/65` to the v2.5 system recipe with the
+  spotlight radial wash.
+- **FolderBrowserTable** (Table view inside a project /
+  folder) — same upgrade. Inner rows + thumbnail placeholders
+  swapped to white-tint glass; selection painted in
+  `bg-primary/15 ring-primary/40`.
+- **Processing video... share-page card** — glass refresh so
+  admins joining a session mid-encode no longer see the only
+  flat dark surface on an otherwise glass page.
+
+### Changed — Project / folder navigation
+
+- **Folder Back button** — used to always navigate to the
+  project root; now reads `folder.parentFolderId` and walks
+  ONE step up the tree. VDA → Test Folder → YouTube → Back
+  now lands on Test Folder, not VDA.
+- **Folder grid "+ New Folder" tile** — label centred under
+  the icon (was left-aligned).
+- **Project tiles + table rows on the Projects dashboard** —
+  Frame.io-style **double-click to open**. Single click is now
+  a no-op (matching FolderCard / VideoCard); Cmd/Ctrl-click
+  and middle-click still open the project in a new tab.
+  Keyboard users can press Enter or Space on a focused tile.
+  `onMouseDown preventDefault` blocks the focus-on-click flash
+  that a focusable div would otherwise paint.
+
+### Fixed
+
+- **Project Settings dropdowns and glass containers** — some
+  inputs and outline buttons inside the v2.5 glass panels kept
+  the legacy `bg-card` solid `#1f1f1f` background because the
+  Card primitive had `bg-card` baked into its default class
+  string and the `cn(...)` chain wasn't always merging it
+  away. Walked every callsite and applied the override
+  explicitly.
+- **ShareModal `useMemo not defined`** — when extracting the
+  GlassCalendar into its own file we trimmed the React imports
+  too aggressively. ShareModal still relies on `useMemo`; put
+  it back.
+
+### Notes on shipping
+
+This is purely a UI-system release. The schema is unchanged,
+no migrations run on update, share URLs remain stable, and
+projects / folders / videos / comments are not touched. Roll
+back to 2.4.2 by reverting the image tag — nothing on disk
+changes.
+
+## [2.4.2] - 2026-06-08
+
+### Added — Folder templates (YouTube / UGC)
+
+- **New "Template" wizard on the projects dashboard.** Sits right
+  next to "+ New Project" and opens a split-pane modal: left lists
+  the available templates, right shows a live tree preview of the
+  structure that will be created. Two templates ship in this
+  release:
+    - **YouTube** — `<day>` / `<episode>` / { `01_IN EDIT`,
+      `02_CLEAN`, `03_FINAL` }. The classic per-episode review
+      flow, in one click.
+    - **UGC** — `<campaign>` / `<actor>` / { `9:16`, `4:5` } for
+      each actor. The actor list is a dynamic input row — `+ Add
+      actor` to grow it, `X` to remove. No upper bound that you'd
+      hit in practice (API guards at 50).
+
+  Both templates pick the top-level folder name (`Day7`, `Spring
+  2026 Push`) from the user input, then materialise the rest of
+  the tree underneath. Submitting deep-links the user straight
+  into the freshly-created top-level folder so they can start
+  uploading immediately. Backed by the new
+  `POST /api/folders/from-template` endpoint, which builds the
+  whole tree inside a single Prisma transaction — partial trees
+  on failure are not a thing.
+
+  Collision policy: if `Day7` already exists in the project, the
+  endpoint auto-renames to `Day7 (1)`, `Day7 (2)`, etc., walking
+  up until it finds a free slot. This means re-running the wizard
+  for the same shoot day is safe and never overwrites prior work.
+  Deeper folders inside the freshly-created wrapper can't collide,
+  so we skip the check there.
+
+### Changed — Admin session timeout default raised to 12 HOURS
+
+- **`SecuritySettings.adminSessionTimeoutValue` / `Unit` defaults
+  changed from `15 MINUTES` → `12 HOURS`.** The 15-minute default
+  was a hangover from upstream ViTransfer's password-vault
+  posture and didn't fit FrameComment's actual admin UX (long
+  edit + upload + review sessions across a single workday). The
+  hard cap at 24 HOURS is unchanged, so admins can still tune it
+  down via Settings → Security if they want a tighter window.
+
+  Three places kept defaults in sync with the schema:
+    - `prisma/schema.prisma` — `@default(12)` / `@default("HOURS")`
+    - `src/lib/settings.ts` — fallback when no SecuritySettings
+      row exists yet (fresh install before the seed runs)
+    - `src/components/SessionMonitor.tsx` — frontend fallback
+      while the `/api/settings/security` fetch is in flight (was
+      causing a sub-minute "session expired" flash on first page
+      of the day)
+
+  **Existing installs are automatically migrated.** The shipped
+  `20260608000000_bump_admin_session_timeout_default` Prisma
+  migration nudges any `SecuritySettings` row still on the legacy
+  implicit default (exactly `15 MINUTES`) forward to the new
+  `12 HOURS`. Admins who deliberately picked a different value
+  (anything other than `15 MINUTES`) are left untouched — their
+  choice was intentional and we don't override it. The migration
+  runs once at startup via the app entrypoint's `prisma migrate
+  deploy` step, no manual SQL required.
+
+### Changed — Processing banner reads X / Y, lists only active
+
+- **Encoding tiers banner copy went from `2 in progress · 400 /
+  3945 done` → `400 / 3945 done`.** On a 1300-video bulk backfill
+  the "in progress" leading clause was noise dominated by worker
+  concurrency rather than batch shape — the user only cares about
+  overall progress through the queue, and the per-row pip already
+  shows which specific videos are live.
+- **The expanded panel now lists ONLY the actively-encoding rows
+  (those marked `isActive` by the API — i.e. BullMQ getActive +
+  the oldest-N fallback).** Previously it dumped every PROCESSING
+  row in the project, with the queued ones at 50% opacity — on a
+  big backfill that turned into an unscrollable wall of greyed-
+  out duplicates that all looked the same. Now the panel shows
+  exactly what the worker is currently chewing on (2 rows on
+  default concurrency), full opacity, with the pip.
+- Fallback: if NOTHING is active (worker between jobs, or the API
+  hasn't replied yet) we fall back to the unfiltered list so the
+  panel never appears empty for a healthy queue.
+
 ## [2.4.1] - 2026-06-07
 
 ### Fixed — TrueNAS update reliability (cement-fix)

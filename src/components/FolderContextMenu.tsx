@@ -154,18 +154,18 @@ export default function FolderContextMenu({
       }}
       disabled={disabled || !onClick}
       className={`
-        w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-left
+        w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-left
         transition-colors whitespace-nowrap
         ${disabled || !onClick
-          ? 'opacity-40 cursor-not-allowed'
+          ? 'opacity-40 cursor-not-allowed text-white/40'
           : destructive
-            ? 'hover:bg-destructive/10 text-destructive'
-            : 'hover:bg-muted text-foreground'}
+            ? 'hover:bg-destructive/15 text-destructive'
+            : 'hover:bg-white/[0.08] text-white'}
       `}
     >
       <span
         className={`shrink-0 ${
-          destructive ? 'text-destructive' : 'text-muted-foreground'
+          destructive ? 'text-destructive' : 'text-white/55'
         }`}
       >
         {icon}
@@ -178,8 +178,12 @@ export default function FolderContextMenu({
     <div
       ref={menuRef}
       role="menu"
-      className="fixed z-50 min-w-[260px] rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1 animate-in fade-in-0 slide-in-from-top-1 duration-100"
-      style={{ left, top }}
+      // 2.5.0+: matches the rest of the v2.5 dropdown chrome —
+      // solid `#162533` fill (backdrop-filter glass doesn't
+      // compose in this stacking context), white text + hairline
+      // white/10 ring, soft outward shadow.
+      className="fixed z-50 min-w-[240px] rounded-lg text-white ring-1 ring-white/10 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.65)] p-1 animate-in fade-in-0 slide-in-from-top-1 duration-100"
+      style={{ left, top, backgroundColor: '#162533' }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {hasSelection ? (
@@ -212,7 +216,7 @@ export default function FolderContextMenu({
               onClick={onBulkShare}
             />
           )}
-          <div className="my-1 h-px bg-border/50" role="separator" />
+          <div className="my-1 h-px bg-white/10" role="separator" />
           <Row
             icon={<Copy className="w-4 h-4" />}
             label={
@@ -229,7 +233,7 @@ export default function FolderContextMenu({
               onClick={onBulkRename}
             />
           )}
-          <div className="my-1 h-px bg-border/50" role="separator" />
+          <div className="my-1 h-px bg-white/10" role="separator" />
           <Row
             icon={<ArrowUpFromLine className="w-4 h-4" />}
             label={
@@ -249,7 +253,7 @@ export default function FolderContextMenu({
             }
             onClick={onBulkNewFolderWithSelection}
           />
-          <div className="my-1 h-px bg-border/50" role="separator" />
+          <div className="my-1 h-px bg-white/10" role="separator" />
           <Row
             icon={<Trash2 className="w-4 h-4" />}
             label={
@@ -265,7 +269,7 @@ export default function FolderContextMenu({
         <>
           <Row icon={<ArrowUp className="w-4 h-4" />} label="Upload Asset" onClick={onUploadAsset} />
           <Row icon={<FolderUp className="w-4 h-4" />} label="Upload Folder" onClick={onUploadFolder} />
-          <div className="my-1 h-px bg-border/50" role="separator" />
+          <div className="my-1 h-px bg-white/10" role="separator" />
           <Row icon={<FolderPlus className="w-4 h-4" />} label="New Folder" onClick={onNewFolder} />
           <Row
             icon={<FolderLock className="w-4 h-4" />}

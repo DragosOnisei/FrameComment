@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { GlassCalendar } from '@/components/GlassCalendar'
 import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 
@@ -176,6 +177,28 @@ export function ShareModal({
   const [shortUrl, setShortUrl] = useState<string | null>(null)
   const [shortResolved, setShortResolved] = useState(false)
   const shortRequestedRef = useRef<string | null>(null)
+  // 2.5.1+: ref + open state for the custom GlassCalendar popover.
+  // We dropped the native `<input type="date">` calendar (OS-rendered,
+  // unstyleable) in favour of the v2.5 glass picker that lives at
+  // the bottom of this file. The button below is the trigger.
+  const dateButtonRef = useRef<HTMLButtonElement>(null)
+  const [calendarOpen, setCalendarOpen] = useState(false)
+  const [calendarAnchor, setCalendarAnchor] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (!calendarOpen) return
+    const compute = () => {
+      const el = dateButtonRef.current
+      if (!el) return
+      setCalendarAnchor(el.getBoundingClientRect())
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
+  }, [calendarOpen])
   useEffect(() => {
     if (!open) {
       shortRequestedRef.current = null
@@ -334,9 +357,42 @@ export function ShareModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      {/* 2.5.1+: frosted-glass modal surface — same recipe as every
+          other v2.5 popover (mic picker, PlayerTopMenu, All comments
+          filter, emoji picker). Dialog already portals to body so
+          backdrop-filter samples the page underneath. */}
+      <DialogContent
+        className="sm:max-w-md border-0 ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.85)] text-white"
+        style={{
+          backgroundColor: 'rgba(22, 37, 51, 0.55)',
+          backgroundImage:
+            'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+          backdropFilter: 'blur(40px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          transform: 'translate3d(-50%, -50%, 0)',
+          willChange: 'backdrop-filter, transform',
+          isolation: 'isolate',
+        }}
+        // 2.5.1+: while the GlassCalendar is open, completely
+        // disable Radix's outside-click dismiss. Any click — inside
+        // OR outside the dialog — won't close the share modal as
+        // long as the calendar is up. The calendar's own outside-
+        // click handler still closes IT when the user clicks
+        // elsewhere; once the calendar is gone, Radix's dismiss
+        // behaviour returns to normal.
+        //
+        // This sidesteps every event-ordering / portal / React-tree
+        // edge case we tried to plug, because we simply tell Radix
+        // "ignore everything for now".
+        onPointerDownOutside={(e) => {
+          if (calendarOpen) e.preventDefault()
+        }}
+        onInteractOutside={(e) => {
+          if (calendarOpen) e.preventDefault()
+        }}
+      >
         <DialogHeader>
-          <DialogTitle className="text-base font-semibold leading-6">
+          <DialogTitle className="text-base font-semibold leading-6 text-white">
             {title}
           </DialogTitle>
         </DialogHeader>
@@ -345,13 +401,13 @@ export function ShareModal({
           <div className="flex-1 relative">
             <LinkIcon
               aria-hidden
-              className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
+              className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-white/55"
             />
             <Input
               value={displayUrl}
               readOnly
               onClick={(e) => (e.currentTarget as HTMLInputElement).select()}
-              className="pl-8 pr-2 truncate font-mono text-xs"
+              className="pl-8 pr-2 truncate font-mono text-xs bg-white/[0.06] ring-1 ring-white/10 border-0 text-white focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)]"
               aria-label="Share link"
             />
           </div>
@@ -376,15 +432,16 @@ export function ShareModal({
           </Button>
         </div>
 
-        <div className="mt-2 text-xs text-muted-foreground">
+        <div className="mt-2 text-xs text-white/55">
           {caption ?? 'Anyone with this link can view and leave comments.'}
         </div>
 
         {/* 1.4.x+: expiration controls. Hidden entirely when the caller
             doesn't pass `onSaveExpiration` so the modal still works
-            for callers that don't yet wire it up. */}
+            for callers that don't yet wire it up.
+            2.5.1+ glass panel. */}
         {onSaveExpiration && (
-          <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3">
+          <div className="mt-4 rounded-lg bg-white/[0.05] ring-1 ring-white/10 p-3">
             {/* Single-source-of-truth toggle (1.4.x+). The previous
                 version wrapped a visible <span role="switch" onClick>
                 AND a hidden <input type="checkbox"> in the same
@@ -399,7 +456,7 @@ export function ShareModal({
                 keyboard users — all for free. */}
             <div className="flex items-center justify-between gap-3 select-none">
               <span
-                className="text-sm font-medium cursor-pointer"
+                className="text-sm font-medium cursor-pointer text-white"
                 onClick={() => setNoExpiration((v) => !v)}
               >
                 No expiration date
@@ -410,13 +467,16 @@ export function ShareModal({
                 aria-checked={noExpiration}
                 aria-label="No expiration date"
                 onClick={() => setNoExpiration((v) => !v)}
-                className={`relative z-[1] inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-                  noExpiration ? 'bg-primary' : 'bg-muted-foreground/40'
-                }`}
+                className="relative z-[1] inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)]"
+                style={{
+                  backgroundColor: noExpiration
+                    ? 'hsl(var(--spotlight-tint))'
+                    : 'rgba(255,255,255,0.18)',
+                }}
               >
                 <span
                   aria-hidden
-                  className={`inline-block h-4 w-4 rounded-full bg-background shadow transition-transform ${
+                  className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
                     noExpiration ? 'translate-x-[18px]' : 'translate-x-[2px]'
                   }`}
                 />
@@ -437,40 +497,96 @@ export function ShareModal({
                         key={p}
                         type="button"
                         onClick={() => pickPreset(p)}
-                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                        className="px-3 py-1.5 rounded-md text-xs font-medium ring-1 transition-colors text-white"
+                        style={
                           active
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'bg-background hover:bg-muted border-border'
-                        }`}
+                            ? {
+                                backgroundColor:
+                                  'hsl(var(--spotlight-tint) / 0.25)',
+                                boxShadow:
+                                  'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.55)',
+                              }
+                            : {
+                                backgroundColor: 'rgba(255,255,255,0.06)',
+                                boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.10)',
+                              }
+                        }
                       >
                         {labels[p]}
                       </button>
                     )
                   })}
                 </div>
-                <div className="flex items-center gap-2">
-                  <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span className="text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 flex-nowrap">
+                  <span className="text-xs text-white/55 whitespace-nowrap shrink-0">
                     or pick a date:
                   </span>
-                  <Input
-                    type="date"
-                    value={
-                      expiresDate && activePreset === 'custom'
-                        ? formatDateForInput(expiresDate)
-                        : expiresDate
-                          ? formatDateForInput(expiresDate)
-                          : ''
+                  {/*
+                    2.5.1+: glass trigger button that opens the
+                    custom GlassCalendar popover (see component at
+                    the bottom of this file). Flips to an accent-
+                    tinted pill once a date is set so the user
+                    always sees their selection at a glance. The
+                    tooltip surfaces the formatted date.
+                  */}
+                  <button
+                    ref={dateButtonRef}
+                    type="button"
+                    data-glass-calendar-trigger
+                    onClick={() => setCalendarOpen((v) => !v)}
+                    aria-label="Pick expiration date"
+                    aria-expanded={calendarOpen}
+                    title={
+                      expiresDate
+                        ? expiresDate.toLocaleDateString(undefined, {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })
+                        : 'Pick a date'
                     }
-                    min={formatDateForInput(addDays(new Date(), 0))}
-                    onChange={(e) => handleCustomDate(e.target.value)}
-                    className="h-8 text-xs"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)] shrink-0"
+                    style={
+                      expiresDate
+                        ? {
+                            backgroundColor:
+                              'hsl(var(--spotlight-tint) / 0.22)',
+                            boxShadow:
+                              'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.45)',
+                            color: '#fff',
+                          }
+                        : {
+                            backgroundColor: 'rgba(255,255,255,0.06)',
+                            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.10)',
+                            color: 'rgba(255,255,255,0.75)',
+                          }
+                    }
+                  >
+                    <CalendarIcon className="h-4 w-4" />
+                  </button>
+                  <GlassCalendar
+                    open={calendarOpen}
+                    anchorRect={calendarAnchor}
+                    value={expiresDate}
+                    min={new Date()}
+                    inDialog
+                    onChange={(next) => {
+                      if (next) {
+                        setExpiresDate(next)
+                        setActivePreset('custom')
+                      } else {
+                        setExpiresDate(null)
+                        setActivePreset(null)
+                      }
+                    }}
+                    onClose={() => setCalendarOpen(false)}
                   />
                 </div>
                 {expiresDate && (
-                  <div className="text-xs text-muted-foreground">
+                  <div className="text-xs text-white/55">
                     Expires{' '}
-                    <span className="text-foreground font-medium">
+                    <span className="text-white font-medium">
                       {expiresDate.toLocaleDateString(undefined, {
                         weekday: 'short',
                         month: 'short',
@@ -491,6 +607,7 @@ export function ShareModal({
             variant="outline"
             onClick={handleDone}
             disabled={saving}
+            className="bg-white/[0.06] ring-1 ring-white/15 border-0 text-white hover:bg-white/[0.12] hover:ring-white/25 transition-colors"
           >
             {saving ? 'Saving…' : 'Done'}
           </Button>

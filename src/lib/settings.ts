@@ -211,7 +211,8 @@ export async function getAdminSessionTimeoutSeconds(): Promise<number> {
     })
 
     if (!settings) {
-      cachedAdminSessionTimeout.value = 15 * 60
+      // 2.4.2+: match the new schema default of 12 HOURS.
+      cachedAdminSessionTimeout.value = 12 * 60 * 60
       cachedAdminSessionTimeout.expiresAt = now + SETTINGS_CACHE_TTL_MS
       return cachedAdminSessionTimeout.value
     }
@@ -233,7 +234,8 @@ export async function getAdminSessionTimeoutSeconds(): Promise<number> {
         cachedAdminSessionTimeout.value = value * 7 * 24 * 60 * 60
         break
       default:
-        cachedAdminSessionTimeout.value = 15 * 60
+        // 2.4.2+: match the new schema default of 12 HOURS.
+        cachedAdminSessionTimeout.value = 12 * 60 * 60
         break
     }
 

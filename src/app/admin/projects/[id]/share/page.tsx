@@ -1073,8 +1073,15 @@ function AdminSharePageInner() {
   }
 
   return (
+    /* 2.5.1+: player page wraps in `.spotlight-bg-tr` — TOP-RIGHT
+       anchored spotlight that sweeps diagonally toward the bottom-
+       left. Different orientation than the admin shell so the focal
+       point lives on the OTHER side of the viewport from the
+       comments sidebar. Driven by `--spotlight-tint`, so when the
+       user changes the accent colour in Appearance settings the
+       player background follows. */
     <div
-      className="h-screen overflow-hidden lg:fixed lg:inset-0 bg-background flex flex-col"
+      className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col"
       style={{ height: '100dvh' }}
     >
       {/* Thumbnail Reel - always visible, collapsible.
@@ -1149,36 +1156,55 @@ function AdminSharePageInner() {
             const isUploading = processingVideo.status === 'UPLOADING'
             return (
               <div className="flex-1 flex items-center justify-center p-4">
-                <Card className="bg-card border-border max-w-md w-full">
-                  <CardContent className="py-10 px-8 flex flex-col items-center text-center gap-5">
-                    <div className="relative">
-                      <Loader2 className="w-12 h-12 text-primary animate-spin" />
+                {/* 2.5.1+: v2.5 frosted glass refresh for the
+                    processing card. Same vocabulary as ConfirmDialog
+                    / banners — translucent navy + spotlight radial
+                    + 40px backdrop blur. The spinner sits in an
+                    accent disc so the "first playback quality is
+                    cooking" message reads as a focal point even on
+                    a busy admin page. */}
+                <div
+                  className="max-w-md w-full rounded-2xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white"
+                  style={{
+                    backgroundColor: 'rgba(22, 37, 51, 0.62)',
+                    backgroundImage:
+                      'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                    backdropFilter: 'blur(40px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                    transform: 'translate3d(0, 0, 0)',
+                    willChange: 'backdrop-filter, transform',
+                    isolation: 'isolate',
+                  }}
+                >
+                  <div className="py-10 px-8 flex flex-col items-center text-center gap-5">
+                    <div className="rounded-full bg-primary/15 ring-1 ring-primary/30 p-4">
+                      <Loader2 className="w-10 h-10 text-primary animate-spin" />
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-lg font-semibold text-card-foreground">
+                    <div className="space-y-1.5">
+                      <p className="text-lg font-semibold text-white">
                         {isUploading
                           ? (t('preparingVideo') || 'Preparing video…')
                           : (t('processingVideo') || 'Processing video…')}
                       </p>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-white/65 leading-relaxed">
                         {t('processingFirstTierHint')
                           || "We're generating the first playback quality. The player will open automatically once it's ready."}
                       </p>
                     </div>
-                    {/* Progress bar — theme-aware, not a raw browser <progress>. */}
+                    {/* Progress bar — glass track + primary fill. */}
                     <div className="w-full">
-                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                      <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
                         <div
                           className="h-full bg-primary transition-[width] duration-500 ease-out"
                           style={{ width: `${progress}%` }}
                         />
                       </div>
-                      <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+                      <p className="mt-2 text-xs text-white/55 tabular-nums">
                         {progress}%
                       </p>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               </div>
             )
           }
@@ -1201,7 +1227,11 @@ function AdminSharePageInner() {
                 natural height inside a fixed-height page; the comment
                 section below takes the remaining space and scrolls
                 internally. */}
-            <div className={`shrink-0 bg-background lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
+            {/* 2.5.1+: dropped `bg-background` from the player
+                column so the `.spotlight-bg` wash from the page
+                wrapper bleeds through the margins around the video
+                (which is black on its own). */}
+            <div className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
               <VideoPlayer
                 videos={readyVideos}
                 projectId={project.id}
@@ -1241,7 +1271,14 @@ function AdminSharePageInner() {
                 defaultWidth={360}
                 minWidth={280}
                 maxFraction={0.55}
-                className="flex-1 min-h-0 flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-xl bg-card"
+                // 2.5.1+: dropped the opaque `bg-card` wrapper that
+                // was sitting on top of the `.spotlight-bg` page
+                // wash and giving the comments column a flat grey
+                // look. The inner `CommentSection` carries its own
+                // glass surface (white/[0.04] + ring + accent-tinted
+                // radial gradient), so the wrapper just needs to
+                // structure the layout.
+                className="flex-1 min-h-0 flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-2xl"
               >
                 <CommentSection
                   projectId={project.id}

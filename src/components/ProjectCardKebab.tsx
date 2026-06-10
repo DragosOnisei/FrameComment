@@ -295,7 +295,31 @@ export default function ProjectCardKebab({
             return
           }
           const rect = kebabRef.current?.getBoundingClientRect()
-          if (rect) setMenuStyle(computePopoverStyle(rect))
+          if (rect) {
+            // 2.5.0+: when the kebab lives inside a project tile
+            // (marked with `data-project-tile`), match the popover
+            // width to the tile itself so the menu reads as the
+            // tile's "second face" rather than a generic floating
+            // menu. Clamped to [180, 320] so very narrow / very
+            // wide tiles still get a usable menu. Falls back to the
+            // popover lib's default 240 if no tile ancestor exists
+            // (kebab reused in some other surface).
+            const tile = kebabRef.current?.closest<HTMLElement>('[data-project-tile]')
+            const tileWidth = tile?.getBoundingClientRect().width
+            // 2.5.0+: menu width is ~90% of the tile width — slightly
+            // narrower than the card so the kebab clearly belongs to
+            // the project (not the whole grid). Clamped to a usable
+            // range so very narrow / very wide tiles still get a
+            // readable menu.
+            setMenuStyle(
+              computePopoverStyle(
+                rect,
+                tileWidth
+                  ? { width: Math.max(170, Math.min(tileWidth * 0.9, 290)) }
+                  : undefined,
+              ),
+            )
+          }
           setOpen(true)
         }}
         className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
@@ -310,8 +334,13 @@ export default function ProjectCardKebab({
         <div
           role="menu"
           // 1.3.1+: Frame.io-style smart popover (see VideoCard).
+          // 2.5.0+: frosted-glass look — `#13181d` at 70% opacity
+          // with a heavy backdrop blur so whatever sits behind the
+          // menu (the project tile or the page spotlight) bleeds
+          // through softly. White text + a hairline white-15 ring
+          // keep the panel readable against any underlay.
           style={menuStyle}
-          className="z-50 overflow-y-auto rounded-lg bg-popover text-popover-foreground ring-1 ring-border shadow-2xl p-1"
+          className="z-50 overflow-y-auto rounded-lg bg-[#13181d]/70 backdrop-blur-xl text-white ring-1 ring-white/10 shadow-2xl p-1"
         >
           {/* 1.7.5+: trimmed menu — Rename / Change logo at the
               top, then Share Project / Settings / Delete after a

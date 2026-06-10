@@ -7,9 +7,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { FolderKanban, Plus, Eye, EyeOff, RefreshCw, Copy, Check, AlertCircle, ImagePlus, Lock, LockOpen, X as XIcon } from 'lucide-react'
+import { FolderKanban, Eye, EyeOff, RefreshCw, Copy, Check, AlertCircle, ImagePlus, Lock, LockOpen, X as XIcon } from 'lucide-react'
 import { projectGradient } from '@/lib/project-gradient'
 import ProjectsList from '@/components/ProjectsList'
+import { TemplateModal } from '@/components/TemplateModal'
+import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
+import ViewModeToggle from '@/components/ViewModeToggle'
+import SortModeToggle from '@/components/SortModeToggle'
+import { useAdminViewMode } from '@/lib/use-admin-view-mode'
+import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import { apiFetch } from '@/lib/api-client'
 import { copyToClipboard } from '@/lib/clipboard'
 import { logError } from '@/lib/logging'
@@ -23,6 +29,17 @@ export default function AdminPage() {
   const router = useRouter()
   const [projects, setProjects] = useState<any[] | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // 2.4.2+ Template wizard state
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+
+  // 2.5.0+: view + sort toggles live in the topbar's right slot
+  // alongside Template. The shared `useAdminViewMode` /
+  // `useAdminSortMode` hooks already persist these per-tab in
+  // localStorage so navigating away and back keeps the user's
+  // last choice.
+  const [adminView, setAdminView] = useAdminViewMode()
+  const [adminSort, setAdminSort] = useAdminSortMode()
 
   // New Project Modal state
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
@@ -215,7 +232,15 @@ export default function AdminPage() {
   function renderNewProjectModal() {
     return (
       <Dialog open={showNewProjectModal} onOpenChange={setShowNewProjectModal}>
-        <DialogContent className="sm:max-w-md max-h-[calc(100dvh-3rem)] sm:max-h-[85vh] flex flex-col">
+        <DialogContent
+          hideClose
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md max-h-[calc(100dvh-3rem)] sm:max-h-[85vh] flex flex-col bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
           {/*
             1.2.0+: Frame.io-style composer.
             - Big preview tile up top (gradient by default, optional
@@ -223,6 +248,10 @@ export default function AdminPage() {
               the tile.
             - Single "Make Restricted" toggle row.
             - Footer: Cancel + Create New Project.
+
+            2.5.1+ glass refresh: same recipe as NewFolderDialog /
+            AddUser modal — transparent backdrop, frosted shell,
+            white text hierarchy, brand-blue primary action.
 
             The legacy fields (description, recipient, share-only,
             explicit password / authMode dropdown) live in Project
@@ -240,9 +269,12 @@ export default function AdminPage() {
               <DialogDescription>{t('createDescription')}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto space-y-4 -mx-4 px-4 sm:-mx-6 sm:px-6 pt-2">
+            {/* `px-0.5` on the scroll container lets the inner
+                rings render fully on the left/right edges — same fix
+                as the AddUser modal. */}
+            <div className="flex-1 overflow-y-auto space-y-4 -mx-4 px-[calc(1rem+2px)] sm:-mx-6 sm:px-[calc(1.5rem+2px)] pt-2">
               {formError && (
-                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
+                <div className="p-3 bg-destructive/15 ring-1 ring-destructive/30 rounded-md flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
                   <span className="text-sm text-destructive">{formError}</span>
                 </div>
@@ -267,7 +299,7 @@ export default function AdminPage() {
                 the explicit X button (clears the file → label
                 returns next paint).
               */}
-              <div className="relative block aspect-square rounded-xl overflow-hidden ring-1 ring-border/40 group/cover">
+              <div className="relative block aspect-square rounded-xl overflow-hidden ring-1 ring-white/15 group/cover">
                 {/* Layer 1: background — gradient or cropper */}
                 {coverImageFile ? (
                   <CoverImageCropper
@@ -315,22 +347,25 @@ export default function AdminPage() {
                     falls through to the <label> below it. */}
                 {!coverImageFile && (
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-                    <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-black/40 text-white shadow-lg backdrop-blur-sm transition-transform duration-200 group-hover/cover:scale-105">
+                    <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/[0.08] text-white ring-1 ring-white/15 backdrop-blur-md shadow-lg transition-transform duration-200 group-hover/cover:scale-105">
                       <ImagePlus className="w-6 h-6" />
                     </div>
                   </div>
                 )}
 
-                {/* Lock chip in the top-right corner. */}
+                {/* Lock chip in the top-right corner. 2.5.1+: glass
+                    when idle, brand-blue when locked — matches the
+                    v2.5 active-state vocabulary used everywhere
+                    else (accent swatches, count badges, etc.). */}
                 <button
                   type="button"
                   onClick={() => setRestricted((v) => !v)}
                   aria-pressed={restricted}
                   title={restricted ? 'Restricted (click to unlock)' : 'Unrestricted (click to lock)'}
-                  className={`absolute top-3 right-3 z-30 inline-flex items-center justify-center w-9 h-9 rounded-lg backdrop-blur-sm shadow-md transition-colors ${
+                  className={`absolute top-3 right-3 z-30 inline-flex items-center justify-center w-9 h-9 rounded-lg backdrop-blur-md shadow-md transition-colors ${
                     restricted
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-black/55 text-white hover:bg-black/70'
+                      ? 'bg-primary text-white ring-1 ring-primary/60'
+                      : 'bg-white/[0.08] text-white ring-1 ring-white/15 hover:bg-white/[0.14]'
                   }`}
                 >
                   <span
@@ -350,14 +385,16 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => handlePickCoverImage(null)}
-                    className="absolute top-3 right-14 z-30 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-black/55 text-white hover:bg-black/70 backdrop-blur-sm shadow-md transition-colors"
+                    className="absolute top-3 right-14 z-30 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-white/[0.08] text-white ring-1 ring-white/15 hover:bg-white/[0.14] backdrop-blur-md shadow-md transition-colors"
                     title="Remove image"
                   >
                     <XIcon className="w-4 h-4" />
                   </button>
                 )}
 
-                {/* Title input pinned at the bottom-center. */}
+                {/* Title input pinned at the bottom-center. 2.5.1+:
+                    softer glass instead of `bg-black/40` — reads
+                    better over both gradient and uploaded covers. */}
                 <div className="absolute inset-x-4 bottom-4 z-30">
                   <Input
                     id="projectTitle"
@@ -369,27 +406,39 @@ export default function AdminPage() {
                     data-lpignore="true"
                     data-1p-ignore
                     autoFocus
-                    className="bg-black/40 border-white/20 text-white placeholder:text-white/70 backdrop-blur-md text-base font-semibold focus-visible:ring-primary/60"
+                    // 2.5.1+: `transition-none` kills the base
+                    // Input's `transition-all duration-200`, which
+                    // was animating the focus-state changes through
+                    // a brief lighter intermediate — that's the
+                    // white-ish flash users saw on click. We also
+                    // zero out the WebKit tap-highlight (mobile)
+                    // and force the caret to white so nothing else
+                    // pops in/out around the click.
+                    className="!transition-none bg-black/35 border-0 ring-1 ring-white/20 text-white caret-white placeholder:text-white/55 backdrop-blur-md text-base font-semibold focus-visible:ring-1 focus-visible:ring-white/20 focus-visible:ring-offset-0 focus-visible:outline-none focus:outline-none"
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
                   />
                 </div>
               </div>
 
-              {/* Make Restricted toggle row. */}
+              {/* Make Restricted toggle row. 2.5.1+: glass surface
+                  in line with the rest of the v2.5 chrome. The
+                  inner switch is hand-rolled (not Radix) so its
+                  visual stays consistent here. */}
               <button
                 type="button"
                 onClick={() => setRestricted((v) => !v)}
-                className="w-full flex items-center gap-3 rounded-xl border border-border bg-card/40 hover:bg-card/70 px-4 py-3 text-left transition-colors"
+                className="w-full flex items-center gap-3 rounded-xl bg-white/[0.04] ring-1 ring-white/10 hover:bg-white/[0.08] px-4 py-3 text-left transition-colors"
               >
                 <Lock
                   className={`w-5 h-5 shrink-0 ${
-                    restricted ? 'text-primary' : 'text-muted-foreground'
+                    restricted ? 'text-primary' : 'text-white/55'
                   }`}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-white">
                     Make Restricted
                   </div>
-                  <p className="text-xs text-muted-foreground leading-snug">
+                  <p className="text-xs text-white/55 leading-snug">
                     Only people directly invited to the project will have access.
                   </p>
                 </div>
@@ -397,7 +446,7 @@ export default function AdminPage() {
                 <span
                   aria-hidden="true"
                   className={`relative inline-flex h-6 w-10 shrink-0 rounded-full transition-colors ${
-                    restricted ? 'bg-primary' : 'bg-muted'
+                    restricted ? 'bg-primary' : 'bg-white/15 ring-1 ring-white/10'
                   }`}
                 >
                   <span
@@ -409,11 +458,27 @@ export default function AdminPage() {
               </button>
             </div>
 
-            <DialogFooter className="pt-2">
+            {/* 2.5.1+: footer centred (no `sm:justify-end` from the
+                shadcn default) — Cancel + Create New Project sit
+                together in the middle of the modal so neither
+                action gets buried in a corner. */}
+            <DialogFooter className="pt-3 gap-3 flex-row justify-center sm:justify-center">
               <DialogClose asChild>
-                <Button type="button" variant="outline" disabled={creating}>{tc('cancel')}</Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={creating}
+                  className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0"
+                >
+                  {tc('cancel')}
+                </Button>
               </DialogClose>
-              <Button type="submit" disabled={creating}>
+              <Button
+                type="submit"
+                disabled={creating}
+                style={{ color: '#ffffff' }}
+                className="font-semibold"
+              >
                 {creating ? tc('creating') : 'Create New Project'}
               </Button>
             </DialogFooter>
@@ -425,7 +490,7 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+      <div className="flex-1 min-h-0 flex items-center justify-center">
         <p className="text-muted-foreground">{t('loadingProjects')}</p>
       </div>
     )
@@ -433,31 +498,50 @@ export default function AdminPage() {
 
   if (!projects || projects.length === 0) {
     return (
-      <div className="flex-1 min-h-0 bg-background">
-        <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-          {/* 1.3.0+: mobile-first header. `min-w-0 flex-1` lets the
-              title block shrink so the long subtitle never pushes
-              the action button past the viewport edge. The button
-              is icon-only on phones, full label from sm: up. */}
-          <div className="flex justify-between items-center gap-3 mb-4 sm:mb-6">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-xl sm:text-3xl font-bold flex items-center gap-2 min-w-0">
-                <FolderKanban className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
-                <span className="truncate">{t('dashboard')}</span>
-              </h1>
-              <p className="text-muted-foreground mt-1 text-xs sm:text-base truncate">{t('dashboardDescription')}</p>
-            </div>
-            <Button
-              variant="default"
-              size="sm"
-              className="shrink-0 sm:h-10 sm:px-4"
-              onClick={openNewProjectModal}
-              aria-label={t('newProject')}
-            >
-              <Plus className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">{t('newProject')}</span>
-            </Button>
-          </div>
+      <div className="flex-1 min-h-0">
+        {/* 2.5.0+: title + actions live in the AdminTopBar slots
+            (see TopbarSlots). Template is disabled in the empty
+            state because there's no project yet to scaffold into,
+            but stays visible so the feature is discoverable. */}
+        <TopbarLeftSlot>
+          {/* 2.5.0+: title block pinned to absolute pixel sizes
+              (not rem) so it can't drift with viewport / root
+              font-size. The icon sits naked next to the title —
+              no chip — so there's no boxed surface that the eye
+              can compare against the (now-larger) project tiles. */}
+          <FolderKanban size={20} className="text-primary shrink-0" />
+          <h1
+            className="font-semibold truncate"
+            style={{ fontSize: 18, lineHeight: '24px' }}
+          >
+            Projects
+          </h1>
+        </TopbarLeftSlot>
+        <TopbarRightSlot>
+          {/* Empty state: Template disabled (no project to scaffold
+              into), view + sort toggles still rendered so the bar
+              stays visually consistent with the populated state. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+            onClick={() => setShowTemplateModal(true)}
+            disabled
+            title="Create a project first to use templates"
+            aria-label="Create from template"
+          >
+            Template
+          </Button>
+          <ViewModeToggle value={adminView} onChange={setAdminView} />
+          <SortModeToggle value={adminSort} onChange={setAdminSort} />
+        </TopbarRightSlot>
+
+        <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
           <div className="text-muted-foreground">{t('noProjects')}</div>
         </div>
         {renderNewProjectModal()}
@@ -466,28 +550,52 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        <div className="flex justify-between items-center gap-3 mb-4 sm:mb-6">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-3xl font-bold flex items-center gap-2 min-w-0">
-              <FolderKanban className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
-              <span className="truncate">{t('dashboard')}</span>
-            </h1>
-            <p className="text-muted-foreground mt-1 text-xs sm:text-base truncate">{t('dashboardDescription')}</p>
-          </div>
-          <Button
-            variant="default"
-            size="sm"
-            className="shrink-0 sm:h-10 sm:px-4"
-            onClick={openNewProjectModal}
-            aria-label={t('newProject')}
-          >
-            <Plus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">{t('newProject')}</span>
-          </Button>
+    <div className="flex-1 min-h-0">
+      {/* 2.5.0+: title + primary actions are portalled into the
+          AdminTopBar slots so the page body is just the grid. */}
+      <TopbarLeftSlot>
+        {/* 2.5.0+: title block pinned to absolute pixel sizes
+            (not rem) so it never grows with viewport width or
+            root font-size. */}
+        <div
+          className="inline-flex items-center justify-center rounded-lg bg-primary/15 text-primary shrink-0"
+          style={{ width: 36, height: 36 }}
+        >
+          <FolderKanban size={20} />
         </div>
+        <h1
+          className="font-semibold truncate"
+          style={{ fontSize: 18, lineHeight: '24px' }}
+        >
+          Projects
+        </h1>
+      </TopbarLeftSlot>
+      <TopbarRightSlot>
+        {/* 2.4.2+: Template wizard — opens the split-pane modal
+            with YouTube/UGC templates that scaffold a multi-level
+            folder structure into an existing project. The
+            standalone "New Project" button was dropped here in
+            2.5.0+ — the empty New Project tile at the end of the
+            grid already covers that affordance. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+          }}
+          onClick={() => setShowTemplateModal(true)}
+          aria-label="Create from template"
+        >
+          Template
+        </Button>
+        <ViewModeToggle value={adminView} onChange={setAdminView} />
+        <SortModeToggle value={adminSort} onChange={setAdminSort} />
+      </TopbarRightSlot>
 
+      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <ProjectsList
           projects={projects}
           onProjectMutated={loadProjects}
@@ -495,6 +603,15 @@ export default function AdminPage() {
         />
       </div>
       {renderNewProjectModal()}
+      {/* 2.4.2+: Template wizard. Always mounted so the modal
+          state animates open/close cleanly. The projects list it
+          consumes is the same one rendered above — when a project
+          has been created mid-session, it shows up here too. */}
+      <TemplateModal
+        open={showTemplateModal}
+        onOpenChange={setShowTemplateModal}
+        projects={(projects || []).map((p) => ({ id: p.id, title: p.title || 'Untitled project' }))}
+      />
     </div>
   )
 }

@@ -224,11 +224,11 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
   }
 
   return (
-    <div className="space-y-3 border p-3 sm:p-4 rounded-lg bg-muted/30">
+    <div className="space-y-3 p-3 sm:p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
       {/* Email Header Branding Style - dedicated section */}
-      <div className="space-y-2 pb-3 border-b border-border">
-        <Label className="text-sm font-medium">{t('headerBranding')}</Label>
-        <p className="text-xs text-muted-foreground">
+      <div className="space-y-2 pb-3 border-b border-white/10">
+        <Label className="text-sm font-medium text-white">{t('headerBranding')}</Label>
+        <p className="text-xs text-white/55">
           {t('headerBrandingHint')}
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
@@ -242,10 +242,10 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
               key={option.value}
               type="button"
               onClick={() => setEmailHeaderStyle(option.value)}
-              className={`flex flex-col items-center gap-1.5 p-2.5 rounded-lg border text-xs transition-all ${
+              className={`flex flex-col items-center gap-1.5 p-2.5 rounded-lg ring-1 text-xs transition-all ${
                 emailHeaderStyle === option.value
-                  ? 'border-primary bg-primary/10 text-primary font-medium'
-                  : 'border-border bg-card hover:border-primary/50'
+                  ? 'bg-primary/15 text-primary ring-primary/40 font-medium'
+                  : 'bg-white/[0.04] text-white/85 ring-white/10 hover:bg-white/[0.08] hover:ring-white/20'
               }`}
             >
               <option.Icon className="w-4 h-4" />
@@ -258,8 +258,8 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
       {/* Email Templates Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="min-w-0">
-          <Label>{t('title')}</Label>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <Label className="text-white">{t('title')}</Label>
+          <p className="text-xs text-white/55 mt-0.5">
             {t('description')}
           </p>
         </div>
@@ -273,7 +273,7 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
             <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-border bg-muted/50">
               <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-semibold">{t('preview')}</h3>
-                <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                <p className="text-xs text-white/55 mt-0.5 truncate">
                   {t('subject')} <span className="font-medium text-foreground">{previewSubject}</span>
                 </p>
               </div>
@@ -317,7 +317,7 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
             <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-border bg-muted/50">
               <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-semibold">{t('placeholders')}</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
+                <p className="text-xs text-white/55 mt-0.5">
                   {t('placeholdersHint')}
                 </p>
               </div>
@@ -345,12 +345,12 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
                       {copiedPlaceholder === placeholder.key ? (
                         <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
                       ) : (
-                        <Copy className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                        <Copy className="w-3.5 h-3.5 text-white/55 flex-shrink-0" />
                       )}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">{placeholder.description}</div>
+                    <div className="text-xs text-white/55 mt-1">{placeholder.description}</div>
                     {placeholder.example && (
-                      <div className="text-xs text-muted-foreground/70 mt-0.5 truncate">
+                      <div className="text-xs text-white/55/70 mt-0.5 truncate">
                         {t('example')} {placeholder.example}
                       </div>
                     )}
@@ -364,19 +364,19 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
                 <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 text-xs">
                   <div className="p-2.5 sm:p-3 rounded-lg bg-muted/50 border border-border">
                     <code className="font-mono text-primary text-[11px] sm:text-xs break-all">{'{{BUTTON:Label:{{URL}}}}'}</code>
-                    <p className="text-muted-foreground mt-1">{t('buttonSyntax')}</p>
+                    <p className="text-white/55 mt-1">{t('buttonSyntax')}</p>
                   </div>
                   <div className="p-2.5 sm:p-3 rounded-lg bg-muted/50 border border-border">
                     <code className="font-mono text-primary">class=&quot;info-box&quot;</code>
-                    <p className="text-muted-foreground mt-1">{t('infoBox')}</p>
+                    <p className="text-white/55 mt-1">{t('infoBox')}</p>
                   </div>
                   <div className="p-2.5 sm:p-3 rounded-lg bg-muted/50 border border-border">
                     <code className="font-mono text-primary">class=&quot;secondary-box&quot;</code>
-                    <p className="text-muted-foreground mt-1">{t('secondaryBox')}</p>
+                    <p className="text-white/55 mt-1">{t('secondaryBox')}</p>
                   </div>
                   <div className="p-2.5 sm:p-3 rounded-lg bg-muted/50 border border-border">
                     <code className="font-mono text-primary">class=&quot;info-label&quot;</code>
-                    <p className="text-muted-foreground mt-1">{t('labelText')}</p>
+                    <p className="text-white/55 mt-1">{t('labelText')}</p>
                   </div>
                 </div>
               </div>
@@ -386,7 +386,7 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <div className="flex items-center justify-center py-8 text-white/55">
           {t('loadingTemplates')}
         </div>
       ) : error ? (
@@ -399,7 +399,7 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
         <div className="space-y-4">
           {Object.entries(groupedTemplates).map(([category, categoryTemplates]) => (
             <div key={category} className="space-y-2">
-              <h4 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              <h4 className="text-xs sm:text-sm font-semibold text-white/55 uppercase tracking-wide">
                 {categoryLabels[category] || category}
               </h4>
               <div className="space-y-1">
@@ -408,22 +408,26 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
                     key={template.type}
                     type="button"
                     onClick={() => handleSelectTemplate(template)}
-                    className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-lg border border-border bg-card hover:border-primary/50 hover:bg-muted/50 transition-colors text-left gap-2"
+                    // 2.5.0+: frosted-glass row matching the user
+                    // list / table rows. Hover lifts the tint to
+                    // `white/[0.08]` for affordance without losing
+                    // the see-through feel.
+                    className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-white/[0.04] ring-1 ring-white/10 hover:bg-white/[0.08] hover:ring-white/20 transition-colors text-left gap-2"
                   >
                     <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                      <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <Mail className="w-4 h-4 text-white/55 flex-shrink-0" />
                       <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">{template.name}</div>
-                        <div className="text-xs text-muted-foreground line-clamp-1">{template.description}</div>
+                        <div className="text-sm font-medium truncate text-white">{template.name}</div>
+                        <div className="text-xs text-white/55 line-clamp-1">{template.description}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
                       {template.isCustom && (
-                        <span className="text-[10px] sm:text-xs bg-primary/10 text-primary px-1.5 sm:px-2 py-0.5 rounded whitespace-nowrap">
+                        <span className="text-[10px] sm:text-xs bg-primary/15 text-primary ring-1 ring-primary/30 px-1.5 sm:px-2 py-0.5 rounded whitespace-nowrap">
                           {t('custom')}
                         </span>
                       )}
-                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      <ChevronRight className="w-4 h-4 text-white/55" />
                     </div>
                   </button>
                 ))}
@@ -442,7 +446,7 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
               <div className="min-w-0 flex-1 flex items-start justify-between sm:block">
                 <div>
                   <h3 className="text-sm font-semibold truncate">{selectedTemplate.name}</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{selectedTemplate.description}</p>
+                  <p className="text-xs text-white/55 mt-0.5 line-clamp-1">{selectedTemplate.description}</p>
                 </div>
                 {/* Close button - mobile only in header row */}
                 <button
@@ -532,7 +536,7 @@ export function EmailTemplatesEditor({ emailHeaderStyle, setEmailHeaderStyle }: 
               <div className="space-y-1.5 sm:space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium">{t('bodyContent')}</label>
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <span className="text-xs text-white/55 flex items-center gap-1">
                     <Code className="w-3 h-3" />
                     {t('htmlSupported')}
                   </span>

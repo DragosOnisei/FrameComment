@@ -347,16 +347,16 @@ export function ExternalNotificationsContent({ active, showIntro = true }: { act
       )}
 
       {showIntro && (
-        <div className="text-sm text-muted-foreground">
+        <div className="text-sm text-white/55">
           {t('configureBelow')}
         </div>
       )}
 
-      <div className="space-y-4 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-4 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <Label className="text-base">{t('addDestination')}</Label>
-                <p className="text-xs text-muted-foreground mt-1">{providerHelp}</p>
+                <p className="text-xs text-white/55 mt-1">{providerHelp}</p>
               </div>
             </div>
 
@@ -422,7 +422,7 @@ export function ExternalNotificationsContent({ active, showIntro = true }: { act
         <Label className="text-base">{t('destinations')}</Label>
 
         {destinations.length === 0 && (
-          <div className="text-sm text-muted-foreground border p-4 rounded-lg bg-muted/30">
+          <div className="text-sm text-white/55 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
             {t('noDestinations')}
           </div>
         )}
@@ -437,17 +437,17 @@ export function ExternalNotificationsContent({ active, showIntro = true }: { act
               <div className="space-y-0.5">
                 <div className="font-medium text-sm">
                   {dest.name}{' '}
-                  <span className="text-xs text-muted-foreground">({dest.provider})</span>
+                  <span className="text-xs text-white/55">({dest.provider})</span>
                 </div>
-                <div className="text-xs text-muted-foreground">
+                <div className="text-xs text-white/55">
                   {dest.hasSecrets ? t('configured') : t('secretsNotConfigured')} • {tc('updated')}{' '}
                   {new Date(dest.updatedAt).toLocaleString()}
                 </div>
               </div>
               {expandedIds[dest.id] ? (
-                <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                <ChevronUp className="w-4 h-4 text-white/55" />
               ) : (
-                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                <ChevronDown className="w-4 h-4 text-white/55" />
               )}
             </button>
 
@@ -645,7 +645,7 @@ function DestinationEditor({
         </div>
       </div>
 
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <Label className="text-base">{t('providerConfig')}</Label>
         {renderProviderFields()}
       </div>

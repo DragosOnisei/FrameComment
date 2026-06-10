@@ -73,7 +73,7 @@ export function EmailSettingsContent({
   const t = useTranslations('settings')
   return (
     <div className="space-y-4">
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
           <Label className="text-base">{t('email.smtpConfig')}</Label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -125,7 +125,7 @@ export function EmailSettingsContent({
                 <div className="font-medium text-sm group-hover:text-primary transition-colors">
                   {t('email.starttls')}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
+                <div className="text-xs text-white/55 mt-1">
                   {t('email.starttlsHint')}
                 </div>
               </div>
@@ -144,7 +144,7 @@ export function EmailSettingsContent({
                 <div className="font-medium text-sm group-hover:text-primary transition-colors">
                   {t('email.tls')}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
+                <div className="text-xs text-white/55 mt-1">
                   {t('email.tlsHint')}
                 </div>
               </div>
@@ -191,15 +191,15 @@ export function EmailSettingsContent({
             placeholder={t('email.smtpPasswordPlaceholder')}
             showToggle={false}
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-white/55">
             {t('email.smtpPasswordHint')}
           </p>
         </div>
         </div>
 
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
           <Label className="text-base">{t('email.testConfig')}</Label>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-white/55">
             {t('email.testConfigHint')}
           </p>
           <div className="space-y-3">
@@ -247,7 +247,7 @@ export function EmailSettingsContent({
           </div>
         </div>
 
-      <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
+      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
           <ScheduleSelector
             schedule={adminNotificationSchedule}
             time={adminNotificationTime}

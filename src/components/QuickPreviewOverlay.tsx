@@ -94,7 +94,14 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
 
   return (
     <div
-      className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8"
+      // 2.5.1+: scrim made fully transparent — user explicitly
+      // didn't want the dark backdrop behind the video preview
+      // (a Quick Preview is a focused glance, not a modal that
+      // demands page dismissal, so the page behind staying
+      // visible & clickable on the outer area is the desired
+      // affordance). Click-outside-to-close still works because
+      // the wrapper catches the mouseDown.
+      className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-8"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -102,17 +109,40 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
       aria-modal="true"
       aria-label="Quick preview"
     >
-      <div className="relative bg-card border border-border rounded-xl shadow-elevation-lg overflow-hidden max-w-[95vw] max-h-[92vh] w-full sm:w-auto flex flex-col">
+      {/* 2.5.1+: v2.5 frosted glass container — same recipe as
+          ConfirmDialog / banners / tables (translucent navy +
+          spotlight radial wash + 40px backdrop blur + hairline
+          ring + elevation shadow). Replaces the old `bg-card`
+          flat dark grey. */}
+      <div
+        className="relative rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white overflow-hidden max-w-[95vw] max-h-[92vh] w-full sm:w-auto flex flex-col"
+        style={{
+          backgroundColor: 'rgba(22, 37, 51, 0.62)',
+          backgroundImage:
+            'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+          backdropFilter: 'blur(40px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          transform: 'translate3d(0, 0, 0)',
+          willChange: 'backdrop-filter, transform',
+          isolation: 'isolate',
+        }}
+      >
         {/* Close button — top right corner, floats over the
-            content so it works for both video and folder modes. */}
+            content so it works for both video and folder modes.
+            2.5.1+: glass pill matching Save Changes / Back. */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-3 right-3 z-10 p-1.5 rounded-md bg-background/70 hover:bg-background border border-border/50 transition-colors"
+          className="absolute top-3 right-3 z-10 inline-flex items-center justify-center w-8 h-8 rounded-md ring-1 ring-white/15 hover:ring-white/25 text-white/80 hover:text-white transition-colors"
+          style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(12px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+          }}
           aria-label="Close preview (Space / Esc)"
           title="Close (Space / Esc)"
         >
-          <X className="w-4 h-4 text-foreground" />
+          <X className="w-4 h-4" />
         </button>
 
         {target.kind === 'video' ? (
@@ -174,16 +204,16 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
             className="w-full h-full object-contain opacity-90"
           />
         ) : isImage ? (
-          <ImageIcon className="w-12 h-12 text-muted-foreground" />
+          <ImageIcon className="w-12 h-12 text-white/40" />
         ) : (
-          <Film className="w-12 h-12 text-muted-foreground" />
+          <Film className="w-12 h-12 text-white/40" />
         )}
       </div>
-      <div className="px-4 py-3 border-t border-border/50 min-w-0">
-        <div className="text-sm font-medium break-words [overflow-wrap:anywhere]">
+      <div className="px-4 py-3 border-t border-white/10 min-w-0">
+        <div className="text-sm font-medium break-words [overflow-wrap:anywhere] text-white">
           {video.name}
         </div>
-        <div className="text-xs text-muted-foreground mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+        <div className="text-xs text-white/55 mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
           {video.versionLabel && <span>{video.versionLabel}</span>}
           {!isImage && typeof video.duration === 'number' && video.duration > 0 && (
             <span>{formatDuration(video.duration)}</span>
@@ -348,9 +378,9 @@ function ScrubThumbnail({ video: v }: { video: FolderContents['videos'][number] 
             onError={() => setThumbErrored(true)}
           />
         ) : isImage ? (
-          <ImageIcon className="w-6 h-6 text-muted-foreground" />
+          <ImageIcon className="w-6 h-6 text-white/40" />
         ) : (
-          <Film className="w-6 h-6 text-muted-foreground" />
+          <Film className="w-6 h-6 text-white/40" />
         )
       )}
       {v.mediaType !== 'IMAGE' &&
@@ -421,7 +451,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         </div>
       )}
       {items.length === 2 && (
-        <div className="grid grid-cols-2 gap-1 w-full h-full bg-card">
+        <div className="grid grid-cols-2 gap-1 w-full h-full bg-white/[0.04]">
           {items.map((it) => (
             <div key={tileKey(it)} className={baseTile}>
               {renderTile(it, 'small')}
@@ -430,7 +460,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         </div>
       )}
       {items.length === 3 && (
-        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-card">
+        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-white/[0.04]">
           <div className={`${baseTile} row-span-2`}>
             {renderTile(items[0], 'big')}
           </div>
@@ -439,7 +469,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         </div>
       )}
       {items.length === 4 && (
-        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-card">
+        <div className="grid grid-cols-2 grid-rows-2 gap-1 w-full h-full bg-white/[0.04]">
           {items.map((it) => (
             <div key={tileKey(it)} className={baseTile}>
               {renderTile(it, 'small')}
@@ -561,12 +591,12 @@ function FolderPreviewBody({
 
   return (
     <>
-      <div className="px-4 py-3 border-b border-border/50 flex items-center gap-2">
-        <FolderIcon className="w-5 h-5 text-muted-foreground shrink-0" />
+      <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+        <FolderIcon className="w-5 h-5 text-primary/80 shrink-0" />
         <div className="min-w-0">
-          <div className="text-sm font-medium truncate">{folder.name}</div>
+          <div className="text-sm font-medium truncate text-white">{folder.name}</div>
           {subtitle && (
-            <div className="text-xs text-muted-foreground">{subtitle}</div>
+            <div className="text-xs text-white/55">{subtitle}</div>
           )}
         </div>
       </div>
@@ -593,11 +623,11 @@ function FolderPreviewBody({
         }}
       >
         {loading ? (
-          <div className="text-sm text-muted-foreground text-center py-8">
+          <div className="text-sm text-white/55 text-center py-8">
             Loading…
           </div>
         ) : !contents || (contents.folders.length === 0 && contents.videos.length === 0) ? (
-          <div className="text-sm text-muted-foreground text-center py-8">
+          <div className="text-sm text-white/55 text-center py-8">
             This folder is empty.
           </div>
         ) : (
@@ -643,15 +673,15 @@ function FolderPreviewBody({
                 // (which has intrinsic dimensions like 1920×1080),
                 // the column would grow / shrink to accommodate
                 // those, jiggling the whole panel width.
-                className="min-w-0 rounded-md overflow-hidden border border-border/50 bg-muted flex flex-col cursor-pointer hover:border-primary/40 transition-colors"
+                className="min-w-0 rounded-md overflow-hidden ring-1 ring-white/10 bg-white/[0.04] flex flex-col cursor-pointer hover:ring-primary/40 hover:bg-white/[0.07] transition-colors"
                 title={`${f.name} — double-click to open`}
               >
                 <div className="relative aspect-video bg-black/30 dark:bg-black/40">
                   <FolderCover previewItems={f.previewItems} />
                 </div>
                 <div className="px-2 py-1.5 flex items-center gap-1.5 min-w-0">
-                  <FolderIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-xs truncate" title={f.name}>
+                  <FolderIcon className="w-3.5 h-3.5 text-primary/80 shrink-0" />
+                  <span className="text-xs truncate text-white" title={f.name}>
                     {f.name}
                   </span>
                 </div>
@@ -672,11 +702,11 @@ function FolderPreviewBody({
                 // 2.0.x+: see folder tile above — `min-w-0` keeps the
                 // grid column from being inflated by the <video>'s
                 // intrinsic size on first hover-scrub render.
-                className="min-w-0 rounded-md overflow-hidden border border-border/50 bg-muted flex flex-col cursor-pointer hover:border-primary/40 transition-colors"
+                className="min-w-0 rounded-md overflow-hidden ring-1 ring-white/10 bg-white/[0.04] flex flex-col cursor-pointer hover:ring-primary/40 hover:bg-white/[0.07] transition-colors"
                 title={`${v.name} — double-click to open`}
               >
                 <ScrubThumbnail video={v} />
-                <div className="px-2 py-1.5 text-xs truncate" title={v.name}>
+                <div className="px-2 py-1.5 text-xs truncate text-white" title={v.name}>
                   {v.name}
                 </div>
               </div>

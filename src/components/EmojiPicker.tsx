@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Smile } from 'lucide-react'
 
 interface EmojiCategory {
@@ -248,8 +249,18 @@ export default function EmojiPicker({
       const top = placeAbove
         ? Math.max(8, rect.top - POPOVER_H - 8)
         : Math.min(vh - POPOVER_H - 8, rect.bottom + 8)
+      // 2.5.1+: position the popover HALFWAY between left-aligned
+      // and fully centered on the trigger, then nudge 50 px further
+      // LEFT so the popover sits visibly closer to the centre of
+      // the comments sidebar (the smiley trigger lives in the
+      // bottom-left of the action row). Halfway = average of the
+      // two anchor offsets; the additional nudge is empirical.
+      const triggerCenter = rect.left + rect.width / 2
+      const leftAligned = rect.left
+      const centered = triggerCenter - POPOVER_W / 2
+      const halfway = (leftAligned + centered) / 2 - 60
       const left = Math.min(
-        Math.max(8, rect.left),
+        Math.max(8, halfway),
         vw - POPOVER_W - 8,
       )
       setCoords({ left, top })
@@ -314,53 +325,68 @@ export default function EmojiPicker({
         aria-label={title}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-50"
       >
         <Smile className="h-4 w-4" />
       </button>
-      {open && coords && (
+      {open && coords && typeof document !== 'undefined' && createPortal(
         <div
           ref={popoverRef}
           role="dialog"
           aria-label="Emoji picker"
-          // `position: fixed` with computed viewport coordinates so
-          // the popover floats above the rest of the page instead of
-          // taking up space in the parent flex/sidebar layout. See
-          // the position-compute effect above for placement logic.
+          // 2.5.1+: portal to document.body so the popover escapes
+          // any ancestor that creates a containing block for fixed-
+          // position descendants. `backdrop-filter` / `filter` /
+          // `transform` on the CommentSection card and the
+          // CommentInput composer card both establish containing
+          // blocks, which previously made `position: fixed` resolve
+          // relative to those ancestors instead of the viewport —
+          // pushing the popover off-screen and visually shifting
+          // the entire comments column. Porting to body sidesteps
+          // the issue entirely (PlayerTopMenu uses the same trick).
           style={{
             position: 'fixed',
             left: coords.left,
             top: coords.top,
             width: POPOVER_W,
+            // 2.5.1+: TRUE frosted glass — same recipe used across
+            // the v2.5 dropdowns (mic picker, PlayerTopMenu, All
+            // comments filter, CommentsKebabMenu): low-opacity navy
+            // base + accent-tinted radial bleed + heavy blur + GPU
+            // layer hints so backdrop-filter actually samples the
+            // page behind.
+            backgroundColor: 'rgba(22, 37, 51, 0.35)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
           }}
-          className="z-50 rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl p-2"
+          className="z-[100] rounded-lg ring-1 ring-white/15 text-white shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-2"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Search row */}
+          {/* Search row — 2.5.1+ glass input */}
           <input
             ref={searchInputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search…"
-            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="w-full rounded-md bg-white/[0.06] ring-1 ring-white/10 px-2 py-1.5 text-sm text-white outline-none placeholder:text-white/45 focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)]"
           />
 
-          {/* Quick-pick row (1.1.1+). Used to be the category tabs
-              (smiley / pray / heart / movie / fire); now it's a
-              live "recently used" row instead. Pre-seeded with the
-              same five glyphs so the empty state looks identical,
-              then progressively replaced as the user picks emojis.
-              `localStorage` persists picks across reloads. */}
+          {/* Quick-pick row (1.1.1+). */}
           {!query.trim() && (
-            <div className="mt-2 flex items-center gap-0.5 border-b border-border/50 pb-1">
+            <div className="mt-2 flex items-center gap-0.5 border-b border-white/10 pb-1">
               {quickPick.map((emoji, i) => (
                 <button
                   key={`quick-${emoji}-${i}`}
                   type="button"
                   onClick={() => handlePick(emoji)}
                   title={`Insert ${emoji}`}
-                  className="flex h-8 w-9 items-center justify-center rounded-md text-xl hover:bg-muted transition-colors"
+                  className="flex h-8 w-9 items-center justify-center rounded-md text-xl hover:bg-white/[0.08] transition-colors"
                 >
                   {emoji}
                 </button>
@@ -368,14 +394,14 @@ export default function EmojiPicker({
             </div>
           )}
 
-          {/* Emoji grid */}
-          <div
-            className="mt-2 grid max-h-[260px] grid-cols-10 gap-0.5 overflow-y-auto pr-1"
-            // `pr-1` keeps the scrollbar from overlapping the rightmost
-            // emoji button's hover state.
-          >
+          {/* Emoji grid — 2.5.1+ scroll bar hidden via the
+              `scrollbar-hide` utility. Scroll behaviour intact, just
+              no visible bar (the partial last row makes overflow
+              obvious without it). pr-1 also dropped since we no
+              longer need a gutter for the scrollbar track. */}
+          <div className="mt-2 grid max-h-[260px] grid-cols-10 gap-0.5 overflow-y-auto scrollbar-hide">
             {visible.length === 0 ? (
-              <div className="col-span-10 py-6 text-center text-xs text-muted-foreground">
+              <div className="col-span-10 py-6 text-center text-xs text-white/55">
                 No emoji matches
               </div>
             ) : (
@@ -384,7 +410,7 @@ export default function EmojiPicker({
                   key={`${emoji}-${i}`}
                   type="button"
                   onClick={() => handlePick(emoji)}
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-xl hover:bg-muted transition-colors"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-xl hover:bg-white/[0.08] transition-colors"
                   aria-label={`Insert ${emoji}`}
                 >
                   {emoji}
@@ -392,7 +418,8 @@ export default function EmojiPicker({
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

@@ -49,6 +49,9 @@ export async function GET(
         email: true,
         username: true,
         name: true,
+        // 2.5.1+: expose the inline avatar so the Profile page can
+        // hydrate its preview from a single GET round-trip.
+        avatarUrl: true,
         role: true,
         createdAt: true,
         updatedAt: true,
@@ -91,7 +94,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { email, username, name, password, oldPassword, role } = body
+    const { email, username, name, avatarUrl, password, oldPassword, role } = body
 
     // Build update data
     const updateData: any = {}
@@ -141,6 +144,29 @@ export async function PATCH(
       updateData.name = name
     }
 
+    // 2.5.1+: avatar update. Accept either an empty string / null
+    // (clear the avatar — fall back to initials) or a `data:` URL
+    // capped at ~250KB so we don't blow up routine session lookups.
+    if (avatarUrl !== undefined) {
+      if (avatarUrl === null || avatarUrl === '') {
+        updateData.avatarUrl = null
+      } else if (typeof avatarUrl === 'string') {
+        if (!avatarUrl.startsWith('data:image/')) {
+          return NextResponse.json(
+            { error: 'Invalid avatar — must be a data:image URL' },
+            { status: 400 }
+          )
+        }
+        if (avatarUrl.length > 256 * 1024) {
+          return NextResponse.json(
+            { error: 'Avatar too large — please crop to a smaller image' },
+            { status: 413 }
+          )
+        }
+        updateData.avatarUrl = avatarUrl
+      }
+    }
+
     if (role !== undefined) {
       // Validate role
       if (role !== 'ADMIN' && role !== 'USER') {
@@ -165,12 +191,39 @@ export async function PATCH(
     // Track if password is being changed (for session regeneration)
     let passwordChanged = false
 
-    // Process password change - coerce inputs to strings, let validation decide
-    const newPassword = typeof password === 'string' ? password.trim() : ''
-    const oldPasswordStr = typeof oldPassword === 'string' ? oldPassword : ''
-    const passwordValidation = validatePassword(newPassword)
+    // 2.5.1+ password handling fix.
+    //
+    // The old version coerced `password` to '' when it was undefined
+    // AND when it was an invalid string, then quietly skipped the
+    // update branch in BOTH cases. The result: a caller that
+    // explicitly sent a weak/short new password got back a 200 OK
+    // ("user updated successfully") even though nothing in the DB
+    // had changed — and the old password kept working. That's
+    // exactly the failure pattern we just hit on the Profile page.
+    //
+    // Fix: distinguish "no password supplied" (legitimate — caller
+    // is updating something else) from "invalid password supplied"
+    // (return 400 with the first validator complaint so the UI can
+    // surface it).
+    const passwordWasProvided =
+      password !== undefined && password !== null && password !== ''
 
-    if (passwordValidation.isValid) {
+    if (passwordWasProvided) {
+      const newPassword = typeof password === 'string' ? password.trim() : ''
+      const oldPasswordStr = typeof oldPassword === 'string' ? oldPassword : ''
+      const passwordValidation = validatePassword(newPassword)
+
+      if (!passwordValidation.isValid) {
+        return NextResponse.json(
+          {
+            error:
+              passwordValidation.errors[0] ||
+              'Password does not meet the security requirements',
+          },
+          { status: 400 }
+        )
+      }
+
       // Get user's current password hash
       const userWithPassword = await prisma.user.findUnique({
         where: { id },
@@ -206,6 +259,7 @@ export async function PATCH(
         email: true,
         username: true,
         name: true,
+        avatarUrl: true,
         role: true,
         createdAt: true,
         updatedAt: true,

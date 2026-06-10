@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, FolderPlus, FolderLock, Loader2, Eye, EyeOff } from 'lucide-react'
+import { FolderPlus, FolderLock, Loader2, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 /**
@@ -103,17 +103,30 @@ export default function NewFolderDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      // 2.5.0+: transparent backdrop — no black tint or extra blur on
+      // the page behind the dialog. The dialog itself is the visible
+      // surface, frosted-glass like all other v2.5 modals.
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onMouseDown={(e) => {
-        // Only close on backdrop click — not on dialog content click.
         if (e.target === e.currentTarget && !submitting) onClose()
       }}
     >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md rounded-xl bg-card text-card-foreground border border-border shadow-2xl"
+        // Frosted-glass shell, same recipe as TemplateModal /
+        // GlobalSearchOverlay / Appearance pane: 6% white tint, hairline
+        // white-10 ring, soft outward shadow, explicit inline
+        // backdrop-filter so the blur survives any Tailwind purging.
+        className="w-full max-w-md rounded-xl bg-white/[0.06] ring-1 ring-white/10 text-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.65)]"
+        style={{
+          backdropFilter: 'blur(20px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+        }}
       >
-        <div className="flex items-center justify-between px-5 pt-5 pb-3">
+        {/* 2.5.0+: header is just the title — close (X) was dropped
+            since Cancel in the footer already covers that affordance
+            and Esc still closes the dialog. */}
+        <div className="px-5 pt-5 pb-3">
           <h2 className="text-lg font-semibold inline-flex items-center gap-2">
             {restricted ? (
               <FolderLock className="w-5 h-5 text-primary" />
@@ -122,19 +135,10 @@ export default function NewFolderDialog({
             )}
             {restricted ? 'New Restricted Folder' : 'New Folder'}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-            className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-50"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
         <div className="px-5 pb-5">
-          <label className="block text-sm font-medium text-foreground/90 mb-1.5">
+          <label className="block text-sm font-medium text-white mb-1.5">
             Name
           </label>
           <input
@@ -145,11 +149,11 @@ export default function NewFolderDialog({
             placeholder="01_Brand_Spots"
             maxLength={255}
             disabled={submitting}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+            className="w-full rounded-lg bg-white/[0.04] ring-1 ring-white/10 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
           />
           {restricted && (
             <div className="mt-3">
-              <label className="block text-sm font-medium text-foreground/90 mb-1.5">
+              <label className="block text-sm font-medium text-white mb-1.5">
                 Password
               </label>
               <div className="relative">
@@ -159,12 +163,12 @@ export default function NewFolderDialog({
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter a password"
                   disabled={submitting}
-                  className="w-full rounded-md border border-border bg-background pl-3 pr-10 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+                  className="w-full rounded-lg bg-white/[0.04] ring-1 ring-white/10 pl-3 pr-10 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-muted-foreground hover:text-foreground"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-white/55 hover:text-white"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   tabIndex={-1}
                 >
@@ -176,23 +180,51 @@ export default function NewFolderDialog({
           {error && (
             <p className="mt-2 text-xs text-destructive">{error}</p>
           )}
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            {restricted
-              ? 'Viewers will need this password to open the folder share link. You can change or remove it later.'
-              : 'Folder is created with no share password. You can change that later from the folder settings.'}
-          </p>
+          {/* 2.5.0+: helper text for the non-restricted case was
+              dropped — the default flow is "just create with no
+              password" and the share password lives in folder
+              settings, which the user can discover from there.
+              For the restricted variant we keep the hint because
+              the password is being entered RIGHT HERE. */}
+          {restricted && (
+            <p className="mt-2 text-[11px] text-white/55">
+              Viewers will need this password to open the folder share link. You can change or remove it later.
+            </p>
+          )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20 rounded-b-xl">
+        {/* 2.5.0+: dropped the footer's own glass tile / ring /
+            shadow — the buttons sit directly on the dialog surface
+            now, so the visual hierarchy is just popup → button →
+            text. Less chrome, less competing layers. */}
+        <div className="px-5 pb-5 flex items-center justify-center gap-3">
           <Button
             type="button"
             variant="ghost"
             onClick={onClose}
             disabled={submitting}
+            // Cancel gets its own glass tile + ring so it reads as a
+            // proper sibling button next to Create folder instead of
+            // plain text. Layered shadow recipe mirrors the primary
+            // button (minus the brand-blue tint) so the hierarchy
+            // stays popup → footer → button → text.
+            className="text-white/90 bg-white/[0.06] hover:bg-white/[0.12] hover:text-white ring-1 ring-white/15 hover:ring-white/25 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)] hover:shadow-[0_4px_12px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12)] border-0"
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={submitting || !name.trim()}>
+          <Button
+            type="submit"
+            disabled={submitting || !name.trim()}
+            // Inline `color` wins over the `.btn-primary` rule in
+            // globals.css that pins text to `hsl(var(--primary-
+            // foreground))`. On dark theme that's already white, but
+            // depending on browser composition + opacity layering it
+            // can read as a muted gray. Forcing #fff inline guarantees
+            // the topmost-layer feel the layered shadow stack is
+            // building up to.
+            style={{ color: '#ffffff' }}
+            className="font-semibold shadow-[0_4px_12px_-2px_hsl(var(--primary)/0.55),0_0_0_1px_hsl(var(--primary)/0.5),inset_0_1px_0_rgba(255,255,255,0.18)] hover:shadow-[0_6px_18px_-2px_hsl(var(--primary)/0.65),0_0_0_1px_hsl(var(--primary)/0.6),inset_0_1px_0_rgba(255,255,255,0.22)] disabled:opacity-60"
+          >
             {submitting ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

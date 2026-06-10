@@ -73,17 +73,30 @@ function DownloadBanner({
 
   return (
     <div
-      className="pointer-events-auto w-[340px] rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.4)] p-3 animate-in slide-in-from-bottom-2 fade-in duration-200"
+      // 2.5.1+: v2.5 frosted glass — same recipe as
+      // ProcessingStatusBanners so download / upload / encoding
+      // banners read as a coherent stack.
+      className="pointer-events-auto w-[340px] rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white p-3 animate-in slide-in-from-bottom-2 fade-in duration-200"
+      style={{
+        backgroundColor: 'rgba(22, 37, 51, 0.62)',
+        backgroundImage:
+          'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+        backdropFilter: 'blur(40px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+        transform: 'translate3d(0, 0, 0)',
+        willChange: 'backdrop-filter, transform',
+        isolation: 'isolate',
+      }}
       role="status"
     >
       <div className="flex items-start gap-2.5">
         <div className="shrink-0 mt-0.5">
           {job.status === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 text-green-500" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-300" />
           ) : job.status === 'error' ? (
-            <AlertCircle className="w-4 h-4 text-red-500" />
+            <AlertCircle className="w-4 h-4 text-red-300" />
           ) : job.status === 'cancelled' ? (
-            <X className="w-4 h-4 text-muted-foreground" />
+            <X className="w-4 h-4 text-white/55" />
           ) : pct === null ? (
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
           ) : (
@@ -91,10 +104,10 @@ function DownloadBanner({
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-card-foreground truncate" title={job.label}>
+          <div className="text-sm font-medium text-white truncate" title={job.label}>
             {job.label}
           </div>
-          <div className="text-[11px] text-muted-foreground truncate">
+          <div className="text-[11px] text-white/55 truncate">
             {job.status === 'success'
               ? 'Done'
               : job.status === 'error'
@@ -110,7 +123,7 @@ function DownloadBanner({
         <button
           type="button"
           onClick={isTerminal ? onDismiss : onCancel}
-          className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors"
           aria-label={isTerminal ? 'Dismiss' : 'Cancel download'}
           title={isTerminal ? 'Dismiss' : 'Cancel download'}
         >
@@ -121,11 +134,11 @@ function DownloadBanner({
           otherwise. Hidden for success/cancelled so the banner can
           fade out cleanly. */}
       {!isTerminal && (
-        <div className="mt-2.5 h-1 w-full rounded-full bg-muted overflow-hidden">
+        <div className="mt-2.5 h-1 w-full rounded-full bg-white/10 overflow-hidden">
           {pct !== null ? (
             <div
               className={`h-full rounded-full transition-all duration-200 ease-out ${
-                job.status === 'error' ? 'bg-red-500' : 'bg-primary'
+                job.status === 'error' ? 'bg-red-400' : 'bg-primary'
               }`}
               style={{ width: `${pct}%` }}
             />
@@ -135,7 +148,7 @@ function DownloadBanner({
         </div>
       )}
       {pct !== null && !isTerminal && (
-        <div className="mt-1 text-[10px] text-muted-foreground tabular-nums">{pct}%</div>
+        <div className="mt-1 text-[10px] text-white/55 tabular-nums">{pct}%</div>
       )}
     </div>
   )

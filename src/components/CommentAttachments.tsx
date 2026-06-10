@@ -127,21 +127,24 @@ export default function CommentAttachments({
         const isDownloading = downloadingId === asset.id
 
         return (
+          // 2.5.1+: generic-attachment chip in v2.5 glass language —
+          // matches the pending-attachment pills in CommentInput so
+          // the lifecycle (pending → saved) feels visually identical.
           <button
             key={asset.id}
             onClick={() => handleDownload(asset.id)}
             disabled={isDownloading}
-            className="flex items-center gap-2 px-2.5 py-1.5 bg-muted/40 border border-border/50 rounded-md text-sm hover:bg-muted/60 transition-colors w-full text-left group"
+            className="flex items-center gap-2 px-2.5 py-1.5 bg-white/[0.06] ring-1 ring-white/10 rounded-md text-sm hover:bg-white/[0.10] hover:ring-white/15 transition-colors w-full text-left group"
           >
-            <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            <span className="truncate flex-1 text-foreground">{asset.fileName}</span>
-            <span className="text-xs text-muted-foreground flex-shrink-0">
+            <Icon className="w-4 h-4 text-white/55 flex-shrink-0" />
+            <span className="truncate flex-1 text-white">{asset.fileName}</span>
+            <span className="text-xs text-white/55 flex-shrink-0">
               {formatFileSize(Number(asset.fileSize))}
             </span>
             {isDownloading ? (
-              <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin flex-shrink-0" />
+              <Loader2 className="w-3.5 h-3.5 text-white/55 animate-spin flex-shrink-0" />
             ) : (
-              <Download className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+              <Download className="w-3.5 h-3.5 text-white/55 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
             )}
           </button>
         )
@@ -309,8 +312,12 @@ function ImageLightbox({
 /**
  * Inline audio player for voice messages and other audio attachments.
  * Fetches a signed download URL on mount and feeds it into a native <audio>.
+ *
+ * 2.5.1+: also used by the timeline popover (CustomVideoControls) to
+ * surface voice comments without forcing the user to scroll through
+ * the sidebar.
  */
-function AudioAttachment({
+export function AudioAttachment({
   asset,
   videoId,
   shareToken,
@@ -531,11 +538,22 @@ function ThemedAudioPlayer({ src }: { src: string }) {
   }, [isPlaying, isScrubbing, audioDuration])
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/40 border border-border min-w-0 w-full">
+    // 2.5.1+: same glass v2.5 chip as the VoiceRecorderButton
+    // preview — so a voice attachment looks identical whether
+    // it's about to be sent or already saved on a comment. Subtle
+    // accent-tinted radial gradient on the left half keeps the
+    // surface tied to the rest of the v2.5 system.
+    <div
+      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.06] ring-1 ring-white/10 shadow-[0_6px_18px_-12px_rgba(0,0,0,0.45)] min-w-0 w-full"
+      style={{
+        backgroundImage:
+          'radial-gradient(120% 80% at 0% 50%, hsl(var(--spotlight-tint) / 0.12) 0%, hsl(var(--spotlight-tint) / 0.03) 55%, transparent 85%)',
+      }}
+    >
       <button
         type="button"
         onClick={togglePlay}
-        className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 text-foreground transition-colors"
+        className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-white/[0.10] hover:bg-white/[0.18] ring-1 ring-white/15 text-white transition-colors"
         title={isPlaying ? 'Pause' : 'Play'}
         aria-label={isPlaying ? 'Pause' : 'Play'}
       >
@@ -551,16 +569,29 @@ function ThemedAudioPlayer({ src }: { src: string }) {
         onTouchStart={handleTouchStart}
         className="relative h-5 flex-1 min-w-0 cursor-pointer touch-none flex items-center px-2"
       >
-        <div className="relative w-full h-[3px] rounded-full bg-muted-foreground/40">
+        <div className="relative w-full h-[3px] rounded-full bg-white/15">
           <div
-            className="absolute inset-y-0 left-0 bg-primary rounded-full"
-            style={{ width: `${progress * 100}%` }}
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{
+              width: `${progress * 100}%`,
+              backgroundColor: 'hsl(var(--spotlight-tint))',
+              boxShadow: '0 0 8px hsl(var(--spotlight-tint) / 0.45)',
+            }}
           />
           <div
-            className="absolute top-1/2 w-3 h-3 rounded-full bg-primary shadow-md ring-2 ring-background pointer-events-none"
+            className="absolute top-1/2 w-3.5 h-3.5 rounded-full pointer-events-none"
             style={{
               left: `${progress * 100}%`,
               transform: 'translate(-50%, -50%)',
+              // Frosted-glass ball with crisp white stroke — same
+              // treatment as the recorder preview thumb so the two
+              // surfaces feel like one component.
+              backgroundColor: 'rgba(255, 255, 255, 0.18)',
+              border: '1.5px solid rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(6px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(6px) saturate(140%)',
+              boxShadow:
+                '0 0 0 1px hsl(var(--spotlight-tint) / 0.35), 0 2px 8px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
             }}
           />
         </div>

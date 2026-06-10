@@ -65,10 +65,39 @@
     --radius-lg: 1rem;
     --radius-full: 9999px;
 
-    /* Logo color tokens (used by LogoMark) - light mode */
-    --logo-bg: #000000;
-    --logo-panel: #000000; /* slit matches background */
+    /* Logo color tokens (used by LogoMark) - light mode.
+       2.5.0+: rebrand to play+i mark. `--logo-bg` is the rounded-
+       square tile color, `--logo-i-stem` is the lowercase-i stem
+       (dark on light tile, light on dark tile). Legacy `--logo-panel`
+       and `--logo-wedge` keys kept for any unmigrated downstream
+       components, but they no longer paint the new mark. */
+    --logo-bg: #ffffff;
+    --logo-i-stem: #0f172a;
+    --logo-panel: #000000;
     --logo-wedge: #ffffff;
+
+    /* 2.5.0+ design tokens for the new look.
+       Spotlight + frosted glass. `--spotlight-tint` is the blue
+       wash that bleeds in from the top-left corner. We split it
+       into two layered stops so the gradient stays soft at large
+       viewports (no banding). */
+    --spotlight-tint: 211 100% 50%;
+    --spotlight-alpha-1: 0.08;
+    --spotlight-alpha-2: 0.0;
+
+    /* Frosted-glass surface. Used by sidebar, topbar and modal
+       containers — a tinted, semi-opaque background that lets the
+       page color leak through plus a 1px hairline for the edge.
+       Backdrop-blur is applied at the component level (a CSS var
+       can't carry a `filter`). */
+    --glass-bg: 0 0% 100% / 0.6;
+    --glass-border: 0 0% 0% / 0.06;
+
+    /* Layout primitives for the sidebar + topbar grid. Sidebar
+       collapses below `md:` (768px) — handled in JS, the layout
+       grid swaps to a single column. */
+    --sidebar-width: 17rem;
+    --topbar-height: 4rem;
 
     /* Shadow definitions */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -144,10 +173,27 @@
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
     --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7);
 
-    /* Logo color tokens (dark mode) */
-    --logo-bg: #f5f7fb;
-    --logo-panel: #f5f7fb; /* slit matches background */
+    /* Logo color tokens (dark mode) — 2.5.0+ play+i mark.
+       Dark tile + light i-stem to read clean on near-black. */
+    --logo-bg: #0a0a0a;
+    --logo-i-stem: #f5f7fb;
+    --logo-panel: #f5f7fb;
     --logo-wedge: #0b1220;
+
+    /* 2.5.0+ dark-mode design tokens.
+       Spotlight is more saturated against the dark page so it
+       reads as the visual anchor instead of disappearing into the
+       background. The frosted glass switches polarity — it's a
+       light wash with low alpha instead of a dark wash, which
+       gives the layered panels the desired "lifted off the page"
+       feel rather than "sunk into the page". */
+    --spotlight-tint: 211 100% 60%;
+    --spotlight-alpha-1: 0.18;
+    --spotlight-alpha-2: 0.0;
+
+    /* Frosted-glass surface (dark). */
+    --glass-bg: 0 0% 100% / 0.04;
+    --glass-border: 0 0% 100% / 0.08;
   }
 }
 
@@ -428,17 +474,199 @@
     animation: stack-slide-in-left 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
 
-  /* 1.9.1+: PERSISTENT glossy "lift" for the currently-selected
-     comment card. CommentSection adds .is-selected when the user
-     clicks a comment (via the avatar in the timeline or directly
-     on the card) and clears it on any click outside the comment
-     cards. The transition handles the fade in/out — no keyframe
-     animation, the state simply sticks until something else gets
-     clicked. !important wins over the card's own hover bg. */
+  /* 1.9.1+ / 2.5.1+: PERSISTENT glossy "lift" for the currently-
+     selected comment card. CommentSection adds .is-selected when
+     the user clicks a comment (via the avatar in the timeline or
+     directly on the card) and clears it on any click outside the
+     comment cards.
+
+     v2.5 refresh: the card now uses the glass language of the rest
+     of the app — translucent white tint, hairline brand-accent
+     ring, and an accent-tinted radial bleed in the top-left
+     corner driven by `--spotlight-tint`. Box-shadow ring is used
+     (not border) so the look survives the card's `ring-1 ring-
+     white/10` base utility without fighting it. Smooth 220ms
+     transition handles the in/out fade. !important wins over the
+     base card hover state. */
   .comment-card.is-selected {
-    background-color: hsl(var(--card) / 0.95) !important;
-    border-color: hsl(var(--primary) / 0.45) !important;
-    box-shadow: inset 0 1px 0 0 hsl(0 0% 100% / 0.08);
-    transition: background-color 220ms ease-out, border-color 220ms ease-out, box-shadow 220ms ease-out;
+    background-color: hsl(0 0% 100% / 0.10) !important;
+    background-image: radial-gradient(
+      140% 80% at 0% 0%,
+      hsl(var(--spotlight-tint, 217 91% 60%) / 0.22) 0%,
+      hsl(var(--spotlight-tint, 217 91% 60%) / 0.06) 45%,
+      transparent 75%
+    ) !important;
+    box-shadow:
+      0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.45),
+      0 12px 30px -10px hsl(var(--spotlight-tint, 217 91% 60%) / 0.25),
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.10) !important;
+    transition:
+      background-color 220ms ease-out,
+      background-image 220ms ease-out,
+      box-shadow 220ms ease-out;
+  }
+}
+
+/* ─── 2.5.0+ Global "Spotlight" + Frosted Glass system ────────────
+   The visual identity of the new look is a soft blue glow that
+   washes the top-left corner of the page, with translucent
+   surfaces (sidebar, topbar, cards) sitting on top so the wash
+   bleeds through and gives the layout a sense of depth. This
+   replaces the flat solid-color backgrounds of the previous
+   design.
+
+   `.spotlight-bg` is meant to live on the OUTER admin layout
+   wrapper so every page inherits the wash. It uses a pseudo-
+   element with `position: absolute` rather than a background-image
+   on the element itself so we can control the gradient size and
+   blur amount independently and the wash always stays under any
+   content even if a child uses backdrop-blur.
+─────────────────────────────────────────────────────────────────── */
+@layer utilities {
+  /* 2.5.0 (revised): paint the spotlight as a direct viewport-fixed
+     background on the element rather than a `::before` overlay. The
+     pseudo-element approach sat behind the parent's own `bg-back-
+     ground`, which meant the wash was invisible on any page that
+     painted its own opaque container — i.e. all of them.
+     The new shape: large ellipse anchored to the top-LEFT corner of
+     the viewport, ramping from the brand blue at full intensity in
+     the corner all the way out to transparent past the diagonal so
+     the gradient bleeds across the whole dashboard area (sidebar
+     AND main content) on its way to bottom-right. `background-
+     attachment: fixed` keeps the wash anchored to the viewport on
+     scroll so long pages don't drag the glow with them. */
+  .spotlight-bg {
+    background-color: hsl(var(--background));
+    /* 2.5.0+ (revised): stretched ellipse + softer fall-off so the
+       lit zone reaches well into the dashboard area instead of
+       dying out around 35 % across the viewport. The mid-stop now
+       holds 60 % intensity to 50 %, then tapers through an extra
+       step before hitting transparent at the far edge. */
+    background-image: radial-gradient(
+      ellipse 200% 170% at 0% 0%,
+      hsl(var(--spotlight-tint) / var(--spotlight-alpha-1)) 0%,
+      hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.6)) 50%,
+      hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.2)) 80%,
+      transparent 100%
+    );
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+  /* 2.5.1+: DUAL-spotlight variant for the share / player page.
+     Layers TWO radial gradients on the page background — one
+     anchored top-RIGHT (primary focal point) and one anchored
+     top-LEFT (softer counterpoint). The two washes meet in the
+     middle of the viewport and bleed diagonally toward the
+     bottom corners, giving the page a balanced "two-source"
+     lighting that doesn't lean only to one side. The top-left
+     stop uses a lower alpha multiplier so the right wash still
+     reads as the primary focal point. Both layers are driven by
+     `--spotlight-tint` so they follow the user's accent colour.
+     Layer order matters in CSS: the FIRST gradient in the
+     comma-separated list paints ON TOP, so we list top-right
+     first to keep it dominant. */
+  .spotlight-bg-tr {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(
+        ellipse 200% 170% at 100% 0%,
+        hsl(var(--spotlight-tint) / var(--spotlight-alpha-1)) 0%,
+        hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.6)) 50%,
+        hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.2)) 80%,
+        transparent 100%
+      ),
+      radial-gradient(
+        ellipse 180% 150% at 0% 0%,
+        hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.8)) 0%,
+        hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.5)) 50%,
+        hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.2)) 80%,
+        transparent 100%
+      );
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+  /* Stronger variant for splash / hero surfaces (login). Larger
+     ellipse + 1.6× the alpha so the wash reads as a focal point
+     instead of an ambient tint. */
+  .spotlight-bg-strong {
+    background-color: hsl(var(--background));
+    background-image: radial-gradient(
+      ellipse 160% 140% at 0% 0%,
+      hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 1.6)) 0%,
+      hsl(var(--spotlight-tint) / calc(var(--spotlight-alpha-1) * 0.7)) 35%,
+      transparent 85%
+    );
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+
+  /* Frosted-glass surface. `backdrop-filter: blur` blurs whatever
+     sits BEHIND the element, giving the layered glass effect. The
+     translucent fill from `--glass-bg` plus the hairline border
+     from `--glass-border` defines the panel edge. Apply with
+     `className="glass-panel"`. */
+  .glass-panel {
+    background-color: hsl(var(--glass-bg));
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid hsl(var(--glass-border));
+  }
+  /* Lighter blur variant — used for inputs / pills where a full
+     panel blur would feel heavy. */
+  .glass-pill {
+    background-color: hsl(var(--glass-bg));
+    backdrop-filter: blur(10px) saturate(130%);
+    -webkit-backdrop-filter: blur(10px) saturate(130%);
+    border: 1px solid hsl(var(--glass-border));
+  }
+
+  /* 2.5.0+: themed scrollbar for the dark glass UI. Default
+     Webkit / OS chrome bars come up gray-on-white and clash with
+     the frosted-glass surfaces; this class swaps in a soft white
+     thumb on a transparent track so the bar reads as part of the
+     surface. Apply with `className="custom-scrollbar"`. */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
+    /* Inset border via background-clip trick so the thumb floats
+       inside the track without touching the edges. */
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.22);
+    background-clip: padding-box;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: rgba(255, 255, 255, 0.32);
+    background-clip: padding-box;
+  }
+  /* Hide the small square where vertical + horizontal tracks
+     intersect — looks like a stray gray pixel otherwise. */
+  .custom-scrollbar::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* 2.5.1+: completely hide the scrollbar while keeping scroll
+     behaviour intact. Apply with `className="scrollbar-hide"`.
+     Used on popovers (emoji picker) where the bar adds visual
+     noise to a small panel and the user can clearly see there's
+     more content via the partial last row. */
+  .scrollbar-hide {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE / old Edge */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome / Safari */
   }
 }

@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Users, UserPlus, Edit, Trash2, Mail, User, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import { copyToClipboard } from '@/lib/clipboard'
 import { apiDelete, apiFetch, apiPost, apiPatch } from '@/lib/api-client'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
@@ -368,10 +369,10 @@ export default function UsersPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 min-h-0 bg-background">
-        <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="flex-1 min-h-0">
+        <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
           <div className="flex items-center justify-center h-64">
-            <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+            <RefreshCw className="w-6 h-6 animate-spin text-white/55" />
           </div>
         </div>
       </div>
@@ -379,47 +380,57 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        {/* 1.3.0+: title block can shrink so the Add User button
-            never gets pushed off-screen on narrow phones. */}
-        <div className="flex justify-between items-center gap-3 mb-4 sm:mb-6">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-3xl font-bold flex items-center gap-2 min-w-0">
-              <Users className="w-6 h-6 sm:w-8 sm:h-8 shrink-0" />
-              <span className="truncate">{t('title')}</span>
-            </h1>
-            <p className="text-muted-foreground mt-1 text-xs sm:text-base truncate">
-              {t('description')}
-            </p>
-          </div>
-          <Button
-            variant="default"
-            size="sm"
-            className="shrink-0 sm:h-10 sm:px-4"
-            onClick={() => {
-              setNewUserData({ email: '', username: '', name: '', password: '', confirmPassword: '' })
-              setShowPassword(false)
-              setShowConfirmPassword(false)
-              setError('')
-              setShowAddUserModal(true)
-            }}
-            aria-label={t('addUser')}
-          >
-            <UserPlus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">{t('addUser')}</span>
-          </Button>
-        </div>
+    <div className="flex-1 min-h-0">
+      {/* 2.5.0+: title + primary action portalled into the
+          AdminTopBar slots — same pattern as the Projects page. */}
+      <TopbarLeftSlot>
+        <Users size={20} className="text-primary shrink-0" />
+        <h1
+          className="font-semibold truncate"
+          style={{ fontSize: 18, lineHeight: '24px' }}
+        >
+          {t('title')}
+        </h1>
+      </TopbarLeftSlot>
+      <TopbarRightSlot>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+          }}
+          onClick={() => {
+            setNewUserData({ email: '', username: '', name: '', password: '', confirmPassword: '' })
+            setShowPassword(false)
+            setShowConfirmPassword(false)
+            setError('')
+            setShowAddUserModal(true)
+          }}
+          aria-label={t('addUser')}
+        >
+          <UserPlus className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">{t('addUser')}</span>
+        </Button>
+      </TopbarRightSlot>
 
-        {/* Search */}
+      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+        {/* 2.5.0+: subtitle stays just under the search since the
+            title moved to the topbar. */}
+        <p className="text-sm text-white/55 mb-4">{t('description')}</p>
+
+        {/* Search — frosted-glass input matching the projects
+            table's design vocabulary. */}
         <div className="mb-4">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/55 pointer-events-none z-10" />
             <Input
               placeholder={t('searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
+              className="pl-9 bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -433,37 +444,51 @@ export default function UsersPage() {
 
         {/* Users List */}
         {filteredUsers.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
-            <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p className="font-medium">{t('noUsers')}</p>
+          <div className="text-center py-12 text-white/55">
+            <Users className="w-12 h-12 mx-auto mb-4 opacity-40" />
+            <p className="font-medium text-white">{t('noUsers')}</p>
             <p className="text-sm mt-1">
               {searchQuery ? t('noUsersSearch') : t('noUsersHint')}
             </p>
           </div>
         ) : (
+          // 2.5.0+: each row is a floating frosted-glass card with
+          // the same recipe as the projects table — `#13181d` at 65 %
+          // with backdrop-blur + a hairline white-10 ring, plus a
+          // subtle drop shadow so the rows read as elevated tiles
+          // against the spotlight wash.
           <div className="space-y-2">
             {filteredUsers.map((user) => (
               <div
                 key={user.id}
-                className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-accent/50 transition-colors"
+                // 2.5.0+: true frosted-glass row — white-tint film
+                // (same recipe as the sidebar / topbar surfaces in
+                // dark mode) + inline backdrop-filter so the blur
+                // is guaranteed to land. The spotlight wash and
+                // grid behind bleed through clearly.
+                className="flex items-center justify-between p-3 rounded-xl bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] hover:bg-white/[0.07] transition-colors"
+                style={{
+                  backdropFilter: 'blur(20px) saturate(140%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+                }}
               >
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="p-2 rounded-lg bg-primary/10">
+                  <div className="p-2 rounded-lg bg-primary/15 ring-1 ring-primary/30">
                     <User className="w-4 h-4 text-primary" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium truncate">{user.name || user.username || user.email}</p>
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-info-visible text-info border border-info-visible flex-shrink-0">
+                      <p className="font-medium truncate text-white">{user.name || user.username || user.email}</p>
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-primary/15 text-primary ring-1 ring-primary/30 flex-shrink-0">
                         {t('admin')}
                       </span>
                       {loggedInUser?.id === user.id && (
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-success-visible text-success border border-success-visible flex-shrink-0">
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30 flex-shrink-0">
                           {t('you')}
                         </span>
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-0.5">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-white/55 mt-0.5">
                       <span className="flex items-center gap-1">
                         <Mail className="w-3 h-3" />
                         <span className="truncate">{user.email}</span>
@@ -478,7 +503,7 @@ export default function UsersPage() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-8 w-8 text-white/65 hover:text-white hover:bg-white/5"
                     onClick={() => openEditModal(user)}
                     title={t('editUser')}
                   >
@@ -488,7 +513,7 @@ export default function UsersPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-8 w-8 text-white/65 hover:text-white hover:bg-white/5"
                       onClick={() => openPasswordModal(user)}
                       title={t('changePassword')}
                     >
@@ -499,7 +524,7 @@ export default function UsersPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-8 w-8 text-white/65 hover:text-white hover:bg-white/5"
                       onClick={() => openPasskeyModal(user)}
                       title={t('managePasskeys')}
                     >
@@ -510,7 +535,7 @@ export default function UsersPage() {
                     variant="ghost"
                     size="icon"
                     onClick={() => confirmDelete(user)}
-                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10"
                     title={t('deleteUser')}
                   >
                     <Trash2 className="w-4 h-4" />
@@ -522,63 +547,81 @@ export default function UsersPage() {
         )}
       </div>
 
-      {/* Add User Modal */}
+      {/* Add User Modal — 2.5.1+ glass refresh. Same recipe as
+          NewFolderDialog / ConfirmModal so all three dialogs read as
+          one family: transparent backdrop (no black wash), frosted
+          glass shell, white text hierarchy, brand-blue primary
+          button. */}
       <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] flex flex-col">
+        <DialogContent
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md max-h-[90vh] flex flex-col bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
           <DialogHeader className="pb-2">
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-white">
               <UserPlus className="w-5 h-5 text-primary" />
               {t('addNewUser')}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-white/55">
               {t('addNewUserDescription')}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-2 py-1">
+          {/* 2.5.1+: `px-0.5` gives the inputs' `ring-1` enough
+              horizontal room to actually render on the left/right
+              edges. Without it, `overflow-y-auto` here implicitly
+              clips `overflow-x`, which chops the box-shadow that
+              implements the ring — leaving only the top/bottom of
+              the rounded outline visible. The 2px of padding is
+              imperceptible but lets the ring complete its loop. */}
+          <div className="flex-1 overflow-y-auto space-y-3 py-1 px-0.5">
             {error && (
-              <div className="p-2 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
+              <div className="p-2.5 bg-destructive/15 ring-1 ring-destructive/30 rounded-md flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
                 <span className="text-sm text-destructive">{error}</span>
               </div>
             )}
-            <div className="space-y-1">
-              <Label htmlFor="newEmail" className="text-xs">{t('emailRequired')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="newEmail" className="text-xs text-white/80">{t('emailRequired')}</Label>
               <Input
                 id="newEmail"
                 type="email"
                 placeholder={t('emailPlaceholder')}
                 value={newUserData.email}
                 onChange={(e) => setNewUserData(prev => ({ ...prev, email: e.target.value }))}
-                className="h-8"
+                className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                 autoComplete="off"
                 data-form-type="other"
                 data-lpignore="true"
                 data-1p-ignore
               />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label htmlFor="newUsername" className="text-xs">{t('username')}</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="newUsername" className="text-xs text-white/80">{t('username')}</Label>
                 <Input
                   id="newUsername"
                   placeholder={t('usernamePlaceholder')}
                   value={newUserData.username}
                   onChange={(e) => setNewUserData(prev => ({ ...prev, username: e.target.value }))}
-                  className="h-8"
+                  className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                   autoComplete="off"
                   data-form-type="other"
                   data-lpignore="true"
                   data-1p-ignore
                 />
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="newName" className="text-xs">{t('displayName')}</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="newName" className="text-xs text-white/80">{t('displayName')}</Label>
                 <Input
                   id="newName"
                   placeholder={t('displayNamePlaceholder')}
                   value={newUserData.name}
                   onChange={(e) => setNewUserData(prev => ({ ...prev, name: e.target.value }))}
-                  className="h-8"
+                  className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                   autoComplete="off"
                   data-form-type="other"
                   data-lpignore="true"
@@ -586,16 +629,16 @@ export default function UsersPage() {
                 />
               </div>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label htmlFor="newPassword" className="text-xs">{t('passwordRequired')}</Label>
+                <Label htmlFor="newPassword" className="text-xs text-white/80">{t('passwordRequired')}</Label>
                 <div className="flex gap-1">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => generateRandomPassword(true)}
-                    className="h-6 px-2 text-xs"
+                    className="h-7 px-2 text-xs text-white/85 hover:text-white hover:bg-white/[0.08]"
                   >
                     <RefreshCw className="w-3 h-3 mr-1" />
                     {tc('generate')}
@@ -606,7 +649,7 @@ export default function UsersPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => copyPassword(newUserData.password)}
-                      className="h-6 px-2 text-xs"
+                      className="h-7 px-2 text-xs text-white/85 hover:text-white hover:bg-white/[0.08]"
                     >
                       {copiedPassword ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                     </Button>
@@ -619,7 +662,7 @@ export default function UsersPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={newUserData.password}
                   onChange={(e) => setNewUserData(prev => ({ ...prev, password: e.target.value }))}
-                  className="pr-8 h-8"
+                  className="pr-9 h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                   autoComplete="new-password"
                   data-form-type="other"
                   data-lpignore="true"
@@ -628,21 +671,22 @@ export default function UsersPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-white/55 hover:text-white"
+                  title={showPassword ? t('hidePassword') : t('showPassword')}
                 >
-                  {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="newConfirmPassword" className="text-xs">{t('confirmPasswordRequired')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="newConfirmPassword" className="text-xs text-white/80">{t('confirmPasswordRequired')}</Label>
               <div className="relative">
                 <Input
                   id="newConfirmPassword"
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={newUserData.confirmPassword}
                   onChange={(e) => setNewUserData(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                  className="pr-8 h-8"
+                  className="pr-9 h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                   autoComplete="new-password"
                   data-form-type="other"
                   data-lpignore="true"
@@ -651,19 +695,32 @@ export default function UsersPage() {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-white/55 hover:text-white"
+                  title={showConfirmPassword ? t('hidePassword') : t('showPassword')}
                 >
-                  {showConfirmPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>
             <PasswordRequirements password={newUserData.password} />
           </div>
-          <DialogFooter className="pt-2">
+          <DialogFooter className="pt-3 gap-2">
             <DialogClose asChild>
-              <Button variant="outline" size="sm">{tc('cancel')}</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0"
+              >
+                {tc('cancel')}
+              </Button>
             </DialogClose>
-            <Button size="sm" onClick={handleAddUser} disabled={saving}>
+            <Button
+              size="sm"
+              onClick={handleAddUser}
+              disabled={saving}
+              style={{ color: '#ffffff' }}
+              className="font-semibold"
+            >
               {saving ? tc('creating') : t('addUser')}
             </Button>
           </DialogFooter>

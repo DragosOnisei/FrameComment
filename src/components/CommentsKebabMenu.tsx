@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { MoreVertical, ClipboardCopy, ClipboardPaste, Check } from 'lucide-react'
 
 /**
@@ -46,14 +47,43 @@ export default function CommentsKebabMenu({
     | null
   >(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  // 2.5.1+: viewport-anchored coords for the portalled popover so
+  // backdrop-filter can actually sample the page behind it (the
+  // CommentSection card has its own backdrop-filter that would
+  // otherwise form a backdrop root).
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const compute = () => {
+      const el = triggerRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      setCoords({
+        top: rect.bottom + 4,
+        right: Math.max(8, window.innerWidth - rect.right),
+      })
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
+  }, [open])
 
-  // Close on outside click / Escape, identical pattern to
-  // PlaybackSpeedMenu so the two feel the same.
+  // Close on outside click / Escape. With the popover portalled to
+  // body we have to check BOTH the trigger wrapper and the popover
+  // ref before treating a click as "outside".
   useEffect(() => {
     if (!open) return
     const onPointerDown = (e: MouseEvent | TouchEvent) => {
-      if (!wrapperRef.current) return
-      if (!wrapperRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (wrapperRef.current?.contains(target)) return
+      if (popoverRef.current?.contains(target)) return
+      setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -112,6 +142,7 @@ export default function CommentsKebabMenu({
   return (
     <div ref={wrapperRef} className="relative shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -119,9 +150,9 @@ export default function CommentsKebabMenu({
         className={`
           inline-flex items-center justify-center
           w-8 h-8 rounded-md
-          text-muted-foreground hover:text-foreground hover:bg-muted/60
+          text-white/65 hover:text-white hover:bg-white/[0.08]
           transition-colors
-          ${open ? 'bg-muted/60 text-foreground' : ''}
+          ${open ? 'bg-white/[0.08] text-white' : ''}
         `}
         title="More actions"
         aria-label="More actions"
@@ -148,16 +179,28 @@ export default function CommentsKebabMenu({
         </span>
       )}
 
-      {open && (
+      {open && coords && typeof document !== 'undefined' && createPortal(
+        // 2.5.1+: TRUE frosted glass — portalled to document.body
+        // so backdrop-filter can sample what's actually behind
+        // (CommentSection's own backdrop-filter would otherwise
+        // form a backdrop root and break the blur). Same recipe
+        // as PlayerTopMenu / All comments filter / mic picker.
         <div
+          ref={popoverRef}
           role="menu"
-          className="
-            absolute top-full right-0 mt-1 z-50 min-w-[200px]
-            bg-popover text-popover-foreground
-            ring-1 ring-border shadow-2xl
-            rounded-lg p-1
-            animate-in fade-in-0 slide-in-from-top-1 duration-150
-          "
+          className="fixed z-[100] min-w-[220px] text-white ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] rounded-lg p-1 animate-in fade-in-0 slide-in-from-top-1 duration-150"
+          style={{
+            top: coords.top,
+            right: coords.right,
+            backgroundColor: 'rgba(22, 37, 51, 0.35)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
         >
           <button
             role="menuitem"
@@ -167,13 +210,13 @@ export default function CommentsKebabMenu({
             className={`
               w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
               transition-colors text-left
-              ${canCopy ? 'hover:bg-muted' : 'opacity-40 cursor-not-allowed'}
+              ${canCopy ? 'hover:bg-white/[0.08]' : 'opacity-40 cursor-not-allowed'}
             `}
           >
             <ClipboardCopy className="w-4 h-4 shrink-0" />
             <span className="flex-1">Copy comments</span>
             {commentCount > 0 && (
-              <span className="text-xs text-muted-foreground tabular-nums">
+              <span className="text-xs text-white/55 tabular-nums">
                 {commentCount}
               </span>
             )}
@@ -186,13 +229,14 @@ export default function CommentsKebabMenu({
             className={`
               w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
               transition-colors text-left
-              ${canPaste ? 'hover:bg-muted' : 'opacity-40 cursor-not-allowed'}
+              ${canPaste ? 'hover:bg-white/[0.08]' : 'opacity-40 cursor-not-allowed'}
             `}
           >
             <ClipboardPaste className="w-4 h-4 shrink-0" />
             <span className="flex-1">Paste comments</span>
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

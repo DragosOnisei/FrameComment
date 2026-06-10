@@ -1396,7 +1396,7 @@
       "autoApproveDisableHint": "Disable this if you upload videos one-by-one and don't want the project to auto-approve until you're ready."
     },
     "security": {
-      "title": "Advanced Security Settings",
+      "title": "Security",
       "description": "Configure advanced security options",
       "warning": "Warning: Advanced Configuration",
       "warningDescription": "These settings control critical security features including rate limiting, hotlink protection, and access controls. Modifying these values without proper understanding may impact system functionality and security. Only adjust if you are familiar with these security mechanisms.",

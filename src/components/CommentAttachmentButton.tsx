@@ -410,7 +410,7 @@ export default function CommentAttachmentButton({
         disabled={disabled}
         title={t('attachFiles')}
         aria-label={t('attachFiles')}
-        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Paperclip className="w-4 h-4" />
       </button>

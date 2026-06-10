@@ -9,6 +9,9 @@ interface User {
   id: string
   email: string
   name: string | null
+  // 2.5.1+: inline data: URL for the profile avatar (null when the
+  // user hasn't uploaded one yet — UI falls back to initials).
+  avatarUrl?: string | null
   role: string
 }
 
@@ -115,8 +118,16 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
   }, [checkAuth, refreshWithToken])
 
   useEffect(() => {
+    // 2.5.0+: bootstrap once on mount, NOT on every pathname change.
+    // The previous `[bootstrap, pathname]` dep array re-flipped
+    // `loading` to true on every internal navigation, which made the
+    // full-screen `Loading…` gate (below) flash between every page.
+    // Session tokens are validated on every `apiFetch` request via
+    // the access-token header, so we don't need to re-verify the
+    // session on the client just because the URL changed.
     bootstrap()
-  }, [bootstrap, pathname])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (requireAuth && !loading && !user) {

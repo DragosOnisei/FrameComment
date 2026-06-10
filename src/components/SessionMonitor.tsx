@@ -5,7 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { getAccessToken, getRefreshToken, clearTokens, subscribe } from '@/lib/token-store'
 
-const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000 // 15 minutes
+// 2.4.2+: raised from 15 minutes → 12 hours. Matches the new
+// SecuritySettings schema default. The /api/settings/security
+// response still overrides this at runtime, so admins who set a
+// shorter value via the UI keep their preference. This default
+// only fires while the fetch is in flight or if it fails outright,
+// preventing a sub-minute "session expired" flash on the first
+// page of the day.
+const DEFAULT_INACTIVITY_TIMEOUT_MS = 12 * 60 * 60 * 1000 // 12 hours
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
 
 export default function SessionMonitor() {

@@ -6,8 +6,6 @@ import Link from 'next/link'
 import {
   ArrowLeft,
   Download,
-  FolderPlus,
-  Settings,
   Upload,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -16,6 +14,7 @@ import AdminVideoManager, { type AdminVideoManagerHandle } from '@/components/Ad
 import FolderBrowser, {
   type FolderBrowserHandle,
 } from '@/components/FolderBrowser'
+import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
@@ -222,13 +221,10 @@ export default function ProjectFolderPage() {
     }
   }, [fetchFolder])
 
-  if (loading) {
-    return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">{tc('loading')}</p>
-      </div>
-    )
-  }
+  // 2.5.0+: render nothing while the first fetch is in flight — see
+  // the matching note on the project root page. Sidebar + topbar
+  // stay mounted from the layout, so navigation feels instant.
+  if (loading) return null
 
   if (error || !folder || !project) {
     return (
@@ -250,78 +246,69 @@ export default function ProjectFolderPage() {
   const breadcrumbForBrowser = breadcrumb.map((b) => ({ id: b.id, name: b.name }))
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-        {/* 1.3.0+: Frame.io-style top action bar. On phones (<sm)
-            every button is icon-only with no min-width so the entire
-            row — Back + Upload + Download + New Folder + Settings —
-            fits on a single line at 360px. From sm: up we restore the
-            150px floor + visible labels so the desktop layout is
-            unchanged. Removed `flex-wrap` so buttons never stack into
-            a 2x2 grid on mobile (Frame.io-style single-row toolbar). */}
-        <div className="mb-4 sm:mb-6 flex items-center justify-between gap-2">
-          <Link href={`/admin/projects/${projectId}`}>
-            <Button
-              variant="outline"
-              size="sm"
-              className="sm:size-default sm:h-10 sm:px-4 sm:min-w-[150px]"
-              aria-label="Back"
-            >
-              <ArrowLeft className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Back</span>
-            </Button>
-          </Link>
-          <div className="flex items-center gap-1 sm:gap-2">
-            {project && project.status !== 'APPROVED' && (
-              // Upload is the primary action — solid blue variant.
-              <Button
-                variant="default"
-                size="sm"
-                className="sm:h-10 sm:px-4 sm:min-w-[150px]"
-                onClick={() => videoManagerRef.current?.triggerUpload()}
-                aria-label={t('uploadVideos')}
-              >
-                <Upload className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">{t('uploadVideos')}</span>
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="sm:h-10 sm:px-4 sm:min-w-[150px]"
-              onClick={() => folderBrowserRef.current?.downloadAll()}
-              aria-label="Download All"
-            >
-              <Download className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Download All</span>
-            </Button>
-            {/* 1.7.0+: the Grid / Table toggle moved to AdminHeader
-                so the same control flips both the dashboard and the
-                folder browser. We still read folderView via
-                useAdminViewMode below to pick the right layout. */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="sm:h-10 sm:px-4 sm:min-w-[150px]"
-              onClick={() => folderBrowserRef.current?.openNewFolderDialog()}
-              aria-label="New Folder"
-            >
-              <FolderPlus className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">New Folder</span>
-            </Button>
-            <Link href={`/admin/projects/${projectId}/settings`}>
-              <Button
-                variant="outline"
-                size="sm"
-                className="sm:h-10 sm:px-4 sm:min-w-[150px]"
-                aria-label="Project settings"
-              >
-                <Settings className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Project settings</span>
-              </Button>
-            </Link>
-          </div>
-        </div>
+    // 2.5.0+: drop the `bg-background` solid so the layout's spotlight
+    // gradient shows through behind FolderCard / VideoCard glass; also
+    // drop the centred max-w wrapper so folders flow flush-left next
+    // to the sidebar.
+    <div className="flex-1 min-h-0">
+      {/* 2.5.0+: action bar lives in the global topbar via portal slots
+          — same recipe as the project root page.
+          2.5.1+: Back navigates ONE step up the tree. If the current
+          folder has a `parentFolderId`, jump to that folder's page;
+          otherwise we're a top-level folder under the project, so
+          fall back to the project root. Previously it always went
+          to the project root which lost the user's place when they
+          were 2+ levels deep (e.g. VDA > Test Folder > YouTube). */}
+      <TopbarLeftSlot>
+        <Link
+          href={
+            folder?.parentFolderId
+              ? `/admin/projects/${projectId}/folder/${folder.parentFolderId}`
+              : `/admin/projects/${projectId}`
+          }
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:size-default md:h-10 md:px-4 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-4 h-4 md:mr-2" />
+            <span className="hidden md:inline">Back</span>
+          </Button>
+        </Link>
+      </TopbarLeftSlot>
+      <TopbarRightSlot>
+        {/* 2.5.0+: New Folder is an in-grid tile now; Project Settings
+            moved into the ProjectActions kebab on the project root.
+            We keep Upload + Download All here because they're the
+            primary actions inside a folder. Text collapses to icon
+            below `md` so the toolbar lines up with the search pill's
+            own icon-only state — every group expands together. */}
+        {project && project.status !== 'APPROVED' && (
+          <Button
+            variant="default"
+            size="sm"
+            className="md:h-10 md:px-4"
+            onClick={() => videoManagerRef.current?.triggerUpload()}
+            aria-label={t('uploadVideos')}
+          >
+            <Upload className="w-4 h-4 md:mr-2" />
+            <span className="hidden md:inline">{t('uploadVideos')}</span>
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="md:h-10 md:px-4 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
+          onClick={() => folderBrowserRef.current?.downloadAll()}
+          aria-label="Download All"
+        >
+          <Download className="w-4 h-4 md:mr-2" />
+          <span className="hidden md:inline">Download All</span>
+        </Button>
+      </TopbarRightSlot>
+      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
 
         <div className="space-y-6">
           {/* Unified Frame.io-style grid (1.0.6+) — folders and

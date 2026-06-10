@@ -325,7 +325,11 @@ export default function ThumbnailReel({
   return (
     <div className="relative shrink-0 z-20 p-2 sm:p-3">
       {/* Compact Control Bar - Always visible */}
-      <div className="bg-card/95 backdrop-blur-sm px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl">
+      {/* 2.5.1+ refresh — bar wrapper is transparent, same as the
+          AdminTopBar pattern. Only the individual elements (Back
+          pill, version chip, panel toggle, kebab) carry glass
+          surfaces; the row itself just structures the layout. */}
+      <div className="px-3 py-2 sm:px-4 sm:py-2.5">
         <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Left: Back to grid */}
           <div className="flex items-center">
@@ -334,14 +338,12 @@ export default function ThumbnailReel({
                 variant="ghost"
                 size="sm"
                 onClick={onBackToGrid}
-                className="shrink-0 gap-1.5 px-2 sm:px-3 h-8"
+                // 2.5.1+: glass pill matching the rest of the v2.5
+                // back buttons (project / folder pages). White text,
+                // hairline ring, low-opacity bg with hover lift.
+                className="shrink-0 gap-1.5 px-2 sm:px-3 h-8 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0"
                 title={backLabel ?? tShare('backToAllVideos')}
               >
-                {/* 1.0.9+: plain "Back" arrow instead of the grid
-                    glyph + "All Videos" label, to match the unified
-                    Back buttons on the project + folder pages. A
-                    `backLabel` override (e.g. folder-share's "Back to
-                    folder") still wins when provided. */}
                 <ArrowLeft className="w-4 h-4" />
                 <span className="hidden sm:inline text-sm">{backLabel ?? 'Back'}</span>
               </Button>
@@ -360,15 +362,18 @@ export default function ThumbnailReel({
                 onClick={handleToggleExpanded}
                 disabled={currentVersions.length < 2}
                 className={cn(
-                  "flex items-center gap-2 min-w-0 px-2 py-1 rounded-md transition-all max-w-[40vw] sm:max-w-[50vw]",
-                  // 2.2.4+: only show hover affordance + scale when
-                  // there are 2+ versions to switch between. A
-                  // single-version clip leaves the title visually
-                  // static — clicking it would be a dead-end.
+                  // 2.5.1+: persistent glass pill — mirrors the
+                  // AdminTopBar search button so the center column
+                  // reads as the same affordance everywhere in the
+                  // app. Rounded-lg + h-9 + `bg-white/[0.06]` ring
+                  // by default; bumps to `bg-white/[0.12]` on hover
+                  // or when the versions dropdown is open.
+                  "flex items-center gap-2 min-w-0 px-3 h-9 rounded-lg transition-all max-w-[40vw] sm:max-w-[50vw]",
+                  "bg-white/[0.06] ring-1 ring-white/10",
                   currentVersions.length >= 2
-                    ? "hover:bg-muted/80 active:scale-95 cursor-pointer"
+                    ? "hover:bg-white/[0.12] hover:ring-white/20 active:scale-95 cursor-pointer"
                     : "cursor-default",
-                  isExpanded && currentVersions.length >= 2 && "bg-muted/50"
+                  isExpanded && currentVersions.length >= 2 && "bg-white/[0.12] ring-white/20"
                 )}
                 title={
                   currentVersions.length < 2
@@ -520,7 +525,9 @@ export default function ThumbnailReel({
                 variant="ghost"
                 size="icon"
                 onClick={onToggleCommentPanel}
-                className="hidden lg:flex h-8 w-8"
+                // 2.5.1+: glass icon button matching the kebab next
+                // to it so the right cluster reads as a pair.
+                className="hidden lg:flex h-8 w-8 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0"
                 title={isCommentPanelVisible ? tComments('hideFeedback') : tComments('showFeedback')}
               >
                 {isCommentPanelVisible ? (
@@ -552,8 +559,25 @@ export default function ThumbnailReel({
         <div
           className="absolute left-2 right-2 sm:left-3 sm:right-3 top-full z-30 mt-1"
         >
-          <div className="bg-background/90 backdrop-blur-md shadow-lg rounded-xl">
-            <div className="px-2 py-3 sm:px-4 relative">
+          {/* 2.5.1+: glass panel matching the rest of the v2.5
+              vocabulary — soft white tint over `.spotlight-bg`,
+              hairline ring, deep outward shadow so it reads as
+              elevated above the player. */}
+          <div
+            className="rounded-xl bg-white/[0.06] ring-1 ring-white/15 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.7)]"
+            style={{
+              backdropFilter: 'blur(20px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+            }}
+          >
+            {/* 2.5.1+: vertical padding moved off the outer wrapper
+                so the scroll container's implicit overflow-y clip
+                (a side effect of `overflow-x-auto`) doesn't cut the
+                tiles' drop shadow + brand-blue highlight glow at
+                the bottom. The horizontal padding stays on the
+                outer so the arrow buttons sit flush with the
+                wrapper's edge. */}
+            <div className="px-2 sm:px-4 relative">
               {currentVersions.length > VERSION_REEL_ARROWS_THRESHOLD && (
                 <button
                   type="button"
@@ -561,9 +585,9 @@ export default function ThumbnailReel({
                   onClick={() => scrollVersionReel('left')}
                   className={cn(
                     'absolute left-1 sm:left-2 top-1/2 -translate-y-1/2 z-10',
-                    'h-8 w-8 rounded-full bg-background/95 ring-1 ring-border shadow-md',
-                    'flex items-center justify-center',
-                    'hover:bg-muted transition-colors',
+                    'h-8 w-8 rounded-full bg-white/[0.08] ring-1 ring-white/15 shadow-md text-white',
+                    'flex items-center justify-center backdrop-blur-md',
+                    'hover:bg-white/[0.14] hover:ring-white/25 transition-colors',
                   )}
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -573,7 +597,14 @@ export default function ThumbnailReel({
               <div
                 ref={scrollContainerRef}
                 className={cn(
-                  'flex gap-2 sm:gap-3 overflow-x-auto overscroll-x-contain snap-x snap-mandatory',
+                  // 2.5.1+: `py-3` lives here (not on the outer
+                  // wrapper) so each tile gets ~12px of breathing
+                  // room above + below INSIDE the scroll container's
+                  // implicit overflow-y clip — enough for the drop
+                  // shadow + brand-blue glow ring to render fully on
+                  // every side instead of getting chopped at the
+                  // bottom edge.
+                  'flex gap-2 sm:gap-3 py-3 overflow-x-auto overscroll-x-contain snap-x snap-mandatory',
                   currentVersions.length > VERSION_REEL_ARROWS_THRESHOLD
                     ? 'px-10 justify-start'
                     : 'justify-center',
@@ -622,21 +653,41 @@ export default function ThumbnailReel({
                       onMouseMove={handleScrub}
                       onMouseLeave={() => setVersionScrub(version.id, null)}
                       className={cn(
+                        // 2.5.1+: glass tile — drops `bg-muted` +
+                        // `border-2` chrome in favour of the v2.5
+                        // `bg-white/[0.04]` + ring pattern. Every
+                        // tile gets a soft outward shadow so it
+                        // reads as a layer floating ABOVE the
+                        // panel — that's how the user told them
+                        // apart from the wrapper. Active tile
+                        // keeps the brand-blue ring so it stays
+                        // the strongest signal in the panel.
                         'shrink-0 rounded-md sm:rounded-lg overflow-hidden snap-start',
-                        'bg-muted border-2 transition-all duration-150',
+                        'bg-white/[0.04] transition-all duration-150',
+                        'shadow-[0_6px_18px_-8px_rgba(0,0,0,0.55)]',
                         'focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-background',
                         'w-[80px] sm:w-[110px] md:w-[130px] lg:w-[150px]',
                         isActive
-                          ? 'border-primary ring-2 ring-primary/30'
-                          : 'border-transparent hover:border-border'
+                          // 2.5.1+: only a clean white outline ring
+                          // marks the active tile — dropped the blue
+                          // halo glow so the icon stays neutral and
+                          // the highlight reads as a crisp border
+                          // rather than a wash of accent colour.
+                          ? 'ring-2 ring-white shadow-[0_10px_24px_-8px_rgba(0,0,0,0.65)]'
+                          : 'ring-1 ring-white/10 hover:ring-white/20 hover:shadow-[0_10px_24px_-8px_rgba(0,0,0,0.65)]'
                       )}
                       title={version.originalFileName || versionLabel}
                     >
                       <div className="aspect-video relative bg-black overflow-hidden">
                         {versionThumb && (
+                          // 2.5.1+: `alt=""` so a broken image
+                          // doesn't render the version label on top
+                          // of the black thumbnail. The footer
+                          // below already shows v1 / v2, and the
+                          // tile is keyboard-labelled via `title`.
                           <Image
                             src={versionThumb}
-                            alt={versionLabel}
+                            alt=""
                             fill
                             sizes="(min-width: 1024px) 150px, (min-width: 640px) 110px, 80px"
                             className={cn(
@@ -673,16 +724,34 @@ export default function ThumbnailReel({
                           </div>
                         )}
 
-                        {isActive && (
-                          <div className="absolute inset-0 bg-primary/10 pointer-events-none" />
-                        )}
+                        {/* 2.5.1+: dropped the `bg-primary/10`
+                            overlay that used to wash the active
+                            cover blue — the ring + the bold footer
+                            already make the active state obvious,
+                            and the wash dulled the actual
+                            thumbnail. */}
                       </div>
 
-                      <div className="px-1.5 py-1 sm:px-2 sm:py-1.5 bg-card/80 flex items-center justify-center gap-1">
+                      {/* 2.5.1+: footer with its own distinct
+                          surface so the label band reads as a clearly
+                          different layer from the video cover above
+                          it. Background stays neutral glass on
+                          BOTH active and inactive tiles — the
+                          brand-blue tint that used to wash the
+                          active footer was redundant with the
+                          white ring + the blue label text, and it
+                          dulled the layered look. */}
+                      <div className="px-1.5 py-1.5 sm:px-2 sm:py-2 flex items-center justify-center gap-1 bg-white/[0.08] border-t border-white/10">
+                        {/* 2.5.1+: label text stays white for both
+                            active and inactive tiles so it always
+                            reads cleanly against the glass footer.
+                            The white ring around the active tile is
+                            what marks it — no need to colour the
+                            label too. */}
                         <span
                           className={cn(
-                            'text-[10px] sm:text-xs font-mono font-semibold',
-                            isActive ? 'text-primary' : 'text-foreground'
+                            'text-[10px] sm:text-xs font-mono font-semibold tracking-wider',
+                            isActive ? 'text-white' : 'text-white/85'
                           )}
                         >
                           {versionLabel}
