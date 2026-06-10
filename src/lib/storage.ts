@@ -185,6 +185,32 @@ export async function downloadFile(filePath: string): Promise<Readable> {
   return fs.createReadStream(fullPath)
 }
 
+/**
+ * 3.1.0+: Return the absolute on-disk path for a stored file, or null
+ * if we're in S3 mode (no local file available).
+ *
+ * Lets the worker feed ffmpeg the source file DIRECTLY out of
+ * STORAGE_ROOT, without first streaming it into /tmp. Before this, a
+ * 4K master that gets transcoded to 480p/720p/1080p/2160p would be
+ * copied into `/tmp/framecomment/<id>-original` once per tier (because
+ * /tmp on Docker is tmpfs and gets reset between jobs) — that's a
+ * 16 GB original ending up as ~64 GB of pointless I/O per video, and
+ * /tmp pressure on top.
+ *
+ * With this helper the encoder calls getLocalSourcePath() first;
+ * if it returns a path, ffmpeg reads straight from the uploads volume
+ * (the file is still validated against STORAGE_ROOT to prevent
+ * traversal). If null, we fall through to the old download-into-/tmp
+ * path which is still correct for S3 mode (ffmpeg can't seek over an
+ * HTTP body, so we have to land it on disk).
+ */
+export function getLocalSourcePath(filePath: string): string | null {
+  if (isS3Mode()) return null
+  const fullPath = validatePath(filePath)
+  if (!fs.existsSync(fullPath)) return null
+  return fullPath
+}
+
 export async function deleteFile(filePath: string): Promise<void> {
   if (isS3Mode()) {
     await s3DeleteFile(filePath)

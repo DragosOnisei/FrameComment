@@ -5,7 +5,7 @@ import { pipeline } from 'stream/promises'
 import { EncodeTierJob, getVideoQueue } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
-import { downloadFile } from '../lib/storage'
+import { downloadFile, getLocalSourcePath } from '../lib/storage'
 import { rewriteHlsMaster } from '../lib/ffmpeg'
 import { TEMP_DIR } from './cleanup'
 import {
@@ -171,20 +171,42 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
       return
     }
 
-    // Ensure the cached original is on /tmp; re-download if not.
-    const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
-    if (!fs.existsSync(cachedOriginal)) {
-      logMessage(`[WORKER] encode-tier ${tier} for ${videoId}: cached original missing, re-downloading`)
-      const stream = await downloadFile(originalStoragePath)
-      await pipeline(stream, fs.createWriteStream(cachedOriginal))
+    // 3.1.0+: Resolve the SOURCE FILE PATH that ffmpeg will read from.
+    //
+    // Local mode (TrueNAS / single-host Docker): read DIRECTLY from
+    // STORAGE_ROOT — getLocalSourcePath() validates and returns the
+    // absolute on-disk path. Zero copy, zero /tmp pressure, instant
+    // job start. A 16 GB 4K master used to be copied into /tmp once
+    // per tier (480p/720p/1080p/2160p = 64 GB of I/O); we now read
+    // it in place.
+    //
+    // S3 mode: we still have to land it on disk first because ffmpeg
+    // can't seek inside an HTTP response body. The legacy
+    // download-to-/tmp path is preserved as the fallback, with the
+    // same "is it already cached?" check it had before.
+    let sourcePath: string
+    const localSource = getLocalSourcePath(originalStoragePath)
+    if (localSource) {
+      sourcePath = localSource
+      // Intentionally NOT setting tempFiles.input — we don't own the
+      // file and we sure don't want the temp sweeper unlinking the
+      // upload volume's original.
+    } else {
+      const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
+      if (!fs.existsSync(cachedOriginal)) {
+        logMessage(`[WORKER] encode-tier ${tier} for ${videoId}: cached original missing, re-downloading`)
+        const stream = await downloadFile(originalStoragePath)
+        await pipeline(stream, fs.createWriteStream(cachedOriginal))
+      }
+      sourcePath = cachedOriginal
+      tempFiles.input = cachedOriginal // tracked for sweeper but not unlinked here
     }
-    tempFiles.input = cachedOriginal // tracked for sweeper but not unlinked here
 
     // We need source metadata to compute output dimensions. Probing
     // here adds a few hundred ms — acceptable for the per-tier job,
     // and keeps each encode-tier job stateless w.r.t. metadata so it
     // can run in any order on any worker.
-    const metadata: VideoMetadata = await getVideoMetadata(cachedOriginal)
+    const metadata: VideoMetadata = await getVideoMetadata(sourcePath)
     const dimensions = calculateOutputDimensions(metadata, tier)
 
     const settings: ProcessingSettings = await fetchProcessingSettings(projectId, videoId)
@@ -209,7 +231,7 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
       previewPath = await processPreview(
         videoId,
         projectId,
-        cachedOriginal,
+        sourcePath,
         dimensions,
         { ...settings, resolution: tier, applyLut: settings.applyLut },
         tempFiles,

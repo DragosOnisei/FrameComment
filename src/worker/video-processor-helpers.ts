@@ -1,5 +1,5 @@
 import { prisma } from '../lib/db'
-import { downloadFile, uploadFile } from '../lib/storage'
+import { downloadFile, uploadFile, getLocalSourcePath } from '../lib/storage'
 import { transcodeVideo, generateThumbnail, generateStoryboard, getVideoMetadata, remuxToHls, VideoMetadata } from '../lib/ffmpeg'
 import fs from 'fs'
 import path from 'path'
@@ -101,19 +101,36 @@ export async function downloadAndValidateVideo(
 ): Promise<VideoInfo> {
   debugLog('Starting download and validation...')
 
-  // Download original file to temp location
-  const tempInputPath = path.join(TEMP_DIR, `${videoId}-original`)
-  tempFiles.input = tempInputPath
+  // 3.1.0+: Try to use the source file directly from STORAGE_ROOT
+  // (local mode). For local storage this turns the entire "download
+  // original to /tmp" step into a no-op — magic-byte validation and
+  // ffprobe both work fine on the upload volume directly.
+  //
+  // If the resolver returns null (S3 mode, or file missing), we fall
+  // through to the legacy download-to-/tmp path. In that case we
+  // still set tempFiles.input so cleanupTempFiles() can unlink it.
+  let tempInputPath: string
+  const localSource = getLocalSourcePath(storagePath)
+  if (localSource) {
+    tempInputPath = localSource
+    // Intentionally do NOT set tempFiles.input — this is the upload
+    // volume's original, not ours to delete.
+    debugLog('Using source directly from STORAGE_ROOT:', localSource)
+    logMessage(`[WORKER] Source for video ${videoId} read directly from storage volume (no /tmp copy)`)
+  } else {
+    tempInputPath = path.join(TEMP_DIR, `${videoId}-original`)
+    tempFiles.input = tempInputPath
 
-  debugLog('Downloading from:', storagePath)
-  debugLog('Temp path:', tempInputPath)
+    debugLog('Downloading from:', storagePath)
+    debugLog('Temp path:', tempInputPath)
 
-  const downloadStart = Date.now()
-  const downloadStream = await downloadFile(storagePath)
-  await pipeline(downloadStream, fs.createWriteStream(tempInputPath))
-  const downloadTime = Date.now() - downloadStart
+    const downloadStart = Date.now()
+    const downloadStream = await downloadFile(storagePath)
+    await pipeline(downloadStream, fs.createWriteStream(tempInputPath))
+    const downloadTime = Date.now() - downloadStart
 
-  logMessage(`[WORKER] Downloaded original file for video ${videoId} in ${(downloadTime / 1000).toFixed(2)}s`)
+    logMessage(`[WORKER] Downloaded original file for video ${videoId} in ${(downloadTime / 1000).toFixed(2)}s`)
+  }
 
   // Verify file exists and has content
   const stats = fs.statSync(tempInputPath)

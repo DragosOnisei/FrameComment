@@ -5,7 +5,7 @@ import { pipeline } from 'stream/promises'
 import { RegenerateThumbnailJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
-import { downloadFile } from '../lib/storage'
+import { downloadFile, getLocalSourcePath } from '../lib/storage'
 import { getVideoMetadata } from '../lib/ffmpeg'
 import { TEMP_DIR } from './cleanup'
 import {
@@ -59,24 +59,33 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
       return
     }
 
-    // Ensure the original is on /tmp; re-download if not.
-    const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
-    if (!fs.existsSync(cachedOriginal)) {
-      logMessage(`[WORKER] regenerate-thumbnail ${videoId}: cached original missing, re-downloading`)
-      const stream = await downloadFile(originalStoragePath)
-      await pipeline(stream, fs.createWriteStream(cachedOriginal))
+    // 3.1.0+: Prefer reading the source DIRECTLY from STORAGE_ROOT
+    // (local mode) — same fix applied to encode-tier. Falls back to
+    // the legacy download-into-/tmp behaviour for S3 mode.
+    let sourcePath: string
+    const localSource = getLocalSourcePath(originalStoragePath)
+    if (localSource) {
+      sourcePath = localSource
+    } else {
+      const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
+      if (!fs.existsSync(cachedOriginal)) {
+        logMessage(`[WORKER] regenerate-thumbnail ${videoId}: cached original missing, re-downloading`)
+        const stream = await downloadFile(originalStoragePath)
+        await pipeline(stream, fs.createWriteStream(cachedOriginal))
+      }
+      // We DON'T set tempFiles.input — the temp sweeper / a later
+      // tier job may need the cached original to stick around.
+      sourcePath = cachedOriginal
     }
-    // We DON'T set tempFiles.input — the temp sweeper / a later
-    // tier job may need the cached original to stick around.
 
     // Probe just for duration (cheap; processThumbnail needs it to
     // pick the timestamp inside the clip).
-    const metadata = await getVideoMetadata(cachedOriginal)
+    const metadata = await getVideoMetadata(sourcePath)
 
     const newThumbnailPath = await processThumbnail(
       videoId,
       projectId,
-      cachedOriginal,
+      sourcePath,
       metadata.duration,
       tempFiles,
     )

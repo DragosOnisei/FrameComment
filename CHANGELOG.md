@@ -14,7 +14,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.0.1] - 2026-06-10
+## [3.1.0] - 2026-06-10
+
+### Worker: zero-copy source reads — kill the /tmp pressure
+
+The encode pipeline used to copy every uploaded original into
+`/tmp/framecomment/<videoId>-original` before each ffmpeg pass. On
+Docker (and TrueNAS SCALE Custom Apps especially) `/tmp` is a tmpfs
+ramdisk that gets reset between jobs, and the per-job cleanup was
+deleting the cached copy after each tier finished. The net effect:
+a single 4K master uploaded at 16 GB was getting copied into /tmp
+once for every tier (480p / 720p / 1080p / 2160p) — **~64 GB of
+pointless I/O per video**, and constant `cached original missing,
+re-downloading` lines in the worker log.
+
+Fix is structural: in **local storage mode** (the only mode TrueNAS
+Custom App users run), the worker now reads the source file
+**directly from STORAGE_ROOT** — i.e. straight off the uploads
+volume. The file is still validated through the same path-traversal
+guard as `downloadFile()`. Zero copy, zero /tmp pressure, instant
+job start. In S3 mode the legacy download-to-/tmp path is preserved
+unchanged because ffmpeg can't seek inside an HTTP response body.
+
+Touched processors:
+
+- `encode-tier` (the big one — 4 tiers × every video)
+- `regenerate-thumbnail` (one-off thumbnail rebuild)
+- `prepare-video` (initial validate + probe pass)
+
+Net result on a typical TrueNAS deployment encoding a 4K master:
+
+| | before | after |
+|---|---|---|
+| /tmp writes per video | 4 × source size | 0 |
+| disk I/O during encode | source size × (1 + N_tiers) | source size × 1 |
+| job startup latency | seconds → minutes | constant <100 ms |
+
+### Quick Preview + Global Settings polish (carried over from 3.0.1)
+
+- **Quick Preview folder peek — zero-flash open**: contents are
+  pre-fetched by the parent overlay before the modal mounts, so the
+  popup appears in one shot at its final width with real thumbnails.
+  No empty frame, no skeleton, no width snap. Fetch is cancellable
+  on Esc / Space.
+- **Quick Preview sub-folder tiles use the chunky FolderCard glyph**:
+  same `bg-white/[0.03]` glass fill, `w-14` empty-state, `w-10` /
+  `w-7` mosaic glyphs — Quick Preview sub-folders now read as a
+  direct echo of the cards behind them.
+- **Global Settings page is boxed**: same `max-w-screen-2xl mx-auto
+  w-full` wrapper as Project Settings. Appearance / Branding /
+  Security panels no longer stretch edge-to-edge on wide monitors.
+
+### Notes
+
+- Schema: unchanged. No migrations.
+- API: unchanged.
+- S3 mode (`STORAGE_PROVIDER=s3`): no behaviour change — still
+  downloads to /tmp before encoding.
+
+---
+
+## [3.0.1] - 2026-06-10 (unreleased — folded into 3.1.0)
 
 ### Quick Preview + Global Settings polish
 
