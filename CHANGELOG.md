@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.1.1] - 2026-06-14
+## [3.1.2] - 2026-06-14
 
 ### CRITICAL hotfix — `downloadTime is not defined` killed 1000+ prepare-video jobs
 
