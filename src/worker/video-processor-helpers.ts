@@ -130,6 +130,17 @@ export async function downloadAndValidateVideo(
     const downloadTime = Date.now() - downloadStart
 
     logMessage(`[WORKER] Downloaded original file for video ${videoId} in ${(downloadTime / 1000).toFixed(2)}s`)
+
+    // 3.1.1+: download-speed debug log MUST stay inside the else
+    // branch — `downloadTime` is only meaningful when we actually
+    // streamed bytes off storage. The local-source path doesn't
+    // download at all, so this metric doesn't apply. The original
+    // 3.1.0 refactor left this debugLog at the outer scope by
+    // accident, which threw "downloadTime is not defined" on every
+    // local-mode prepare-video job and bricked the queue with 1000+
+    // failed jobs before anyone noticed.
+    const fileSizeForSpeed = fs.statSync(tempInputPath).size
+    debugLog('Download speed:', (fileSizeForSpeed / 1024 / 1024 / (downloadTime / 1000)).toFixed(2) + ' MB/s')
   }
 
   // Verify file exists and has content
@@ -142,7 +153,6 @@ export async function downloadAndValidateVideo(
   logMessage(`[WORKER] Downloaded file size: ${(fileSize / 1024 / 1024).toFixed(2)} MB`)
 
   debugLog('File verification passed')
-  debugLog('Download speed:', (fileSize / 1024 / 1024 / (downloadTime / 1000)).toFixed(2) + ' MB/s')
 
   // Validate file content (magic bytes)
   debugLog('Validating magic bytes...')

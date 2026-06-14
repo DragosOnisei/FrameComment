@@ -14,6 +14,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-06-14
+
+### CRITICAL hotfix — `downloadTime is not defined` killed 1000+ prepare-video jobs
+
+3.1.0 refactored `downloadAndValidateVideo` (`src/worker/video-processor-helpers.ts`)
+to skip the /tmp copy when reading from local STORAGE_ROOT, but the
+`debugLog('Download speed: …', downloadTime)` line was left at the
+outer scope while `const downloadTime = …` only got declared inside
+the S3 `else` branch. Every prepare-video job that took the local-
+source path (i.e. all of them on TrueNAS deploys) threw
+`ReferenceError: downloadTime is not defined` right after the magic-
+byte validation step. BullMQ marked the job failed after retries and
+moved on — no encode-tier jobs were ever enqueued for those videos.
+
+By the time it was caught, **1006 prepare-video jobs had failed**
+silently on a single TrueNAS deploy: worker idle, GPU at 0%, queue
+empty, but the DB showed hundreds of videos still pending tier
+completion. The processing banner kept showing "encoding…" but
+nothing was actually encoding.
+
+**Fix**: move the download-speed debug line into the S3 branch
+(`else { … const downloadTime = … debugLog(…) }`). `downloadTime` is
+only meaningful when we actually streamed bytes; in local mode there
+is no download to measure.
+
+**Recovery**: after deploying 3.1.1, retry the failed prepare-video
+jobs in BullMQ. They'll re-run the validation step (this time
+without the ReferenceError) and enqueue their encode-tier siblings
+normally. See `docs/recovery-3.1.1.md` (or the release notes) for
+the one-liner.
+
+### Notes
+
+- No schema changes. No API changes.
+- The local-source code path itself works correctly — the bug was
+  purely a misplaced debug log reference. Encodes that did make it
+  past prepare-video have been processing at the expected speed all
+  along.
+
+---
+
 ## [3.1.0] - 2026-06-10
 
 ### Worker: zero-copy source reads — kill the /tmp pressure
