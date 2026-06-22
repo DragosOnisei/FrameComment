@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.5] - 2026-06-22
+
+### Clean re-release of the 3.2.4 fixes under a correct tag
+
+No new code — this is a packaging fix. The `v3.2.4` tag already existed
+locally and on the remote, pointing at the **3.2.3** commit (a stale
+leftover), so when the 3.2.4 fixes were committed the `git tag -a
+v3.2.4` step failed with "tag already exists" and the tag never moved
+to the fix commit. The release workflow therefore never built a valid
+`framecomment:3.2.4` image (and would have failed its tag-vs-version
+check anyway, since the tagged commit still said `3.2.3`).
+
+The fix commit itself landed on `main` fine; only the tag was wrong.
+3.2.5 bumps the version files and ships the exact same three fixes
+under a clean, correctly-pointed tag. See the [3.2.4] notes below for
+the full detail:
+
+- Client share player stuck on "Loading video…" — the 3.2.2 admin
+  thumbnail fan-out fix, now applied to the public client share
+  (`/share/[token]`): player-view skips the bulk thumbnail fetch, grid
+  view runs a 4-wide concurrency pool. Kills
+  `ERR_INSUFFICIENT_RESOURCES` on 250+ clip shares.
+- Share-link auto-copy showed "Copied" but left the clipboard empty on
+  plain-HTTP deployments — copy now reads from the visible input, which
+  is `readOnly` (not `disabled`) so it stays selectable.
+- Added the missing `share.loadingVideo` i18n key.
+
 ## [3.2.4] - 2026-06-22
 
 ### CRITICAL — client share player stuck on "Loading video…" (same
