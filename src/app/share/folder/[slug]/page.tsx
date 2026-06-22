@@ -331,10 +331,29 @@ function PublicFolderSharePageInner() {
     )
   }
 
+  // 3.2.3+ Folder share initial loading: glass card on spotlight bg
+  // instead of bare loader on flat `bg-background`. Same recipe as
+  // the public/admin share initial-load cards so the client never
+  // sees the legacy #121212 surface before the folder grid renders.
   if (loading && !data) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+      <div className="spotlight-bg-tr min-h-screen flex items-center justify-center p-4">
+        <div
+          className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+          <p className="text-sm font-medium text-white/85">Loading folder…</p>
+        </div>
       </div>
     )
   }
@@ -451,7 +470,13 @@ function PublicFolderSharePageInner() {
   })()
 
   return (
-    <div className="min-h-screen bg-background">
+    // 3.2.3+ Folder share styling: replace the flat `bg-background`
+    // (#121212) wrapper with the v2.5 spotlight gradient (`spotlight-
+    // bg-tr`) so the public folder share matches the admin look —
+    // soft radial spotlight + cooler tint instead of the legacy
+    // pure-dark surface. The wrapper inside keeps its max-width
+    // constraint so cards still align with the rest of the page.
+    <div className="spotlight-bg-tr min-h-screen">
       <div className="max-w-screen-xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-5">
         {/* Header: in-scope breadcrumb + optional Back button.
             1.4.x+: the project title used to be rendered above as a

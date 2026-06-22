@@ -1124,11 +1124,31 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     )
   }
 
-  // Show loading state
+  // 3.2.3+ Mobile/client UX: glass loading instead of pre-2.5 flat
+  // dark "Loading…" while the share page is figuring out whether
+  // the project needs password / OTP auth. Same recipe as the
+  // `if (!project)` and player-side glass cards so the client never
+  // sees the legacy `bg-background` (#121212) flash before the
+  // password gate / player renders.
   if (isPasswordProtected === null) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">{tc('loading')}</p>
+      <div className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col items-center justify-center p-4" style={{ height: '100dvh' }}>
+        <div
+          className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+          <p className="text-sm font-medium text-white/85">{tc('loading')}</p>
+        </div>
       </div>
     )
   }

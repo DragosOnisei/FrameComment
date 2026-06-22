@@ -403,11 +403,27 @@ export function ShareModal({
               aria-hidden
               className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-white/55"
             />
+            {/* 3.2.3+ UX fix: until the short-link round-trip resolves,
+                show a placeholder instead of the long URL. Previously
+                the input flashed the long `framecomment.com/share/<slug>`
+                URL for the ~200ms it took the POST to come back, then
+                swapped to the short `fcmt.io/<slug>` — confusing and
+                meant the user copying mid-flight could end up with
+                the wrong URL in their clipboard. Now the URL only
+                appears once we know which one to show (short if
+                configured, long as fallback). The auto-copy effect
+                below already gates on `shortResolved` so the
+                clipboard side was correct — just the visual was off.
+                On the loading state the input is disabled + shows a
+                discreet "Generating link…" placeholder; once resolved
+                the real URL slides in. */}
             <Input
-              value={displayUrl}
+              value={shortResolved ? displayUrl : ''}
+              placeholder={shortResolved ? undefined : 'Generating link…'}
               readOnly
+              disabled={!shortResolved}
               onClick={(e) => (e.currentTarget as HTMLInputElement).select()}
-              className="pl-8 pr-2 truncate font-mono text-xs bg-white/[0.06] ring-1 ring-white/10 border-0 text-white focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)]"
+              className="pl-8 pr-2 truncate font-mono text-xs bg-white/[0.06] ring-1 ring-white/10 border-0 text-white placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)] disabled:opacity-100 disabled:cursor-default"
               aria-label="Share link"
             />
           </div>
@@ -416,6 +432,7 @@ export function ShareModal({
             size="sm"
             variant={copied ? 'outline' : 'default'}
             onClick={handleCopy}
+            disabled={!shortResolved}
             className={`shrink-0 ${copied ? 'border-emerald-500 text-emerald-500' : ''}`}
           >
             {copied ? (

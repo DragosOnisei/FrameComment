@@ -14,6 +14,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-06-22
+
+### Mobile & share polish — Quality submenu fits the viewport, glass
+loading states on share pages, comment composer matches the glass surface
+
+A small UI/UX polish pass spotted on prod after the v3.2.2 hotfix:
+
+**Quality submenu off-screen on phones.** The settings popover opens
+its side submenu (Quality / Guides) using the desktop
+`right = mainRight + mainWidth + 6px` math, which on a 390 px-wide
+phone pushed the submenu's left edge into negative coordinates —
+the "Recommended / HD / HD / SD" rows ended up cropped past the
+left edge of the device. On viewports `< 640px` the submenu now
+stacks BELOW the main menu instead, anchored to the same right
+edge with a 6 px gap. Animation direction switches from
+`slide-in-from-right-2` to `slide-in-from-top-2` to match the
+new orientation. Desktop behaviour is unchanged.
+
+**Mobile composer used the pre-2.5 background.** The fixed-bottom
+"Leave your comment…" wrapper on phones still rendered with
+`bg-background/95 backdrop-blur-sm`, the old solid dark surface
+from before the v2.5 glass redesign. Replaced with the same
+recipe used elsewhere — `rgba(22, 37, 51, 0.62)` + radial
+spotlight + `backdropFilter: blur(40px) saturate(180%)` +
+`border-t border-white/10` — so the composer reads as part of
+the same translucent layer when the soft keyboard floats it
+above the player. Safe-area inset bottom padding is preserved
+for notched devices.
+
+**Share pages still flashed the pre-2.5 flat surface while
+loading.** The public share page (while it figured out
+password / OTP auth), the public folder share, and their
+initial loaders rendered on the legacy `bg-background`
+(#121212) before the gate / grid mounted. Replaced with the
+v2.5 glass recipe — `spotlight-bg-tr` background plus a frosted
+`rgba(22, 37, 51, 0.62)` card with the radial spotlight overlay
+and `blur(40px) saturate(180%)` — so the client never sees the
+old pure-dark flash before content renders. Matches the admin
+look.
+
+**ShareModal flashed the long URL before the short link
+resolved.** The share input briefly showed the 200-character
+signed URL for the ~200 ms it took the short-link POST to come
+back, then swapped to the tidy `fcmt.io/<slug>` — confusing,
+and a user copying mid-flight could grab the wrong URL. The
+input now shows a discreet "Generating link…" placeholder
+(disabled) until `shortResolved`, then the real URL slides in.
+The Copy button is disabled until then too. The auto-copy
+effect already gated correctly — this just fixes the visual.
+
+### Files changed
+
+- `src/components/PlayerSettingsMenu.tsx` — viewport-aware
+  submenu positioning, mobile stacks below instead of beside.
+- `src/components/CommentSection.tsx` — mobile-only fixed-bottom
+  composer wrapper switched to the v2.5 glass recipe.
+- `src/app/share/[token]/SharePageClient.tsx` — glass loading
+  card on the public share initial-load state.
+- `src/app/share/folder/[slug]/page.tsx` — glass loading card +
+  `spotlight-bg-tr` wrapper on the public folder share.
+- `src/components/ShareModal.tsx` — "Generating link…"
+  placeholder + disabled Copy until the short link resolves.
+
 ## [3.2.2] - 2026-06-22
 
 ### CRITICAL hotfix — `ERR_INSUFFICIENT_RESOURCES` from thumbnail fan-out drowned the active video's token fetches

@@ -336,22 +336,44 @@ export default function PlayerSettingsMenu({
                 The `key={submenu}` forces a remount when the user
                 hovers from Quality to Guides (or back), so the fade-in
                 animation replays for the new content. */}
-            {submenu && mainSize && (
+            {submenu && mainSize && (() => {
+              // 3.2.3+ Mobile fix: on narrow viewports (<640px) the
+              // side-by-side layout pushes the submenu off-screen
+              // (the desktop math `right = mainRight + mainWidth +
+              // 6px` would put the submenu's LEFT edge at negative
+              // coordinates when the main menu already hugs the
+              // right edge of a 390px-wide phone). Detect mobile
+              // and stack the submenu BELOW the main menu instead,
+              // anchored to the same right edge. The user gets a
+              // vertical sheet that always fits within the viewport.
+              const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
+              const submenuPositionStyle = isMobile
+                ? {
+                    // Stacked under the main menu, hugging the same
+                    // right edge so the visual relationship is
+                    // preserved. 6px gap matches the desktop side-
+                    // by-side spacing for a consistent feel.
+                    right: `${mainSize.right}px`,
+                    top: `${mainSize.top + mainSize.height + 6}px`,
+                    // Cap width so a long sub label (e.g. "Auto · 1080p")
+                    // doesn't blow past the screen edge.
+                    maxWidth: `calc(100vw - ${mainSize.right}px - 8px)`,
+                  }
+                : {
+                    // Desktop: side-by-side, aligned tops (Frame.io /
+                    // YouTube style).
+                    right: `calc(${mainSize.right}px + ${mainSize.width}px + 6px)`,
+                    top: `${mainSize.top}px`,
+                  }
+              return (
               <div
                 key={submenu}
                 data-player-settings-menu
-                className="fixed z-[2147483600] min-w-[220px] rounded-xl text-card-foreground ring-1 ring-border shadow-[0_12px_40px_rgba(0,0,0,0.6)] overflow-hidden animate-in fade-in-0 slide-in-from-right-2 duration-200 ease-out"
+                className={`fixed z-[2147483600] min-w-[220px] rounded-xl text-card-foreground ring-1 ring-border shadow-[0_12px_40px_rgba(0,0,0,0.6)] overflow-hidden animate-in fade-in-0 duration-200 ease-out ${
+                  isMobile ? 'slide-in-from-top-2' : 'slide-in-from-right-2'
+                }`}
                 style={{
-                  // 1.9.4+ Phase A: align the submenu's TOP with
-                  // the parent menu's top (Frame.io / YouTube
-                  // style) instead of its bottom. When the submenu
-                  // has fewer rows than the parent (e.g. Quality
-                  // shows just Auto + one tier early on) anchoring
-                  // by bottom made it sit visibly lower than the
-                  // parent — the new `top` anchor keeps both
-                  // panels reading as one continuous strip.
-                  right: `calc(${mainSize.right}px + ${mainSize.width}px + 6px)`,
-                  top: `${mainSize.top}px`,
+                  ...submenuPositionStyle,
                   ...popoverStyle,
                 }}
                 onMouseEnter={cancelSubmenuClose}
@@ -446,7 +468,8 @@ export default function PlayerSettingsMenu({
                   </div>
                 )}
               </div>
-            )}
+              )
+            })()}
           </>,
           document.body,
         )}

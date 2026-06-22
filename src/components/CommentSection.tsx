@@ -1508,7 +1508,28 @@ export default function CommentSection({
         {mobileCollapsible && (
           <div
             ref={mobileInputWrapperRef}
-            className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-background/95 backdrop-blur-sm border-t border-border shadow-[0_-4px_12px_rgba(0,0,0,0.25)] pb-[env(safe-area-inset-bottom)]"
+            // 3.2.3+ Mobile: align fixed-bottom composer with the v2.5
+            // frosted-glass recipe instead of the pre-2.5 flat
+            // `bg-background/95`. Same `rgba(22, 37, 51, 0.62)` tint +
+            // radial spotlight overlay + `backdrop-filter` blur as the
+            // glass loading cards and the comments sidebar, so the
+            // composer reads as part of the same translucent surface
+            // when the soft keyboard floats it up over the player
+            // background. `border-t border-white/10` matches the
+            // hairline used inside the glass cards. `pb-[env(safe-area-
+            // inset-bottom)]` stays — it covers the home-bar gap on
+            // notched devices.
+            className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-white/10 shadow-[0_-4px_12px_rgba(0,0,0,0.25)] pb-[env(safe-area-inset-bottom)]"
+            style={{
+              backgroundColor: 'rgba(22, 37, 51, 0.62)',
+              backgroundImage:
+                'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+              backdropFilter: 'blur(40px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+              transform: 'translate3d(0, 0, 0)',
+              willChange: 'backdrop-filter, transform',
+              isolation: 'isolate',
+            }}
           >
             <CommentInput
               newComment={newComment}
