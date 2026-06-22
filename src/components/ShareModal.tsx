@@ -92,6 +92,11 @@ export function ShareModal({
   onSaveExpiration,
 }: ShareModalProps) {
   const [copied, setCopied] = useState(false)
+  // 3.2.3+: ref to the visible share-URL input. The insecure-context
+  // (HTTP) clipboard fallback in `writeClipboard` copies directly from
+  // this field, which Chrome honours far more reliably than a hidden
+  // detached textarea.
+  const inputRef = useRef<HTMLInputElement>(null)
   const initialExpiresDate = useMemo(() => {
     if (!initialExpiresAt) return null
     return initialExpiresAt instanceof Date
@@ -136,14 +141,44 @@ export function ShareModal({
         /* fall through to legacy path */
       }
     }
+    // 3.2.3+ FIX: insecure-context copy (TrueNAS LAN over plain HTTP,
+    // where `navigator.clipboard` is undefined). Copy from the VISIBLE,
+    // focused share <input> instead of a detached off-screen textarea.
+    // The opacity:0 / off-screen textarea was the reason auto-copy
+    // "worked" visually but left the clipboard empty: on HTTP, Chrome
+    // returned `true` from `execCommand('copy')` while silently refusing
+    // to populate the clipboard from a hidden, unfocused element. A
+    // real, on-screen, focusable field that already holds the exact
+    // text is honoured reliably. The detached textarea stays as a
+    // last-resort fallback (e.g. if the input ref isn't mounted yet).
+    try {
+      const el = inputRef.current
+      if (el && el.value === text) {
+        const activeBefore = document.activeElement as HTMLElement | null
+        el.focus()
+        el.setSelectionRange(0, el.value.length)
+        const ok = document.execCommand('copy')
+        // Collapse the selection and restore prior focus so we don't
+        // leave the URL highlighted or steal focus from the dialog.
+        el.setSelectionRange(el.value.length, el.value.length)
+        if (activeBefore && activeBefore !== el && typeof activeBefore.focus === 'function') {
+          activeBefore.focus()
+        }
+        if (ok) return true
+      }
+    } catch {
+      /* fall through to detached textarea */
+    }
     try {
       const ta = document.createElement('textarea')
       ta.value = text
       ta.setAttribute('readonly', '')
       ta.style.position = 'fixed'
-      ta.style.top = '-9999px'
+      ta.style.top = '0'
+      ta.style.left = '0'
       ta.style.opacity = '0'
       document.body.appendChild(ta)
+      ta.focus()
       ta.select()
       const ok = document.execCommand('copy')
       document.body.removeChild(ta)
@@ -417,13 +452,22 @@ export function ShareModal({
                 On the loading state the input is disabled + shows a
                 discreet "Generating link…" placeholder; once resolved
                 the real URL slides in. */}
+            {/* 3.2.3+: `readOnly` (NOT `disabled`) while the short link
+                resolves. A `disabled` input cannot be focused or
+                selected, which broke the execCommand copy fallback on
+                HTTP deployments — the button flashed "Copied" but the
+                clipboard stayed empty. `readOnly` keeps the field
+                non-editable yet focusable/selectable so the copy works,
+                while the empty value + "Generating link…" placeholder
+                still conveys the loading state. `ref` lets
+                `writeClipboard` select this field directly. */}
             <Input
+              ref={inputRef}
               value={shortResolved ? displayUrl : ''}
               placeholder={shortResolved ? undefined : 'Generating link…'}
               readOnly
-              disabled={!shortResolved}
               onClick={(e) => (e.currentTarget as HTMLInputElement).select()}
-              className="pl-8 pr-2 truncate font-mono text-xs bg-white/[0.06] ring-1 ring-white/10 border-0 text-white placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)] disabled:opacity-100 disabled:cursor-default"
+              className="pl-8 pr-2 truncate font-mono text-xs bg-white/[0.06] ring-1 ring-white/10 border-0 text-white placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)]"
               aria-label="Share link"
             />
           </div>

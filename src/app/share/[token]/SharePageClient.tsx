@@ -826,28 +826,80 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       setThumbnailsLoading(true)
       const newThumbnails = new Map<string, string>()
 
+      // 3.2.3+ CRITICAL FIX — mirror of the 3.2.2 admin-share fix, now
+      // applied to the CLIENT share page. When we're in player view
+      // (URL targets a specific video via ?video=<name>) only fetch the
+      // thumbnail for the active video group. The grid is hidden, so
+      // fetching thumbnails for ALL videos here was firing one
+      // `/api/share/<token>/video-token?quality=thumbnail` per clip in a
+      // single `Promise.all`. On a 250+ clip share that's 250 parallel
+      // fetches the instant the page mounts — Chrome hits its global
+      // concurrent-fetch ceiling and starts returning
+      // `net::ERR_INSUFFICIENT_RESOURCES`. The ACTIVE video's own token
+      // fetch (480p/720p/1080p/2160p/hls/original/thumbnail) then lands
+      // on the exhausted pool, all come back errored, every streamUrl is
+      // empty, and the player is stuck on "Loading video…" forever. The
+      // public share endpoint had the exact same fan-out the admin page
+      // did before 3.2.2.
+      const inPlayerView = !!urlVideoName
+      const targetEntries = inPlayerView
+        ? Array.from(nameToVideoWithThumb.entries()).filter(([name]) => name === urlVideoName)
+        : Array.from(nameToVideoWithThumb.entries())
+
+      // 3.2.3+: run bulk thumbnails (grid view) through a small
+      // concurrency-limited worker pool instead of `Promise.all` so we
+      // never burst N requests at once. 4 is conservative — under
+      // Chrome's 6-per-origin cap so other UI requests (auth poll,
+      // processing-status, the active video's own tokens) still get
+      // bandwidth. Cached entries return synchronously without a fetch.
+      const CONCURRENCY = 4
+      const fetchOne = async ([name, videoWithThumb]: [string, any]) => {
+        const cachedUrl = thumbnailUrlCacheRef.current.get(videoWithThumb.id)
+        if (cachedUrl) {
+          if (isMounted) {
+            newThumbnails.set(name, cachedUrl)
+          }
+          return
+        }
+        const thumbToken = await fetchVideoTokenWithRetry(videoWithThumb.id, 'thumbnail')
+        if (thumbToken && isMounted) {
+          const url = `/api/content/${thumbToken}`
+          thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
+          newThumbnails.set(name, url)
+        }
+      }
+
       try {
+        // Worker-pool: CONCURRENCY workers each pull from a shared queue
+        // until it's empty.
+        const queue = targetEntries.slice()
+        const worker = async () => {
+          while (queue.length > 0 && isMounted) {
+            const next = queue.shift()
+            if (!next) break
+            await fetchOne(next)
+          }
+        }
         await Promise.all(
-          Array.from(nameToVideoWithThumb.entries()).map(async ([name, videoWithThumb]) => {
-            const cachedUrl = thumbnailUrlCacheRef.current.get(videoWithThumb.id)
-            if (cachedUrl) {
-              if (isMounted) {
-                newThumbnails.set(name, cachedUrl)
-              }
-              return
-            }
-            const thumbToken = await fetchVideoTokenWithRetry(videoWithThumb.id, 'thumbnail')
-            if (thumbToken && isMounted) {
-              const url = `/api/content/${thumbToken}`
-              thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
-              newThumbnails.set(name, url)
-            }
-          })
+          Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker()),
         )
 
         if (isMounted) {
-          setThumbnailsByName(newThumbnails)
-          lastThumbnailFingerprintRef.current = fingerprint
+          // 3.2.3+: in player view `newThumbnails` has only ONE entry —
+          // merge into existing state instead of replacing so the grid
+          // doesn't lose previously-loaded tiles, and DON'T mark the
+          // fingerprint as up-to-date (otherwise the grid view's first
+          // run would short-circuit and never load the rest).
+          if (inPlayerView) {
+            setThumbnailsByName((prev) => {
+              const merged = new Map(prev)
+              newThumbnails.forEach((url, name) => merged.set(name, url))
+              return merged
+            })
+          } else {
+            setThumbnailsByName(newThumbnails)
+            lastThumbnailFingerprintRef.current = fingerprint
+          }
         }
       } catch (error) {
         // Failed to load thumbnails
@@ -863,7 +915,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     return () => {
       isMounted = false
     }
-  }, [project?.videosByName, shareToken, fetchVideoTokenWithRetry])
+  }, [project?.videosByName, shareToken, fetchVideoTokenWithRetry, urlVideoName])
 
   // Determine initial view state based on URL params
   useEffect(() => {

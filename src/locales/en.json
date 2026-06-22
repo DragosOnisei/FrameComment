@@ -897,6 +897,7 @@
     "stepOf": "{current} of {total}"
   },
   "share": {
+    "loadingVideo": "Loading video...",
     "authRequired": "Authentication Required",
     "tooManyRequestsSlowDown": "Too many requests. Please slow down.",
     "slugRequired": "Slug is required",

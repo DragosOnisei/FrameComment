@@ -14,6 +14,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.4] - 2026-06-22
+
+### CRITICAL — client share player stuck on "Loading video…" (same
+fan-out as the 3.2.2 admin fix), broken auto-copy, missing i18n key
+
+Three issues found on prod after v3.2.3.
+
+**`ERR_INSUFFICIENT_RESOURCES` on the CLIENT share, identical to the
+3.2.2 admin bug.** The 3.2.2 hotfix capped the thumbnail fan-out on
+the *admin* share page but the public client share
+(`/share/[token]`) still fired one
+`/api/share/<token>/video-token?quality=thumbnail` per clip in a
+single `Promise.all` on mount. On a 250+ clip share that's 250
+parallel fetches → Chrome's renderer hits the global concurrent-fetch
+ceiling → the active video's own token fetch (480p / 720p / 1080p /
+2160p / hls / original / thumbnail) lands on the exhausted pool, all
+come back errored, every `streamUrl` is empty, and the player spins on
+"Loading video…" forever. Ported the exact 3.2.2 fix to the client
+page: in player view (`?video=<name>`) only the active clip's
+thumbnail is fetched; grid view runs through a 4-wide concurrency-
+limited worker pool instead of all-parallel `Promise.all`; player-view
+results merge into existing state and don't mark the fingerprint as
+complete (so the grid still lazy-loads the rest later).
+
+**Share-link auto-copy showed "Copied" but left the clipboard empty.**
+On the TrueNAS deployment (plain HTTP, `HTTPS_ENABLED=false`),
+`navigator.clipboard` is undefined — a secure-context-only API — so
+`writeClipboard` always took the legacy `execCommand('copy')` path.
+That path copied from a hidden, off-screen, opacity:0 textarea, which
+Chrome reports as successful (`execCommand` returns `true`) while
+silently refusing to populate the clipboard from an unfocused, hidden
+element. The button flashed green but nothing was copied. Now the
+insecure-context fallback selects the VISIBLE share `<input>` (which
+already holds the exact URL) and copies from there — Chrome honours
+that reliably. The input is now `readOnly` instead of `disabled` while
+the short link resolves, because a `disabled` field can't be focused
+or selected (which was blocking the copy). The "don't flash the long
+URL" behaviour from 3.2.3 is preserved.
+
+**Missing i18n key `share.loadingVideo`.** The 3.2.x glass loading
+cards on the public share page call `t('loadingVideo')` against the
+`share` namespace, but the key only existed under `projects` and
+`videos`. Console logged `MISSING_MESSAGE: share.loadingVideo (en)`
+and the spinner rendered the raw key. Added `loadingVideo` to the
+`share` namespace.
+
+### Files changed
+
+- `src/app/share/[token]/SharePageClient.tsx` — client thumbnail
+  fan-out fix (player-view skip + 4-wide worker pool, mirror of 3.2.2).
+- `src/components/ShareModal.tsx` — insecure-context clipboard copies
+  from the visible input; input `readOnly` not `disabled`.
+- `src/locales/en.json` — add `share.loadingVideo`.
+
 ## [3.2.3] - 2026-06-22
 
 ### Mobile & share polish — Quality submenu fits the viewport, glass
