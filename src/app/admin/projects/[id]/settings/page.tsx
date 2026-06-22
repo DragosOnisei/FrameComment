@@ -148,8 +148,21 @@ export default function ProjectSettingsPage() {
     shareExpiresAt: string | null
     parentFolderId: string | null
     hasPassword: boolean
+    // 3.2.6+: timestamps (ISO) for the share-link date filter below.
+    // The filter uses `updatedAt` (bumps on create / slug rotation /
+    // expiry change) so a folder re-shared today shows under "Today",
+    // not just folders first created today. `createdAt` kept for
+    // reference / fallback.
+    createdAt: string
+    updatedAt?: string
   }
   const [sharedFolders, setSharedFolders] = useState<SharedFolderRow[]>([])
+  // 3.2.6+: date filter for the Security → Folder share links list.
+  // Defaults to "today" so a project with hundreds of folders opens
+  // showing only the links created today; the segmented control lets
+  // the admin widen the window up to "all time".
+  type ShareLinkRange = 'today' | 'week' | 'month' | 'year' | 'all'
+  const [shareLinkRange, setShareLinkRange] = useState<ShareLinkRange>('today')
   // 1.5.8+: per-row pending state so we can disable buttons + show a
   // small "…" while a folder's share is being updated.
   const [folderShareBusyId, setFolderShareBusyId] = useState<string | null>(null)
@@ -1729,6 +1742,44 @@ export default function ProjectSettingsPage() {
             </>
           )
 
+          // 3.2.6+: date-range filter for the folder share-links list.
+          // Computed here (same scope as securityContent) so the list +
+          // empty-state can both read it. "today" = since local midnight;
+          // the rest are rolling windows; "all" disables the cutoff.
+          const shareLinkRanges: { id: ShareLinkRange; label: string }[] = [
+            { id: 'today', label: 'Today' },
+            { id: 'week', label: 'Last week' },
+            { id: 'month', label: 'Last month' },
+            { id: 'year', label: 'Last year' },
+            { id: 'all', label: 'All time' },
+          ]
+          const shareLinkCutoffMs: number | null = (() => {
+            if (shareLinkRange === 'all') return null
+            const now = new Date()
+            if (shareLinkRange === 'today') {
+              const d = new Date(now)
+              d.setHours(0, 0, 0, 0)
+              return d.getTime()
+            }
+            const days =
+              shareLinkRange === 'week' ? 7 : shareLinkRange === 'month' ? 30 : 365
+            return now.getTime() - days * 24 * 60 * 60 * 1000
+          })()
+          const visibleSharedFolders =
+            shareLinkCutoffMs == null
+              ? sharedFolders
+              : sharedFolders.filter((f) => {
+                  // Prefer updatedAt (when the share link was last
+                  // (re)created/activated); fall back to createdAt.
+                  const t = new Date(f.updatedAt ?? f.createdAt).getTime()
+                  // Fail-open: if the timestamp is missing or unparseable
+                  // (e.g. an older API response without the field), never
+                  // hide the link — better to show a stray row than to
+                  // make a freshly-shared folder vanish from the list.
+                  if (Number.isNaN(t)) return true
+                  return t >= shareLinkCutoffMs
+                })
+
           // Security content
           const securityContent = (
             <>
@@ -1861,6 +1912,34 @@ export default function ProjectSettingsPage() {
                   </p>
                 </div>
 
+                {/* 3.2.6+: date-range filter for the share-links list.
+                    Defaults to "Today"; the admin can widen the window
+                    up to "All time". Filters by folder creation date so
+                    a project with hundreds of folders isn't a wall of
+                    links on open. */}
+                {sharedFolders.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {shareLinkRanges.map((r) => {
+                      const active = shareLinkRange === r.id
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => setShareLinkRange(r.id)}
+                          className={cn(
+                            'px-3 py-1.5 rounded-lg text-xs font-medium ring-1 transition-colors',
+                            active
+                              ? 'bg-primary/15 text-primary ring-primary/40'
+                              : 'bg-white/[0.04] text-white/70 ring-white/10 hover:bg-white/[0.08] hover:text-white',
+                          )}
+                        >
+                          {r.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
                 {folderShareError && (
                   <p className="text-xs text-red-300">{folderShareError}</p>
                 )}
@@ -1869,9 +1948,19 @@ export default function ProjectSettingsPage() {
                   <p className="text-xs text-white/55 italic">
                     No folders in this project yet.
                   </p>
+                ) : visibleSharedFolders.length === 0 ? (
+                  <p className="text-xs text-white/55 italic">
+                    No share links created in this period. Try a wider range.
+                  </p>
                 ) : (
-                  <ul className="divide-y divide-white/10 rounded-md ring-1 ring-white/10 bg-white/[0.03]">
-                    {sharedFolders.map((folder) => {
+                  // 3.2.6+: the list scrolls INTERNALLY (max-height +
+                  // overflow) so a long folder list doesn't grow the
+                  // whole page — the left settings nav and the rest of
+                  // the page stay fixed. `overscroll-contain` stops the
+                  // scroll from chaining to the page once the list hits
+                  // its top/bottom.
+                  <ul className="max-h-[58vh] overflow-y-auto overscroll-contain divide-y divide-white/10 rounded-md ring-1 ring-white/10 bg-white/[0.03]">
+                    {visibleSharedFolders.map((folder) => {
                       const expires = folder.shareExpiresAt
                         ? new Date(folder.shareExpiresAt)
                         : null

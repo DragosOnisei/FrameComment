@@ -40,6 +40,8 @@ export async function GET(
         shareExpiresAt: true,
         parentFolderId: true,
         sharePassword: true,
+        createdAt: true,
+        updatedAt: true,
       },
       orderBy: [{ parentFolderId: 'asc' }, { name: 'asc' }],
     })
@@ -68,6 +70,14 @@ export async function GET(
       shareExpiresAt: f.shareExpiresAt ? f.shareExpiresAt.toISOString() : null,
       parentFolderId: f.parentFolderId,
       hasPassword: !!f.sharePassword,
+      // 3.2.6+: timestamps used by the Security tab's "Today / Last
+      // week / …" share-link date filter. `updatedAt` is the field the
+      // filter actually uses — it bumps when the folder is created, its
+      // slug is rotated (re-share), or its share expiry changes, so it
+      // tracks "when this share link was last (re)created/activated"
+      // rather than just when the folder first came into existence.
+      createdAt: f.createdAt.toISOString(),
+      updatedAt: f.updatedAt.toISOString(),
     }))
 
     return NextResponse.json({ folders: sanitized })

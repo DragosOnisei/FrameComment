@@ -14,6 +14,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.7] - 2026-06-22
+
+### Security tab — date filter on the folder share-links list, the
+list scrolls on its own, and the Share modal defaults to no expiry
+
+**Date-range filter on "Folder share links".** Projects with a lot of
+folders turned the Security tab into a very long wall of share links.
+Added a segmented filter above the list — **Today** (default), **Last
+week**, **Last month**, **Last year**, **All time** — that filters by
+when each folder's share link was last (re)created/activated (the
+folder's `updatedAt`, which bumps on create, slug rotation/re-share,
+and expiry change — so a folder re-shared today shows under "Today",
+not just folders first created today). The default opens showing only
+links from today; the admin widens the window as needed. The filter is
+fail-open: a row with a missing/unparseable timestamp is shown rather
+than hidden, so a freshly-shared folder never vanishes. When a range
+has no links, the panel shows "No share links created in this period.
+Try a wider range." instead of an empty list. Added `createdAt` +
+`updatedAt` to the `/api/projects/[id]/shared-folders` payload.
+
+**The links list now scrolls internally.** Previously a long list grew
+the page and the whole thing scrolled, carrying the left settings nav
+out of view. The list is now capped (`max-height` + `overflow-y-auto`
++ `overscroll-contain`), so only the list segment scrolls when it
+reaches the bottom — the left nav and the rest of the page stay put.
+
+**Share modal defaults to "No expiration date" again.** A folder that
+had been revoked via Project Settings → Delete link keeps its
+`shareExpiresAt` pinned to the epoch-0 sentinel (1970-01-01). When
+re-sharing such a folder the Share modal treated that as a real
+expiration — it opened with the toggle OFF and showed "Expires Thu, 1
+Jan 1970". The modal now treats the epoch sentinel (and any invalid /
+pre-2000 timestamp) as "no expiration", so it opens with the "No
+expiration date" toggle ON by default. Folders with a genuine future
+expiry still open with the toggle OFF and the date shown.
+
+### Files changed
+
+- `src/app/api/projects/[id]/shared-folders/route.ts` — return
+  `createdAt` + `updatedAt` per folder.
+- `src/app/admin/projects/[id]/settings/page.tsx` — `shareLinkRange`
+  state + segmented filter UI, `createdAt`/`updatedAt` on the row type,
+  fail-open `updatedAt` filtering, and internal scroll on the list.
+- `src/components/ShareModal.tsx` — treat the epoch-0 / invalid
+  expiry sentinel as "no expiration" so the toggle defaults ON.
+
 ## [3.2.6] - 2026-06-22
 
 ### Client share polish — no light-mode toggle, glass name field,

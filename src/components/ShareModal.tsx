@@ -99,9 +99,23 @@ export function ShareModal({
   const inputRef = useRef<HTMLInputElement>(null)
   const initialExpiresDate = useMemo(() => {
     if (!initialExpiresAt) return null
-    return initialExpiresAt instanceof Date
-      ? initialExpiresAt
-      : new Date(initialExpiresAt)
+    const d =
+      initialExpiresAt instanceof Date
+        ? initialExpiresAt
+        : new Date(initialExpiresAt)
+    // 3.2.x: treat the epoch-0 "revoked" sentinel (and any invalid /
+    // pre-2000 timestamp) as "no expiration". Folders that were once
+    // revoked via Project Settings → Delete link keep `shareExpiresAt`
+    // pinned to 1970-01-01; without this guard the modal opened with
+    // the toggle OFF and showed "Expires Thu, 1 Jan 1970". Real
+    // expirations always live in the present/future, so a year-2000
+    // floor cleanly separates them from the sentinel — anything below
+    // it defaults the share to "No expiration date" (toggle ON).
+    const MIN_VALID_EXPIRY_MS = Date.UTC(2000, 0, 1)
+    if (Number.isNaN(d.getTime()) || d.getTime() < MIN_VALID_EXPIRY_MS) {
+      return null
+    }
+    return d
   }, [initialExpiresAt])
 
   // Toggle ON = "No expiration date". Default ON when caller didn't
