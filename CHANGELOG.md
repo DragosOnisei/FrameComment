@@ -14,6 +14,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.6] - 2026-06-22
+
+### Client share polish — no light-mode toggle, glass name field,
+download banner that survives navigation
+
+**Removed the light/dark theme toggle from the client share.** The
+public share is dark-only by design, but the sun/moon toggle still
+showed up in the player toolbar (via `ThumbnailReel`), the folder/video
+grid header, and the password/OTP auth gate. All three are gone for
+clients now. `ThumbnailReel` gained a `showThemeToggle` prop (default
+`true`, so the admin share page is unchanged); the client player passes
+`showThemeToggle={false}`. The admin player keeps its consolidated
+top-right menu (which already has a "Switch theme" entry).
+
+**Client name field is now frosted glass.** The "Name: …" field in the
+comments panel (where a client sets their display name) still used the
+pre-2.5 flat `bg-background` (#121212) box, which stood out as a black
+rectangle against the glass sidebar. Both the editable input and the
+click-to-edit display button now use the v2.5 glass recipe
+(`bg-white/[0.06]` + `ring-1 ring-white/10`, accent focus ring) so the
+field reads as part of the same translucent surface.
+
+**Download banner now survives navigating into a video and back.**
+When a client downloaded a whole folder, the bottom-right progress
+banner appeared correctly and correctly hid while watching a video —
+but on "Back" it never reappeared, so the client couldn't tell whether
+the download was still running or how long was left. Root cause: the
+`DownloadManagerProvider` + `<DownloadBanners />` were mounted INSIDE
+the folder share page. Opening a video routes to `/share/[token]`,
+which unmounted that page (and its provider) — the ZIP kept downloading
+in the background (held by an in-memory stream that isn't aborted on
+unmount), but the banner state was gone. Moved the provider + banner up
+into a new shared `/share` layout (`app/share/layout.tsx`), a common
+ancestor of both the folder grid and the player that Next.js preserves
+across client-side navigation. The job state and its banner now persist
+seamlessly between grid and player.
+
+### Files changed
+
+- `src/components/ThumbnailReel.tsx` — `showThemeToggle` prop.
+- `src/app/share/[token]/SharePageClient.tsx` — drop theme toggle from
+  the auth gate + grid header; pass `showThemeToggle={false}` to the
+  player reel; remove the now-unused import.
+- `src/components/CommentSection.tsx` — glass styling on the client
+  name input + display button (both desktop and mobile blocks).
+- `src/app/share/layout.tsx` — NEW: shared layout hosting the
+  `DownloadManagerProvider` + `<DownloadBanners />`.
+- `src/app/share/folder/[slug]/page.tsx` — drop the page-level provider
+  wrapper (now inherited from the layout); consume it via context.
+
 ## [3.2.5] - 2026-06-22
 
 ### Clean re-release of the 3.2.4 fixes under a correct tag

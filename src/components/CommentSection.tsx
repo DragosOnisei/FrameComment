@@ -1428,7 +1428,7 @@ export default function CommentSection({
                   autoFocus
                   maxLength={120}
                   placeholder="Your name"
-                  className="flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="flex-1 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--spotlight-tint)/0.55)]"
                 />
                 <button
                   type="button"
@@ -1459,7 +1459,7 @@ export default function CommentSection({
               <button
                 type="button"
                 onClick={handleStartRename}
-                className="group flex items-center justify-between gap-2 flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-left text-sm text-foreground hover:border-primary/50 hover:bg-muted/40 transition-colors"
+                className="group flex items-center justify-between gap-2 flex-1 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-left text-sm text-white hover:bg-white/[0.12] hover:ring-white/20 transition-colors"
                 title="Edit your display name"
               >
                 <span className="font-medium truncate min-w-0">
@@ -1677,7 +1677,7 @@ export default function CommentSection({
                   autoFocus
                   maxLength={120}
                   placeholder="Your name"
-                  className="flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="flex-1 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--spotlight-tint)/0.55)]"
                 />
                 <button
                   type="button"
@@ -1704,7 +1704,7 @@ export default function CommentSection({
               <button
                 type="button"
                 onClick={handleStartRename}
-                className="group flex items-center justify-between gap-2 flex-1 min-w-0 h-8 rounded-md border border-input bg-background px-2.5 py-1 text-left text-sm text-foreground hover:border-primary/50 hover:bg-muted/40 transition-colors"
+                className="group flex items-center justify-between gap-2 flex-1 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-left text-sm text-white hover:bg-white/[0.12] hover:ring-white/20 transition-colors"
               >
                 <span className="font-medium truncate min-w-0">
                   {guestName || 'Client'}

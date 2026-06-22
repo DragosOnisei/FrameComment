@@ -17,7 +17,6 @@ import { Button } from '@/components/ui/button'
 import { Lock, Check, Mail, KeyRound, Download, Loader2 } from 'lucide-react'
 import BrandLogo from '@/components/BrandLogo'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
-import ThemeToggle from '@/components/ThemeToggle'
 import LanguageToggle from '@/components/LanguageToggle'
 import PrivacyBanner, { PRIVACY_STORAGE_KEY } from '@/components/PrivacyBanner'
 import ReverseShareUploadPanel from '@/components/ReverseShareUploadPanel'
@@ -1209,10 +1208,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   if (isPasswordProtected && !isAuthenticated) {
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
-        {/* Language and theme toggles for auth view */}
+        {/* Language toggle for auth view. 3.2.6+: theme toggle removed —
+            the client share is dark-only, no light-mode switch. */}
         <div className="fixed top-3 right-3 z-20 flex items-center gap-2">
           <LanguageToggle />
-          <ThemeToggle />
         </div>
         <div className="w-full max-w-md flex flex-col items-center gap-4">
           <BrandLogo height={64} className="mx-auto" />
@@ -1523,10 +1522,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             })()}
           </div>
 
-          {/* Right: language, theme, tutorial */}
+          {/* Right: language, tutorial. 3.2.6+: theme toggle removed —
+              the client share is dark-only, no light-mode switch. */}
           <div className="flex items-center gap-2 ml-auto">
             <LanguageToggle />
-            <ThemeToggle />
           </div>
         </div>
 
@@ -1590,6 +1589,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           showCommentToggle={!project.hideFeedback && !isGuest}
           isCommentPanelVisible={!hideComments}
           onToggleCommentPanel={() => setHideComments(!hideComments)}
+          showThemeToggle={false}
           trailingAction={undefined}
         />
 

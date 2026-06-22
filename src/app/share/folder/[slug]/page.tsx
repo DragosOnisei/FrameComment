@@ -15,8 +15,7 @@ import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
 import { logError } from '@/lib/logging'
-import { DownloadManagerProvider, useDownloadManager } from '@/contexts/DownloadManager'
-import { DownloadBanners } from '@/components/DownloadBanners'
+import { useDownloadManager } from '@/contexts/DownloadManager'
 
 /**
  * Public folder share page (1.0.6+).
@@ -108,18 +107,17 @@ interface FolderShareResponse {
   isAdmin?: boolean
 }
 
-// 2.0.x+: the page is wrapped in the DownloadManagerProvider below
-// so the `useDownloadManager` calls inside `handleDownloadAll` can
-// push jobs into the bottom-right banner stack rendered by
-// <DownloadBanners />. The original component is renamed to
-// PublicFolderSharePageInner and the default export wraps it.
+// 3.2.6+: the DownloadManagerProvider + <DownloadBanners /> used to be
+// wrapped HERE, inside the folder page. That meant opening a video
+// (which routes to `/share/[token]?video=…`) unmounted the provider —
+// the folder ZIP kept downloading in the background but its progress
+// banner vanished and never reappeared on "Back". The provider + banner
+// now live in the shared `/share` layout (`app/share/layout.tsx`),
+// which Next.js preserves across navigation between the folder grid and
+// the player, so the banner persists. This page just consumes the
+// provider via context (`useDownloadManager` in handleDownloadAll).
 export default function PublicFolderSharePage() {
-  return (
-    <DownloadManagerProvider>
-      <PublicFolderSharePageInner />
-      <DownloadBanners />
-    </DownloadManagerProvider>
-  )
+  return <PublicFolderSharePageInner />
 }
 
 function PublicFolderSharePageInner() {

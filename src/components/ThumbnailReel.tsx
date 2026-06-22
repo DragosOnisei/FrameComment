@@ -26,6 +26,11 @@ interface ThumbnailReelProps {
   onToggleCommentPanel?: () => void
   // Language toggle visibility (hidden on admin share page)
   showLanguageToggle?: boolean
+  /** 3.2.6+: theme (light/dark) toggle visibility. Defaults to true to
+   *  keep existing behaviour everywhere else. The CLIENT share player
+   *  passes `false` — clients shouldn't get a light-mode switch (the
+   *  public share is dark-only by design). */
+  showThemeToggle?: boolean
   // Optional slot rendered after ThemeToggle (e.g. tutorial help button)
   trailingAction?: React.ReactNode
   /** 1.3.2+: when provided, replaces the standalone ThemeToggle in the
@@ -60,6 +65,7 @@ export default function ThumbnailReel({
   isCommentPanelVisible = true,
   onToggleCommentPanel,
   showLanguageToggle = true,
+  showThemeToggle = true,
   trailingAction,
   topRightMenu,
   activeVideoId,
@@ -545,7 +551,7 @@ export default function ThumbnailReel({
                 other admin actions, so two theme controls would be
                 redundant. */}
             {showLanguageToggle && <LanguageToggle />}
-            {topRightMenu ? topRightMenu : <ThemeToggle />}
+            {topRightMenu ? topRightMenu : (showThemeToggle && <ThemeToggle />)}
             {trailingAction}
           </div>
         </div>
