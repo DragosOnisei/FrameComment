@@ -880,30 +880,89 @@ function AdminSharePageInner() {
       setThumbnailsLoading(true)
       const newThumbnails = new Map<string, string>()
 
+      // 3.2.2+ CRITICAL FIX: when we're in player view (URL targets a
+      // specific video via ?video=<name>), only fetch the thumbnail for
+      // the active video group. The grid is hidden — fetching thumbnails
+      // for ALL videos in the project here was burning the browser's
+      // concurrent-fetch quota (Chrome ~10K renderer ceiling) on
+      // off-screen tiles, then the player's own token fetch (480p/720p/
+      // 1080p/2160p/hls/original/thumbnail = 7 requests) would land on
+      // an exhausted pool and return `net::ERR_INSUFFICIENT_RESOURCES`
+      // for all 7. Result: stream URLs all empty, player stuck on
+      // "Loading video…" forever. On a 250+ clip project this was
+      // 100% reproducible from the folder grid double-click. Skipping
+      // the bulk thumbnail fetch in player view also makes the page
+      // visibly faster — the version reel (ThumbnailReel) only needs
+      // thumbnails for one video group anyway.
+      const inPlayerView = !!urlVideoName
+      const targetEntries = inPlayerView
+        ? Array.from(nameToVideoWithThumb.entries()).filter(([name]) => name === urlVideoName)
+        : Array.from(nameToVideoWithThumb.entries())
+
+      // 3.2.2+: when we DO need bulk thumbnails (grid view), run them
+      // through a small concurrency-limited worker pool instead of
+      // `Promise.all` so we never burst N requests at once. 4 is
+      // conservative — well under Chrome's 6-per-origin TCP cap so
+      // other UI requests (auth poll, processing-status banner, etc.)
+      // still get bandwidth. Cached entries don't count toward the
+      // limit because the helper returns synchronously without a fetch.
+      const CONCURRENCY = 4
+      const fetchOne = async ([name, videoWithThumb]: [string, any]) => {
+        // 2.2.3+: serve from cache when we've already minted a
+        // thumbnail URL for this videoId during this session.
+        const cachedUrl = thumbnailUrlCacheRef.current.get(videoWithThumb.id)
+        if (cachedUrl) {
+          if (isMounted) {
+            newThumbnails.set(name, cachedUrl)
+          }
+          return
+        }
+        const thumbToken = await fetchAdminVideoTokenWithRetry(videoWithThumb.id, 'thumbnail', sessionId)
+        if (thumbToken && isMounted) {
+          const url = `/api/content/${thumbToken}`
+          thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
+          newThumbnails.set(name, url)
+        }
+      }
+
       try {
+        // Simple worker-pool: maintain CONCURRENCY workers each
+        // pulling from a shared queue until the queue is empty.
+        const queue = targetEntries.slice()
+        const worker = async () => {
+          while (queue.length > 0 && isMounted) {
+            const next = queue.shift()
+            if (!next) break
+            await fetchOne(next)
+          }
+        }
         await Promise.all(
-          Array.from(nameToVideoWithThumb.entries()).map(async ([name, videoWithThumb]) => {
-            // 2.2.3+: serve from cache when we've already minted a
-            // thumbnail URL for this videoId during this session.
-            const cachedUrl = thumbnailUrlCacheRef.current.get(videoWithThumb.id)
-            if (cachedUrl) {
-              if (isMounted) {
-                newThumbnails.set(name, cachedUrl)
-              }
-              return
-            }
-            const thumbToken = await fetchAdminVideoTokenWithRetry(videoWithThumb.id, 'thumbnail', sessionId)
-            if (thumbToken && isMounted) {
-              const url = `/api/content/${thumbToken}`
-              thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
-              newThumbnails.set(name, url)
-            }
-          })
+          Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker()),
         )
 
         if (isMounted) {
-          setThumbnailsByName(newThumbnails)
-          lastThumbnailFingerprintRef.current = fingerprint
+          // 3.2.2+: when we ran in player view (single video) the
+          // `newThumbnails` Map only has ONE entry. Don't overwrite
+          // any previously-populated thumbnails for other clips —
+          // merge into existing state so navigating back to the grid
+          // doesn't re-render with empty tiles. The next grid visit
+          // re-fires this effect with `inPlayerView=false`, which
+          // re-fetches everything (cache makes it a no-op for
+          // already-known videoIds).
+          if (inPlayerView) {
+            setThumbnailsByName((prev) => {
+              const merged = new Map(prev)
+              newThumbnails.forEach((url, name) => merged.set(name, url))
+              return merged
+            })
+          } else {
+            setThumbnailsByName(newThumbnails)
+            // Only update the fingerprint when we did a FULL sweep —
+            // a player-view single-fetch must NOT mark the fingerprint
+            // as up-to-date, otherwise the grid view's first effect
+            // run would short-circuit and never load the rest.
+            lastThumbnailFingerprintRef.current = fingerprint
+          }
         }
       } catch (error) {
         // Failed to load thumbnails
@@ -919,7 +978,7 @@ function AdminSharePageInner() {
     return () => {
       isMounted = false
     }
-  }, [project?.videosByName, id, fetchAdminVideoTokenWithRetry])
+  }, [project?.videosByName, id, fetchAdminVideoTokenWithRetry, urlVideoName])
 
   // Determine initial view state based on URL params (same behavior as public share)
   useEffect(() => {

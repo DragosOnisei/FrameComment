@@ -14,6 +14,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-06-22
+
+### CRITICAL hotfix — `ERR_INSUFFICIENT_RESOURCES` from thumbnail fan-out drowned the active video's token fetches
+
+On large projects (200+ video clips) the admin share player was getting
+**permanently stuck on "Loading video…"**. The diagnostic logs added in
+3.2.0 ([SP-DIAG] / [VP-DIAG]) finally pinpointed the chain on prod:
+
+1. Double-click a video from the folder grid → navigate to
+   `/admin/projects/[id]/share?video=<name>`.
+2. The thumbnail-fetch effect (admin share `page.tsx`) sweeps every
+   video group in `project.videosByName` and fires one
+   `/api/admin/video-token?quality=thumbnail` per clip — all in a
+   single `Promise.all`. On a 250-clip project that's 250 parallel
+   fetches the moment the page mounts.
+3. Chrome's renderer hits the global concurrent-fetch ceiling and
+   starts returning `net::ERR_INSUFFICIENT_RESOURCES` for *all*
+   subsequent requests in the burst.
+4. The ACTIVE video's own 7-request token fetch (480p / 720p /
+   1080p / 2160p / hls / original / storyboard) lands on the
+   exhausted pool and *all 7 come back errored*. `fetchAdminVideoToken`
+   sees `!response.ok` and returns empty string → every
+   `streamUrl*` and `hlsUrl` on the tokenized object is empty.
+5. `VideoPlayer` sees `hasHlsConfigured=true` (the DB row legitimately
+   has `hlsQualities` populated) but `hlsUrl=null`, hits the
+   wait-for-HLS-before-MP4-commit guard added in 1.9.4 Phase B, and
+   never moves on. Loading spinner forever.
+
+**Verified on prod:** the diagnostic console log shows
+`hasHlsConfigured: true, hlsQualities: ['480p','720p','1080p'],
+streamUrl480p: false, streamUrl720p: false, streamUrl1080p: false,
+streamUrl2160p: false, hlsUrl_field: "(empty)"` for the stuck video.
+DB row for the same video has all preview*Path columns set ✓ and a
+valid `hlsBasePath`. Pure browser-side resource exhaustion, not a
+worker / DB bug.
+
+### Fix
+
+Two-part defence in admin share `page.tsx` `fetchThumbnails` effect:
+
+1. **Skip bulk fetch in player view.** When the page enters with
+   `?video=<name>` set (now the dominant path since the v3.2.1
+   double-click flow lands here directly), only fetch the thumbnail
+   for the active video group. The other 249 thumbnails belong to a
+   grid the user isn't looking at, and the version reel
+   (`ThumbnailReel`) only uses the active clip's thumbnails.
+   Net effect: 1 thumbnail fetch instead of 250 before the active
+   video's tokens even queue up.
+2. **Concurrency-limited pool for grid view.** When we genuinely
+   do need bulk thumbnails (grid view, no URL video param), run
+   them through a small worker pool (`CONCURRENCY = 4`) instead of
+   `Promise.all`. Stays under Chrome's per-origin TCP cap, leaves
+   bandwidth for the auth + processing-status + theme polls running
+   in parallel, and the cached entries (`thumbnailUrlCacheRef`) are
+   served synchronously so they don't count toward the limit.
+
+Plus: player-view single-fetch merges into existing
+`thumbnailsByName` state instead of overwriting it, and only
+advances the `lastThumbnailFingerprintRef` when a FULL sweep
+completed. Otherwise the grid view's first effect run would
+short-circuit on the stale "we already saw this set" check.
+
+### Files changed
+
+- `src/app/admin/projects/[id]/share/page.tsx` — `fetchThumbnails`:
+  player-view single-fetch + 4-wide worker pool for grid view;
+  `urlVideoName` added to the effect deps so navigating between
+  grid and player re-fires the appropriate fetch strategy.
+
 ## [3.2.1] - 2026-06-22
 
 ### Hotfix — admin share double-click no longer flashes confidential metadata
