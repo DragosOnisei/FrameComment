@@ -14,6 +14,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-06-22
+
+### Hotfix — admin share double-click no longer flashes confidential metadata
+
+3.2.0 shipped the public-share fix but missed the same bug on the
+**admin** share preview (`/admin/projects/[id]/share`). Reviewers
+double-clicking a video from the folder grid saw a 3-frame flash
+sequence before the player chrome painted:
+
+1. **Flat `#121212` "Loading…"** — the file had TWO `if (loading)`
+   branches stacked; the first (flat dark) shadowed the v3.2.0 glass
+   card below. The glass branch was unreachable. Removed the flat
+   branch entirely; glass card now renders for the full duration of
+   the initial project fetch.
+2. **Full project grid with EVERY video name + version count** — same
+   bug as the public share: `viewState` defaults to `'grid'` and the
+   URL-sync useEffect (which flips it to `'player'` when
+   `?video=<name>` is in the URL) runs one tick AFTER `project`
+   resolves, painting the grid for one frame. On a screen-recording
+   this exposed confidential project metadata to whoever happened to
+   be recording at that moment. Added the same render-time override
+   from `SharePageClient.tsx`: when `urlVideoName` matches a video in
+   `project.videosByName`, force `effectiveViewState='player'`
+   regardless of the reactive state, plus an extra glass guard while
+   `activeVideoName` settles so the player never mounts with empty
+   `readyVideos`.
+
+### Files changed
+
+- `src/app/admin/projects/[id]/share/page.tsx` (removed duplicated
+  `if (loading)` branch, added URL-aware effective view state +
+  glass loading guard)
+
 ## [3.2.0] - 2026-06-22
 
 ### UI polish — frosted glass everywhere, share view alignment, transparent favicon

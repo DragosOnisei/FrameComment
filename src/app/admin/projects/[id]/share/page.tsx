@@ -997,15 +997,6 @@ function AdminSharePageInner() {
     ? `/admin/projects/${id}/folder/${backFolderId}`
     : `/admin/projects/${id}`
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="fixed inset-0 bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">{tc('loading')}</p>
-      </div>
-    )
-  }
-
   // 3.2.0+: Initial loading state — glass card on spotlight bg with a
   // spinning ring. Distinct from "project not found" below: this fires
   // while the initial fetch is in-flight; the old code reached the
@@ -1014,6 +1005,16 @@ function AdminSharePageInner() {
   // flash. By splitting `loading` out we get the modern glass card
   // visible during the natural fetch window AND keep the real "not
   // found + Back to Projects" UI for actually-broken URLs.
+  //
+  // 3.2.1 fix: the previous version had TWO `if (loading)` branches —
+  // the first one (flat `bg-background` + muted "Loading…" text) was
+  // copied from the 3.1.x baseline and was meant to be replaced by the
+  // glass card below. Both stayed in the file, so the flat branch
+  // shadowed the glass branch and the user kept seeing the old
+  // #121212 "Loading…" flash for the entire initial fetch window
+  // before the player chrome painted. Removed the flat branch entirely;
+  // the glass card below is now reachable and renders for the full
+  // duration of the project fetch.
   if (loading) {
     return (
       <div
@@ -1094,8 +1095,55 @@ function AdminSharePageInner() {
   const activeVersionLabel = activeVideo?.versionLabel
     || (activeVideo?.version ? `v${activeVideo.version}` : null)
 
+  // 3.2.1+: render-time override — same fix as SharePageClient.tsx.
+  // When the admin opens the share preview with a deep-link to a
+  // specific video (?video=<name>), force the player branch even
+  // before `setViewState('player')` settles via the URL-sync effect.
+  // Without this, double-clicking a video card briefly paints the
+  // ENTIRE project's grid (every video name + version count) for
+  // one frame before the player chrome takes over. The reviewer
+  // sees a flash of confidential metadata in screen-recordings.
+  const targetingSpecificVideo = !!(
+    urlVideoName && project.videosByName?.[urlVideoName]
+  )
+  const effectiveViewState: 'grid' | 'player' = targetingSpecificVideo
+    ? 'player'
+    : viewState
+
+  // 3.2.1+: if the URL targets a specific video but the active video
+  // group hasn't been wired up yet (the effect that sets
+  // `activeVideoName` from `urlVideoName` runs the same tick we're
+  // in), keep the glass loading card on screen instead of mounting
+  // the player with empty `readyVideos`. Same visual recipe as the
+  // `if (loading)` glass card above so the transition is seamless.
+  if (targetingSpecificVideo && !activeVideoName) {
+    return (
+      <div
+        className="spotlight-bg-tr fixed inset-0 flex items-center justify-center p-4"
+        style={{ height: '100dvh' }}
+      >
+        <div
+          className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+        </div>
+      </div>
+    )
+  }
+
   // Show thumbnail grid when in grid view (same as public share layout)
-  if (viewState === 'grid') {
+  if (effectiveViewState === 'grid') {
     return (
       <div className="fixed inset-0 bg-background flex flex-col overflow-hidden">
         {/* Grid view toolbar */}
