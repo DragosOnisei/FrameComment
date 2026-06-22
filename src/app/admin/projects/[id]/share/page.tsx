@@ -101,7 +101,14 @@ function AdminSharePageInner() {
   const [loading, setLoading] = useState(true)
   const [_companyName, setCompanyName] = useState('Studio')
   const [defaultQuality, setDefaultQuality] = useState<'720p' | '1080p' | '2160p'>('720p')
-  const [activeVideoName, setActiveVideoName] = useState<string>('')
+  // 3.2.0+: seed `activeVideoName` from `?video=…` directly on first
+  // render. The old default of `''` meant the share page rendered its
+  // GRID mode ("Select a video to begin" + thumbnails) on the very
+  // first paint, then flipped to the player after the URL-parsing
+  // effect fired — a visible "client / 01_VDA / Select a video"
+  // flash every time the user double-clicked a video in the dashboard
+  // to navigate here. Honouring the URL up-front skips that flash.
+  const [activeVideoName, setActiveVideoName] = useState<string>(urlVideoName || '')
   // Currently-playing video id (specific version), surfaced from
   // VideoPlayer via onVideoStateChange. Used by ThumbnailReel to
   // highlight the active row in the version dropdown.
@@ -416,6 +423,25 @@ function AdminSharePageInner() {
             tokenHls && (video as any).hlsQualities && (video as any).hlsQualities.length > 0
               ? `/api/videos/${video.id}/hls/master.m3u8?token=${encodeURIComponent(tokenHls)}`
               : ''
+          // ==== DIAGNOSTIC LOGS (3.2.0 stuck-loading debug, remove before ship) ====
+          console.warn('[SP-DIAG] tokenize result for video', {
+            videoId: video.id?.slice(0, 12),
+            name: (video as any).originalFileName?.slice(0, 40),
+            status: video.status,
+            hlsQualities: (video as any).hlsQualities,
+            hlsBasePath: (video as any).hlsBasePath,
+            preview480Path: !!(video as any).preview480Path,
+            preview720Path: !!(video as any).preview720Path,
+            preview1080Path: !!(video as any).preview1080Path,
+            preview2160Path: !!(video as any).preview2160Path,
+            tokenHls: tokenHls ? tokenHls.slice(0, 12) + '…' : '(empty)',
+            token480: token480 ? '✓' : '✗',
+            token720: token720 ? '✓' : '✗',
+            token1080: token1080 ? '✓' : '✗',
+            token2160: token2160 ? '✓' : '✗',
+            hlsUrl_built: hlsUrl ? hlsUrl.slice(0, 80) : '(empty)',
+          })
+          // ==== END DIAGNOSTIC ====
 
           const tokenized = {
             ...video,
@@ -980,6 +1006,40 @@ function AdminSharePageInner() {
     )
   }
 
+  // 3.2.0+: Initial loading state — glass card on spotlight bg with a
+  // spinning ring. Distinct from "project not found" below: this fires
+  // while the initial fetch is in-flight; the old code reached the
+  // `!project` branch in both cases and showed a flat dark "Project
+  // not found" Card, which the user perceived as a generic loading
+  // flash. By splitting `loading` out we get the modern glass card
+  // visible during the natural fetch window AND keep the real "not
+  // found + Back to Projects" UI for actually-broken URLs.
+  if (loading) {
+    return (
+      <div
+        className="spotlight-bg-tr fixed inset-0 flex items-center justify-center p-4"
+        style={{ height: '100dvh' }}
+      >
+        <div
+          className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+        </div>
+      </div>
+    )
+  }
+
   // Show project not found
   if (!project) {
     return (
@@ -1208,15 +1268,32 @@ function AdminSharePageInner() {
               </div>
             )
           }
+          /* 3.2.0+: same frosted-glass card recipe as the top-level
+             `if (loading)` gate above — so the transition from project
+             loading → tokens loading → empty/loaded reads as one
+             continuous glass surface instead of a flat dark card flash. */
           return (
             <div className="flex-1 flex items-center justify-center p-4">
-              <Card className="bg-card">
-                <CardContent className="py-12 text-center">
-                  <p className="text-muted-foreground">
-                    {tokensLoading ? t('loadingVideo') : t('noVideosReadyForReview')}
-                  </p>
-                </CardContent>
-              </Card>
+              <div
+                className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+                style={{
+                  backgroundColor: 'rgba(22, 37, 51, 0.62)',
+                  backgroundImage:
+                    'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                  backdropFilter: 'blur(40px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                  transform: 'translate3d(0, 0, 0)',
+                  willChange: 'backdrop-filter, transform',
+                  isolation: 'isolate',
+                }}
+              >
+                {tokensLoading && (
+                  <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin shrink-0" />
+                )}
+                <p className="text-sm font-medium text-white/85">
+                  {tokensLoading ? t('loadingVideo') : t('noVideosReadyForReview')}
+                </p>
+              </div>
             </div>
           )
         })() : (

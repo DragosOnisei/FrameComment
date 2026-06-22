@@ -56,20 +56,18 @@ export async function getAccentColor(): Promise<string> {
  * doesn't override.
  */
 export function buildLogoSvg(accentColor: string, size: number): string {
+  // 3.2.0+: dropped the rounded-square background. The Play + i marks
+  // sit on a transparent surface so browser tabs, OS launchers, and
+  // PWA contexts render them on their own theme chrome instead of a
+  // hard-edged white/black square. i-stem still flips colour with
+  // prefers-color-scheme so it stays legible on both light + dark.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64">
   <style>
-    :root {
-      --logo-bg: #ffffff;
-      --logo-i-stem: #0f172a;
-    }
+    :root { --logo-i-stem: #0f172a; }
     @media (prefers-color-scheme: dark) {
-      :root {
-        --logo-bg: #0a0a0a;
-        --logo-i-stem: #f5f7fb;
-      }
+      :root { --logo-i-stem: #f5f7fb; }
     }
   </style>
-  <rect width="64" height="64" rx="14" fill="var(--logo-bg)"/>
   <path d="M 14 16 C 14 13 16 12 18 13 L 41 30 C 43 31 43 33 41 34 L 18 51 C 16 52 14 51 14 48 Z" fill="${accentColor}"/>
   <circle cx="51" cy="20" r="4.5" fill="${accentColor}"/>
   <rect x="46.5" y="28" width="9" height="22" rx="4.5" fill="var(--logo-i-stem)"/>

@@ -1,6 +1,6 @@
 {
   "name": "framecomment",
-  "version": "3.1.2",
+  "version": "3.2.0",
   "description": "FrameComment — self-hosted video review and approval platform for filmmakers and video professionals.",
   "author": {
     "name": "Dragos Onisei",
@@ -96,5 +96,8 @@
     "tar": "7.5.8",
     "diff": "8.0.3",
     "effect": ">=3.20.0"
+  },
+  "optionalDependencies": {
+    "@next/swc-darwin-arm64": "^16.2.9"
   }
 }

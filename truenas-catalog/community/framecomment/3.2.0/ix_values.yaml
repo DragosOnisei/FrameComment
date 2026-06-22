@@ -49,7 +49,7 @@ resources:
 images:
   app:
     repository: dragosonisei/framecomment
-    tag: 3.1.1
+    tag: 3.2.0
     pullPolicy: IfNotPresent
   postgres:
     repository: postgres

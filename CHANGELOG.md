@@ -14,6 +14,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-06-22
+
+### UI polish — frosted glass everywhere, share view alignment, transparent favicon
+
+The headline of this release is the carry-through of the v2.5 frosted-glass
+visual recipe into every loading surface the user might land on, plus the
+fix for two reproducible flashes between page navigations on the public
+share routes.
+
+**Glass loading on every entry point.** Previously the public share page
+landed with a flat "Loading…" string on `bg-background`, then crossfaded
+into the new v2.5 player chrome. Now `if (!project)`, `if (loading)`,
+empty `readyVideos`, and the player's own internal `videoUrl === ''` slot
+all render the SAME frosted card recipe — `rgba(22, 37, 51, 0.62)` +
+radial spotlight gradient + `backdropFilter: blur(40px) saturate(180%)` +
+`ring-1 ring-white/15` + shadow elevation. Reaching the player feels
+like one continuous surface, no two distinct loading states.
+
+Applied at:
+
+- `src/app/share/[token]/SharePageClient.tsx` — `if (!project)` early
+  return + `readyVideos.length === 0` empty card now use the glass
+  recipe (dropped the flat `Card` + `Spinner`)
+- `src/components/VideoPlayer.tsx` — internal "Loading video…" slot
+  when `videoUrl` hasn't committed yet
+- `src/components/AuthProvider.tsx` — admin auth bootstrap card
+- `src/app/admin/projects/[id]/share/page.tsx` — admin share's
+  `if (loading)` gate + empty-state card
+
+**Fix: "all videos" flash when share link targets a specific video.**
+Tapping a share link of the form `/share/<slug>?video=<name>` would
+briefly paint the entire grid (every video in the project) for one
+frame between (a) `project` resolving via the fetch and (b) the URL-sync
+useEffect calling `setViewState('player')`. Visible to the reviewer as a
+jarring "everything → just the requested clip" transition. Fixed in
+`SharePageClient.tsx` with a render-time override: when
+`urlVideoName && project.videosByName?.[urlVideoName]` we force
+`effectiveViewState='player'` regardless of the reactive state, plus a
+secondary glass-loading guard that keeps the initial card on screen
+until `activeVideoName` settles (so the player doesn't mount with
+`readyVideos=[]` and flash a secondary spinner).
+
+**Fix: favicon black background on prod.** `layout.tsx`, `manifest.json`,
+`sw.js`, and `push-notifications.ts` all reference `/brand/icon.svg`,
+`/brand/icon-192.svg`, `/brand/icon-512.svg` — but the SVGs we cleaned
+up for transparency in v3.0 lived at `/public/icon.svg` and
+`/public/icons/icon-{192,512}.svg`. Locally the orphan files were the
+only source so dev showed transparent / default; the prod Docker image
+3.1.2 still had the OLD black-rect SVGs at `/public/brand/` from the
+pre-cleanup builds. Restored the canonical location — created three
+transparent SVGs at `/public/brand/icon.svg`, `/public/brand/icon-192.svg`,
+`/public/brand/icon-512.svg` matching all four reference sites. Locally
++ on prod 3.2.0 the tab icon now sits on the browser's own theme
+background (transparent), with the i-stem flipping colour via
+`prefers-color-scheme`.
+
+**Admin layout: providers hoisted outside `hidesChrome` ternary.**
+`<AuthProvider><DownloadManagerProvider><ProcessingStatusProvider>` used
+to live INSIDE the `if (hidesChrome)` arm only, which meant the entire
+React tree torn down + remounted every time the user navigated between
+a chrome-bearing route (admin projects) and a no-chrome route (admin
+player). Refresh tokens were re-fetched, processing-status polls
+restarted, download-manager queues blanked. Moved the providers OUTSIDE
+the ternary so the chrome/no-chrome split is purely visual.
+
+**`activeVideoName` initialised from URL on admin share.** Mirrors the
+public share fix from earlier — when the admin player opens with a
+`?video=<name>` deep-link, `activeVideoName` now starts at `urlVideoName`
+instead of `''`, eliminating the brief first-frame where the player
+showed a different version than the URL requested.
+
+### Diagnostic logs (temporary) — root-causing the "Loading video forever" bug on prod
+
+A 36-min 2.6 GB video on prod gets stuck on "Loading video…" indefinitely
+in the admin player; re-uploading the same source locally plays cleanly.
+The mismatch points at half-baked DB state inherited from the v3.1.0
+`downloadTime` recovery: `hlsQualities` populated but the matching HLS
+files missing (or vice-versa). Added two console.warn instrumentation
+blocks tagged `[VP-DIAG]` (VideoPlayer state on each `loadVideoUrl`
+tick) and `[SP-DIAG]` (admin share page token-fetch result per video)
+so the next time a video gets stuck we can read the actual state from
+the console instead of guessing. These logs ship in 3.2.0 and will be
+removed in a follow-up release once we've captured the prod state of
+the offending row.
+
+### Files changed
+
+- `public/brand/icon.svg`, `public/brand/icon-192.svg`,
+  `public/brand/icon-512.svg` (new — transparent SVG at canonical path)
+- `src/app/share/[token]/SharePageClient.tsx` (glass loading + URL-aware
+  view override)
+- `src/app/admin/projects/[id]/share/page.tsx` (glass loading +
+  diagnostic logs)
+- `src/components/VideoPlayer.tsx` (glass loading slot + diagnostic
+  logs)
+- `src/components/AuthProvider.tsx` (glass loading card)
+- `src/app/admin/layout.tsx` (providers hoisted)
+- `src/app/admin/settings/page.tsx` (boxed/centered layout — Global
+  Settings now matches Project Settings)
+
 ## [3.1.2] - 2026-06-14
 
 ### CRITICAL hotfix — `downloadTime is not defined` killed 1000+ prepare-video jobs

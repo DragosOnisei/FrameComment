@@ -1308,15 +1308,36 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     )
   }
 
-  // Show project not found
+  // 3.2.0+: Initial loading state. SSR has already validated the
+  // project exists (see /share/[token]/page.tsx — invalid slugs are
+  // 404'd before this client component ever mounts), so reaching
+  // `!project` here ALWAYS means "fetch hasn't resolved yet", not
+  // "project genuinely missing". Render a single frosted-glass card
+  // that visually matches the "Loading video…" card shown later in
+  // the empty-state branch — so the brief gap between (a) `project`
+  // becoming non-null and (b) `tokensLoading` flipping false is a
+  // seamless single screen instead of two distinct flat cards. Old
+  // behaviour was: bare "Loading…" flash → "Loading video…" card
+  // flash; new behaviour: one glass card the whole time.
   if (!project) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
-        <Card className="bg-card border-border">
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">{t('projectNotFound')}</p>
-          </CardContent>
-        </Card>
+      <div className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col items-center justify-center p-4" style={{ height: '100dvh' }}>
+        <div
+          className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+        </div>
       </div>
     )
   }
@@ -1337,8 +1358,58 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     return !comment.videoId || activeVideoIds.has(comment.videoId)
   })
 
+  // 3.2.0+: render-time override that prefers the player view as soon
+  // as the share URL points at a specific video (?video=<name>) AND
+  // the project actually contains it. Without this override, between
+  // (a) `project` resolving via fetch and (b) the URL-sync useEffect
+  // at line ~869 calling `setViewState('player')`, React paints one
+  // frame with viewState='grid' + project loaded — which renders the
+  // full thumbnail grid for the entire project (every video!) before
+  // the effect re-renders into the player. Visible to the reviewer
+  // as a jarring flash of "all videos" between the share link and
+  // the requested clip. The actual state still settles via the
+  // effect; this is purely a guard against the in-between frame.
+  const targetingSpecificVideo = !!(
+    urlVideoName && project.videosByName?.[urlVideoName]
+  )
+  const effectiveViewState: 'grid' | 'player' = targetingSpecificVideo
+    ? 'player'
+    : viewState
+
+  // 3.2.0+: if the URL targets a specific video but `activeVideoName`
+  // hasn't been set yet (fetchProjectData wires it up via its own
+  // effect, which fires the same render tick we're in), keep the
+  // initial glass-loading card on screen instead of mounting the
+  // player with empty `readyVideos`. The player branch handles
+  // `readyVideos.length === 0` with its own loading spinner, but
+  // showing the SAME glass card the whole way through (initial !project
+  // → URL-targeted player) means the user sees a single continuous
+  // loading state instead of two distinct ones.
+  if (targetingSpecificVideo && !activeVideoName) {
+    return (
+      <div className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col items-center justify-center p-4" style={{ height: '100dvh' }}>
+        <div
+          className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+        </div>
+      </div>
+    )
+  }
+
   // Show thumbnail grid when in grid view (scrollable)
-  if (viewState === 'grid') {
+  if (effectiveViewState === 'grid') {
     return (
       <>
       <div className="fixed inset-0 bg-background flex flex-col overflow-hidden">
@@ -1425,8 +1496,14 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const showCommentPanel = !project.hideFeedback && !isGuest && !hideComments
 
   return (
+    // 3.2.0+: align client share view with the v2.5+ admin player —
+    // `spotlight-bg-tr` paints the same top-right anchored spotlight
+    // gradient + accent-tinted radial wash the admin uses, instead of
+    // a flat `bg-background`. Combined with the inner glass surfaces
+    // (player + comments sidebar), the public share page now reads as
+    // the same product instead of a stripped-down clone.
     <div
-      className="h-screen overflow-hidden lg:fixed lg:inset-0 bg-background flex flex-col"
+      className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col"
       style={{ height: '100dvh' }}
     >
       {/* Thumbnail Reel - always visible, collapsible */}
@@ -1494,14 +1571,32 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           ~70px. On mobile the page falls back to a natural-scroll column. */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
         {readyVideos.length === 0 ? (
+          /* 3.2.0+: same frosted-glass card recipe as the `if (!project)`
+             initial loading state above — so the transition from "project
+             still loading" → "project loaded, video tokens still loading"
+             is visually seamless. The user sees ONE continuous glass card
+             instead of two flat cards flashing in sequence. */
           <div className="flex-1 flex items-center justify-center p-4">
-            <Card className="bg-card border-border">
-              <CardContent className="py-12 text-center">
-                <p className="text-muted-foreground">
-                  {tokensLoading ? 'Loading video...' : 'No videos are ready for review yet. Please check back later.'}
-                </p>
-              </CardContent>
-            </Card>
+            <div
+              className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+              style={{
+                backgroundColor: 'rgba(22, 37, 51, 0.62)',
+                backgroundImage:
+                  'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                backdropFilter: 'blur(40px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                transform: 'translate3d(0, 0, 0)',
+                willChange: 'backdrop-filter, transform',
+                isolation: 'isolate',
+              }}
+            >
+              {tokensLoading && (
+                <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin shrink-0" />
+              )}
+              <p className="text-sm font-medium text-white/85">
+                {tokensLoading ? 'Loading video...' : 'No videos are ready for review yet. Please check back later.'}
+              </p>
+            </div>
           </div>
         ) : (
           <>
@@ -1514,7 +1609,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 background` keeps the comments from showing through.
                 From lg: up sticky becomes irrelevant (side-by-side
                 layout) so we let those classes pass through harmlessly. */}
-            <div data-tutorial="video-player" className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col bg-background ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
+            {/* 3.2.0+: drop `bg-background` so the outer `spotlight-bg-tr`
+                gradient shows through around the player margins — same
+                layering as the admin view. */}
+            <div data-tutorial="video-player" className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
               <VideoPlayer
                 videos={readyVideos}
                 projectId={project.id}
@@ -1549,14 +1647,18 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               />
             </div>
 
-            {/* Comments Section - max one screen height on mobile, side panel on desktop */}
+            {/* Comments Section - max one screen height on mobile, side panel on desktop.
+                3.2.0+: matches admin — `rounded-2xl` for the larger, more elegant
+                glass-card corners, and drop the opaque `bg-card` so the inner
+                CommentSection's frosted glass surface (white/[0.04] + spotlight
+                radial) is what we see, not a flat dark fill on top of it. */}
             {showCommentPanel && (
               <ResizableSidebar
                 storageKey={`framecomment:sidebar-width:${project.id}`}
                 defaultWidth={360}
                 minWidth={280}
                 maxFraction={0.55}
-                className="flex-1 min-h-0 flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-xl bg-card"
+                className="flex-1 min-h-0 flex flex-col lg:max-h-full lg:h-full overflow-hidden rounded-2xl"
               >
                 <CommentSection
                   projectId={project.id}

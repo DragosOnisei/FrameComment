@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 64 64">
   <style>
-    /* 3.2.0+: transparent background — see /public/icon.svg for context. */
+    /* 3.2.0+: transparent background — see /public/brand/icon.svg for context. */
     :root { --logo-i-stem: #0f172a; }
     @media (prefers-color-scheme: dark) {
       :root { --logo-i-stem: #f5f7fb; }

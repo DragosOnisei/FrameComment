@@ -192,13 +192,36 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
   }
 
   // SECURITY: Show loading state while checking auth OR when unauthenticated (before redirect)
-  // This prevents content flash - NO content should render until auth is confirmed
+  // This prevents content flash - NO content should render until auth is confirmed.
+  //
+  // 3.2.0+: Frosted-glass card on spotlight background with a subtle
+  // spinning ring. Visually matches the share page's `if (!project)`
+  // and "Loading video…" cards exactly, so on routes where Auth
+  // wraps Share (admin previewing a share link), the transition
+  // Auth → Share renders as ONE continuous loading screen instead of
+  // the old "flat black + Loading…" flash → "tiny dark Loading
+  // video…" card flash.
   if (requireAuth && (loading || !user)) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading...</p>
+      <div
+        className="spotlight-bg-tr flex-1 min-h-0 h-screen lg:fixed lg:inset-0 flex items-center justify-center p-4"
+        style={{ height: '100dvh' }}
+      >
+        <div
+          className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.62)',
+            backgroundImage:
+              'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'backdrop-filter, transform',
+            isolation: 'isolate',
+          }}
+        >
+          <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+          <p className="text-sm font-medium text-white/85">Loading...</p>
         </div>
       </div>
     )

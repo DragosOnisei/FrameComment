@@ -832,6 +832,7 @@ export default function VideoPlayer({
       try {
         // Safety check: ensure selectedVideo exists
         if (!selectedVideo) {
+          console.warn('[VP-DIAG] loadVideoUrl: selectedVideo is null — skipping')
           return
         }
         // 1.9.4+ Phase B: if this video has HLS configured but
@@ -844,7 +845,25 @@ export default function VideoPlayer({
         // tier for the whole session.
         const sv: any = selectedVideo
         const hasHlsConfigured = Array.isArray(sv?.hlsQualities) && sv.hlsQualities.length > 0
+        // ==== DIAGNOSTIC LOGS (3.2.0 stuck-loading debug, remove before ship) ====
+        console.warn('[VP-DIAG] loadVideoUrl tick', {
+          videoId: sv?.id?.slice(0, 12),
+          name: sv?.originalFileName?.slice(0, 40),
+          status: sv?.status,
+          hasHlsConfigured,
+          hlsQualities: sv?.hlsQualities,
+          hlsUrl_field: sv?.hlsUrl ? sv.hlsUrl.slice(0, 80) : '(empty)',
+          hlsUrl_var: hlsUrl ? hlsUrl.slice(0, 80) : '(null)',
+          streamUrl480p: !!sv?.streamUrl480p,
+          streamUrl720p: !!sv?.streamUrl720p,
+          streamUrl1080p: !!sv?.streamUrl1080p,
+          streamUrl2160p: !!sv?.streamUrl2160p,
+          committedTo: committedVideoIdRef.current?.slice(0, 12) ?? '(none)',
+          willReturnEarly: hasHlsConfigured && !hlsUrl,
+        })
+        // ==== END DIAGNOSTIC ====
         if (hasHlsConfigured && !hlsUrl) {
+          console.warn('[VP-DIAG] STUCK: hasHlsConfigured=true but hlsUrl=null. Waiting for share page to set tokenHls.')
           return
         }
 
@@ -2198,8 +2217,25 @@ export default function VideoPlayer({
             </div>
           </>
         ) : (
-          <div className="w-full h-full aspect-video lg:aspect-auto max-h-[70vh] lg:max-h-none flex items-center justify-center text-card-foreground bg-black rounded-xl">
-            Loading video...
+          /* 3.2.0+: frosted-glass loading slate inside the player frame —
+             matches the share page's outer loading card so once the
+             player wrapper mounts, the visual stays consistent (no flash
+             from glass card → flat black box → real player). */
+          <div
+            className="w-full h-full aspect-video lg:aspect-auto max-h-[70vh] lg:max-h-none flex items-center justify-center gap-4 text-white rounded-xl ring-1 ring-white/15"
+            style={{
+              backgroundColor: 'rgba(22, 37, 51, 0.62)',
+              backgroundImage:
+                'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+              backdropFilter: 'blur(40px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+              transform: 'translate3d(0, 0, 0)',
+              willChange: 'backdrop-filter, transform',
+              isolation: 'isolate',
+            }}
+          >
+            <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+            <p className="text-sm font-medium text-white/85">Loading video...</p>
           </div>
         )}
       </div>

@@ -83,14 +83,32 @@ export default function AdminLayout({
     }
   }, [])
 
-  // Share-player preview: no sidebar, no topbar — render children
-  // straight onto the background. Preserves the existing behaviour
-  // exactly.
-  if (hidesChrome) {
-    return (
-      <AuthProvider requireAuth={true}>
-        <DownloadManagerProvider>
-          <ProcessingStatusProvider>
+  // 3.2.0+: Hoist AuthProvider + DownloadManager + ProcessingStatus
+  // OUT of the `if (hidesChrome) {...}` / `return (...)` split so they
+  // stay mounted across navigations between chromed pages (Projects,
+  // Settings, etc.) and the chrome-less share-player view.
+  //
+  // The old structure returned different React element trees from
+  // each branch — both started with `<AuthProvider>`, but because the
+  // children differed structurally, React's reconciler treated them
+  // as separate component instances and remounted AuthProvider on
+  // every chrome ↔ no-chrome transition. The fresh AuthProvider would
+  // start at `loading=true`, paint its placeholder, then resolve a
+  // moment later. The user saw that placeholder as a "Loading…" flash
+  // every time they double-clicked a video in the grid to navigate
+  // into the player.
+  //
+  // Now there's exactly one Provider stack, mounted once on first
+  // admin route. Only the inner chrome (sidebar + topbar + main vs.
+  // bare children) flips based on `hidesChrome`.
+  return (
+    <AuthProvider requireAuth={true}>
+      <DownloadManagerProvider>
+        <ProcessingStatusProvider>
+          {hidesChrome ? (
+            // Share-player preview: no sidebar, no topbar — render
+            // children straight onto the background. Preserves the
+            // existing behaviour exactly.
             <div className="flex flex-1 min-h-0 bg-background flex-col overflow-x-hidden">
               <div className="flex-1 min-h-0 flex flex-col">
                 {children}
@@ -99,35 +117,28 @@ export default function AdminLayout({
               <DownloadBanners />
               <GlobalDropOverlay />
             </div>
-          </ProcessingStatusProvider>
-        </DownloadManagerProvider>
-      </AuthProvider>
-    )
-  }
-
-  return (
-    <AuthProvider requireAuth={true}>
-      <DownloadManagerProvider>
-        <ProcessingStatusProvider>
-          {/* 2.5.0 (revised): `.spotlight-bg` already carries the
-              base background-color (so removing the duplicate
-              `bg-background` lets the gradient paint
-              uninterrupted). Inner pages drop their own
-              `bg-background` wrappers too so the wash bleeds
-              across the dashboard area to bottom-right. */}
-          <div className="spotlight-bg flex flex-1 min-h-0 overflow-x-hidden">
-            <AdminSidebar />
-            <div className="flex-1 min-w-0 flex flex-col">
-              <AdminTopBar />
-              <main className="flex-1 min-h-0 flex flex-col">
-                {children}
-              </main>
+          ) : (
+            // Chromed pages: sidebar + topbar + main.
+            // 2.5.0 (revised): `.spotlight-bg` already carries the
+            // base background-color (so removing the duplicate
+            // `bg-background` lets the gradient paint uninterrupted).
+            // Inner pages drop their own `bg-background` wrappers too
+            // so the wash bleeds across the dashboard area to bottom-
+            // right.
+            <div className="spotlight-bg flex flex-1 min-h-0 overflow-x-hidden">
+              <AdminSidebar />
+              <div className="flex-1 min-w-0 flex flex-col">
+                <AdminTopBar />
+                <main className="flex-1 min-h-0 flex flex-col">
+                  {children}
+                </main>
+              </div>
+              <SessionMonitor />
+              <DownloadBanners />
+              {!hideFloatingBanners && <ProcessingStatusBanners />}
+              <GlobalDropOverlay />
             </div>
-            <SessionMonitor />
-            <DownloadBanners />
-            {!hideFloatingBanners && <ProcessingStatusBanners />}
-            <GlobalDropOverlay />
-          </div>
+          )}
         </ProcessingStatusProvider>
       </DownloadManagerProvider>
     </AuthProvider>
