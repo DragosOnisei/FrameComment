@@ -21,6 +21,10 @@ interface AuthContextType {
   login: () => void
   logout: () => Promise<void>
   isAuthenticated: boolean
+  /** 3.2.x: patch the in-memory user (e.g. after a profile avatar
+   *  change) so it propagates everywhere immediately — sidebar chip,
+   *  user list, etc. — without a full session re-fetch. */
+  updateUser: (partial: Partial<User>) => void
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -29,6 +33,7 @@ const AuthContext = createContext<AuthContextType>({
   login: () => {},
   logout: async () => {},
   isAuthenticated: false,
+  updateUser: () => {},
 })
 
 export function useAuth() {
@@ -201,6 +206,12 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
   // Auth → Share renders as ONE continuous loading screen instead of
   // the old "flat black + Loading…" flash → "tiny dark Loading
   // video…" card flash.
+  // 3.2.x: shallow-merge a partial into the cached user so avatar /
+  // name changes made on the Profile page show up instantly across the
+  // app (sidebar, user list) without waiting for a session re-fetch.
+  const updateUser = (partial: Partial<User>) =>
+    setUser((prev) => (prev ? { ...prev, ...partial } : prev))
+
   if (requireAuth && (loading || !user)) {
     return (
       <div
@@ -235,6 +246,7 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
         login,
         logout,
         isAuthenticated: !!user,
+        updateUser,
       }}
     >
       {children}

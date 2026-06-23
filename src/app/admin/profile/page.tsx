@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
+import { AvatarCropModal } from '@/components/AvatarCropModal'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,41 +29,19 @@ export const dynamic = 'force-dynamic'
  * have to revalidate the whole page.
  *
  * Avatar uploads are downsized to 256×256 JPEG client-side and sent
- * inline as a `data:` URL (see `compressAvatar` below) so we don't
- * need a separate object store.
+ * inline as a `data:` URL (cropped via the AvatarCropModal) so we
+ * don't need a separate object store.
  *
  * Email is intentionally NOT editable here — it's the sign-in
  * identifier and changing it is a destructive operation we don't
  * surface in the self-serve flow.
  */
 
-/** Resize + JPEG-encode an avatar file client-side so we keep the
- *  inline `data:` URL small (~30–80 KB for 256×256 JPEG quality 0.85).
- *  Returns the data URL ready to POST. */
-async function compressAvatar(file: File): Promise<string> {
-  const url = URL.createObjectURL(file)
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image()
-      i.onload = () => resolve(i)
-      i.onerror = reject
-      i.src = url
-    })
-    // Square-crop centered on the longer axis, then resize to 256.
-    const side = Math.min(img.naturalWidth, img.naturalHeight)
-    const sx = (img.naturalWidth - side) / 2
-    const sy = (img.naturalHeight - side) / 2
-    const canvas = document.createElement('canvas')
-    canvas.width = 256
-    canvas.height = 256
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('Canvas 2D context unavailable')
-    ctx.drawImage(img, sx, sy, side, side, 0, 0, 256, 256)
-    return canvas.toDataURL('image/jpeg', 0.85)
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
+// 3.2.x: the old auto-square-crop (`compressAvatar`) was removed — it
+// blindly cropped the image centre and beheaded off-centre subjects.
+// Avatars now go through the interactive AvatarCropModal, which lets
+// the user drag/zoom to choose the circular crop and returns a 256×256
+// JPEG data URL.
 
 function initialsFromUser(user: { name?: string | null; email?: string | null }): string {
   const base = (user.name || user.email || '?').trim()
@@ -73,12 +52,14 @@ function initialsFromUser(user: { name?: string | null; email?: string | null })
 }
 
 export default function ProfilePage() {
-  const { user, loading } = useAuth()
+  const { user, loading, updateUser } = useAuth()
 
   // --- Profile section state -------------------------------------
   const [name, setName] = useState('')
   const [username, setUsername] = useState('')
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  // 3.2.x: file pending crop. Non-null opens the AvatarCropModal.
+  const [cropFile, setCropFile] = useState<File | null>(null)
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileMsg, setProfileMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
@@ -99,39 +80,72 @@ export default function ProfilePage() {
     setAvatarPreview((user as any).avatarUrl ?? null)
   }, [user])
 
-  const handleAvatarPick = useCallback(async (file: File) => {
+  const handleAvatarPick = useCallback((file: File) => {
+    // 3.2.x: open the crop modal instead of auto-cropping the centre.
     setProfileMsg(null)
-    try {
-      const data = await compressAvatar(file)
-      setAvatarPreview(data)
-    } catch (err) {
-      logError('Avatar compression failed:', err)
-      setProfileMsg({ kind: 'err', text: 'Could not process that image. Try another one.' })
-    }
+    setCropFile(file)
   }, [])
 
+  // 3.2.x: the avatar saves + propagates on its own (Apply / Remove),
+  // independent of the "Save profile" button. This way a photo change
+  // can't be blocked by an unrelated name/username validation error
+  // (e.g. "Username already taken"), and it updates everywhere — the
+  // sidebar chip and the user list — the moment it's applied.
+  const persistAvatar = useCallback(
+    async (next: string | null) => {
+      if (!user) return
+      const previous = (user as any).avatarUrl ?? null
+      setAvatarPreview(next) // optimistic
+      setProfileMsg(null)
+      try {
+        const res = await apiFetch(`/api/users/${user.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ avatarUrl: next }),
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body?.error || 'Could not update photo')
+        }
+        updateUser({ avatarUrl: next }) // propagate instantly
+        setProfileMsg({ kind: 'ok', text: next ? 'Photo updated.' : 'Photo removed.' })
+      } catch (err) {
+        logError('Avatar save failed:', err)
+        setAvatarPreview(previous) // revert on failure
+        setProfileMsg({
+          kind: 'err',
+          text: err instanceof Error ? err.message : 'Could not update photo',
+        })
+      }
+    },
+    [user, updateUser],
+  )
+
   const handleClearAvatar = useCallback(() => {
-    setAvatarPreview(null)
-  }, [])
+    void persistAvatar(null)
+  }, [persistAvatar])
 
   const handleSaveProfile = useCallback(async () => {
     if (!user) return
     setSavingProfile(true)
     setProfileMsg(null)
     try {
+      // 3.2.x: this button now only saves Display name + Username. The
+      // avatar persists on its own (Apply / Remove) so a name/username
+      // error here can't block a photo change.
       const res = await apiFetch(`/api/users/${user.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
           username: username.trim() || null,
-          avatarUrl: avatarPreview, // null clears, data: URL sets
         }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body?.error || 'Could not save profile')
       }
+      updateUser({ name: name.trim() }) // propagate the name change
       setProfileMsg({ kind: 'ok', text: 'Profile updated.' })
     } catch (err) {
       logError('Save profile failed:', err)
@@ -139,7 +153,7 @@ export default function ProfilePage() {
     } finally {
       setSavingProfile(false)
     }
-  }, [user, name, username, avatarPreview])
+  }, [user, name, username, updateUser])
 
   const handleSavePassword = useCallback(async () => {
     if (!user) return
@@ -202,6 +216,13 @@ export default function ProfilePage() {
   }, [user, currentPassword, newPassword, confirmPassword])
 
   if (loading || !user) return null
+
+  // 3.2.x: "Save profile" only applies to Display name + Username, and
+  // only when one of them actually changed vs the saved values. The
+  // avatar is excluded — it saves on its own.
+  const profileDirty =
+    name.trim() !== (user.name ?? '').trim() ||
+    (username.trim() || '') !== (((user as any).username ?? '') as string)
 
   // Reused field-input className — `bg-white/[0.04]` glass surface
   // matching the rest of the v2.5 admin chrome.
@@ -273,6 +294,17 @@ export default function ProfilePage() {
             </Button>
           </div>
 
+          {/* 3.2.x: interactive circular crop on upload. */}
+          <AvatarCropModal
+            file={cropFile}
+            onCancel={() => setCropFile(null)}
+            onApply={(dataUrl) => {
+              setCropFile(null)
+              // Save + propagate immediately — no "Save profile" needed.
+              void persistAvatar(dataUrl)
+            }}
+          />
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="profile-name" className="text-white/80">Display name</Label>
@@ -311,7 +343,7 @@ export default function ProfilePage() {
             <Button
               type="button"
               onClick={handleSaveProfile}
-              disabled={savingProfile}
+              disabled={savingProfile || !profileDirty}
               style={{ color: '#ffffff' }}
               className="font-semibold"
             >

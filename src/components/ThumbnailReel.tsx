@@ -74,6 +74,16 @@ export default function ThumbnailReel({
   const tShare = useTranslations('share')
   const tComments = useTranslations('comments')
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  // 3.2.x: click-and-drag (mouse) horizontal panning of the version
+  // reel. `moved` tracks whether the pointer travelled far enough to
+  // count as a drag, so a drag doesn't also fire a tile's version-
+  // select click. Touch devices already scroll natively.
+  const reelDragRef = useRef<{ active: boolean; startX: number; startScroll: number; moved: boolean }>({
+    active: false,
+    startX: 0,
+    startScroll: 0,
+    moved: false,
+  })
   // Start collapsed on first load
   const [isExpanded, setIsExpanded] = useState(false)
   const hasScrolledRef = useRef(false)
@@ -102,10 +112,13 @@ export default function ThumbnailReel({
   }, [versionMenuOpen])
 
   // 2.2.4+: Threshold for showing left/right page-scroll arrows
-  // inside the expanded version reel. Below this we expect the
-  // versions to fit comfortably on screen (or scroll via touch),
-  // so arrows would just add visual noise.
-  const VERSION_REEL_ARROWS_THRESHOLD = 10
+  // inside the expanded version reel. At or below this the versions
+  // fit comfortably; above it the reel left-aligns and shows arrows
+  // for paging.
+  // 3.2.x: lowered 10 → 4 so a video with MORE than 4 versions gets a
+  // horizontal scroll (arrows + overflow) to reach them all, per the
+  // requested "v1, v2, v3 … left-to-right, scroll past 4" behaviour.
+  const VERSION_REEL_ARROWS_THRESHOLD = 4
 
   // 2.2.4+: storyboard sprite-sheet hover-scrub. Same constants
   // VideoCard uses for the grid view (10×10 grid = 100 frames per
@@ -150,6 +163,44 @@ export default function ThumbnailReel({
     // user keeps context across paging clicks.
     const delta = container.clientWidth * 0.8 * (direction === 'left' ? -1 : 1)
     container.scrollBy({ left: delta, behavior: 'smooth' })
+  }
+
+  // 3.2.x: drag-to-scroll the version reel with the mouse. We attach
+  // move/up listeners to the window on mousedown so the drag keeps
+  // tracking even when the cursor leaves the strip or passes over a
+  // tile, and remove them on release.
+  const handleReelMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return // left button only
+    const el = scrollContainerRef.current
+    if (!el) return
+    reelDragRef.current = {
+      active: true,
+      startX: e.clientX,
+      startScroll: el.scrollLeft,
+      moved: false,
+    }
+    // 3.2.x: turn OFF scroll-snap while dragging. With
+    // `snap-mandatory` left on, the browser keeps yanking the strip
+    // back to the nearest tile mid-drag, which feels sticky/jumpy.
+    // Disabling it lets the reel follow the pointer 1:1 and smoothly;
+    // we restore snap on release so it settles neatly on a tile.
+    el.style.scrollSnapType = 'none'
+    const onMove = (ev: MouseEvent) => {
+      if (!reelDragRef.current.active) return
+      const dx = ev.clientX - reelDragRef.current.startX
+      if (Math.abs(dx) > 4) reelDragRef.current.moved = true
+      el.scrollLeft = reelDragRef.current.startScroll - dx
+    }
+    const onUp = () => {
+      reelDragRef.current.active = false
+      // Restore the class-based `snap-x snap-mandatory` so the strip
+      // settles on the nearest tile after the drag ends.
+      el.style.scrollSnapType = ''
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
 
   // 2.2.4+: The expanded reel now shows ONLY the versions of the
@@ -329,7 +380,15 @@ export default function ThumbnailReel({
   })()
 
   return (
-    <div className="relative shrink-0 z-20 p-2 sm:p-3">
+    // 3.2.x: z-40 (was z-20). `relative` + z-index here creates a
+    // stacking context, so the expanded version reel inside is capped
+    // at THIS level no matter its own z-index. The comments-panel
+    // resize handle sits at z-30 in the page's root context, so at
+    // z-20 the whole top bar (and thus the reel) rendered BELOW the
+    // handle — a click-drag through the versions over the video/comments
+    // divider grabbed the resizer instead. Lifting the bar above z-30
+    // lets the reel win the pointer across the full strip.
+    <div className="relative shrink-0 z-40 p-2 sm:p-3">
       {/* Compact Control Bar - Always visible */}
       {/* 2.5.1+ refresh — bar wrapper is transparent, same as the
           AdminTopBar pattern. Only the individual elements (Back
@@ -365,29 +424,20 @@ export default function ThumbnailReel({
             <div ref={versionMenuRef} className="relative flex items-center gap-2 min-w-0">
               <button
                 data-tutorial="video-reel-center"
-                onClick={handleToggleExpanded}
-                disabled={currentVersions.length < 2}
+                type="button"
                 className={cn(
                   // 2.5.1+: persistent glass pill — mirrors the
                   // AdminTopBar search button so the center column
-                  // reads as the same affordance everywhere in the
-                  // app. Rounded-lg + h-9 + `bg-white/[0.06]` ring
-                  // by default; bumps to `bg-white/[0.12]` on hover
-                  // or when the versions dropdown is open.
-                  "flex items-center gap-2 min-w-0 px-3 h-9 rounded-lg transition-all max-w-[40vw] sm:max-w-[50vw]",
-                  "bg-white/[0.06] ring-1 ring-white/10",
-                  currentVersions.length >= 2
-                    ? "hover:bg-white/[0.12] hover:ring-white/20 active:scale-95 cursor-pointer"
-                    : "cursor-default",
-                  isExpanded && currentVersions.length >= 2 && "bg-white/[0.12] ring-white/20"
+                  // reads as the same affordance everywhere in the app.
+                  // 3.2.x: informational ONLY now — clicking the
+                  // filename no longer toggles the version reel. The
+                  // reel opens from the Vx chip to its right instead, so
+                  // this pill has no click behaviour and a default
+                  // cursor.
+                  "flex items-center gap-2 min-w-0 px-3 h-9 rounded-lg max-w-[40vw] sm:max-w-[50vw]",
+                  "bg-white/[0.06] ring-1 ring-white/10 cursor-default"
                 )}
-                title={
-                  currentVersions.length < 2
-                    ? 'This video has only one version'
-                    : isExpanded
-                      ? 'Hide versions'
-                      : 'Show versions'
-                }
+                title={displayedHeaderName || undefined}
               >
                 {/* 1.7.0+: removed the CheckCircle2 approval glyph
                     that used to sit in front of the filename — the
@@ -425,13 +475,17 @@ export default function ThumbnailReel({
                 <button
                   type="button"
                   onClick={() => {
+                    // 3.2.x: clicking the version chip now opens the
+                    // THUMBNAIL reel below the bar (v1 → v2 → … left to
+                    // right) instead of the old vertical filename
+                    // dropdown — that's what users expect when they tap
+                    // "Vx". Same toggle the title pill uses.
                     if (currentVersions.length > 1) {
-                      setVersionMenuOpen((v) => !v)
+                      handleToggleExpanded()
                     }
                   }}
                   disabled={currentVersions.length < 2}
-                  aria-haspopup={currentVersions.length > 1 ? 'menu' : undefined}
-                  aria-expanded={versionMenuOpen}
+                  aria-expanded={isExpanded}
                   className={cn(
                     // 1.7.0+: bigger primary-blue pill so the
                     // active version reads as a clear status
@@ -563,7 +617,14 @@ export default function ThumbnailReel({
           inside the panel for paging. */}
       {isExpanded && currentVersions.length >= 2 && (
         <div
-          className="absolute left-2 right-2 sm:left-3 sm:right-3 top-full z-30 mt-1"
+          // 3.2.x: z-50 (was z-30) so the expanded version reel sits
+          // ABOVE the comments-panel resize handle (also z-30). At the
+          // video/comments divider the two overlapped at equal z-index
+          // and the later-in-DOM resize handle won the pointer, so a
+          // click-drag through the versions there grabbed the resizer
+          // instead of scrolling the reel. Raising the reel keeps the
+          // drag-to-scroll working across the whole strip.
+          className="absolute left-2 right-2 sm:left-3 sm:right-3 top-full z-50 mt-1"
         >
           {/* 2.5.1+: glass panel matching the rest of the v2.5
               vocabulary — soft white tint over `.spotlight-bg`,
@@ -602,7 +663,11 @@ export default function ThumbnailReel({
 
               <div
                 ref={scrollContainerRef}
+                onMouseDown={handleReelMouseDown}
                 className={cn(
+                  // 3.2.x: grab cursor + drag-to-scroll. `select-none`
+                  // stops text/tile selection while dragging.
+                  'cursor-grab active:cursor-grabbing select-none',
                   // 2.5.1+: `py-3` lives here (not on the outer
                   // wrapper) so each tile gets ~12px of breathing
                   // room above + below INSIDE the scroll container's
@@ -610,6 +675,13 @@ export default function ThumbnailReel({
                   // shadow + brand-blue glow ring to render fully on
                   // every side instead of getting chopped at the
                   // bottom edge.
+                  // 3.2.x: center the strip when the versions fit (≤4)
+                  // so a couple of tiles sit balanced under the title.
+                  // Once there are more than 4 (the reel overflows +
+                  // shows arrows) switch to left-aligned so the first
+                  // tile isn't clipped and the whole row stays
+                  // scrollable left-to-right. Tiles are always sorted
+                  // v1 → v2 → v3 … regardless of alignment.
                   'flex gap-2 sm:gap-3 py-3 overflow-x-auto overscroll-x-contain snap-x snap-mandatory',
                   currentVersions.length > VERSION_REEL_ARROWS_THRESHOLD
                     ? 'px-10 justify-start'
@@ -646,6 +718,13 @@ export default function ThumbnailReel({
                       key={version.id}
                       data-thumbnail
                       onClick={() => {
+                        // 3.2.x: if this click was the tail end of a
+                        // drag-to-scroll gesture, swallow it so panning
+                        // the reel doesn't accidentally switch version.
+                        if (reelDragRef.current.moved) {
+                          reelDragRef.current.moved = false
+                          return
+                        }
                         // Reuse the same event the version chip
                         // dropdown dispatches — VideoPlayer listens
                         // for it and jumps to the right index.

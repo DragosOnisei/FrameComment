@@ -201,10 +201,14 @@ export default function ResizableSidebar({
   return (
     <div className={`relative ${className}`} style={desktopStyle}>
       {children}
-      {/* Resize handle — only visible / usable from lg+. The hit
-          area is wider (8px) than the visible bar (1px) so the
-          cursor target is forgiving without making the sidebar
-          itself look hairy. */}
+      {/* Resize handle — only visible / usable from lg+.
+          3.2.x: a clear, grabbable GRIP centered on the sidebar's left
+          edge instead of a full-height hairline. This makes the resize
+          affordance obvious AND scopes the drag to just the grip — the
+          rest of the left edge (e.g. where the version reel overlaps
+          the video/comments divider) is no longer a resize target, so
+          dragging through the version thumbnails there never grabs the
+          resizer. */}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -212,15 +216,17 @@ export default function ResizableSidebar({
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onDoubleClick={handleDoubleClick}
-        className="hidden lg:block absolute top-0 bottom-0 -left-1.5 w-3 z-30 cursor-ew-resize group"
+        className="hidden lg:flex absolute top-1/2 -translate-y-1/2 -left-2.5 w-5 h-20 z-30 cursor-ew-resize group items-center justify-center touch-none"
         title="Drag to resize • double-click to reset"
       >
+        {/* Visible pill grip — thick enough to read as a drag handle.
+            Brightens to the accent colour on hover and while dragging. */}
         <div
           className={`
-            absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px
-            bg-border/40 group-hover:bg-primary/60
-            transition-colors
-            ${isDragging ? 'bg-primary w-0.5' : ''}
+            rounded-full ring-1 transition-all
+            ${isDragging
+              ? 'w-2 h-16 bg-primary ring-primary/50 shadow-[0_0_0_3px_hsl(var(--primary)/0.18)]'
+              : 'w-1.5 h-12 bg-white/30 ring-white/10 group-hover:w-2 group-hover:h-16 group-hover:bg-primary/70 group-hover:ring-primary/40'}
           `}
         />
       </div>

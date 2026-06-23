@@ -898,6 +898,7 @@
   },
   "share": {
     "loadingVideo": "Loading video...",
+    "downloadVideo": "Download Video",
     "authRequired": "Authentication Required",
     "tooManyRequestsSlowDown": "Too many requests. Please slow down.",
     "slugRequired": "Slug is required",

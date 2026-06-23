@@ -24,6 +24,11 @@ export interface CoverImageCropperHandle {
    * hasn't loaded yet.
    */
   commit(): Promise<File | null>
+  /** 3.2.x: set the zoom level (clamped to [MIN_SCALE, MAX_SCALE]).
+   *  Lets a host render its own zoom slider outside the preview. */
+  setZoom(scale: number): void
+  /** 3.2.x: reset zoom + position to the default centred fit. */
+  resetZoom(): void
 }
 
 export interface CoverImageCropperProps {
@@ -35,15 +40,29 @@ export interface CoverImageCropperProps {
   /** Output format. JPEG is smaller for photographs; PNG is used
    *  when the source has transparency. */
   className?: string
+  /** 3.2.x: hide the built-in overlay zoom slider so a host (e.g. the
+   *  avatar crop modal) can render its own control BELOW the preview
+   *  instead. Wheel / pinch zoom still work. Defaults to showing the
+   *  overlay (unchanged for the cover-image use). */
+  showZoomControls?: boolean
+  /** 3.2.x: notified whenever the zoom level changes (drag, wheel,
+   *  slider, reset) so an external slider can stay in sync. */
+  onZoomChange?: (scale: number) => void
 }
 
 const DEFAULT_OUTPUT_SIZE = 1024
-const MIN_SCALE = 1 // never zoom out past "cover" — preview must stay full
-const MAX_SCALE = 4
+export const MIN_SCALE = 1 // never zoom out past "cover" — preview must stay full
+export const MAX_SCALE = 4
 
 const CoverImageCropper = React.forwardRef<CoverImageCropperHandle, CoverImageCropperProps>(
   function CoverImageCropper(
-    { file, outputSize = DEFAULT_OUTPUT_SIZE, className },
+    {
+      file,
+      outputSize = DEFAULT_OUTPUT_SIZE,
+      className,
+      showZoomControls = true,
+      onZoomChange,
+    },
     ref,
   ) {
     // Object URL for the picked file. We revoke it whenever the file
@@ -96,6 +115,12 @@ const CoverImageCropper = React.forwardRef<CoverImageCropperHandle, CoverImageCr
       setScale(1)
       setTranslate({ x: 0, y: 0 })
     }, [file])
+
+    // 3.2.x: report every zoom change (wheel / pinch / slider / reset /
+    // load) so a host rendering an external slider stays in sync.
+    React.useEffect(() => {
+      onZoomChange?.(scale)
+    }, [scale, onZoomChange])
 
     /**
      * Compute the base cover-fit scale: the multiplier that makes the
@@ -251,7 +276,18 @@ const CoverImageCropper = React.forwardRef<CoverImageCropperHandle, CoverImageCr
         const filename = `cover.${ext}`
         return new File([blob], filename, { type: mime })
       },
-    }), [naturalSize, previewSize, baseCoverScale, scale, translate, file.type, outputSize])
+      setZoom: (value: number) => {
+        setScale((prev) => {
+          const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, value))
+          setTranslate((t) => clampTranslate(t, next))
+          return next
+        })
+      },
+      resetZoom: () => {
+        setScale(1)
+        setTranslate({ x: 0, y: 0 })
+      },
+    }), [naturalSize, previewSize, baseCoverScale, scale, translate, file.type, outputSize, clampTranslate])
 
     return (
       <div className={className}>
@@ -287,7 +323,10 @@ const CoverImageCropper = React.forwardRef<CoverImageCropperHandle, CoverImageCr
 
           {/* Zoom slider + reset, anchored at the bottom of the
               cropper. We surface it INSIDE the preview area so the
-              parent modal layout doesn't need to change to host it. */}
+              parent modal layout doesn't need to change to host it.
+              3.2.x: hidden when `showZoomControls` is false so a host
+              can render its own slider below the preview instead. */}
+          {showZoomControls && (
           <div
             className="absolute inset-x-3 bottom-3 flex items-center gap-2 rounded-lg bg-black/55 px-2 py-1 backdrop-blur-sm pointer-events-none"
             onPointerDown={(e) => e.stopPropagation()}
@@ -314,6 +353,7 @@ const CoverImageCropper = React.forwardRef<CoverImageCropperHandle, CoverImageCr
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
+          )}
 
           {!objectUrl && (
             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">

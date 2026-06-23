@@ -135,6 +135,12 @@ export default function VoiceRecorderButton({
     try {
       if (selectedDeviceId) {
         window.localStorage.setItem('framecomment.preferred-mic-id', selectedDeviceId)
+      } else {
+        // 3.2.x: clear the persisted id when the selection is reset
+        // (e.g. after a stale device caused getUserMedia to fail and we
+        // fell back to the default). Without this, the bad id would be
+        // re-read on the next mount and keep breaking recording.
+        window.localStorage.removeItem('framecomment.preferred-mic-id')
       }
     } catch {
       // localStorage can throw in private mode / disabled — non-fatal.
@@ -398,15 +404,49 @@ export default function VoiceRecorderButton({
 
   const startRecording = useCallback(async () => {
     setError(null)
+    // 3.2.x: secure-context guard. Browsers only expose
+    // `navigator.mediaDevices.getUserMedia` on HTTPS or localhost. On a
+    // plain-HTTP LAN origin (e.g. http://192.168.x.x) `mediaDevices` is
+    // undefined and no app code can grant mic access — so surface the
+    // real reason instead of the generic "Could not access microphone."
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setError(
+        typeof window !== 'undefined' && window.isSecureContext === false
+          ? 'Voice comments need a secure (HTTPS) connection — they don’t work over plain HTTP.'
+          : 'This browser doesn’t support microphone recording.',
+      )
+      return
+    }
     try {
-      // If the user has picked a specific input device, request it explicitly;
-      // otherwise let the OS / browser pick the default. We pass exact:false
-      // (the default) so the browser falls back gracefully if the device id
-      // is no longer present (e.g. USB mic unplugged between recordings).
+      // If the user has picked a specific input device, request it as a
+      // PREFERENCE (non-exact) so the browser falls back to the default
+      // when that device is gone. A stale saved id (USB mic unplugged,
+      // different machine, localStorage carried over) must not hard-fail
+      // recording — the old `{ exact: … }` constraint threw
+      // OverconstrainedError, which surfaced as "Could not access
+      // microphone." even though a working default mic was present.
       const audioConstraints: MediaTrackConstraints | true = selectedDeviceId
-        ? { deviceId: { exact: selectedDeviceId } }
+        ? { deviceId: selectedDeviceId }
         : true
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      } catch (constraintErr) {
+        // Even non-exact constraints can still throw on some browsers
+        // when the saved device id is invalid. Clear the persisted pick
+        // and retry once with the default device before giving up.
+        if (
+          selectedDeviceId &&
+          constraintErr instanceof Error &&
+          (constraintErr.name === 'OverconstrainedError' ||
+            constraintErr.name === 'NotFoundError')
+        ) {
+          setSelectedDeviceId('')
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        } else {
+          throw constraintErr
+        }
+      }
       streamRef.current = stream
 
       // Now that permission has been granted, we can read device labels.

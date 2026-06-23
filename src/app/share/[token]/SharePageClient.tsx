@@ -58,6 +58,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // "Back to folder" button (which replaces the default "All Videos").
   const urlFolderId = searchParams?.get('folderId') || null
   const urlFolderSlug = searchParams?.get('folderSlug') || null
+  // 3.2.x: single-video share detection. A `sig` param means the link
+  // was minted for ONE video (HMAC-signed via share-video-sig), so the
+  // dataset is locked to that clip — there is no grid to go "Back" to.
+  const isSingleVideoShare = !!(searchParams?.get('sig'))
 
   const [focusCommentId, setFocusCommentId] = useState<string | null>(urlFocusCommentId)
   const [isPasswordProtected, setIsPasswordProtected] = useState<boolean | null>(null)
@@ -128,6 +132,21 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const [thumbnailsByName, setThumbnailsByName] = useState<Map<string, string>>(new Map())
   const [thumbnailsLoading, setThumbnailsLoading] = useState(true)
   const [downloadingAll, setDownloadingAll] = useState(false)
+  // 3.2.x: mobile-only vertical resize of the player vs comments. On
+  // phones the layout stacks (video on top, comments below); a grip
+  // between them lets the viewer drag the split up/down. `null` height
+  // = natural/default. We only apply the inline height while the mobile
+  // (stacked) layout is active so it never fights the desktop lg: flex
+  // sizing.
+  const [isMobileLayout, setIsMobileLayout] = useState(false)
+  const [mobileVideoHeight, setMobileVideoHeight] = useState<number | null>(null)
+  const mobileResizeRef = useRef<{ active: boolean; startY: number; startHeight: number }>({
+    active: false,
+    startY: 0,
+    startHeight: 0,
+  })
+  const playerColRef = useRef<HTMLDivElement>(null)
+  const mainContentRef = useRef<HTMLDivElement>(null)
   const storageKey = token || ''
   const tokenCacheRef = useRef<Map<string, any>>(new Map())
   const inFlightTokenRequestsRef = useRef<Map<string, Promise<string>>>(new Map())
@@ -974,6 +993,69 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     router.replace(newUrl || '', { scroll: false })
   }, [searchParams, pathname, router, urlFolderId, urlFolderSlug])
 
+  // 3.2.x: track whether we're in the stacked (mobile) layout — matches
+  // the lg breakpoint Tailwind uses to switch from column to row. When
+  // we leave mobile, drop any custom video height so the desktop flex
+  // sizing takes over cleanly.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 1023px)')
+    const update = () => {
+      setIsMobileLayout(mq.matches)
+      if (!mq.matches) setMobileVideoHeight(null)
+    }
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+
+  // 3.2.x: drag the mobile video/comments split. Records the player's
+  // current height on grab, then tracks pointer/touch movement on the
+  // window so the drag keeps working past the thin grip. Clamped so
+  // neither the video nor the comments can collapse to nothing.
+  const beginMobileResize = useCallback((clientY: number) => {
+    const el = playerColRef.current
+    if (!el) return
+    mobileResizeRef.current = {
+      active: true,
+      startY: clientY,
+      startHeight: el.getBoundingClientRect().height,
+    }
+    const clampHeight = (h: number) => {
+      const container = mainContentRef.current
+      const avail = container
+        ? container.getBoundingClientRect().height
+        : window.innerHeight
+      // Keep at least ~150px of video and ~160px of comments visible.
+      const max = Math.max(180, avail - 160)
+      return Math.max(150, Math.min(h, max))
+    }
+    const move = (cy: number) => {
+      if (!mobileResizeRef.current.active) return
+      const dy = cy - mobileResizeRef.current.startY
+      setMobileVideoHeight(clampHeight(mobileResizeRef.current.startHeight + dy))
+    }
+    const onMouseMove = (e: MouseEvent) => move(e.clientY)
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches[0]) {
+        move(e.touches[0].clientY)
+        // Stop the page from scrolling while dragging the split.
+        e.preventDefault()
+      }
+    }
+    const end = () => {
+      mobileResizeRef.current.active = false
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', end)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', end)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', end)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', end)
+  }, [])
+
   const handleDownloadAll = useCallback(async () => {
     if (downloadingAll || !shareToken) return
 
@@ -1422,6 +1504,21 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     readyVideos = readyVideos.filter((v: any) => v.approved)
   }
 
+  // 3.2.x: active version's signed download URL for the top-right
+  // download button in the player toolbar. `downloadUrl` is only set on
+  // the tokenized video when the clip is actually downloadable (project
+  // allows it + the right token was minted), so gating the button on it
+  // keeps the control honest.
+  const activeReadyVideoForDownload =
+    readyVideos.find((v: any) => v.id === activeVideoId) || readyVideos[0]
+  const activeVideoDownloadUrl: string | null =
+    activeReadyVideoForDownload?.downloadUrl || null
+  const showToolbarDownload = !!(
+    project.allowAssetDownload &&
+    activeVideoDownloadUrl &&
+    !isGuest
+  )
+
   // Filter comments to only show comments for active videos
   const activeVideoIds = new Set(activeVideos.map((v: any) => v.id))
   const filteredComments = comments.filter((comment: any) => {
@@ -1583,14 +1680,47 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           thumbnailsByName={thumbnailsByName}
           activeVideoName={activeVideoName}
           activeVideoId={activeVideoId}
+          // 3.2.x: feed the tokenized versions so the version reel shows
+          // each version's real thumbnail (v1, v2, v3 …) instead of
+          // blank placeholders. The admin share page already did this;
+          // the client page didn't, so multi-version reels were empty.
+          activeVersionsTokenized={activeVideos}
           onVideoSelect={handleVideoSelect}
           onBackToGrid={handleBackToGrid}
-          showBackButton={true}
+          // 3.2.x: no "Back" on a single-video share — there's no grid
+          // to return to (the link is locked to one clip via `sig`).
+          // Folder/project shares keep the button so the client can go
+          // back to the folder grid.
+          showBackButton={!isSingleVideoShare}
           showCommentToggle={!project.hideFeedback && !isGuest}
           isCommentPanelVisible={!hideComments}
           onToggleCommentPanel={() => setHideComments(!hideComments)}
           showThemeToggle={false}
-          trailingAction={undefined}
+          // 3.2.x: top-right download button so the client can grab the
+          // current video (gated on the project allowing downloads + a
+          // real download token). Especially relevant for single-video
+          // shares, which have no grid-level "Download all".
+          trailingAction={
+            showToolbarDownload && activeVideoDownloadUrl ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const a = document.createElement('a')
+                  a.href = activeVideoDownloadUrl
+                  a.download = ''
+                  a.rel = 'noopener'
+                  document.body.appendChild(a)
+                  a.click()
+                  a.remove()
+                }}
+                title={t('downloadVideo')}
+                aria-label={t('downloadVideo')}
+                className="inline-flex items-center justify-center h-9 w-9 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 hover:ring-white/25 text-white/80 hover:text-white transition-colors"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            ) : undefined
+          }
         />
 
         {/* 1.4.x+: share-link expiration countdown. Thin strip pinned
@@ -1641,7 +1771,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           viewports like Nest Hub (1024×600) the stacked layout left the
           comments eating most of the height and the player squeezed to
           ~70px. On mobile the page falls back to a natural-scroll column. */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
+      <div ref={mainContentRef} className="flex-1 min-h-0 flex flex-col lg:flex-row p-2 sm:p-3 gap-2 sm:gap-3">
         {readyVideos.length === 0 ? (
           /* 3.2.0+: same frosted-glass card recipe as the `if (!project)`
              initial loading state above — so the transition from "project
@@ -1684,7 +1814,14 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             {/* 3.2.0+: drop `bg-background` so the outer `spotlight-bg-tr`
                 gradient shows through around the player margins — same
                 layering as the admin view. */}
-            <div data-tutorial="video-player" className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
+            <div
+              ref={playerColRef}
+              data-tutorial="video-player"
+              className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}
+              // 3.2.x: on mobile (stacked layout) apply the dragged
+              // height; on desktop leave it to the lg: flex sizing.
+              style={isMobileLayout && mobileVideoHeight ? { height: `${mobileVideoHeight}px` } : undefined}
+            >
               <VideoPlayer
                 videos={readyVideos}
                 projectId={project.id}
@@ -1718,6 +1855,31 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 }}
               />
             </div>
+
+            {/* 3.2.x: mobile-only drag grip between the video and the
+                comments. Drag up/down to grow/shrink the video (and so
+                shrink/grow the comments). Double-click resets to the
+                natural split. Hidden from lg+ where the side
+                ResizableSidebar handles resizing instead. */}
+            {showCommentPanel && (
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize video and comments"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  beginMobileResize(e.clientY)
+                }}
+                onTouchStart={(e) => {
+                  if (e.touches[0]) beginMobileResize(e.touches[0].clientY)
+                }}
+                onDoubleClick={() => setMobileVideoHeight(null)}
+                className="lg:hidden shrink-0 h-6 -my-1 flex items-center justify-center cursor-ns-resize touch-none select-none group"
+                title="Drag to resize • double-click to reset"
+              >
+                <div className="h-1.5 w-12 rounded-full bg-white/30 ring-1 ring-white/10 group-hover:w-16 group-hover:bg-primary/70 group-hover:ring-primary/40 transition-all" />
+              </div>
+            )}
 
             {/* Comments Section - max one screen height on mobile, side panel on desktop.
                 3.2.0+: matches admin — `rounded-2xl` for the larger, more elegant

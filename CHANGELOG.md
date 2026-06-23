@@ -14,6 +14,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.9] - 2026-06-23
+
+### Player version reel + share UX, mobile/desktop resize grips, profile
+photo cropper, and a voice-comment mic fix
+
+**Voice comments — mic fix.** A stale saved microphone id (persisted in
+localStorage) made `getUserMedia` hard-fail with the old
+`{ deviceId: { exact } }` constraint, so the composer showed "Could
+not access microphone." even with a working mic. Now we request the
+saved device as a preference and retry with the default on
+Overconstrained/NotFound, clearing the bad id. Also added a clear
+message for insecure (plain-HTTP) origins, where browsers disable the
+mic entirely (it needs HTTPS or localhost).
+
+**Single-video share.** Sharing one video no longer shows a "Back"
+button (there's no grid to return to — folder/project shares keep it),
+and the player toolbar gained a top-right Download button so the client
+can grab the video when the project allows downloads.
+
+**Player version reel.** On the client share, the version strip now
+shows each version's real thumbnail (v1 → v2 → v3 …, left to right) —
+it was passing no tokenized data so the tiles were blank. Clicking the
+**Vx** chip opens the reel (clicking the filename no longer does);
+thumbnails are centered when they fit and switch to a horizontal,
+draggable, smooth scroll past 4 versions. Raised the reel above the
+comments resize handle so dragging through it doesn't grab the resizer.
+
+**Resize grips.** The desktop comments-sidebar resize handle is now a
+visible, centered pill grip (drag only from there). On mobile, a new
+grip between the video and comments lets you drag the split up/down
+(double-click resets).
+
+**Profile photo cropper.** Uploading an avatar opens an interactive
+circular crop modal (drag + zoom, zoom slider below the image) so the
+subject isn't beheaded by a blind centre-crop. The photo now saves and
+propagates the moment you hit **Apply** (or Remove) — independent of
+the **Save profile** button, which is now scoped to Display name +
+Username and only enabled when one of those actually changed. This
+fixes a photo change being blocked by an unrelated "Username already
+taken" error.
+
+### Files changed
+
+- `src/components/VoiceRecorderButton.tsx` — mic device fallback +
+  secure-context message.
+- `src/app/share/[token]/SharePageClient.tsx` — single-video back/
+  download, version-reel tokenized data, mobile resize grip.
+- `src/components/ThumbnailReel.tsx` — version reel opens from the Vx
+  chip, alignment, drag-to-scroll, z-index above the resize handle.
+- `src/components/ResizableSidebar.tsx` — centered pill grip.
+- `src/components/CoverImageCropper.tsx` — optional external zoom
+  controls (`showZoomControls`, `onZoomChange`, `setZoom`/`resetZoom`).
+- `src/components/AvatarCropModal.tsx` — NEW: circular avatar crop.
+- `src/app/admin/profile/page.tsx` — crop modal, instant avatar save,
+  Save-profile scoped to name/username.
+- `src/components/AuthProvider.tsx` — `updateUser` for instant propagation.
+- `src/locales/en.json` — `share.downloadVideo`.
+
 ## [3.2.8] - 2026-06-23
 
 ### M4V uploads now encode, User Management shows avatars + glass
