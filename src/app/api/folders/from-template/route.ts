@@ -240,6 +240,15 @@ export async function POST(request: NextRequest) {
         }
       }
       return { root, foldersCreated: count }
+    }, {
+      // 3.3.x: the template materialises many folders sequentially
+      // (root + per-actor + subfolders, each with a slug check + insert).
+      // On a busy / large DB that can run past Prisma's default 5s
+      // interactive-transaction timeout, which aborts + rolls back the
+      // whole thing and surfaces "Failed to create folders from
+      // template" even though the work was almost done. Give it room.
+      timeout: 30_000,
+      maxWait: 15_000,
     })
 
     return NextResponse.json(

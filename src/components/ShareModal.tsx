@@ -225,6 +225,14 @@ export function ShareModal({
   // POST resolves, success OR failure) closes that race.
   const [shortUrl, setShortUrl] = useState<string | null>(null)
   const [shortResolved, setShortResolved] = useState(false)
+  // 3.3.x: grace flag. The 3.2.3 "wait for the short link before
+  // showing anything" was nice when the round-trip is fast, but on a
+  // busy admin page (token + thumbnail storms + rate-limit retries)
+  // that POST can take many seconds, leaving the modal stuck on
+  // "Generating link…". Once this flag flips we reveal the long URL as
+  // a usable fallback so the modal is never blocked. The short URL
+  // still swaps in if it arrives.
+  const [graceElapsed, setGraceElapsed] = useState(false)
   const shortRequestedRef = useRef<string | null>(null)
   // 2.5.1+: ref + open state for the custom GlassCalendar popover.
   // We dropped the native `<input type="date">` calendar (OS-rendered,
@@ -309,9 +317,25 @@ export function ShareModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, shareUrl])
 
+  // 3.3.x: reveal the long URL as a usable fallback if the short-link
+  // round-trip is slow, so the modal never hangs on "Generating link…".
+  // On a fast server the short link resolves well inside this window,
+  // so there's no long-URL flash in the common case.
+  useEffect(() => {
+    if (!open) {
+      setGraceElapsed(false)
+      return
+    }
+    const t = setTimeout(() => setGraceElapsed(true), 600)
+    return () => clearTimeout(t)
+  }, [open])
+
   // The URL the user actually sees + copies. Short URL wins when
   // available; otherwise we fall back to the original long URL.
   const displayUrl = shortUrl || shareUrl
+  // A URL is ready to show/copy once the short link resolved OR the
+  // grace window elapsed (fallback to the long URL).
+  const hasUsableUrl = shortResolved || graceElapsed
 
   const autoCopiedRef = useRef(false)
   useEffect(() => {
@@ -320,18 +344,18 @@ export function ShareModal({
       return
     }
     if (autoCopiedRef.current) return
-    // Wait until the short-link round-trip has resolved (success
-    // OR failure) before copying. Otherwise we'd copy the long
-    // URL into the clipboard for the brief window before the
-    // POST returns, even though the modal then renders the short
-    // one — leading to "modal shows fcmt.io/aBc but my clipboard
-    // has framecomment.com/share/…".
-    if (!shortResolved) return
+    // 3.3.x: auto-copy as soon as there's a usable URL — the short link
+    // when it resolves quickly, otherwise the long URL once the grace
+    // window elapses. Previously this waited for `shortResolved` only,
+    // so a slow short-link round-trip left the clipboard empty for many
+    // seconds. `displayUrl` is the short URL when available, the long
+    // URL otherwise, so we always copy the best link currently shown.
+    if (!hasUsableUrl) return
     autoCopiedRef.current = true
     void writeClipboard(displayUrl).then((ok) => {
       if (ok) setCopied(true)
     })
-  }, [open, displayUrl, shortResolved, writeClipboard])
+  }, [open, displayUrl, hasUsableUrl, writeClipboard])
 
   // Reset the green check after a couple of seconds so the user can
   // re-copy without the modal needing to be re-opened.
@@ -477,8 +501,8 @@ export function ShareModal({
                 `writeClipboard` select this field directly. */}
             <Input
               ref={inputRef}
-              value={shortResolved ? displayUrl : ''}
-              placeholder={shortResolved ? undefined : 'Generating link…'}
+              value={hasUsableUrl ? displayUrl : ''}
+              placeholder={hasUsableUrl ? undefined : 'Generating link…'}
               readOnly
               onClick={(e) => (e.currentTarget as HTMLInputElement).select()}
               className="pl-8 pr-2 truncate font-mono text-xs bg-white/[0.06] ring-1 ring-white/10 border-0 text-white placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)]"
@@ -490,7 +514,7 @@ export function ShareModal({
             size="sm"
             variant={copied ? 'outline' : 'default'}
             onClick={handleCopy}
-            disabled={!shortResolved}
+            disabled={!hasUsableUrl}
             className={`shrink-0 ${copied ? 'border-emerald-500 text-emerald-500' : ''}`}
           >
             {copied ? (

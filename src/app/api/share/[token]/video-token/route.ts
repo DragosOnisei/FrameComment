@@ -31,7 +31,7 @@ export async function GET(
 
   const project = await prisma.project.findUnique({
     where: { id: shareContext.projectId },
-    select: { id: true, slug: true },
+    select: { id: true, slug: true, allowAssetDownload: true },
   })
 
   if (!project || project.slug !== token) {
@@ -60,7 +60,12 @@ export async function GET(
     return NextResponse.json({ error: shareMessages?.videoNotFound || 'Video not found' }, { status: 404 })
   }
 
-  if (quality === 'original' && !video.approved) {
+  // 3.3.x: the original source is available once the video is approved
+  // OR when the project opts into client downloads (`allowAssetDownload`)
+  // — the latter lets a client download the source of a single-video
+  // share before approval. Without `allowAssetDownload` the original
+  // stays gated behind approval as before.
+  if (quality === 'original' && !video.approved && !project.allowAssetDownload) {
     return NextResponse.json({ error: shareMessages?.originalQualityUnavailable || 'Original quality unavailable' }, { status: 403 })
   }
 

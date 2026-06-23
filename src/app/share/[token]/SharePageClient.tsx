@@ -704,6 +704,15 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             streamToken720p = token720
             streamToken1080p = token1080
             streamToken2160p = token2160
+            // 3.3.x: when the project allows downloads, also mint an
+            // original download token for not-yet-approved videos so the
+            // client gets the top-right Download button (e.g. on a
+            // single-video share). The share video-token + content
+            // routes permit the original under the same
+            // `allowAssetDownload` rule.
+            if (project?.allowAssetDownload) {
+              downloadToken = await fetchVideoTokenWithRetry(video.id, 'original')
+            }
           }
 
           let thumbnailUrl = null

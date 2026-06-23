@@ -45,6 +45,10 @@ export default function NewFolderDialog({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  // 3.3.x: tracks whether a backdrop dismiss gesture actually STARTED
+  // on the backdrop, so we only close on a deliberate click-outside —
+  // not on a stray release from the opening click.
+  const backdropDownRef = useRef(false)
 
   // Reset state when the dialog opens so a previous error / value
   // doesn't bleed into the next open.
@@ -108,7 +112,22 @@ export default function NewFolderDialog({
       // surface, frosted-glass like all other v2.5 modals.
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !submitting) onClose()
+        // 3.3.x: record that the press began on the backdrop. We only
+        // dismiss if BOTH the press and the release land on the
+        // backdrop. Closing on a bare mousedown meant the dialog could
+        // vanish the moment it opened: the backdrop mounts right under
+        // the cursor on the opening click, and the trailing
+        // mouseup/re-dispatched event was treated as an outside click —
+        // so a single click "flashed" the popup and it disappeared on
+        // release. Now a single click reliably opens it and it stays.
+        backdropDownRef.current = e.target === e.currentTarget
+      }}
+      onMouseUp={(e) => {
+        const startedOnBackdrop = backdropDownRef.current
+        backdropDownRef.current = false
+        if (startedOnBackdrop && e.target === e.currentTarget && !submitting) {
+          onClose()
+        }
       }}
     >
       <form

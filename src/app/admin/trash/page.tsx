@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { logError } from '@/lib/logging'
+import { useDownloadManager } from '@/contexts/DownloadManager'
 
 interface TrashItem {
   /** 1.2.0+: projects can be trashed too. They render as top-level
@@ -60,6 +61,11 @@ interface TrashItem {
 }
 
 export default function TrashPage() {
+  // 3.3.x: bottom-right progress banner (shared download/task manager,
+  // mounted in the admin layout) so emptying Trash runs in the
+  // background with a "Deleting … / N items" bar instead of freezing
+  // the page behind one giant blocking request.
+  const { startManualDownload } = useDownloadManager()
   const [items, setItems] = useState<TrashItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -214,33 +220,88 @@ export default function TrashPage() {
     [fetchTrash],
   )
 
+  // 3.3.x: permanently delete a single trash item (video group /
+  // folder / project). Extracted so the Empty-Trash background worker
+  // can reuse it. 404 is treated as success — the row was already
+  // removed (e.g. cascaded when its parent project was deleted).
+  const deleteOneTrashItem = useCallback(async (item: TrashItem) => {
+    if (item.kind === 'folder') {
+      const res = await apiFetch(`/api/folders/${item.id}?permanent=1`, { method: 'DELETE' })
+      if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+    } else if (item.kind === 'project') {
+      const res = await apiFetch(`/api/projects/${item.id}?permanent=1`, { method: 'DELETE' })
+      if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+    } else {
+      const ids = item.allIds && item.allIds.length > 0 ? item.allIds : [item.id]
+      for (const id of ids) {
+        const res = await apiFetch(`/api/videos/${id}?permanent=1`, { method: 'DELETE' })
+        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+      }
+    }
+  }, [])
+
   const handleEmptyTrash = useCallback(() => {
     if (items.length === 0) return
+    const snapshot = items
+    const count = snapshot.length
     setConfirmState({
       open: true,
       title: 'Empty Trash?',
-      description: `${items.length} ${items.length === 1 ? 'item' : 'items'} will be deleted permanently. This action cannot be undone.`,
+      description: `${count} ${count === 1 ? 'item' : 'items'} will be deleted permanently. This action cannot be undone.`,
       confirmLabel: 'Empty Trash',
-      onConfirm: async () => {
-        setConfirmState((s) => ({ ...s, busy: true }))
-        try {
-          const res = await apiFetch('/api/trash/empty', { method: 'POST' })
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}))
-            throw new Error(err.error || 'Failed to empty Trash')
+      onConfirm: () => {
+        // 3.3.x: close the dialog immediately and do the work in the
+        // background with a progress banner — the admin can keep
+        // navigating while Trash empties, even with many large items.
+        setConfirmState({ open: false, title: '' })
+        // Optimistically clear the list; the banner reports progress
+        // and we re-sync at the end in case some deletes failed.
+        setItems([])
+        window.dispatchEvent(new CustomEvent('trash:changed'))
+
+        const { bumpItem, finish, signal } = startManualDownload({
+          label: 'Emptying Trash',
+          totalItems: count,
+          unit: 'items',
+          icon: 'trash',
+        })
+
+        void (async () => {
+          // Projects first (their delete cascades children), then
+          // videos, then folders — mirrors the server's order so a
+          // cascade-removed child just 404s harmlessly.
+          const rank = (k: string) => (k === 'project' ? 0 : k === 'video' ? 1 : 2)
+          const ordered = [...snapshot].sort((a, b) => rank(a.kind) - rank(b.kind))
+          let next = 0
+          let failed = 0
+          const CONCURRENCY = 3
+          const worker = async () => {
+            while (next < ordered.length) {
+              if (signal.aborted) return
+              const item = ordered[next++]
+              try {
+                await deleteOneTrashItem(item)
+              } catch (err) {
+                failed++
+                logError('[TrashPage] empty: item delete failed', err)
+              }
+              bumpItem()
+            }
           }
-          // 1.2.1+: Trash is now empty — the header badge should
-          // disappear immediately.
+          await Promise.all(
+            Array.from({ length: Math.min(CONCURRENCY, ordered.length) }, () => worker()),
+          )
+          finish(
+            failed > 0 ? 'error' : 'success',
+            failed > 0 ? `${failed} item${failed === 1 ? '' : 's'} could not be deleted` : undefined,
+          )
           window.dispatchEvent(new CustomEvent('trash:changed'))
-          await fetchTrash()
-        } catch (err) {
-          alert(err instanceof Error ? err.message : 'Failed to empty Trash')
-        } finally {
-          setConfirmState({ open: false, title: '' })
-        }
+          // Re-sync the list (restores any rows that failed to delete).
+          void fetchTrash()
+        })()
       },
     })
-  }, [items.length, fetchTrash])
+  }, [items, startManualDownload, deleteOneTrashItem, fetchTrash])
 
   const daysLeft = (expiresAt: string) => {
     const ms = new Date(expiresAt).getTime() - Date.now()

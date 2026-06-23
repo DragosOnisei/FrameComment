@@ -58,6 +58,12 @@ export type DownloadJob = {
   completedItems?: number
   /** Total items (kind='manual'). */
   totalItems?: number
+  /** 3.3.x: unit noun for the progress label (kind='manual').
+   *  Defaults to "files"; the Trash flow passes "items". */
+  unit?: string
+  /** 3.3.x: which glyph the banner shows. Defaults to a download
+   *  arrow; the Trash flow passes 'trash'. */
+  icon?: 'download' | 'trash'
   /** Error message — set when status='error'. */
   error?: string
   /** Stable reference to the underlying controller so the banner can
@@ -84,6 +90,11 @@ type StartStreamOpts = {
 type StartManualOpts = {
   label: string
   totalItems: number
+  /** 3.3.x: unit noun shown in the banner ("files" default, "items"
+   *  for the Trash flow). */
+  unit?: string
+  /** 3.3.x: banner glyph. Defaults to the download arrow. */
+  icon?: 'download' | 'trash'
 }
 
 type DownloadManagerCtx = {
@@ -284,6 +295,8 @@ export function DownloadManagerProvider({ children }: { children: React.ReactNod
         status: 'active',
         completedItems: 0,
         totalItems: opts.totalItems,
+        unit: opts.unit,
+        icon: opts.icon,
         abortController,
       }
       jobsRef.current.set(jobId, job)

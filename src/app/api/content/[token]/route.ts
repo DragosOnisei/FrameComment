@@ -265,6 +265,18 @@ export async function GET(
       } else if (isDownload && isAdminRequest && originalPath) {
         // Admin downloads should always use the original file, even before approval
         filePath = originalPath
+      } else if (
+        isDownload &&
+        verifiedToken.quality === 'original' &&
+        originalPath &&
+        video.project.allowAssetDownload
+      ) {
+        // 3.3.x: client download of the original source. The video-token
+        // route only mints an 'original' token when the video is
+        // approved OR the project allows asset downloads, so an
+        // 'original' download token reaching here is already authorised
+        // — serve the source even before approval.
+        filePath = originalPath
       } else if (video.approved && originalPath) {
         // Check if project prefers preview playback after approval (for streaming, not downloads)
         if (!isDownload && video.project.usePreviewForApprovedPlayback) {

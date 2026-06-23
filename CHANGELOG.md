@@ -14,6 +14,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.1] - 2026-06-23
+
+### Trash + Security performance, Share modal, profile/voice/template fixes
+
+**Empty Trash no longer freezes the app.** Emptying Trash now runs in
+the background with a bottom-right progress banner ("Emptying Trash —
+N / M items", trash icon) instead of one giant blocking request. Items
+are deleted through a 3-wide concurrency pool (projects → videos →
+folders) so it's faster too, and you can keep navigating while it runs.
+
+**Security → Folder share links no longer freezes on big lists.** The
+list now shows 10 rows with a "Load more" button (for EVERY range,
+including Today), and short links are minted only for the visible rows
+instead of one POST per folder for the whole project (which flooded
+`/api/short-links` on open).
+
+**Create project / template reliability.** Both now run their DB
+transaction with a 30s timeout (up from Prisma's 5s default) so a
+momentarily busy database can't abort a create that would otherwise
+commit — the "Failed to create… but it's there on refresh" case. The
+share-link minting fix above also removes the main source of that DB
+contention.
+
+**Share modal — no more long "Generating link…" hang.** The short link
+shows instantly when it resolves quickly (no long-URL flash); if it's
+slow, the long URL is revealed as a usable fallback within ~0.6s
+instead of blocking. Copy + auto-copy follow suit.
+
+**Single-video share — client can download the video.** When the
+project allows downloads (`allowAssetDownload`), the top-right Download
+button now appears on a single-video share and serves the original
+source even before approval (server + content routes gated on the same
+rule).
+
+**Profile photo cropper + instant save.** Uploading an avatar opens an
+interactive circular crop modal (drag + zoom, zoom slider below the
+image). The photo saves and propagates everywhere the moment you hit
+Apply/Remove — independent of "Save profile" (now scoped to name /
+username, enabled only when changed) — so a photo change can't be
+blocked by an unrelated "Username already taken" error.
+
+**Voice comments hidden on HTTP.** The mic button now only appears in a
+secure context (HTTPS / localhost) where the browser actually exposes
+the microphone; on a plain-HTTP LAN origin it's hidden instead of
+showing an error. Plus a stale-saved-mic fallback so recording isn't
+hard-blocked by an unavailable device.
+
+**Player version reel.** Shows real per-version thumbnails (v1 → v2 →
+v3, left to right), opens from the Vx chip, smooth click-and-drag
+scroll past 4 versions, and sits above the comments resize handle.
+
+**Resize grips.** Visible centered pill grip on the desktop comments
+sidebar (drag only from there) + a new mobile grip to drag the
+video/comments split.
+
+**New Folder dialog.** A single click opens it and it stays — it no
+longer dismissed on mouse-release.
+
+**Split versions modal** reskinned to the v2.5 frosted glass.
+
+### Files changed
+
+- `src/app/admin/trash/page.tsx`, `src/contexts/DownloadManager.tsx`,
+  `src/components/DownloadBanners.tsx` — background Empty-Trash banner.
+- `src/app/admin/projects/[id]/settings/page.tsx` — share-links
+  pagination + scoped minting.
+- `src/app/api/projects/route.ts`,
+  `src/app/api/folders/from-template/route.ts` — 30s tx timeout.
+- `src/components/ShareModal.tsx` — short-link grace fallback.
+- `src/app/share/[token]/SharePageClient.tsx`,
+  `src/app/api/share/[token]/video-token/route.ts`,
+  `src/app/api/content/[token]/route.ts` — single-video original
+  download.
+- `src/components/VoiceRecorderButton.tsx` — hide on insecure origin.
+- `src/components/NewFolderDialog.tsx`,
+  `src/components/SplitVersionsModal.tsx` — dialog fixes / glass.
+
 ## [3.3.0] - 2026-06-23
 
 ### Clean release — rolls up the 3.2.x line

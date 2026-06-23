@@ -113,6 +113,21 @@ export default function VoiceRecorderButton({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 3.3.x: whether this browser can record audio at all. `getUserMedia`
+  // is only exposed in a secure context (HTTPS or localhost); on a
+  // plain-HTTP LAN origin `navigator.mediaDevices` is undefined and
+  // there's no way to capture the mic. We resolve this on mount (not
+  // during render) so server + first client render agree (no hydration
+  // mismatch), then hide the whole recorder when unsupported. Starts
+  // false so SSR renders nothing until the client confirms support.
+  const [micSupported, setMicSupported] = useState(false)
+  useEffect(() => {
+    setMicSupported(
+      typeof navigator !== 'undefined' &&
+        !!navigator.mediaDevices &&
+        typeof navigator.mediaDevices.getUserMedia === 'function',
+    )
+  }, [])
   // When the browser has permanently denied mic access we can't trigger the
   // native permission prompt again — we must show the user how to re-enable it.
   const [showPermissionHelp, setShowPermissionHelp] = useState(false)
@@ -746,6 +761,13 @@ export default function VoiceRecorderButton({
   }, [recordedBlob, isUploading, uploadRecording, onReadyToSendChange])
 
   // ---------- Render ----------
+
+  // 3.3.x: no audio recording on insecure origins (plain HTTP / LAN
+  // IP) — the browser doesn't expose the mic there. Hide the recorder
+  // entirely instead of showing a button that only errors. It returns
+  // automatically on HTTPS / localhost. (Placed after all hooks so the
+  // rules of hooks hold.)
+  if (!micSupported) return null
 
   // Collapsed state: just the mic button (plus permission help dialog).
   // If we already have a list of devices (because the user has recorded

@@ -332,6 +332,13 @@ export async function POST(request: NextRequest) {
       }
 
       return newProject
+    }, {
+      // 3.3.x: give the transaction room so a momentarily busy DB
+      // (connection-pool contention under load) can't abort the
+      // create at Prisma's default 5s and surface "Failed to create
+      // project" even though it would have committed.
+      timeout: 30_000,
+      maxWait: 15_000,
     })
 
     // 1.2.0+: if a cover image was uploaded with the create request,

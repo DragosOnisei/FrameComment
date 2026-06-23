@@ -1,6 +1,6 @@
 'use client'
 
-import { Download, X, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
+import { Download, X, AlertCircle, CheckCircle2, Loader2, Trash2 } from 'lucide-react'
 import { useDownloadManager, type DownloadJob } from '@/contexts/DownloadManager'
 
 /**
@@ -57,8 +57,9 @@ function DownloadBanner({
   if (isManual) {
     const done = job.completedItems ?? 0
     const total = job.totalItems ?? 0
+    const unit = job.unit || 'files'
     pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null
-    progressLabel = total > 0 ? `${done} / ${total} files` : `${done} files`
+    progressLabel = total > 0 ? `${done} / ${total} ${unit}` : `${done} ${unit}`
   } else {
     const recv = job.bytesReceived ?? 0
     const total = job.totalBytes ?? 0
@@ -99,6 +100,8 @@ function DownloadBanner({
             <X className="w-4 h-4 text-white/55" />
           ) : pct === null ? (
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
+          ) : job.icon === 'trash' ? (
+            <Trash2 className="w-4 h-4 text-primary" />
           ) : (
             <Download className="w-4 h-4 text-primary" />
           )}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -163,6 +163,44 @@ export default function ProjectSettingsPage() {
   // the admin widen the window up to "all time".
   type ShareLinkRange = 'today' | 'week' | 'month' | 'year' | 'all'
   const [shareLinkRange, setShareLinkRange] = useState<ShareLinkRange>('today')
+  // 3.3.x: paginate the share-links list. Rendering hundreds/thousands
+  // of rows at once froze the Security tab. We show 10 and reveal more
+  // on demand — for EVERY range (even "Today" can have 10+). Resets to
+  // 10 whenever the range filter changes. The list (filter + paging) is
+  // computed here at component scope so both the render AND the
+  // short-link minting effect operate on the same paged subset (the
+  // minting used to POST one short link per folder for ALL folders on
+  // mount — a flood of thousands; now it only mints the visible ones).
+  const [shareLinksVisibleCount, setShareLinksVisibleCount] = useState(10)
+  useEffect(() => {
+    setShareLinksVisibleCount(10)
+  }, [shareLinkRange])
+  const visibleSharedFolders = useMemo(() => {
+    const cutoff: number | null = (() => {
+      if (shareLinkRange === 'all') return null
+      const now = new Date()
+      if (shareLinkRange === 'today') {
+        const d = new Date(now)
+        d.setHours(0, 0, 0, 0)
+        return d.getTime()
+      }
+      const days =
+        shareLinkRange === 'week' ? 7 : shareLinkRange === 'month' ? 30 : 365
+      return now.getTime() - days * 24 * 60 * 60 * 1000
+    })()
+    if (cutoff == null) return sharedFolders
+    return sharedFolders.filter((f) => {
+      // Prefer updatedAt (last (re)share); fall back to createdAt.
+      // Fail-open on missing/invalid dates so nothing vanishes.
+      const t = new Date(f.updatedAt ?? f.createdAt).getTime()
+      if (Number.isNaN(t)) return true
+      return t >= cutoff
+    })
+  }, [sharedFolders, shareLinkRange])
+  const pagedSharedFolders = useMemo(
+    () => visibleSharedFolders.slice(0, shareLinksVisibleCount),
+    [visibleSharedFolders, shareLinksVisibleCount],
+  )
   // 1.5.8+: per-row pending state so we can disable buttons + show a
   // small "…" while a folder's share is being updated.
   const [folderShareBusyId, setFolderShareBusyId] = useState<string | null>(null)
@@ -500,13 +538,17 @@ export default function ProjectSettingsPage() {
   // not configured (`shortDomainConfigured: false`) — the row then
   // falls back to the long URL.
   useEffect(() => {
-    if (sharedFolders.length === 0) return
+    if (pagedSharedFolders.length === 0) return
     if (typeof window === 'undefined') return
     let cancelled = false
     const origin = window.location.origin
     void (async () => {
+      // 3.3.x: only mint short links for the folders currently shown
+      // (the paged subset), not every folder in the project. With many
+      // folders the old all-at-once `Promise.all` fired thousands of
+      // POSTs on mount and hammered /api/short-links.
       const results = await Promise.all(
-        sharedFolders.map(async (f) => {
+        pagedSharedFolders.map(async (f) => {
           if (folderShortLinks[f.id]) return [f.id, folderShortLinks[f.id]] as const
           try {
             const res = await apiFetch('/api/short-links', {
@@ -545,8 +587,9 @@ export default function ProjectSettingsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- folderShortLinks
     // intentionally omitted; we read inside the closure but only want to
-    // re-run when the folder list itself changes (rotations / new shares).
-  }, [sharedFolders])
+    // re-run when the visible (paged) folder list changes — i.e. on
+    // first load, "Load more", or a range-filter change.
+  }, [pagedSharedFolders])
 
   // Track if initial load is complete
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
@@ -1753,32 +1796,10 @@ export default function ProjectSettingsPage() {
             { id: 'year', label: 'Last year' },
             { id: 'all', label: 'All time' },
           ]
-          const shareLinkCutoffMs: number | null = (() => {
-            if (shareLinkRange === 'all') return null
-            const now = new Date()
-            if (shareLinkRange === 'today') {
-              const d = new Date(now)
-              d.setHours(0, 0, 0, 0)
-              return d.getTime()
-            }
-            const days =
-              shareLinkRange === 'week' ? 7 : shareLinkRange === 'month' ? 30 : 365
-            return now.getTime() - days * 24 * 60 * 60 * 1000
-          })()
-          const visibleSharedFolders =
-            shareLinkCutoffMs == null
-              ? sharedFolders
-              : sharedFolders.filter((f) => {
-                  // Prefer updatedAt (when the share link was last
-                  // (re)created/activated); fall back to createdAt.
-                  const t = new Date(f.updatedAt ?? f.createdAt).getTime()
-                  // Fail-open: if the timestamp is missing or unparseable
-                  // (e.g. an older API response without the field), never
-                  // hide the link — better to show a stray row than to
-                  // make a freshly-shared folder vanish from the list.
-                  if (Number.isNaN(t)) return true
-                  return t >= shareLinkCutoffMs
-                })
+          // 3.3.x: `visibleSharedFolders` (filtered) and
+          // `pagedSharedFolders` (first N) are computed at component
+          // scope now — see the useMemo block near the top — so the
+          // render and the short-link minting effect share one source.
 
           // Security content
           const securityContent = (
@@ -1959,8 +1980,9 @@ export default function ProjectSettingsPage() {
                   // the page stay fixed. `overscroll-contain` stops the
                   // scroll from chaining to the page once the list hits
                   // its top/bottom.
+                  <>
                   <ul className="max-h-[58vh] overflow-y-auto overscroll-contain divide-y divide-white/10 rounded-md ring-1 ring-white/10 bg-white/[0.03]">
-                    {visibleSharedFolders.map((folder) => {
+                    {pagedSharedFolders.map((folder) => {
                       const expires = folder.shareExpiresAt
                         ? new Date(folder.shareExpiresAt)
                         : null
@@ -2129,6 +2151,18 @@ export default function ProjectSettingsPage() {
                       )
                     })}
                   </ul>
+                  {/* 3.3.x: Load more — reveal 10 more rows at a time so
+                      the list never renders hundreds/thousands at once. */}
+                  {visibleSharedFolders.length > pagedSharedFolders.length && (
+                    <button
+                      type="button"
+                      onClick={() => setShareLinksVisibleCount((c) => c + 10)}
+                      className="mt-2 w-full rounded-lg bg-white/[0.04] hover:bg-white/[0.08] ring-1 ring-white/10 hover:ring-white/20 px-3 py-2 text-xs font-medium text-white/80 hover:text-white transition-colors"
+                    >
+                      Load more ({visibleSharedFolders.length - pagedSharedFolders.length} more)
+                    </button>
+                  )}
+                  </>
                 )}
               </div>
 
