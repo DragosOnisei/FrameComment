@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-06-23
+
+### Clean release — rolls up the 3.2.x line
+
+No code changes from 3.2.9. Cut as a clean minor release that bundles
+the whole 3.2.x run (client share polish, M4V encoding fix, player
+version reel + resize grips, profile-photo cropper, voice-comment mic
+fix, Security share-link filter, etc.) under one version, and to force
+a fresh image pull on the TrueNAS app after a flaky 3.2.9 deploy. See
+the 3.2.1–3.2.9 entries below for the full detail.
+
 ## [3.2.9] - 2026-06-23
 
 ### Player version reel + share UX, mobile/desktop resize grips, profile
