@@ -14,6 +14,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.8] - 2026-06-23
+
+### M4V uploads now encode, User Management shows avatars + glass
+delete dialog
+
+**CRITICAL — M4V videos were silently rejected and never encoded.**
+Uploading a video whose content `file-type` detects as `video/x-m4v`
+(Apple's M4V — an MPEG-4 container, common even for files named
+`.mp4`, exported from QuickTime / iTunes / some editors) passed the
+upload's extension check but then failed the worker's magic-byte
+validation in `prepare-video` with "File content does not match a
+valid video format. Detected: video/x-m4v". No tiers ever encoded, no
+SD/HD/HD+/4K progress banner appeared, and the player showed "No
+videos are ready for review yet." (the thumbnail / quick preview still
+worked because they use the original file). ffmpeg handles M4V exactly
+like MP4, so the rejection was needless. Added `video/x-m4v` to the
+worker's `VALID_VIDEO_TYPES` and to the upload-side
+`ALLOWED_VIDEO_TYPES` + video-asset MIME list, plus the `.m4v`
+extension to the allowed-extension lists. (A video already stuck in
+ERROR from this can be recovered with the per-video Re-process action,
+or re-uploaded.)
+
+**User Management — profile pictures in the list.** Each admin row
+showed a generic person icon even when the user had a profile picture
+set (the sidebar account chip already showed it). The list now renders
+the user's `avatarUrl` (inline data URL), with an initials disc
+fallback. Added `avatarUrl` to the `/api/users` response, which had
+been omitted.
+
+**User Management — glass Delete dialog.** The "Confirm Delete" popup
+still used the old flat dark modal. Reskinned it with the v2.5 frosted-
+glass recipe (transparent backdrop, blurred shell, white text, glass
+Cancel button; the destructive Delete button stays red) so it matches
+the Add User dialog.
+
+### Files changed
+
+- `src/worker/video-processor-helpers.ts` — accept `video/x-m4v`.
+- `src/lib/file-validation.ts` — `video/x-m4v` + `.m4v` in the video
+  MIME / extension / asset lists.
+- `src/lib/asset-validation.ts` — `.m4v` in the video asset category.
+- `src/app/api/users/route.ts` — return `avatarUrl`.
+- `src/app/admin/users/page.tsx` — avatar in the list row; glass
+  Delete confirmation dialog.
+
 ## [3.2.7] - 2026-06-22
 
 ### Security tab — date filter on the folder share-links list, the

@@ -42,6 +42,15 @@ export const PROGRESS_WEIGHTS = {
 
 export const VALID_VIDEO_TYPES = [
   'video/mp4',
+  // 3.2.x: `video/x-m4v` is Apple's M4V — an MPEG-4 container that
+  // `file-type` reports separately from `video/mp4`. Plenty of normal
+  // exports (QuickTime, iTunes, some cameras/editors) land here even
+  // when the file is named `.mp4`. ffmpeg treats it identically to
+  // mp4, so it was being rejected at magic-byte validation for no
+  // good reason — the upload succeeded but prepare-video threw
+  // "File content does not match a valid video format. Detected:
+  // video/x-m4v" and no tiers ever encoded.
+  'video/x-m4v',
   'video/quicktime',
   'video/x-msvideo',
   'video/webm',

@@ -8,6 +8,11 @@ import { logMessage } from './logging'
 // Allowed video MIME types
 export const ALLOWED_VIDEO_TYPES = [
   'video/mp4',
+  // 3.2.x: Apple M4V (MPEG-4 container `file-type` reports as
+  // `video/x-m4v`). Common even for files named `.mp4`; ffmpeg handles
+  // it like mp4. Without it, such uploads passed the extension check
+  // but failed the worker's magic-byte validation and never encoded.
+  'video/x-m4v',
   'video/quicktime',
   'video/x-msvideo',
   'video/webm',
@@ -41,10 +46,11 @@ export const ALLOWED_MEDIA_TYPES = [
 // callers that need to discriminate (e.g. picking the upload pipeline
 // to use) can do so cheaply.
 export const FILE_LIMITS = {
-  ALLOWED_VIDEO_EXTENSIONS: ['.mp4', '.mov', '.avi', '.webm', '.mkv'],
+  ALLOWED_VIDEO_EXTENSIONS: ['.mp4', '.m4v', '.mov', '.avi', '.webm', '.mkv'],
   ALLOWED_IMAGE_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.webp', '.gif'],
   ALLOWED_EXTENSIONS: [
     '.mp4',
+    '.m4v',
     '.mov',
     '.avi',
     '.webm',
@@ -86,8 +92,8 @@ export const ALLOWED_ASSET_TYPES = {
     mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/flac', 'audio/ogg', 'audio/mp4', 'audio/x-ms-wma', 'audio/webm', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus']
   },
   video: {
-    extensions: ['.mp4', '.mov', '.avi', '.mkv', '.mxf', '.prores'],
-    mimeTypes: ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'application/octet-stream']
+    extensions: ['.mp4', '.m4v', '.mov', '.avi', '.mkv', '.mxf', '.prores'],
+    mimeTypes: ['video/mp4', 'video/x-m4v', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'application/octet-stream']
   },
   subtitle: {
     extensions: ['.srt', '.vtt', '.ass', '.ssa', '.sub'],

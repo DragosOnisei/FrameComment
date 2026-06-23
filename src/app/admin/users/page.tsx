@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { Users, UserPlus, Edit, Trash2, Mail, User, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus } from 'lucide-react'
+import { Users, UserPlus, Edit, Trash2, Mail, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -23,6 +23,9 @@ interface UserData {
   role: string
   createdAt: string
   updatedAt: string
+  // 3.2.x: profile avatar (inline data: URL). Shown in the list row;
+  // falls back to an initials disc when absent.
+  avatarUrl?: string | null
 }
 
 export default function UsersPage() {
@@ -473,9 +476,22 @@ export default function UsersPage() {
                 }}
               >
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="p-2 rounded-lg bg-primary/15 ring-1 ring-primary/30">
-                    <User className="w-4 h-4 text-primary" />
-                  </div>
+                  {/* 3.2.x: show the admin's profile picture (inline
+                      data: URL) when set — same as the sidebar account
+                      chip — instead of a generic icon. Falls back to an
+                      initials disc. */}
+                  {user.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={user.avatarUrl}
+                      alt={user.name || user.username || user.email}
+                      className="w-9 h-9 rounded-full object-cover ring-1 ring-white/10 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-primary/15 text-primary ring-1 ring-primary/30 flex items-center justify-center font-medium text-sm shrink-0">
+                      {(user.name || user.username || user.email || '?').trim().charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-medium truncate text-white">{user.name || user.username || user.email}</p>
@@ -984,29 +1000,51 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal — 3.2.x glass refresh. Same recipe
+          as the Add User modal above (transparent backdrop, frosted
+          glass shell, white text hierarchy) so the two dialogs read as
+          one family instead of the old flat dark popup. */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-white">
               <Trash2 className="w-5 h-5 text-destructive" />
               {t('confirmDeleteTitle')}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-white/55">
               {t('confirmDeleteUser', { name: deleteTarget?.name || deleteTarget?.email || '' })}
             </DialogDescription>
           </DialogHeader>
           {error && (
-            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
+            <div className="p-3 bg-destructive/10 ring-1 ring-destructive/25 rounded-md flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
               <span className="text-sm text-destructive">{error}</span>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="pt-3 gap-2">
             <DialogClose asChild>
-              <Button variant="outline">{tc('cancel')}</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0"
+              >
+                {tc('cancel')}
+              </Button>
             </DialogClose>
-            <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={saving}
+              className="font-semibold"
+            >
               {saving ? tc('deleting') : t('deleteUserButton')}
             </Button>
           </DialogFooter>

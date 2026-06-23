@@ -44,6 +44,10 @@ export async function GET(request: NextRequest) {
         role: true,
         createdAt: true,
         updatedAt: true,
+        // 3.2.x: profile avatar (stored inline as a data: URL) so the
+        // User Management list can show each admin's picture instead of
+        // a generic icon — matching the sidebar account chip.
+        avatarUrl: true,
         // Exclude password from response
       },
       orderBy: {
