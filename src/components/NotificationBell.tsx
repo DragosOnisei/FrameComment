@@ -91,7 +91,7 @@ export default function NotificationBell() {
       >
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-primary text-white text-[10px] font-semibold leading-none ring-2 ring-[#0b1622]">
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none ring-2 ring-[#0b1622]">
             {badge}
           </span>
         )}
@@ -119,7 +119,7 @@ export default function NotificationBell() {
             )}
           </div>
 
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="max-h-[60vh] overflow-y-auto overflow-x-hidden">
             {notifications.length === 0 ? (
               <div className="px-4 py-8 text-sm text-white/50 text-center">
                 No notifications yet.
@@ -142,9 +142,14 @@ export default function NotificationBell() {
                       }`}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm leading-snug">
-                        New comments on{' '}
-                        <span className="font-medium">{n.videoName}</span>
+                      <div className="text-sm leading-snug text-white/80">
+                        New comments on
+                      </div>
+                      {/* Single line, ellipsis on overflow — long unbroken
+                          video names (underscores, no spaces) can never
+                          force a horizontal scrollbar. */}
+                      <div className="text-sm font-medium truncate">
+                        {n.videoName}
                       </div>
                       <div className="text-xs text-white/50 truncate mt-0.5">
                         {n.actorName ? `${n.actorName} · ` : ''}

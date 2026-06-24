@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-06-24
+
+### Notification bell polish
+
+- The unread badge is now **red** instead of blue, so it reads as an
+  alert at a glance.
+- Long video names in the bell are truncated to a single line with an
+  ellipsis — a long unbroken title (e.g. underscore-joined names) can
+  no longer push a horizontal scrollbar into the dropdown.
+
 ## [3.5.0] - 2026-06-24
 
 ### Internal notification system — the live "Send to editor" bell
