@@ -5,6 +5,7 @@ import { Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import GlobalSearchOverlay from '@/components/GlobalSearchOverlay'
+import NotificationBell from '@/components/NotificationBell'
 
 // 2.5.1+: routes where the global search pill is intentionally
 // hidden. These are pure account / configuration screens — the
@@ -129,14 +130,19 @@ export default function AdminTopBar() {
           </button>
         )}
 
-        {/* RIGHT slot — page actions (Upload, Download, kebab, etc.).
-            Justified to the end of the right grid column. `min-w-0`
-            lets long combinations of buttons shrink/wrap instead of
-            forcing the grid to overflow. */}
-        <div
-          id="topbar-right-slot"
-          className="flex items-center justify-end gap-2 min-w-0"
-        />
+        {/* RIGHT column — page actions (Upload, Download, sort, kebab)
+            in the portal slot, with the always-present notification
+            bell pinned to the far right after them. `min-w-0` lets
+            long button combinations shrink instead of overflowing. */}
+        <div className="flex items-center justify-end gap-2 min-w-0">
+          {/* Page-specific actions portal here (incl. sort/view icons). */}
+          <div
+            id="topbar-right-slot"
+            className="flex items-center justify-end gap-2 min-w-0"
+          />
+          {/* 3.5.0+: live bell — sits after the sort icons, top-right. */}
+          <NotificationBell />
+        </div>
       </header>
 
       <GlobalSearchOverlay

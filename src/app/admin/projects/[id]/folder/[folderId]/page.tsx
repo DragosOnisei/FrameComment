@@ -289,23 +289,23 @@ export default function ProjectFolderPage() {
           <Button
             variant="default"
             size="sm"
-            className="md:h-10 md:px-4"
+            className="w-9 px-0 shrink-0"
             onClick={() => videoManagerRef.current?.triggerUpload()}
             aria-label={t('uploadVideos')}
+            title={t('uploadVideos')}
           >
-            <Upload className="w-4 h-4 md:mr-2" />
-            <span className="hidden md:inline">{t('uploadVideos')}</span>
+            <Upload className="w-4 h-4" />
           </Button>
         )}
         <Button
           variant="ghost"
           size="sm"
-          className="md:h-10 md:px-4 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
+          className="w-9 px-0 shrink-0 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
           onClick={() => folderBrowserRef.current?.downloadAll()}
           aria-label="Download All"
+          title="Download All"
         >
-          <Download className="w-4 h-4 md:mr-2" />
-          <span className="hidden md:inline">Download All</span>
+          <Download className="w-4 h-4" />
         </Button>
       </TopbarRightSlot>
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">

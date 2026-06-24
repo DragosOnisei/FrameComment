@@ -46,6 +46,8 @@ model User {
   // in the Frame.io-style folder grid (1.0.6+). Nullable so any
   // historical pre-1.0.6 rows still load.
   videosCreated     Video[]             @relation("VideoCreator")
+  // 3.5.0+: in-app bell notifications addressed to this admin.
+  notifications     Notification[]      @relation("UserNotifications")
 }
 
 enum UserRole {
@@ -145,6 +147,7 @@ model Project {
   analytics         VideoAnalytics[]
   recipients        ProjectRecipient[] // Multiple email recipients
   notificationQueue NotificationQueue[] // Pending notifications
+  notifications     Notification[] // 3.5.0+: in-app bell notifications
   sharePageAccesses SharePageAccess[] // Share page authentication tracking
   projectUploads    ProjectUpload[] // Client-submitted files via reverse share
 
@@ -342,6 +345,8 @@ model Video {
   analytics VideoAnalytics[]
   assets    VideoAsset[]
   comments  Comment[]
+  // 3.5.0+: in-app bell notifications that deep-link to this video.
+  notifications Notification[]
 
   @@index([projectId, version])
   @@index([projectId, name])
@@ -537,6 +542,62 @@ model NotificationQueue {
   @@index([projectId, sentToAdmins])
   @@index([sentToAdmins, createdAt])
   @@index([clientFailed, adminFailed])
+}
+
+// 3.5.0+: In-app "internal" notifications shown in the admin bell.
+//
+// Distinct from `NotificationQueue` (which drives EXTERNAL email /
+// push delivery to clients + admins). This table backs the live bell
+// in the admin top bar: when a reviewer clicks "Send to editor" on a
+// video, we create one row here for the video's uploader
+// (`Video.createdById`) and publish it on a Redis channel so the
+// editor's bell updates live (SSE) without a page refresh.
+//
+// Design notes:
+//   - One UNREAD row per (recipient, video). Re-sending the same
+//     video before the editor reads it just bumps the existing row to
+//     the top instead of stacking duplicates (find-or-create in the
+//     API). Different videos => different rows (an editor working on
+//     several videos can collect several notifications).
+//   - `videoName` / `folderId` are denormalized so the bell can build
+//     the deep-link (`/admin/projects/<id>/share?video=<name>&folderId=<id>`)
+//     and render the row without an extra join.
+//   - No "count" column by design — the notification is a signal
+//     ("New comments on X"), per the product decision.
+model Notification {
+  id   String @id @default(cuid())
+  // The admin who receives this (the video's uploader / "editor").
+  recipientId String
+  // Signal type. Only NEW_COMMENTS today; kept as a string so future
+  // signals (approvals, mentions, …) don't need a migration.
+  type        String @default("NEW_COMMENTS")
+
+  projectId String
+  videoId   String
+  // Denormalized for display + deep-link without a join. Kept even if
+  // the video is later renamed — the link resolves by name, and a
+  // stale name is better than a broken bell row.
+  videoName String
+  folderId  String?
+
+  // Display name of whoever clicked "Send to editor" (client guest
+  // name or admin name). Nullable for anonymous reviewers.
+  actorName String?
+
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipient User    @relation("UserNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  video     Video   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  // Primary read path: "my unread/recent notifications, newest first".
+  @@index([recipientId, isRead, createdAt])
+  // Supports the find-or-create dedupe on (recipient, video).
+  @@index([recipientId, videoId])
 }
 
 model Settings {

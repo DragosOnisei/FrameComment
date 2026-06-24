@@ -14,6 +14,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-06-24
+
+### Internal notification system — the live "Send to editor" bell
+
+**A live bell in the admin top bar.** A new bell icon sits at the far
+right of the top bar (after the sort/view controls) with an unread
+badge. Clicking it opens a list of "New comments on <video>"
+notifications; clicking a row marks it read and deep-links you
+straight to that video in the review view. "Mark all read" clears the
+badge. An editor working on several videos collects one notification
+per video.
+
+**"Send to editor" button.** The comments header (between the "All
+comments" filter and the kebab) gains a Send to editor button, in both
+the admin review view and the client share view. After leaving
+feedback, a reviewer taps it and the editor who uploaded that video is
+notified. The button shows its result inline (Sending → Sent).
+
+**Live, no refresh.** Notifications arrive instantly over a
+Server-Sent Events stream (Redis pub/sub). If a reverse proxy buffers
+the stream, the bell automatically falls back to polling so it still
+updates within a few seconds — no page refresh either way.
+
+**Only the uploader is notified.** Notifications go to the video's
+uploader (`createdById`) only. If a video has no uploader on record
+(legacy upload / deleted user) the button reports "No editor
+assigned"; an admin reviewing their own upload isn't notified.
+
+> Ships a database migration (`Notification` table) that runs
+> automatically on container start.
+
 ## [3.4.0] - 2026-06-24
 
 ### Global search now finds folders too — Videos / Folders tabs

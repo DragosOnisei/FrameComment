@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { Comment, Video } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { CheckCircle2, MessageSquare, ChevronDown, ChevronUp, PanelRightClose, Pencil, Check, X as XIcon } from 'lucide-react'
+import { CheckCircle2, MessageSquare, ChevronDown, ChevronUp, PanelRightClose, Pencil, Check, X as XIcon, Send } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
@@ -486,6 +486,104 @@ export default function CommentSection({
     },
     [isAdminView, buildAuthedHeaders, fetchComments],
   )
+
+  // 3.5.0+: "Send to editor" — signals the video's uploader (the
+  // editor) that there's new feedback to review, creating a live bell
+  // notification for them. Lives in the comments header in both the
+  // admin review view and the client share view; the server resolves
+  // the recipient and gates self-notifications, so this handler just
+  // fires and reflects the outcome inline on the button.
+  type SendState = 'idle' | 'sending' | 'sent' | 'noeditor' | 'self' | 'error'
+  const [sendState, setSendState] = useState<SendState>('idle')
+  const sendResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleSendToEditor = useCallback(async () => {
+    if (!selectedVideoId || sendState === 'sending') return
+    if (sendResetRef.current) clearTimeout(sendResetRef.current)
+    setSendState('sending')
+    const actorName = isAdminView
+      ? adminUser?.name || null
+      : authorName || clientName || null
+    const url = `/api/videos/${selectedVideoId}/notify-editor`
+    const body = JSON.stringify({ actorName })
+    try {
+      const response = isAdminView
+        ? await apiFetch(url, { method: 'POST', headers: buildAuthedHeaders(), body })
+        : await fetch(url, { method: 'POST', headers: buildAuthedHeaders(), body })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json().catch(() => ({}))
+      if (data?.reason === 'no_editor') setSendState('noeditor')
+      else if (data?.reason === 'self') setSendState('self')
+      else setSendState('sent')
+    } catch {
+      setSendState('error')
+    } finally {
+      sendResetRef.current = setTimeout(() => setSendState('idle'), 2600)
+    }
+  }, [
+    selectedVideoId,
+    sendState,
+    isAdminView,
+    adminUser,
+    authorName,
+    clientName,
+    buildAuthedHeaders,
+  ])
+
+  // Render helper so both the desktop and mobile comment headers show
+  // an identical "Send to editor" control with inline state feedback.
+  const renderSendToEditor = (extraClass = '') => {
+    const map: Record<SendState, { label: string; cls: string; icon: 'send' | 'check' | 'x' }> = {
+      idle: {
+        label: 'Send to editor',
+        cls: 'bg-primary/15 text-primary ring-primary/30 hover:bg-primary/25',
+        icon: 'send',
+      },
+      sending: {
+        label: 'Sending…',
+        cls: 'bg-primary/10 text-primary/70 ring-primary/20 cursor-wait',
+        icon: 'send',
+      },
+      sent: {
+        label: 'Sent',
+        cls: 'bg-emerald-500/15 text-emerald-400 ring-emerald-500/30',
+        icon: 'check',
+      },
+      self: {
+        label: 'Your upload',
+        cls: 'bg-white/5 text-white/60 ring-white/10',
+        icon: 'x',
+      },
+      noeditor: {
+        label: 'No editor assigned',
+        cls: 'bg-white/5 text-white/60 ring-white/10',
+        icon: 'x',
+      },
+      error: {
+        label: 'Try again',
+        cls: 'bg-red-500/15 text-red-400 ring-red-500/30',
+        icon: 'x',
+      },
+    }
+    const s = map[sendState]
+    return (
+      <button
+        type="button"
+        onClick={handleSendToEditor}
+        disabled={sendState === 'sending' || !selectedVideoId}
+        title="Notify the editor that there's new feedback"
+        className={cn(
+          'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium ring-1 transition-colors whitespace-nowrap disabled:opacity-70',
+          s.cls,
+          extraClass,
+        )}
+      >
+        {s.icon === 'send' && <Send className="w-3.5 h-3.5" />}
+        {s.icon === 'check' && <Check className="w-3.5 h-3.5" />}
+        {s.icon === 'x' && <XIcon className="w-3.5 h-3.5" />}
+        <span>{s.label}</span>
+      </button>
+    )
+  }
 
   // 1.2.0+: ownership check used everywhere we surface Edit / Delete on
   // a guest's own comment. The server prefers the per-browser id
@@ -1376,7 +1474,9 @@ export default function CommentSection({
               )}
             </div>
           </CardTitle>
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* 3.5.0+: Send to editor — between the filter and the kebab. */}
+            {renderSendToEditor()}
             <CommentsKebabMenu
               commentCount={displayComments.length}
               hasClipboard={hasClipboardForProject}
@@ -1643,12 +1743,16 @@ export default function CommentSection({
                 </div>
               )}
             </div>
-            <CommentsKebabMenu
-              commentCount={displayComments.length}
-              hasClipboard={hasClipboardForProject}
-              onCopy={handleCopyComments}
-              onPaste={handlePasteComments}
-            />
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* 3.5.0+: Send to editor — mobile mirror. */}
+              {renderSendToEditor()}
+              <CommentsKebabMenu
+                commentCount={displayComments.length}
+                hasClipboard={hasClipboardForProject}
+                onCopy={handleCopyComments}
+                onPaste={handlePasteComments}
+              />
+            </div>
           </div>
         )}
         {/*

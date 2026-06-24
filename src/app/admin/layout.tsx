@@ -5,6 +5,7 @@ import AdminSidebar from '@/components/AdminSidebar'
 import AdminTopBar from '@/components/AdminTopBar'
 import SessionMonitor from '@/components/SessionMonitor'
 import { DownloadManagerProvider } from '@/contexts/DownloadManager'
+import { NotificationsProvider } from '@/contexts/NotificationsContext'
 import { DownloadBanners } from '@/components/DownloadBanners'
 import { ProcessingStatusProvider } from '@/contexts/ProcessingStatusContext'
 import { ProcessingStatusBanners } from '@/components/ProcessingStatusBanners'
@@ -103,6 +104,7 @@ export default function AdminLayout({
   // bare children) flips based on `hidesChrome`.
   return (
     <AuthProvider requireAuth={true}>
+      <NotificationsProvider>
       <DownloadManagerProvider>
         <ProcessingStatusProvider>
           {hidesChrome ? (
@@ -141,6 +143,7 @@ export default function AdminLayout({
           )}
         </ProcessingStatusProvider>
       </DownloadManagerProvider>
+      </NotificationsProvider>
     </AuthProvider>
   )
 }
