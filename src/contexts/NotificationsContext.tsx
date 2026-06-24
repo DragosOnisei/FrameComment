@@ -49,7 +49,8 @@ interface NotificationsContextValue {
   /** True while a live SSE stream is connected (vs polling fallback). */
   live: boolean
   refresh: () => Promise<void>
-  markRead: (id: string) => Promise<void>
+  /** Mark read AND remove from the list (used when a row is clicked). */
+  dismiss: (id: string) => Promise<void>
   markAllRead: () => Promise<void>
 }
 
@@ -58,7 +59,7 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   unreadCount: 0,
   live: false,
   refresh: async () => {},
-  markRead: async () => {},
+  dismiss: async () => {},
   markAllRead: async () => {},
 })
 
@@ -108,13 +109,13 @@ export function NotificationsProvider({
     }
   }, [])
 
-  const markRead = useCallback(async (id: string) => {
-    // Optimistic — the bell feels instant.
+  const dismiss = useCallback(async (id: string) => {
+    // Optimistic — the row vanishes the instant it's clicked. Marking
+    // it read server-side keeps it from coming back on the next poll
+    // (the list only returns unread rows).
     setNotifications((prev) => {
-      const next = prev.map((n) =>
-        n.id === id ? { ...n, isRead: true } : n,
-      )
-      setUnreadCount(next.filter((n) => !n.isRead).length)
+      const next = prev.filter((n) => n.id !== id)
+      setUnreadCount(next.length)
       return next
     })
     try {
@@ -124,12 +125,12 @@ export function NotificationsProvider({
         body: JSON.stringify({ id }),
       })
     } catch (err) {
-      logError('[notifications] markRead failed:', err)
+      logError('[notifications] dismiss failed:', err)
     }
   }, [])
 
   const markAllRead = useCallback(async () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
+    setNotifications([])
     setUnreadCount(0)
     try {
       await apiFetch('/api/notifications/read', {
@@ -279,7 +280,7 @@ export function NotificationsProvider({
 
   return (
     <NotificationsContext.Provider
-      value={{ notifications, unreadCount, live, refresh, markRead, markAllRead }}
+      value={{ notifications, unreadCount, live, refresh, dismiss, markAllRead }}
     >
       {children}
     </NotificationsContext.Provider>

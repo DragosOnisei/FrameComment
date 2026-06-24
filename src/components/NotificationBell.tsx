@@ -44,7 +44,7 @@ function deepLink(n: InAppNotification): string {
 
 export default function NotificationBell() {
   const router = useRouter()
-  const { notifications, unreadCount, markRead, markAllRead } =
+  const { notifications, unreadCount, dismiss, markAllRead } =
     useNotifications()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -70,7 +70,9 @@ export default function NotificationBell() {
 
   const onRowClick = (n: InAppNotification) => {
     setOpen(false)
-    void markRead(n.id)
+    // Clicking handles the notification: it's marked read and removed
+    // from the list so it disappears rather than lingering as "read".
+    void dismiss(n.id)
     router.push(deepLink(n))
   }
 

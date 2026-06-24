@@ -164,7 +164,14 @@ export async function publishNotification(
   }
 }
 
-/** Recent notifications for a recipient, newest first. */
+/**
+ * Pending notifications for a recipient, newest first.
+ *
+ * The bell is a "pending inbox": only UNREAD rows are returned. Once a
+ * notification is clicked (marked read) it drops out of this list and
+ * won't come back on the next poll/refresh — so a handled item simply
+ * disappears, which is the behaviour users expect.
+ */
 export async function listNotifications(
   recipientId: string,
   limit = 30,
@@ -172,7 +179,7 @@ export async function listNotifications(
   const delegate = notificationDelegate()
   const [rows, unreadCount] = await Promise.all([
     delegate.findMany({
-      where: { recipientId },
+      where: { recipientId, isRead: false },
       orderBy: { createdAt: 'desc' },
       take: limit,
     }),

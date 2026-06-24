@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.2] - 2026-06-24
+
+### Notifications: clicked items now clear
+
+Clicking a notification now marks it read AND removes it from the bell
+immediately — the bell is a list of pending items, so a handled
+notification disappears instead of lingering as a greyed-out "read"
+row. It won't reappear on the next refresh. "Mark all read" clears the
+whole list.
+
 ## [3.5.1] - 2026-06-24
 
 ### Notification bell polish
