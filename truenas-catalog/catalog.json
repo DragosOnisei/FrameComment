@@ -3,25 +3,34 @@
     "community": {
       "framecomment": {
         "app_readme": "FrameComment — Self-hosted Video Review & Approval Platform",
-        "categories": ["productivity", "media"],
+        "categories": [
+          "productivity",
+          "media"
+        ],
         "description": "Self-hosted video review and approval platform for filmmakers and video professionals.",
         "healthy": true,
         "healthy_error": null,
         "home": "https://github.com/DragosOnisei/FrameComment",
         "location": "community/framecomment",
-        "latest_version": "3.3.1",
-        "latest_app_version": "3.3.1",
-        "latest_human_version": "3.3.1",
+        "latest_version": "3.4.0",
+        "latest_app_version": "3.4.0",
+        "latest_human_version": "3.4.0",
         "title": "FrameComment",
         "name": "framecomment",
         "recommended": false,
-        "last_update": "2026-06-22 00:00:00",
+        "last_update": "2026-06-24 00:00:00",
         "sources": [
           "https://github.com/DragosOnisei/FrameComment",
           "https://hub.docker.com/r/dragosonisei/framecomment"
         ],
         "icon_url": "https://raw.githubusercontent.com/DragosOnisei/FrameComment/main/truenas-catalog/community/framecomment/icon.png",
-        "tags": ["video", "review", "approval", "filmmakers", "self-hosted"],
+        "tags": [
+          "video",
+          "review",
+          "approval",
+          "filmmakers",
+          "self-hosted"
+        ],
         "screenshots": [],
         "maintainers": [
           {

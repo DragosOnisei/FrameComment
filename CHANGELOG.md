@@ -14,6 +14,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-06-24
+
+### Global search now finds folders too — Videos / Folders tabs
+
+**Folders are searchable.** The global search (⌘K) previously matched
+only video names, so folders never showed up. The search API now also
+queries folder names (case-insensitive, same trash exclusion as
+videos) and returns both result sets in a single payload — so there's
+no extra round-trip and switching is instant.
+
+**Videos / Folders tabs.** The search bar gained two tabs on the right
+side: **Videos** (default, unchanged two-pane experience) and
+**Folders**. The Folders tab is a fast full-width list — folder name,
+project + parent breadcrumb, and video / subfolder counts — and
+clicking a row opens that folder. Enter on the Folders tab opens the
+top match.
+
+**Search always opens on Videos.** Opening the search overlay always
+lands on the Videos tab, even if you last left it on Folders. The
+placeholder now reads "Search videos, folders…" (dropped "projects" —
+projects aren't searched here).
+
 ## [3.3.1] - 2026-06-23
 
 ### Trash + Security performance, Share modal, profile/voice/template fixes

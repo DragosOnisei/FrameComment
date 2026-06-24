@@ -120,7 +120,7 @@ export default function AdminTopBar() {
           >
             <Search className="w-4 h-4 shrink-0" />
             <span className="hidden md:inline truncate flex-1 text-left">
-              Search projects, folders, videos…
+              Search videos, folders…
             </span>
             <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 h-5 rounded bg-white/[0.08] ring-1 ring-white/10 text-[10px] font-mono text-white/70">
               <span>⌘</span>

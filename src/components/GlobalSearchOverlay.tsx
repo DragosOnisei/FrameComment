@@ -66,6 +66,20 @@ interface SearchResult {
   versionLabel: string
 }
 
+// 3.3.x: folder search results for the "Folders" tab.
+interface FolderResult {
+  id: string
+  name: string
+  slug: string
+  projectId: string
+  projectName: string | null
+  parentName: string | null
+  videoCount: number
+  subfolderCount: number
+}
+
+type SearchTab = 'videos' | 'folders'
+
 interface GlobalSearchOverlayProps {
   open: boolean
   onClose: () => void
@@ -87,6 +101,11 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [total, setTotal] = useState(0)
+  // 3.3.x: Folders tab. The same fetch returns both videos + folders,
+  // so switching tabs is instant (no re-query).
+  const [activeTab, setActiveTab] = useState<SearchTab>('videos')
+  const [folderResults, setFolderResults] = useState<FolderResult[]>([])
+  const [folderTotal, setFolderTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -181,6 +200,11 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
       setTotal(0)
       setSelectedId(null)
       setCopied(false)
+      // 3.3.x: always land on the Videos tab when the overlay opens,
+      // even if the user left it on Folders last time.
+      setActiveTab('videos')
+      setFolderResults([])
+      setFolderTotal(0)
       requestAnimationFrame(() => inputRef.current?.focus())
     }
   }, [open])
@@ -216,6 +240,8 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
     if (trimmed.length < MIN_QUERY) {
       setResults([])
       setTotal(0)
+      setFolderResults([])
+      setFolderTotal(0)
       setLoading(false)
       return
     }
@@ -229,12 +255,18 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
         if (!res.ok) {
           setResults([])
           setTotal(0)
+          setFolderResults([])
+          setFolderTotal(0)
           return
         }
         const data = await res.json()
         const fresh: SearchResult[] = Array.isArray(data?.results) ? data.results : []
         setResults(fresh)
         setTotal(typeof data?.total === 'number' ? data.total : fresh.length)
+        // 3.3.x: folders come back in the same payload.
+        const freshFolders: FolderResult[] = Array.isArray(data?.folders) ? data.folders : []
+        setFolderResults(freshFolders)
+        setFolderTotal(typeof data?.folderTotal === 'number' ? data.folderTotal : freshFolders.length)
         // Auto-select the top match so the right pane is populated
         // from the first keystroke. Keep the existing selection if
         // it's still in the result set (user was inspecting it
@@ -250,6 +282,8 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
         if (err?.name !== 'AbortError') {
           setResults([])
           setTotal(0)
+          setFolderResults([])
+          setFolderTotal(0)
         }
       } finally {
         setLoading(false)
@@ -282,8 +316,26 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
     [router, onClose],
   )
 
+  // 3.3.x: open a folder from the Folders tab — same deferred-close
+  // pattern as videos so the destination route resolves cleanly.
+  const navigateToFolder = useCallback(
+    (f: FolderResult) => {
+      router.push(`/admin/projects/${f.projectId}/folder/${f.id}`)
+      requestAnimationFrame(() => onClose())
+    },
+    [router, onClose],
+  )
+
   const handleInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // 3.3.x: on the Folders tab, Enter opens the first folder match.
+      if (activeTab === 'folders') {
+        if (e.key === 'Enter' && folderResults.length > 0) {
+          e.preventDefault()
+          navigateToFolder(folderResults[0])
+        }
+        return
+      }
       if (results.length === 0) return
       const currentIdx = selected
         ? results.findIndex((r) => r.id === selected.id)
@@ -302,7 +354,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
         if (selected) navigateToVideo(selected)
       }
     },
-    [results, selected, navigateToVideo],
+    [results, selected, navigateToVideo, activeTab, folderResults, navigateToFolder],
   )
 
   const copyShareUrl = useCallback(async () => {
@@ -431,12 +483,38 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                 setQuery(e.target.value)
               }}
               onKeyDown={handleInputKeyDown}
-              placeholder="Search videos by name…"
+              placeholder="Search videos, folders…"
               className="flex-1 bg-transparent outline-none border-0 text-base text-white placeholder:text-white/45"
               aria-label="Search videos"
             />
             {loading && (
               <Loader2 className="w-4 h-4 text-white/55 animate-spin shrink-0" />
+            )}
+            {/* 3.3.x: Videos (default) / Folders tabs live on the right
+                of the search bar. The API returns both result sets in
+                one payload, so switching is instant. Only shown once a
+                query is active so the empty bar stays clean. */}
+            {hasQuery && (
+              <div className="shrink-0 flex items-center gap-1">
+                {([
+                  ['videos', 'Videos', total],
+                  ['folders', 'Folders', folderTotal],
+                ] as const).map(([key, label, count]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setActiveTab(key as SearchTab)}
+                    className={`px-2.5 py-1 rounded-lg text-[13px] font-medium ring-1 transition-colors ${
+                      activeTab === key
+                        ? 'bg-primary/15 text-primary ring-primary/40'
+                        : 'bg-white/[0.04] text-white/60 ring-white/10 hover:bg-white/[0.1] hover:text-white'
+                    }`}
+                  >
+                    {label}
+                    {count > 0 ? ` (${count})` : ''}
+                  </button>
+                ))}
+              </div>
             )}
             <button
               type="button"
@@ -456,10 +534,11 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
           loading state both still render the panel so the layout
           doesn't jump. */}
       {hasQuery && (
-        <div className="flex-1 w-full max-w-screen-2xl mx-auto px-3 sm:px-6 py-3 sm:py-4 overflow-hidden min-h-0">
+        <div className="flex-1 w-full max-w-screen-2xl mx-auto px-3 sm:px-6 py-3 sm:py-4 overflow-hidden min-h-0 flex flex-col">
+          {activeTab === 'videos' ? (
           <div
             ref={panelRef}
-            className="h-full grid grid-cols-1 md:grid-cols-[var(--search-left-w)_4px_1fr] gap-0 rounded-xl overflow-hidden bg-white/[0.06] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
+            className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[var(--search-left-w)_4px_1fr] gap-0 rounded-xl overflow-hidden bg-white/[0.06] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
             style={
               {
                 // Custom property drives the left column width on
@@ -584,6 +663,60 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
               )}
             </div>
           </div>
+          ) : (
+          /* 3.3.x: Folders tab — single full-width list. Folder names
+             aren't heavy to render (no thumbnails/preview tokens), so
+             a flat scrollable list keeps it as fast as the user liked
+             the video search. Click a row to open that folder. */
+          <div
+            className="flex-1 min-h-0 rounded-xl overflow-hidden bg-white/[0.06] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white flex flex-col"
+            style={{
+              backdropFilter: 'blur(40px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(40px) saturate(140%)',
+            }}
+          >
+            <div className="overflow-y-auto overflow-x-hidden min-h-0">
+              {folderResults.length === 0 ? (
+                <div className="px-4 py-8 text-sm text-white/55 text-center">
+                  {loading ? 'Searching…' : 'No folders match your search.'}
+                </div>
+              ) : (
+                <div className="divide-y divide-white/10">
+                  {folderResults.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => navigateToFolder(f)}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-white/[0.06] transition-colors"
+                    >
+                      <span className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg bg-primary/15 text-primary ring-1 ring-primary/25">
+                        <FolderOpen className="w-4 h-4" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-white truncate">
+                          {f.name}
+                        </div>
+                        <div className="text-xs text-white/55 truncate">
+                          {f.projectName || 'Unknown project'}
+                          {f.parentName ? ` · ${f.parentName}` : ''}
+                          {` · ${f.videoCount} video${f.videoCount === 1 ? '' : 's'}`}
+                          {f.subfolderCount > 0
+                            ? ` · ${f.subfolderCount} folder${f.subfolderCount === 1 ? '' : 's'}`
+                            : ''}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {folderResults.length > 0 && folderTotal > folderResults.length && (
+                <div className="px-4 py-2.5 text-[11px] text-white/55 text-center border-t border-white/10">
+                  Showing top {folderResults.length} of {folderTotal} — refine your search to narrow down
+                </div>
+              )}
+            </div>
+          </div>
+          )}
         </div>
       )}
 

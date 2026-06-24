@@ -222,7 +222,52 @@ export async function GET(request: NextRequest) {
       }),
     )
 
-    return NextResponse.json({ results, total, query: rawQuery })
+    // 3.3.x: also search FOLDER names so the overlay's "Folders" tab
+    // can find folders (previously only Video.name was queried). Same
+    // trash exclusion (folder + project `deletedAt`). One light query,
+    // no per-row token minting, so it stays as fast as the video search.
+    const folderWhere = {
+      deletedAt: null,
+      name: { contains: rawQuery, mode: 'insensitive' as const },
+      project: { deletedAt: null },
+    }
+    const folderRows = await prisma.folder.findMany({
+      where: folderWhere as any,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        projectId: true,
+        updatedAt: true,
+        project: { select: { title: true } },
+        parentFolder: { select: { name: true } },
+        _count: { select: { videos: true, subfolders: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+    })
+    const folders = folderRows.map((f: any) => ({
+      id: f.id,
+      name: f.name,
+      slug: f.slug,
+      projectId: f.projectId,
+      projectName: f.project?.title ?? null,
+      parentName: f.parentFolder?.name ?? null,
+      videoCount: f._count?.videos ?? 0,
+      subfolderCount: f._count?.subfolders ?? 0,
+      updatedAt: f.updatedAt,
+    }))
+
+    return NextResponse.json({
+      results,
+      total,
+      folders,
+      // `folders` is capped at `limit`; the client shows a "refine"
+      // hint when the cap is hit. We skip an exact COUNT to keep the
+      // folder search as snappy as the video search.
+      folderTotal: folders.length,
+      query: rawQuery,
+    })
   } catch (error) {
     logError('[GET /api/search] failed:', error)
     return NextResponse.json(
