@@ -951,10 +951,13 @@ function FolderBrowserInner(
       // Sort within the group: latest version first.
       const sorted = [...rows].sort((a, b) => b.version - a.version)
       const latest = sorted[0]
-      const totalComments = sorted.reduce(
-        (acc, v) => acc + (v.commentCount ?? 0),
-        0,
-      )
+      // The card shows the LATEST version (v2, v3, …), so its comment
+      // badge must reflect THAT version's comments — not the sum across
+      // the whole stack. Comments are tied to a specific version's
+      // videoId (server counts `_count.comments` per row), so stacking
+      // a fresh v2 (0 comments) over a v1 with 8 comments must read 0,
+      // not 8. (Older builds summed the stack — that was the bug.)
+      const latestComments = latest.commentCount ?? 0
       const uploaderName =
         latest.createdBy?.name ||
         latest.createdBy?.username ||
@@ -975,7 +978,7 @@ function FolderBrowserInner(
         uploadProgress: (latest as any).uploadProgress ?? null,
         processingProgress: (latest as any).processingProgress ?? null,
         allIds: sorted.map((v) => v.id),
-        commentCount: totalComments,
+        commentCount: latestComments,
         uploaderName,
         createdAt: latest.createdAt,
         mediaType: latest.mediaType,

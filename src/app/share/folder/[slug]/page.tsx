@@ -417,7 +417,8 @@ function PublicFolderSharePageInner() {
 
   // Group videos by `name` so the public grid renders ONE card per
   // stack — exactly the same way the admin folder grid does (latest
-  // version on top, comment counts summed across versions).
+  // version on top; the comment badge reflects the LATEST version's
+  // comments, not the sum across versions).
   const videoGroups = (() => {
     const byName = new Map<string, VideoRow[]>()
     for (const v of videos) {
@@ -459,7 +460,10 @@ function PublicFolderSharePageInner() {
         previewUrl: latest.previewUrl ?? null,
         storyboardUrl: latest.storyboardUrl ?? null,
         status: latest.status,
-        commentCount: sorted.reduce((acc, v) => acc + (v.commentCount ?? 0), 0),
+        // Latest version's own comments (per-version count from the
+        // server), so a fresh v2 with no comments reads 0 — not the
+        // stack total. Matches the admin grid.
+        commentCount: latest.commentCount ?? 0,
         uploaderName,
         createdAt: latest.createdAt,
       })

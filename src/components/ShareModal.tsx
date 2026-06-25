@@ -224,14 +224,23 @@ export function ShareModal({
   // one. Flipping the polarity (start false → set true after the
   // POST resolves, success OR failure) closes that race.
   const [shortUrl, setShortUrl] = useState<string | null>(null)
-  const [shortResolved, setShortResolved] = useState(false)
-  // 3.3.x: grace flag. The 3.2.3 "wait for the short link before
-  // showing anything" was nice when the round-trip is fast, but on a
-  // busy admin page (token + thumbnail storms + rate-limit retries)
-  // that POST can take many seconds, leaving the modal stuck on
-  // "Generating link…". Once this flag flips we reveal the long URL as
-  // a usable fallback so the modal is never blocked. The short URL
-  // still swaps in if it arrives.
+  // 3.5.x: whether a short-link DOMAIN is configured server-side.
+  //   null  → we don't know yet (POST in flight) → show "Generating…",
+  //           never reveal/copy the long URL.
+  //   true  → a domain IS configured → we MUST show the short URL and
+  //           never the long one (the whole point of this fix).
+  //   false → no domain configured → the long URL is correct.
+  // We learn this from the POST response, so the long URL can only
+  // appear once we KNOW no domain is set (or on a hard failure).
+  const [shortDomainConfigured, setShortDomainConfigured] = useState<
+    boolean | null
+  >(null)
+  // 3.5.x: anti-hang safety net ONLY. Previously this was a 600ms grace
+  // that revealed the long URL — but that lost the race against a
+  // slightly-slow short-link POST, so auto-copy grabbed the LONG link
+  // and the short one swapped in too late (the reported bug). Now it's
+  // a long fallback that fires only if the POST never answers at all,
+  // so a configured short domain effectively always wins.
   const [graceElapsed, setGraceElapsed] = useState(false)
   const shortRequestedRef = useRef<string | null>(null)
   // 2.5.1+: ref + open state for the custom GlassCalendar popover.
@@ -260,7 +269,7 @@ export function ShareModal({
     if (!open) {
       shortRequestedRef.current = null
       setShortUrl(null)
-      setShortResolved(false)
+      setShortDomainConfigured(null)
       return
     }
     if (!shareUrl) return
@@ -283,32 +292,29 @@ export function ShareModal({
           }),
         })
         if (!res.ok) {
-          // Endpoint disabled, bad config, or auth issue — silently
-          // fall back to long URL. Don't surface an error to the
-          // admin; the long URL still works.
+          // Endpoint disabled, bad config, or auth issue — we can't
+          // mint a short link, so the long URL is the only working
+          // option. Treat as "no domain" for display purposes.
+          setShortDomainConfigured(false)
           return
         }
         const data = (await res.json()) as {
           shortUrl: string
           shortDomainConfigured: boolean
         }
-        // Only swap in the short URL when a real short-link domain
-        // is configured. Otherwise the server hands us a
-        // `<appDomain>/s/<slug>` which is LONGER than the original
-        // share URL and would feel like a regression.
+        // Record whether a real short-link domain is configured. When
+        // it IS, the modal shows ONLY the short URL (never the long
+        // one). When it is NOT, the server's `<appDomain>/s/<slug>`
+        // would be LONGER than the original share URL, so we keep the
+        // original long URL instead (no regression vs pre-2.4.0).
+        setShortDomainConfigured(!!data.shortDomainConfigured)
         if (data.shortDomainConfigured && data.shortUrl) {
           setShortUrl(data.shortUrl)
         }
       } catch (err) {
         logError('[ShareModal] short link creation failed:', err)
-      } finally {
-        // Flip the gate AFTER any state change above so the
-        // auto-copy effect re-runs with the freshly-resolved
-        // `displayUrl`. `try/finally` makes sure we don't trap
-        // the modal on a transient network error — failure
-        // path still flips this to true and we fall back to
-        // the long URL.
-        setShortResolved(true)
+        // Hard failure — no short link possible; fall back to long.
+        setShortDomainConfigured(false)
       }
     })()
     // We intentionally exclude `initialExpiresDate` from the dep
@@ -317,25 +323,38 @@ export function ShareModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, shareUrl])
 
-  // 3.3.x: reveal the long URL as a usable fallback if the short-link
-  // round-trip is slow, so the modal never hangs on "Generating link…".
-  // On a fast server the short link resolves well inside this window,
-  // so there's no long-URL flash in the common case.
+  // 3.5.x: anti-hang safety net ONLY. If the short-link POST never
+  // answers (server down / network black hole), reveal the long URL
+  // after a generous window so the modal isn't stuck on "Generating
+  // link…" forever. This is intentionally long (8s) so a merely-slow
+  // POST always wins the race — we never copy the long URL out from
+  // under a short link that's about to arrive.
   useEffect(() => {
     if (!open) {
       setGraceElapsed(false)
       return
     }
-    const t = setTimeout(() => setGraceElapsed(true), 600)
+    const t = setTimeout(() => setGraceElapsed(true), 8_000)
     return () => clearTimeout(t)
   }, [open])
 
-  // The URL the user actually sees + copies. Short URL wins when
-  // available; otherwise we fall back to the original long URL.
-  const displayUrl = shortUrl || shareUrl
-  // A URL is ready to show/copy once the short link resolved OR the
-  // grace window elapsed (fallback to the long URL).
-  const hasUsableUrl = shortResolved || graceElapsed
+  // The URL the user actually sees + copies.
+  //   - Short-link domain configured → ALWAYS the short URL (never the
+  //     long one). This is the core guarantee the admin asked for.
+  //   - No domain configured → the original long URL.
+  const displayUrl =
+    shortDomainConfigured && shortUrl ? shortUrl : shareUrl
+  // Ready to show/copy once we KNOW the outcome:
+  //   - domain configured AND the short URL has arrived, OR
+  //   - domain not configured (long URL is correct), OR
+  //   - anti-hang elapsed (last-resort fallback so we never hang).
+  // While the POST is still in flight (`shortDomainConfigured === null`)
+  // we show "Generating link…" and DON'T auto-copy — so the long URL
+  // can never be copied ahead of a short link that's on its way.
+  const hasUsableUrl =
+    (shortDomainConfigured === true && !!shortUrl) ||
+    shortDomainConfigured === false ||
+    graceElapsed
 
   const autoCopiedRef = useRef(false)
   useEffect(() => {

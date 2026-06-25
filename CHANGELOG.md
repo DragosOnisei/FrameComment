@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.3] - 2026-06-24
+
+### Share modal always uses the short link when a domain is configured
+
+Fixed a regression where opening a share (folder or video) briefly
+showed the long URL and auto-copied it before the short link
+resolved. Now, when a short-link domain is configured, the modal shows
+"Generating link…" until the short link arrives and shows / copies
+**only** the short URL — the long URL is never displayed or copied. If
+no short-link domain is configured, the long URL is used as before. A
+generous 8s safety net only kicks in if the short-link request never
+responds at all.
+
 ## [3.5.2] - 2026-06-24
 
 ### Notifications: clicked items now clear
