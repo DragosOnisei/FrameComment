@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.4] - 2026-06-24
+
+### Release plumbing
+
+No app changes — fresh build/tag to force a clean image pull on
+TrueNAS after a failed update. Same code as 3.5.3 (notification bell +
+share-modal short-link fix), including the `Notification` table
+migration that runs on container start.
+
 ## [3.5.3] - 2026-06-24
 
 ### Share modal always uses the short link when a domain is configured
