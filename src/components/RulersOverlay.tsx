@@ -48,11 +48,22 @@ export default function RulersOverlay({
   const [vGuides, setVGuides] = useState<number[]>([])
   // While the user is dragging from a ruler we track the live cursor
   // position so we can preview the not-yet-committed guide.
-  const [drag, setDrag] = useState<
+  type DragState =
     | { kind: 'h-new' | 'v-new'; frac: number }
     | { kind: 'h-move' | 'v-move'; index: number; frac: number }
-    | null
-  >(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
+  // 3.5.x: mirror the live drag in a ref so the release handler can
+  // claim it SYNCHRONOUSLY. On touch devices the browser fires
+  // compatibility mouse events (mousedown/mouseup) right after the
+  // touch ones, so a single finger release used to fire `onUp` twice
+  // and commit TWO guide lines. The first `onUp` now nulls this ref,
+  // so the duplicate event finds nothing to commit — regardless of how
+  // React batches the state updates.
+  const dragRef = useRef<DragState | null>(null)
+  const startDrag = useCallback((d: DragState) => {
+    dragRef.current = d
+    setDrag(d)
+  }, [])
 
   // ---- Painted rect tracking (mirrors SafeZoneOverlay) -----------
   useEffect(() => {
@@ -117,33 +128,33 @@ export default function RulersOverlay({
       if (typeof clientX !== 'number') return
       const isH = drag.kind === 'h-new' || drag.kind === 'h-move'
       const frac = computeFrac(clientX, clientY, isH ? 'h' : 'v')
+      if (dragRef.current) dragRef.current = { ...dragRef.current, frac }
       setDrag((d) => (d ? { ...d, frac } : d))
     }
     const onUp = () => {
-      setDrag((d) => {
-        if (!d) return null
-        // Drag ended OUTSIDE the painted rect → treat as a "drop on
-        // ruler" delete (for *-move) or a no-op (for *-new).
-        const offGrid = d.frac < 0 || d.frac > 1
-        if (d.kind === 'h-new') {
-          if (!offGrid) setHGuides((g) => [...g, d.frac])
-        } else if (d.kind === 'v-new') {
-          if (!offGrid) setVGuides((g) => [...g, d.frac])
-        } else if (d.kind === 'h-move') {
-          if (offGrid) {
-            setHGuides((g) => g.filter((_, i) => i !== d.index))
-          } else {
-            setHGuides((g) => g.map((v, i) => (i === d.index ? d.frac : v)))
-          }
-        } else if (d.kind === 'v-move') {
-          if (offGrid) {
-            setVGuides((g) => g.filter((_, i) => i !== d.index))
-          } else {
-            setVGuides((g) => g.map((v, i) => (i === d.index ? d.frac : v)))
-          }
-        }
-        return null
-      })
+      // Claim the drag synchronously: the FIRST release wins and clears
+      // the ref, so a duplicated event (the compatibility mouse event
+      // that follows touchend) sees null and does nothing → no double
+      // guide. The commit happens here (not inside a setDrag updater),
+      // which also keeps the state updater pure.
+      const d = dragRef.current
+      if (!d) return
+      dragRef.current = null
+      // Drag ended OUTSIDE the painted rect → treat as a "drop on
+      // ruler" delete (for *-move) or a no-op (for *-new).
+      const offGrid = d.frac < 0 || d.frac > 1
+      if (d.kind === 'h-new') {
+        if (!offGrid) setHGuides((g) => [...g, d.frac])
+      } else if (d.kind === 'v-new') {
+        if (!offGrid) setVGuides((g) => [...g, d.frac])
+      } else if (d.kind === 'h-move') {
+        if (offGrid) setHGuides((g) => g.filter((_, i) => i !== d.index))
+        else setHGuides((g) => g.map((v, i) => (i === d.index ? d.frac : v)))
+      } else if (d.kind === 'v-move') {
+        if (offGrid) setVGuides((g) => g.filter((_, i) => i !== d.index))
+        else setVGuides((g) => g.map((v, i) => (i === d.index ? d.frac : v)))
+      }
+      setDrag(null)
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
@@ -164,6 +175,7 @@ export default function RulersOverlay({
     if (!enabled) {
       setHGuides([])
       setVGuides([])
+      dragRef.current = null
       setDrag(null)
     }
   }, [enabled])
@@ -171,7 +183,11 @@ export default function RulersOverlay({
   if (!enabled || !rect) return null
 
   // Ticks rendered on the rulers — every 10 % of the painted rect.
-  const ticks = Array.from({ length: 11 }, (_, i) => i / 10)
+  // 3.5.x: start at 10 % (skip the 0 % tick). The 0 % tick sat exactly
+  // on the shared top-left ruler corner and showed up as a stray 1px
+  // line on the top ruler. The 0 % position is already the ruler's own
+  // edge, so dropping that tick loses nothing visually.
+  const ticks = Array.from({ length: 10 }, (_, i) => (i + 1) / 10)
 
   // Preview frac while dragging a "new" guide.
   const previewH =
@@ -208,65 +224,36 @@ export default function RulersOverlay({
     // click). Each child that needs interaction (ruler strips, guide
     // hit-zones) re-enables pointer events on itself.
     <div className="absolute inset-0 pointer-events-none z-[36]" aria-hidden="true">
-      {/* TOP ruler */}
-      <div
-        className="absolute pointer-events-auto cursor-row-resize select-none"
-        style={{
-          left: rect.left,
-          top: Math.max(0, rect.top - RULER_SIZE),
-          width: rect.width,
-          height: RULER_SIZE,
-          backgroundColor: 'rgba(20,20,24,0.85)',
-          borderBottom: '1px solid rgba(255,255,255,0.25)',
-          backdropFilter: 'blur(4px)',
-        }}
-        onMouseDown={(e) => {
-          e.preventDefault()
-          const frac = computeFrac(e.clientX, e.clientY, 'h')
-          setDrag({ kind: 'h-new', frac })
-        }}
-        onTouchStart={(e) => {
-          const t = e.touches[0]
-          if (!t) return
-          const frac = computeFrac(t.clientX, t.clientY, 'h')
-          setDrag({ kind: 'h-new', frac })
-        }}
-      >
-        {ticks.map((t) => (
-          <div
-            key={t}
-            className="absolute bottom-0 bg-white/60"
-            style={{
-              left: `${t * 100}%`,
-              width: 1,
-              height: t === 0 || t === 1 ? RULER_SIZE : RULER_SIZE / 2,
-            }}
-          />
-        ))}
-      </div>
-
-      {/* LEFT ruler */}
+      {/* LEFT ruler — rendered FIRST so the TOP ruler paints over the
+          shared top-left corner. The top ruler has no vertical border,
+          so the corner stays clean (no white seam where the two meet). */}
       <div
         className="absolute pointer-events-auto cursor-col-resize select-none"
         style={{
-          left: Math.max(0, rect.left - RULER_SIZE),
+          // 3.5.x: sit ON the video's left edge (not in the pillarbox
+          // beside it) so the frosted glass blurs video content instead
+          // of rendering as a solid black strip over the letterbox.
+          left: rect.left,
           top: rect.top,
           width: RULER_SIZE,
           height: rect.height,
-          backgroundColor: 'rgba(20,20,24,0.85)',
-          borderRight: '1px solid rgba(255,255,255,0.25)',
-          backdropFilter: 'blur(4px)',
+          // 3.5.x: modern frosted glass (matches the app's glass v2.5).
+          backgroundColor: 'rgba(11,18,32,0.45)',
+          borderRight: '1px solid rgba(255,255,255,0.14)',
+          backdropFilter: 'blur(20px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+          boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
         }}
         onMouseDown={(e) => {
           e.preventDefault()
           const frac = computeFrac(e.clientX, e.clientY, 'v')
-          setDrag({ kind: 'v-new', frac })
+          startDrag({ kind: 'v-new', frac })
         }}
         onTouchStart={(e) => {
           const t = e.touches[0]
           if (!t) return
           const frac = computeFrac(t.clientX, t.clientY, 'v')
-          setDrag({ kind: 'v-new', frac })
+          startDrag({ kind: 'v-new', frac })
         }}
       >
         {ticks.map((t) => (
@@ -277,6 +264,50 @@ export default function RulersOverlay({
               top: `${t * 100}%`,
               height: 1,
               width: t === 0 || t === 1 ? RULER_SIZE : RULER_SIZE / 2,
+            }}
+          />
+        ))}
+      </div>
+
+      {/* TOP ruler — rendered after the left ruler so it owns the
+          top-left corner cleanly. */}
+      <div
+        className="absolute pointer-events-auto cursor-row-resize select-none"
+        style={{
+          left: rect.left,
+          // 3.5.x: sit ON the video's top edge (not in the letterbox
+          // above it) so the frosted glass always has video content to
+          // blur — otherwise, over a black bar it just renders black.
+          top: rect.top,
+          width: rect.width,
+          height: RULER_SIZE,
+          // 3.5.x: modern frosted glass (matches the app's glass v2.5).
+          backgroundColor: 'rgba(11,18,32,0.45)',
+          borderBottom: '1px solid rgba(255,255,255,0.14)',
+          backdropFilter: 'blur(20px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
+        }}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          const frac = computeFrac(e.clientX, e.clientY, 'h')
+          startDrag({ kind: 'h-new', frac })
+        }}
+        onTouchStart={(e) => {
+          const t = e.touches[0]
+          if (!t) return
+          const frac = computeFrac(t.clientX, t.clientY, 'h')
+          startDrag({ kind: 'h-new', frac })
+        }}
+      >
+        {ticks.map((t) => (
+          <div
+            key={t}
+            className="absolute bottom-0 bg-white/60"
+            style={{
+              left: `${t * 100}%`,
+              width: 1,
+              height: t === 0 || t === 1 ? RULER_SIZE : RULER_SIZE / 2,
             }}
           />
         ))}
@@ -297,11 +328,11 @@ export default function RulersOverlay({
             onMouseDown={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              setDrag({ kind: 'h-move', index: g.i, frac: g.frac })
+              startDrag({ kind: 'h-move', index: g.i, frac: g.frac })
             }}
             onTouchStart={(e) => {
               e.stopPropagation()
-              setDrag({ kind: 'h-move', index: g.i, frac: g.frac })
+              startDrag({ kind: 'h-move', index: g.i, frac: g.frac })
             }}
             onDoubleClick={(e) => {
               e.preventDefault()
@@ -335,11 +366,11 @@ export default function RulersOverlay({
             onMouseDown={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              setDrag({ kind: 'v-move', index: g.i, frac: g.frac })
+              startDrag({ kind: 'v-move', index: g.i, frac: g.frac })
             }}
             onTouchStart={(e) => {
               e.stopPropagation()
-              setDrag({ kind: 'v-move', index: g.i, frac: g.frac })
+              startDrag({ kind: 'v-move', index: g.i, frac: g.frac })
             }}
             onDoubleClick={(e) => {
               e.preventDefault()

@@ -127,7 +127,7 @@ export default function AdminLayout({
             // Inner pages drop their own `bg-background` wrappers too
             // so the wash bleeds across the dashboard area to bottom-
             // right.
-            <div className="spotlight-bg flex flex-1 min-h-0 overflow-x-hidden">
+            <div className="spotlight-bg flex flex-1 min-h-0 overflow-x-hidden select-none">
               <AdminSidebar />
               <div className="flex-1 min-w-0 flex flex-col">
                 <AdminTopBar />

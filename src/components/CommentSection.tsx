@@ -1344,7 +1344,10 @@ export default function CommentSection({
         `--spotlight-tint` so the glow follows the user's chosen
         accent colour, not a hard-coded blue. */}
     <Card
-      className="border-0 flex flex-col h-full lg:max-h-full rounded-none lg:rounded-2xl overflow-hidden bg-white/[0.06] ring-1 ring-white/15 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)] text-white"
+      // 3.5.x: re-enable text selection inside the comments panel — the
+      // player chrome sets `select-none` to stop accidental drags, but
+      // feedback text here must stay selectable/copyable.
+      className="select-text border-0 flex flex-col h-full lg:max-h-full rounded-none lg:rounded-2xl overflow-hidden bg-white/[0.06] ring-1 ring-white/15 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)] text-white"
       style={{
         // Stronger accent-tinted glow in the top-left corner so the
         // sidebar reads as a glass panel ABOVE the page spotlight,

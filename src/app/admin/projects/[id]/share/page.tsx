@@ -1248,7 +1248,10 @@ function AdminSharePageInner() {
        user changes the accent colour in Appearance settings the
        player background follows. */
     <div
-      className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col"
+      // 3.5.x: disable accidental text/element selection across the
+      // player chrome. The comments panel re-enables it on itself so
+      // feedback text stays selectable/copyable.
+      className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col select-none"
       style={{ height: '100dvh' }}
     >
       {/* Thumbnail Reel - always visible, collapsible.

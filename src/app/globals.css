@@ -670,3 +670,18 @@
     display: none; /* Chrome / Safari */
   }
 }
+
+/* 3.5.x: the admin shell + the player/review chrome set
+   `user-select: none` to stop accidental text/element selection while
+   click-dragging (selecting the video, sidebar labels, breadcrumbs,
+   etc.). Form fields and editable surfaces must stay usable, so always
+   re-enable selection on them regardless of any `select-none` ancestor.
+   Anything that explicitly opts back in via Tailwind's `select-text`
+   (e.g. the comments panel) keeps working too. */
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable="true"] * {
+  -webkit-user-select: text;
+  user-select: text;
+}

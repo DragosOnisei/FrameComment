@@ -554,7 +554,14 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
             }
           >
             {/* Left rail */}
-            <div className="overflow-y-auto flex flex-col min-h-0">
+            <div
+              className="overflow-y-auto flex flex-col min-h-0"
+              // 3.5.x: darker backdrop ONLY on the results column so the
+              // text reads well over bright project gradients. The card
+              // itself stays frosted glass — only the results sit on a
+              // darker surface.
+              style={{ backgroundColor: 'rgba(8,13,24,0.55)' }}
+            >
               {results.length === 0 && !loading && (
                 <div className="px-4 py-6 text-sm text-white/55 text-center">
                   No videos match &ldquo;{trimmedQuery}&rdquo;.
@@ -675,7 +682,11 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
               WebkitBackdropFilter: 'blur(40px) saturate(140%)',
             }}
           >
-            <div className="overflow-y-auto overflow-x-hidden min-h-0">
+            <div
+              className="overflow-y-auto overflow-x-hidden min-h-0"
+              // 3.5.x: same darker results backdrop as the Videos tab.
+              style={{ backgroundColor: 'rgba(8,13,24,0.55)' }}
+            >
               {folderResults.length === 0 ? (
                 <div className="px-4 py-8 text-sm text-white/55 text-center">
                   {loading ? 'Searching…' : 'No folders match your search.'}
@@ -851,7 +862,15 @@ function DetailsPane({
     r.width > 0 && r.height > 0 ? `${r.width} / ${r.height}` : '16 / 9'
   return (
     <div className="p-4 sm:p-6 space-y-4 min-w-0">
-      <VideoPreview r={r} aspectRatio={aspectRatio} />
+      {/* 3.5.x: black "stage" behind the preview. Negative margins
+          bleed it to the pane's top + left + right edges (cancelling
+          the panel padding) so the area around and above the video is
+          black like the clip's own bars; inner padding keeps the video
+          inset as before. The area BELOW the video stays on the glass
+          panel (only the metadata sits there). */}
+      <div className="-mt-4 sm:-mt-6 -mx-4 sm:-mx-6 px-4 sm:px-6 pt-4 sm:pt-6 bg-black">
+        <VideoPreview r={r} aspectRatio={aspectRatio} />
+      </div>
       <div className="min-w-0">
         {/* `break-words` (combined with `break-all` for long
             unbroken tokens like uppercase filenames) lets a long

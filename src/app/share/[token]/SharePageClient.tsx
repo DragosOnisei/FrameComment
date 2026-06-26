@@ -1680,7 +1680,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     // (player + comments sidebar), the public share page now reads as
     // the same product instead of a stripped-down clone.
     <div
-      className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col"
+      // 3.5.x: disable accidental text/element selection across the
+      // whole player chrome (video, title, buttons). Click-dragging on
+      // the video used to paint a big selection. The comments panel
+      // re-enables selection on itself (see CommentSection) so feedback
+      // text stays copyable.
+      className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col select-none"
       style={{ height: '100dvh' }}
     >
       {/* Thumbnail Reel - always visible, collapsible */}

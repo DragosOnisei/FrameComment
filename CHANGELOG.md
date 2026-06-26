@@ -14,6 +14,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.5] - 2026-06-25
+
+### Player rulers, no accidental selection, search polish
+
+**Rulers fixes.** Dragging a guide from a ruler no longer drops TWO
+lines on touch devices (the release event was firing twice). Both
+rulers now sit on the video's edges with a modern frosted-glass look,
+so the left ruler is no longer a solid black strip over the pillarbox,
+and the top-left corner where they meet is clean (no stray white seam
+or 1px tick).
+
+**No more accidental selection.** Click-dragging across the player
+(video, title, controls) and the admin shell (sidebar, breadcrumbs,
+grid, buttons) no longer selects UI text/elements. The comments panel
+and all form fields stay fully selectable, so feedback text is still
+copyable.
+
+**Global search readability.** The results column now sits on a darker
+backdrop so result text is legible over bright project gradients
+(while the panel keeps its glass look). The preview pane shows the
+video on a black "stage" that blends with the clip's own bars; the
+metadata below stays on the glass panel.
+
 ## [3.5.4] - 2026-06-24
 
 ### Release plumbing
