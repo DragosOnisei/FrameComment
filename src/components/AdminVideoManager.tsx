@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { apiPatch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
+import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
 
 interface AdminVideoManagerProps {
   projectId: string
@@ -59,6 +60,11 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
   const t = useTranslations('videos')
   const tc = useTranslations('common')
   const router = useRouter()
+  // 3.5.x: force the global processing-status poll to refresh the
+  // instant an upload finishes, so the "Processing/Encoding" banner +
+  // per-card bar appear immediately instead of waiting up to one idle
+  // poll cycle (which could miss a fast SD encode entirely).
+  const { refetch: refetchProcessingStatus } = useProcessingStatus()
 
   // Group videos by name
   const videoGroups = videos.reduce((acc: Record<string, any[]>, video) => {
@@ -124,6 +130,10 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
   // Handle upload completion from modal - refresh to show processing inline
   const handleUploadComplete = () => {
     onRefresh?.()
+    // Kick the global processing banner immediately (don't wait for the
+    // next idle poll) so encoding progress shows right after upload —
+    // including at the project root.
+    refetchProcessingStatus()
   }
 
   const toggleGroup = (name: string) => {

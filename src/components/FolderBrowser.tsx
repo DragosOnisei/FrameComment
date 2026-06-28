@@ -1088,28 +1088,111 @@ function FolderBrowserInner(
   // ─── multi-select + bulk actions (1.0.6+) ────────────────
   // Hoisted above the kebab handlers (1.0.9+) so the bulk-aware
   // Delete / Move-up flows can read the live selection.
-  const handleToggleVideoSelect = useCallback((id: string) => {
-    setSelectedVideoIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
+  // 3.5.x: Finder/Explorer selection semantics.
+  //   - plain click          → select ONLY the clicked item
+  //   - Cmd/Ctrl + click      → toggle that item, keep the rest
+  //   - Shift + click         → select the contiguous RANGE from the
+  //                             last anchor to the clicked item
+  // The grid renders folders first, then videos, so the range walks a
+  // single combined ordered list spanning both types.
+  const selectionAnchorRef = useRef<{
+    kind: 'folder' | 'video'
+    id: string
+  } | null>(null)
 
-  // 1.1.0+: parallel toggle for folder cards.
-  const handleToggleFolderSelect = useCallback((id: string) => {
-    setSelectedFolderIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }, [])
+  const orderedSelectableItems = useMemo(
+    () => [
+      ...sortedFolders.map((f) => ({ kind: 'folder' as const, id: f.id })),
+      ...videoGroups.map((v) => ({ kind: 'video' as const, id: v.id })),
+    ],
+    [sortedFolders, videoGroups],
+  )
+
+  const selectItem = useCallback(
+    (
+      kind: 'folder' | 'video',
+      id: string,
+      additive: boolean,
+      range: boolean,
+    ) => {
+      const anchor = selectionAnchorRef.current
+      // Shift-click: select everything between the anchor and the
+      // clicked item (inclusive). Keep the anchor so further shift-
+      // clicks re-extend from the same origin.
+      if (range && anchor) {
+        const items = orderedSelectableItems
+        const aIdx = items.findIndex(
+          (it) => it.kind === anchor.kind && it.id === anchor.id,
+        )
+        const cIdx = items.findIndex((it) => it.kind === kind && it.id === id)
+        if (aIdx !== -1 && cIdx !== -1) {
+          const lo = Math.min(aIdx, cIdx)
+          const hi = Math.max(aIdx, cIdx)
+          const slice = items.slice(lo, hi + 1)
+          setSelectedFolderIds(
+            new Set(
+              slice.filter((it) => it.kind === 'folder').map((it) => it.id),
+            ),
+          )
+          setSelectedVideoIds(
+            new Set(
+              slice.filter((it) => it.kind === 'video').map((it) => it.id),
+            ),
+          )
+          return
+        }
+        // Anchor went stale (item removed) — fall through to plain.
+      }
+
+      if (additive) {
+        if (kind === 'folder') {
+          setSelectedFolderIds((prev) => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+          })
+        } else {
+          setSelectedVideoIds((prev) => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+          })
+        }
+        selectionAnchorRef.current = { kind, id }
+        return
+      }
+
+      // Plain click: select only this item.
+      if (kind === 'folder') {
+        setSelectedFolderIds(new Set([id]))
+        setSelectedVideoIds(new Set())
+      } else {
+        setSelectedVideoIds(new Set([id]))
+        setSelectedFolderIds(new Set())
+      }
+      selectionAnchorRef.current = { kind, id }
+    },
+    [orderedSelectableItems],
+  )
+
+  const handleToggleVideoSelect = useCallback(
+    (id: string, additive: boolean, range = false) =>
+      selectItem('video', id, additive, range),
+    [selectItem],
+  )
+
+  const handleToggleFolderSelect = useCallback(
+    (id: string, additive: boolean, range = false) =>
+      selectItem('folder', id, additive, range),
+    [selectItem],
+  )
 
   const clearSelection = useCallback(() => {
     setSelectedVideoIds(new Set())
     setSelectedFolderIds(new Set())
+    selectionAnchorRef.current = null
   }, [])
 
   // Combined selection size — drives the floating toolbar count, the
@@ -1388,15 +1471,48 @@ function FolderBrowserInner(
   const handleStackVideos = useCallback(
     async (sourceId: string, targetId: string) => {
       if (sourceId === targetId) return
+      // 3.5.x: bulk-aware. If the dragged card is part of a 2+ video
+      // selection, stack the WHOLE selection onto the target in one
+      // call — the server orders them by their `_V<n>` suffix so they
+      // layer in the right order (V2, V3, V4, …). Dragging a card that
+      // isn't part of the selection still stacks just that one.
+      const isBulk =
+        selectedVideoIds.size >= 2 && selectedVideoIds.has(sourceId)
       try {
-        const res = await apiFetch(`/api/videos/${sourceId}/stack`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetVideoId: targetId }),
-        })
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.error || 'Failed to stack videos')
+        if (isBulk) {
+          // Sources in grid order, excluding the target's own group.
+          const targetGroup = videoGroups.find((g) =>
+            g.allIds.includes(targetId),
+          )
+          const targetGroupIds = new Set(
+            targetGroup ? targetGroup.allIds : [targetId],
+          )
+          const sourceVideoIds = videoGroups
+            .filter(
+              (g) => selectedVideoIds.has(g.id) && !targetGroupIds.has(g.id),
+            )
+            .map((g) => g.id)
+          if (sourceVideoIds.length === 0) return
+          const res = await apiFetch('/api/videos/stack-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetVideoId: targetId, sourceVideoIds }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.error || 'Failed to stack videos')
+          }
+          clearSelection()
+        } else {
+          const res = await apiFetch(`/api/videos/${sourceId}/stack`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetVideoId: targetId }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.error || 'Failed to stack videos')
+          }
         }
         await fetchFolders({ silent: true })
         onMutated?.()
@@ -1404,7 +1520,7 @@ function FolderBrowserInner(
         alert(err instanceof Error ? err.message : 'Failed to stack videos')
       }
     },
-    [onMutated, fetchFolders],
+    [onMutated, fetchFolders, selectedVideoIds, videoGroups, clearSelection],
   )
 
   // Drag-video-onto-folder handler (1.0.7+). When the user drops a
@@ -2174,7 +2290,12 @@ function FolderBrowserInner(
   // both file and folder drops — empty-state, project root, and
   // already-populated folders all support the same gesture.
   const containerDragOver = (e: React.DragEvent) => {
-    const canDropFiles = !!currentFolderId && !!onUploadFiles
+    // 3.5.x: flat-file drop is allowed wherever the parent wired an
+    // `onUploadFiles` handler — including the PROJECT ROOT, where
+    // `currentFolderId` is null (root uploads go to folderId=null).
+    // Previously the `!!currentFolderId` gate silently disabled
+    // dropping individual video files at the root.
+    const canDropFiles = !!onUploadFiles
     const canDropTree = !!onUploadFolderTree
     if (!canDropFiles && !canDropTree) return
     const types = Array.from(e.dataTransfer.types)
@@ -2195,7 +2316,12 @@ function FolderBrowserInner(
     }
   }
   const containerDrop = (e: React.DragEvent) => {
-    const canDropFiles = !!currentFolderId && !!onUploadFiles
+    // 3.5.x: flat-file drop is allowed wherever the parent wired an
+    // `onUploadFiles` handler — including the PROJECT ROOT, where
+    // `currentFolderId` is null (root uploads go to folderId=null).
+    // Previously the `!!currentFolderId` gate silently disabled
+    // dropping individual video files at the root.
+    const canDropFiles = !!onUploadFiles
     const canDropTree = !!onUploadFolderTree
     if (!canDropFiles && !canDropTree) return
     e.preventDefault()
@@ -2955,7 +3081,21 @@ function FolderBrowserInner(
         y={ctxMenu.y}
         onClose={() => setCtxMenu((c) => ({ ...c, open: false }))}
         onUploadAsset={onUploadAsset}
-        onUploadFolder={onUploadFolder}
+        // 3.5.x: the context-menu "Upload Folder" used to be wired only
+        // to the (never-passed) `onUploadFolder` prop, so it rendered
+        // disabled everywhere — including the project root — even though
+        // dragging a folder in already worked. Fall back to triggering
+        // the component's own hidden `webkitdirectory` picker, which
+        // routes through `onUploadFolderTree` (wired on both the folder
+        // AND root pages). Now it's enabled wherever folder upload is
+        // supported.
+        onUploadFolder={
+          onUploadFolder
+            ? onUploadFolder
+            : onUploadFolderTree
+              ? () => folderInputRef.current?.click()
+              : undefined
+        }
         onNewFolder={() => {
           setNewDialogRestricted(false)
           setShowNewDialog(true)

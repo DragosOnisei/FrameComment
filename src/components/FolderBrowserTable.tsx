@@ -43,8 +43,11 @@ interface FolderBrowserTableProps {
   videoGroups: VideoGroup[]
   selectedFolderIds: Set<string>
   selectedVideoIds: Set<string>
-  onToggleFolder: (id: string) => void
-  onToggleVideo: (id: string) => void
+  // `additive` true = Cmd/Ctrl-click (extend); `range` true =
+  // Shift-click (select range); both false = plain click (select only
+  // this row). Matches the grid cards.
+  onToggleFolder: (id: string, additive: boolean, range: boolean) => void
+  onToggleVideo: (id: string, additive: boolean, range: boolean) => void
   onOpenFolder: (id: string) => void
   onOpenVideo: (name: string) => void
 }
@@ -92,7 +95,9 @@ export default function FolderBrowserTable({
             <button
               key={`folder:${f.id}`}
               type="button"
-              onClick={() => onToggleFolder(f.id)}
+              onClick={(e) =>
+                onToggleFolder(f.id, e.metaKey || e.ctrlKey, e.shiftKey)
+              }
               onDoubleClick={() => onOpenFolder(f.id)}
               aria-selected={selected}
               // 1.7.5+: round the bottom-left/right corners on the
@@ -129,7 +134,9 @@ export default function FolderBrowserTable({
             <button
               key={`video:${v.id}`}
               type="button"
-              onClick={() => onToggleVideo(v.id)}
+              onClick={(e) =>
+                onToggleVideo(v.id, e.metaKey || e.ctrlKey, e.shiftKey)
+              }
               onDoubleClick={() => onOpenVideo(v.name)}
               aria-selected={selected}
               className={`w-full grid grid-cols-[minmax(0,1fr)_120px_120px_140px] gap-3 px-3 sm:px-4 py-2 text-left text-sm transition-colors [&:last-child]:rounded-b-xl ${

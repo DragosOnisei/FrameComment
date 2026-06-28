@@ -94,7 +94,12 @@ export interface FolderCardProps {
    *  folders participate in the same bulk-select / bulk-action flow
    *  as videos. */
   isSelected?: boolean
-  onToggleSelect?: (folderId: string) => void
+  /** `additive` is true for Cmd/Ctrl-click (and the checkbox): toggle
+   *  this folder in/out of the selection, keeping the rest. `range` is
+   *  true for Shift-click: select the contiguous range from the last
+   *  anchor. A plain click (both false) selects ONLY this folder
+   *  (Finder/Explorer behaviour). */
+  onToggleSelect?: (folderId: string, additive: boolean, range: boolean) => void
   /** True while ANY card (video OR folder) on the page is selected.
    *  In that mode a plain click toggles selection instead of opening
    *  the folder. */
@@ -272,14 +277,16 @@ export default function FolderCard({
       // in. Matches Finder / Frame.io and stays consistent with
       // VideoCard. We still fall back to `onOpen` when the host
       // didn't wire a select handler.
-      onClick={() => {
+      onClick={(e) => {
         // While the title is being edited, clicking the card MUST
         // NOT drill into the folder — the user is just trying to
         // dismiss the input or click elsewhere. The input itself
         // already swallows clicks via stopPropagation below.
         if (isEditing) return
         if (onToggleSelect) {
-          onToggleSelect(id)
+          // Cmd/Ctrl extends, Shift selects a range; a plain click
+          // selects only this folder.
+          onToggleSelect(id, e.metaKey || e.ctrlKey, e.shiftKey)
           return
         }
         onOpen(id)
@@ -402,7 +409,9 @@ export default function FolderCard({
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              onToggleSelect(id)
+              // Checkbox = explicit multi-select affordance → always
+              // toggle (additive), never collapse the selection.
+              onToggleSelect(id, true, false)
             }}
             className={`absolute top-2 left-2 z-10 inline-flex items-center justify-center w-5 h-5 rounded transition-colors ${
               isSelected

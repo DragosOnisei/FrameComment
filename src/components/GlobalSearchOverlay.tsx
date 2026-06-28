@@ -555,7 +555,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
           >
             {/* Left rail */}
             <div
-              className="overflow-y-auto flex flex-col min-h-0"
+              className="overflow-y-auto custom-scrollbar flex flex-col min-h-0"
               // 3.5.x: darker backdrop ONLY on the results column so the
               // text reads well over bright project gradients. The card
               // itself stays frosted glass — only the results sit on a
@@ -653,7 +653,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                 filenames, video tag at native size, etc.) make the
                 grid track stretch past `1fr` and the whole panel
                 grows a horizontal scrollbar. */}
-            <div className="overflow-y-auto overflow-x-hidden min-h-0 min-w-0">
+            <div className="overflow-y-auto overflow-x-hidden custom-scrollbar min-h-0 min-w-0">
               {!showPanel ? null : !selected ? (
                 <div className="h-full flex items-center justify-center text-sm text-white/55">
                   {loading ? 'Searching…' : 'Select a result to see details.'}
@@ -683,7 +683,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
             }}
           >
             <div
-              className="overflow-y-auto overflow-x-hidden min-h-0"
+              className="overflow-y-auto overflow-x-hidden custom-scrollbar min-h-0"
               // 3.5.x: same darker results backdrop as the Videos tab.
               style={{ backgroundColor: 'rgba(8,13,24,0.55)' }}
             >

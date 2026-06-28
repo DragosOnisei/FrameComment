@@ -14,6 +14,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.6] - 2026-06-28
+
+### Multi-stack, root uploads, Finder-style selection, search scrollbar
+
+**Stack multiple videos at once.** Selecting several videos and
+dragging them onto another now stacks them ALL as new versions,
+ordered by the `_V<n>` suffix in their names (V2, V3, V4 …). The clip
+with the highest version lands on top and names the stack. Files
+without a suffix keep their selection order.
+
+**Upload at the project root.** Dragging video files onto the project
+root now uploads them there (previously only worked inside a folder),
+and the "Upload Folder" right-click item is enabled at the root too.
+Newly uploaded root videos — and their processing/encoding banner —
+now appear live instead of only after a manual refresh.
+
+**Finder-style selection.** A plain click selects only the clicked
+item; Cmd/Ctrl-click toggles items in/out of the selection; Shift-click
+selects a contiguous range. No more building a selection by accident.
+
+**Hover-scrub works as soon as SD is ready.** The grid now keeps
+polling through the HD encode ladder, so the storyboard sprite (which
+powers hover-scrub) is picked up live instead of needing a refresh.
+
+**Search results readability + scrollbar.** The global-search results
+column sits on a darker backdrop (legible over bright project
+gradients), the preview pane shows the video on a black stage, and the
+results lists use the app's themed scrollbar instead of the default
+grey one.
+
 ## [3.5.5] - 2026-06-25
 
 ### Player rulers, no accidental selection, search polish

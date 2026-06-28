@@ -12,13 +12,13 @@
         "healthy_error": null,
         "home": "https://github.com/DragosOnisei/FrameComment",
         "location": "community/framecomment",
-        "latest_version": "3.5.5",
-        "latest_app_version": "3.5.5",
-        "latest_human_version": "3.5.5",
+        "latest_version": "3.5.6",
+        "latest_app_version": "3.5.6",
+        "latest_human_version": "3.5.6",
         "title": "FrameComment",
         "name": "framecomment",
         "recommended": false,
-        "last_update": "2026-06-25 00:00:00",
+        "last_update": "2026-06-28 00:00:00",
         "sources": [
           "https://github.com/DragosOnisei/FrameComment",
           "https://hub.docker.com/r/dragosonisei/framecomment"

@@ -85,7 +85,12 @@ export interface VideoCardProps {
   /** Toggle handler — wired by FolderBrowser. When provided, the
    *  checkbox renders even when the card isn't hovered (so the
    *  user can see what's already selected). */
-  onToggleSelect?: (id: string) => void
+  /** `additive` is true for Cmd/Ctrl-click (and the checkbox): toggle
+   *  this card in/out of the selection, keeping the rest. `range` is
+   *  true for Shift-click: select the contiguous range from the last
+   *  anchor. A plain click (both false) selects ONLY this card
+   *  (Finder/Explorer behaviour). */
+  onToggleSelect?: (id: string, additive: boolean, range: boolean) => void
   /** True while ANY video on the page is selected. In that mode a
    *  click anywhere on the card toggles selection (Frame.io-style)
    *  instead of opening the video. */
@@ -507,9 +512,11 @@ export default function VideoCard({
       // double-click to drill in. Falls back to `onOpen` only when
       // the card doesn't expose a select handler at all (legacy
       // call sites that don't wire multi-select).
-      onClick={() => {
+      onClick={(e) => {
         if (onToggleSelect) {
-          onToggleSelect(id)
+          // Cmd/Ctrl extends, Shift selects a range; a plain click
+          // selects only this card.
+          onToggleSelect(id, e.metaKey || e.ctrlKey, e.shiftKey)
         } else {
           onOpen(name)
         }
@@ -718,7 +725,9 @@ export default function VideoCard({
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              onToggleSelect(id)
+              // The checkbox is the explicit multi-select affordance —
+              // always toggle (additive), never collapse the selection.
+              onToggleSelect(id, true, false)
             }}
             className={`absolute top-2 left-2 z-10 inline-flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
               isSelected

@@ -105,6 +105,16 @@ export default function ProjectPage() {
       const data = await response.json()
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
       setProject(data)
+      // 3.5.x: the project-root FolderBrowser fetches its OWN root-level
+      // videos (unlike the folder view, the page doesn't feed them in as
+      // a `videos` prop). So refreshing `project` alone never updated the
+      // root grid — a video uploaded at the root only appeared after a
+      // manual page refresh. Nudge the FolderBrowser to re-fetch its root
+      // videos on every project refresh (upload-complete + processing
+      // poll), mirroring how the folder view's prop refreshes live.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('framecomment:folders-changed'))
+      }
     } catch (error) {
       // Swallow stale errors so a rapid back/forward doesn't
       // surface a misleading card over a page the user has already
@@ -224,10 +234,19 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!project?.videos) return
 
-    // Check if any videos are currently processing
-    const hasProcessingVideos = project.videos.some(
-      (video: any) => video.status === 'PROCESSING' || video.status === 'UPLOADING'
-    )
+    // Check if any videos are currently processing.
+    // 3.5.x: also keep polling AFTER status flips to READY (which
+    // happens at the first/SD tier) while the HD tiers are still being
+    // produced — the hover-scrub storyboard sprite lands during that
+    // window, so polling through the ladder lets the card pick it up
+    // live instead of needing a manual refresh. Legacy rows have
+    // plannedTiers === null and behave exactly as before.
+    const hasProcessingVideos = project.videos.some((video: any) => {
+      if (video.status === 'PROCESSING' || video.status === 'UPLOADING') return true
+      const planned = Array.isArray(video.plannedTiers) ? video.plannedTiers : []
+      const completed = Array.isArray(video.completedTiers) ? video.completedTiers : []
+      return planned.length > 0 && completed.length < planned.length
+    })
 
     if (hasProcessingVideos) {
       // Poll every 5 seconds while videos are processing (reduced from 3s to reduce load)
@@ -334,6 +353,10 @@ export default function ProjectPage() {
             projectTitle={project.title}
             currentFolderId={null}
             onMutated={fetchProject}
+            onUploadAsset={() => videoManagerRef.current?.triggerUpload()}
+            onUploadFiles={(files) =>
+              videoManagerRef.current?.triggerUploadWithFiles(files)
+            }
             onUploadFolderTree={handleUploadFolderTree}
             hideHeaderActions
             stretch
