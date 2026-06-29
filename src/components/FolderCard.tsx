@@ -47,9 +47,16 @@ export interface FolderCardProps {
   slug: string
   /** Up to four mosaic tiles to render in the cover area (1.0.7+).
    *  Each tile is either a video thumbnail or a folder glyph. When
-   *  the array is omitted/empty, a single big folder glyph is shown. */
+   *  the array is omitted/empty, a single big folder glyph is shown.
+   *  3.5.x: video tiles can carry a storyboardUrl so each one is
+   *  individually hover-scrubbable in the mosaic. */
   previewItems?: Array<
-    | { kind: 'video'; videoId: string; thumbnailUrl: string }
+    | {
+        kind: 'video'
+        videoId: string
+        thumbnailUrl: string
+        storyboardUrl?: string
+      }
     | { kind: 'folder'; folderId: string }
   >
   onOpen: (folderId: string) => void
@@ -725,19 +732,16 @@ function FolderCover({
   // be).
   const renderTile = (t: Tile, size: 'big' | 'small') => {
     if (t.kind === 'video') {
+      // 3.5.x: each video tile is now its own hover-scrub surface. Move
+      // the cursor across a tile and it scrubs through THAT clip's
+      // storyboard sprite (same mechanism as VideoCard) — so a folder
+      // with 4 clips lets you preview each one in place, without
+      // opening the folder. Tiles without a storyboard just render the
+      // static thumbnail.
       return (
-        <img
-          src={t.thumbnailUrl}
-          alt=""
-          draggable={false}
-          // 1.7.0+: `object-contain` so vertical clips (9:16, 4:5,
-          // etc.) show their full frame letter-boxed inside the
-          // mosaic tile, rather than being cropped to a horizontal
-          // strip. Matches the behaviour we use in the Quick
-          // Preview overlay for the same kind of preview real
-          // estate.
-          className="w-full h-full object-contain"
-          loading="lazy"
+        <ScrubTile
+          thumbnailUrl={t.thumbnailUrl}
+          storyboardUrl={t.storyboardUrl}
         />
       )
     }
@@ -783,6 +787,85 @@ function FolderCover({
             </div>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+// 3.5.x: per-tile hover-scrub for the folder mosaic. Mirrors the
+// VideoCard storyboard scrub — one tiny JPEG packs a 10×10 grid of
+// frames; we shift `background-position` to swap cells based on the
+// horizontal cursor position within THIS tile. Each tile owns its own
+// scrub state so hovering the top-left clip scrubs that clip, the
+// bottom-right clip scrubs its own, and so on. Tiles without a
+// storyboard URL fall back to a static thumbnail.
+const STORY_COLS = 10
+const STORY_ROWS = 10
+const STORY_CELLS = STORY_COLS * STORY_ROWS
+
+function ScrubTile({
+  thumbnailUrl,
+  storyboardUrl,
+}: {
+  thumbnailUrl: string
+  storyboardUrl?: string
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  // 0…1 while hovering, null otherwise (overlay hidden → static thumb).
+  const [scrubFraction, setScrubFraction] = useState<number | null>(null)
+  const canScrub = !!storyboardUrl
+
+  const handleScrub = (e: React.MouseEvent) => {
+    if (!canScrub || !ref.current) return
+    const rect = ref.current.getBoundingClientRect()
+    const fraction = (e.clientX - rect.left) / Math.max(1, rect.width)
+    setScrubFraction(Math.max(0, Math.min(1, fraction)))
+  }
+
+  const spriteStyle = (() => {
+    if (!canScrub || scrubFraction === null) return undefined
+    const idx = Math.max(
+      0,
+      Math.min(STORY_CELLS - 1, Math.floor(scrubFraction * STORY_CELLS)),
+    )
+    const col = idx % STORY_COLS
+    const row = Math.floor(idx / STORY_COLS)
+    const xPct = (col / (STORY_COLS - 1)) * 100
+    const yPct = (row / (STORY_ROWS - 1)) * 100
+    return {
+      backgroundImage: `url(${storyboardUrl})`,
+      backgroundRepeat: 'no-repeat' as const,
+      backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
+      backgroundPosition: `${xPct}% ${yPct}%`,
+    }
+  })()
+
+  return (
+    <div
+      ref={ref}
+      className="relative w-full h-full"
+      onMouseMove={handleScrub}
+      onMouseLeave={() => setScrubFraction(null)}
+    >
+      <img
+        src={thumbnailUrl}
+        alt=""
+        draggable={false}
+        // `object-contain` keeps vertical clips (9:16) letter-boxed in
+        // the tile rather than cropping them to a strip.
+        className="w-full h-full object-contain"
+        loading="lazy"
+      />
+      {/* Storyboard sprite overlay — sits on top of the thumbnail and
+          only becomes visible while the cursor is over this tile. */}
+      {canScrub && (
+        <div
+          aria-hidden
+          className={`absolute inset-0 pointer-events-none transition-opacity duration-75 ${
+            scrubFraction !== null ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={spriteStyle}
+        />
       )}
     </div>
   )

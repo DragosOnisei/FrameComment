@@ -53,18 +53,25 @@ export default function NewFolderDialog({
   // Reset state when the dialog opens so a previous error / value
   // doesn't bleed into the next open.
   useEffect(() => {
-    if (open) {
-      setName(defaultName)
-      setPassword('')
-      setShowPassword(false)
-      setError(null)
-      setSubmitting(false)
-      // Focus the input + select all so the user can just start typing.
-      requestAnimationFrame(() => {
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      })
-    }
+    if (!open) return
+    setName(defaultName)
+    setPassword('')
+    setShowPassword(false)
+    setError(null)
+    setSubmitting(false)
+    // Focus the name field + select-all so the user can type the
+    // folder name immediately — no extra click. A single rAF wasn't
+    // reliable: when the dialog is opened by clicking a "New Folder"
+    // button/tile, the browser hands focus back to that trigger on
+    // mouseup AFTER the rAF ran, so the input quietly lost focus. A
+    // short timeout focuses once the opening click has fully settled,
+    // which wins. (`autoFocus` on the input is the first-line grab;
+    // this is the fallback that survives the trigger steal.)
+    const id = setTimeout(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }, 60)
+    return () => clearTimeout(id)
   }, [open, defaultName])
 
   // Close on Escape.
@@ -162,6 +169,8 @@ export default function NewFolderDialog({
           </label>
           <input
             ref={inputRef}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}

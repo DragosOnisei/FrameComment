@@ -21,7 +21,16 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 import { logError } from '@/lib/logging'
 
 export type FolderPreviewItem =
-  | { kind: 'video'; videoId: string; thumbnailUrl: string }
+  | {
+      kind: 'video'
+      videoId: string
+      thumbnailUrl: string
+      // 3.5.x: signed URL to the storyboard sprite-sheet (10×10 grid of
+      // frames) so each mosaic tile can hover-scrub through that clip,
+      // exactly like the video card. Absent for legacy rows that never
+      // got a storyboard — those tiles just stay static thumbnails.
+      storyboardUrl?: string
+    }
   | { kind: 'folder'; folderId: string }
 
 /** Maximum preview tiles we render on a single folder cover. */
@@ -109,6 +118,7 @@ export async function fetchFolderPreviewData(
       projectId: true,
       name: true,
       thumbnailPath: true,
+      storyboardPath: true,
     },
   })
   const videosByFolder = new Map<string, typeof videos>()
@@ -143,10 +153,32 @@ export async function fetchFolderPreviewData(
             request,
             sessionId,
           )
+          // 3.5.x: also mint a storyboard token when the clip has one,
+          // so the tile can hover-scrub. Failure here is soft — we keep
+          // the static thumbnail and just skip the scrub overlay.
+          let storyboardUrl: string | undefined
+          if ((v as any).storyboardPath) {
+            try {
+              const sbToken = await generateVideoAccessToken(
+                v.id,
+                v.projectId,
+                'storyboard',
+                request,
+                sessionId,
+              )
+              storyboardUrl = `/api/content/${sbToken}`
+            } catch (err) {
+              logError(
+                '[fetchFolderPreviewData] storyboard token failed:',
+                err,
+              )
+            }
+          }
           tiles.push({
             kind: 'video',
             videoId: v.id,
             thumbnailUrl: `/api/content/${token}`,
+            ...(storyboardUrl ? { storyboardUrl } : {}),
           })
         } catch (err) {
           logError('[fetchFolderPreviewData] thumbnail token failed:', err)

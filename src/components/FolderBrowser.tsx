@@ -172,7 +172,12 @@ interface FolderRow {
    *  only has sub-folders). Falls back to the plain folder icon when
    *  the array is empty. */
   previewItems?: Array<
-    | { kind: 'video'; videoId: string; thumbnailUrl: string }
+    | {
+        kind: 'video'
+        videoId: string
+        thumbnailUrl: string
+        storyboardUrl?: string
+      }
     | { kind: 'folder'; folderId: string }
   >
   /** 1.6.0+: recursive byte total (as a stringified BigInt from the

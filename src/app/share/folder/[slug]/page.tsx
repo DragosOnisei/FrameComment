@@ -64,7 +64,12 @@ interface SubfolderRow {
   /** Frame.io-style mosaic tiles served by the share API (1.0.7+) —
    *  the same shape FolderCard expects on the admin side. */
   previewItems?: Array<
-    | { kind: 'video'; videoId: string; thumbnailUrl: string }
+    | {
+        kind: 'video'
+        videoId: string
+        thumbnailUrl: string
+        storyboardUrl?: string
+      }
     | { kind: 'folder'; folderId: string }
   >
 }
@@ -600,10 +605,15 @@ function PublicFolderSharePageInner() {
           <div className="flex items-center gap-2 flex-wrap">
             {/* 1.4.x+: Download All — streams a ZIP of the whole folder
                 tree (subfolders + latest-version videos) with original
-                filenames preserved. Only shows when the project has
-                client-downloads enabled AND there's at least one video
-                somewhere in the tree visible at the current level. */}
-            {folder.allowAssetDownload && videoGroups.length > 0 && (
+                filenames preserved. 3.5.x: also shown when the current
+                level holds only SUBFOLDERS (no loose videos) — the ZIP
+                endpoint walks the tree recursively, so "Download All"
+                at a folders-only level still grabs every nested video.
+                Previously it required a loose video at this exact level,
+                so a parent like "SCRIPT 3" (subfolders only) had no
+                button even though there was plenty to download. */}
+            {folder.allowAssetDownload &&
+              (videoGroups.length > 0 || subfolders.length > 0) && (
               <Button
                 size="sm"
                 onClick={handleDownloadAll}
