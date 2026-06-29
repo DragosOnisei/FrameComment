@@ -19,6 +19,7 @@ import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
+import ViewModeToggle from '@/components/ViewModeToggle'
 import {
   createFolderHierarchy,
   uniqueDirectoryPaths,
@@ -59,7 +60,7 @@ export default function ProjectFolderPage() {
   const folderBrowserRef = useRef<FolderBrowserHandle | null>(null)
   // 1.7.0+: grid/table preference comes from the shared admin
   // view-mode store; the actual toggle UI lives in AdminHeader.
-  const [folderView] = useAdminViewMode()
+  const [folderView, setFolderView] = useAdminViewMode()
 
   // 1.7.0+: stale-fetch guard. The user can navigate between
   // folders quickly (back, forward, into a sibling) and each
@@ -290,6 +291,9 @@ export default function ProjectFolderPage() {
         </Link>
       </TopbarLeftSlot>
       <TopbarRightSlot>
+        {/* 3.5.x: Grid / List view toggle available inside folders too,
+            sharing the per-user preference so it persists everywhere. */}
+        <ViewModeToggle value={folderView} onChange={setFolderView} />
         {/* 2.5.0+: New Folder is an in-grid tile now; Project Settings
             moved into the ProjectActions kebab on the project root.
             We keep Upload + Download All here because they're the

@@ -75,78 +75,125 @@ export async function POST(request: NextRequest) {
       select: {
         id: true,
         projectId: true,
+        folderId: true,
         name: true,
         originalFileName: true,
       },
     })
 
-    // Track each `(projectId, originalGroupName)` so we can renumber
-    // the leftovers once we're done. Keys carry the projectId first
-    // so we never collide across projects.
-    const donorGroups = new Set<string>()
-    for (const v of videos) {
-      donorGroups.add(`${v.projectId}::${v.name}`)
-    }
+    const selectedIds = new Set(videos.map((v) => v.id))
 
-    for (const v of videos) {
-      const base =
-        stripExtension(v.originalFileName) || `Video ${v.id.slice(0, 6)}`
-      // Unique suffix loop. We exclude the row we're about to rename
-      // so a single split that happens to match its own filename
-      // doesn't loop forever.
-      let candidate = base
+    // Per-folder filter helper — stacks live inside ONE folder, so all
+    // lookups must be scoped to the same (projectId, folderId).
+    const folderWhere = (folderId: string | null) =>
+      folderId === null ? { folderId: null } : { folderId }
+
+    // Find a name that's free within (projectId, folderId), ignoring
+    // the rows in `excludeIds` (the ones we're about to rename anyway).
+    const uniqueName = async (
+      base: string,
+      projectId: string,
+      folderId: string | null,
+      excludeIds: Set<string>,
+    ): Promise<string> => {
+      const b = base || 'Video'
+      let candidate = b
       let suffix = 2
-      // Don't bother probing if the candidate matches the row's
-      // CURRENT group name — that means the original filename and
-      // the group name already agree, and renaming to itself is a
-      // no-op (we still want a unique name, so we'd hit the loop and
-      // bump to "(2)").
-      // Probe up to 200 attempts so we don't spin endlessly on bad
-      // data.
       for (let i = 0; i < 200; i++) {
         const clash = await prisma.video.findFirst({
           where: {
-            projectId: v.projectId,
+            projectId,
+            ...folderWhere(folderId),
             name: candidate,
-            id: { not: v.id },
+            id: { notIn: Array.from(excludeIds) },
           },
           select: { id: true },
         })
         if (!clash) break
-        candidate = `${base} (${suffix})`
+        candidate = `${b} (${suffix})`
         suffix += 1
       }
-
-      await prisma.video.update({
-        where: { id: v.id },
-        data: {
-          name: candidate,
-          version: 1,
-          versionLabel: 'v1',
-        },
-      })
+      return candidate
     }
 
-    // Renumber the donor groups so their remaining rows go v1..vN.
-    for (const key of donorGroups) {
-      const sep = key.indexOf('::')
-      if (sep < 0) continue
-      const projectId = key.slice(0, sep)
-      const originalName = key.slice(sep + 2)
-      const remaining = await prisma.video.findMany({
-        where: { projectId, name: originalName },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true },
+    // Unique donor groups (project + folder + current stack name).
+    const groupMap = new Map<
+      string,
+      { projectId: string; folderId: string | null; name: string }
+    >()
+    for (const v of videos) {
+      const k = `${v.projectId}::${v.folderId ?? ''}::${v.name}`
+      if (!groupMap.has(k)) {
+        groupMap.set(k, {
+          projectId: v.projectId,
+          folderId: v.folderId ?? null,
+          name: v.name,
+        })
+      }
+    }
+
+    // STEP 1 — rename the REMAINING rows of each donor group FIRST.
+    //
+    // When videos are stacked, EVERY row (including the base) is renamed
+    // to the stack's name (the top version drives it). So after lifting
+    // some versions out, the leftover base would otherwise keep that
+    // stack name (e.g. "…_V4") instead of reverting to its own. We give
+    // the remaining stack the LATEST remaining version's original
+    // filename — and doing this first frees the old stack name so the
+    // extracted rows below can reclaim their own (…_V4 etc.) cleanly.
+    for (const grp of groupMap.values()) {
+      const rows = await prisma.video.findMany({
+        where: {
+          projectId: grp.projectId,
+          ...folderWhere(grp.folderId),
+          name: grp.name,
+        },
+        orderBy: { version: 'asc' },
+        select: { id: true, originalFileName: true },
       })
+      const remaining = rows.filter((r) => !selectedIds.has(r.id))
+      if (remaining.length === 0) continue
+      const latest = remaining[remaining.length - 1] // highest version
+      const remainingIds = new Set(remaining.map((r) => r.id))
+      // Exclude both the remaining rows and the about-to-be-extracted
+      // ones (which still bear the old stack name) from the clash probe.
+      const exclude = new Set<string>([...remainingIds, ...selectedIds])
+      const newName = await uniqueName(
+        stripExtension(latest.originalFileName),
+        grp.projectId,
+        grp.folderId,
+        exclude,
+      )
       for (let i = 0; i < remaining.length; i++) {
         await prisma.video.update({
           where: { id: remaining[i].id },
-          data: {
-            version: i + 1,
-            versionLabel: `v${i + 1}`,
-          },
+          data: { name: newName, version: i + 1, versionLabel: `v${i + 1}` },
         })
       }
+    }
+
+    // STEP 2 — extract each selected row into its own standalone video,
+    // named after ITS original filename, reset to v1. `pending` holds
+    // the rows not yet renamed (still carrying the old stack name); we
+    // exclude them from the clash probe so a row can reclaim its own
+    // name (…_V4) without colliding with siblings that haven't been
+    // processed yet. Already-renamed rows stay in the probe so two
+    // uploads sharing a filename still get distinct " (2)" names.
+    const pending = new Set(selectedIds)
+    for (const v of videos) {
+      const base =
+        stripExtension(v.originalFileName) || `Video ${v.id.slice(0, 6)}`
+      const newName = await uniqueName(
+        base,
+        v.projectId,
+        v.folderId ?? null,
+        pending,
+      )
+      await prisma.video.update({
+        where: { id: v.id },
+        data: { name: newName, version: 1, versionLabel: 'v1' },
+      })
+      pending.delete(v.id)
     }
 
     return NextResponse.json({ success: true, split: videos.length })

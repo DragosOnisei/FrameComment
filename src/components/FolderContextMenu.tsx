@@ -9,6 +9,7 @@ import {
   FolderUp,
   FolderPlus,
   FolderLock,
+  Layers,
   Pencil,
   Share2,
   Trash2,
@@ -64,6 +65,11 @@ export interface FolderContextMenuProps {
   /** 1.1.0+: real-file Duplicate. Creates a copy of every selected
    *  item in the current folder with a `(1)`, `(2)`… suffix. */
   onBulkDuplicate?: () => void
+  /** 3.5.x: Split versions on a single selected video that has >1
+   *  version. Shown only when `canSplitVersions` is true (single
+   *  multi-version video selected). */
+  canSplitVersions?: boolean
+  onSplitVersions?: () => void
 }
 
 export default function FolderContextMenu({
@@ -84,6 +90,8 @@ export default function FolderContextMenu({
   onBulkShare,
   onBulkRename,
   onBulkDuplicate,
+  canSplitVersions = false,
+  onSplitVersions,
 }: FolderContextMenuProps) {
   const hasSelection = bulkSelectionCount > 0
   // 1.1.0+: Share + Rename are single-target only — they don't make
@@ -231,6 +239,13 @@ export default function FolderContextMenu({
               icon={<Pencil className="w-4 h-4" />}
               label="Rename"
               onClick={onBulkRename}
+            />
+          )}
+          {singleTarget && canSplitVersions && (
+            <Row
+              icon={<Layers className="w-4 h-4" />}
+              label="Split versions"
+              onClick={onSplitVersions}
             />
           )}
           <div className="my-1 h-px bg-white/10" role="separator" />

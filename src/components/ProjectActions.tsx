@@ -384,115 +384,13 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
                 {linkCopied ? tc('copied') : t('shareLink')}
               </button>
             )}
+            {/* 3.5.x: trimmed per request — Open, Send Notification,
+                View Admin Share Page, Project Settings, View Analytics
+                and Approve Project were removed from this menu. Only
+                Share Link, Archive and Delete remain. */}
             {shareUrl && (
-              <button
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false)
-                  window.open(shareUrl, '_blank', 'noopener,noreferrer')
-                }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
-              >
-                <ExternalLink className="w-4 h-4 shrink-0" />
-                {tc('open')}
-              </button>
-            )}
-            {(shareUrl) && (
               <div className="my-1 h-px bg-white/10" role="separator" />
             )}
-            {readyVideos.length > 0 && (
-              <button
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false)
-                  setShowNotificationModal(true)
-                }}
-                disabled={smtpConfigured === false || !hasRecipientWithEmail}
-                title={
-                  smtpConfigured === false
-                    ? t('smtpNotConfigured')
-                    : !hasRecipientWithEmail
-                    ? t('noRecipientsEmail')
-                    : ''
-                }
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Send className="w-4 h-4 shrink-0" />
-                {t('sendNotification')}
-              </button>
-            )}
-            <button
-              role="menuitem"
-              type="button"
-              onClick={() => {
-                setMenuOpen(false)
-                handleViewSharePage()
-              }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
-            >
-              <ExternalLink className="w-4 h-4 shrink-0" />
-              {t('viewSharePage')}
-            </button>
-                    {/* 2.5.0+: Project Settings entry, moved here from
-                        the inline topbar action. */}
-                    <button
-                      role="menuitem"
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false)
-                        router.push(`/admin/projects/${project.id}/settings`)
-                      }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
-                    >
-                      <SettingsIcon className="w-4 h-4 shrink-0" />
-                      {t('projectSettings')}
-                    </button>
-                    <button
-                      role="menuitem"
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false)
-                        router.push(`/admin/projects/${project.id}/analytics`)
-                      }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left"
-                    >
-                      <BarChart3 className="w-4 h-4 shrink-0" />
-                      {t('viewAnalytics')}
-                    </button>
-                    {project.status !== 'ARCHIVED' && (
-                      <button
-                        role="menuitem"
-                        type="button"
-                        onClick={() => {
-                          setMenuOpen(false)
-                          handleToggleApproval()
-                        }}
-                        disabled={
-                          isTogglingApproval ||
-                          (project.status !== 'APPROVED' && !canApproveProject)
-                        }
-                        title={
-                          project.status !== 'APPROVED' && !canApproveProject
-                            ? t('approveFirst')
-                            : ''
-                        }
-                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {project.status === 'APPROVED' ? (
-                          <>
-                            <RotateCcw className="w-4 h-4 shrink-0" />
-                            {isTogglingApproval ? tc('changing') : t('unapproveProject')}
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle className="w-4 h-4 shrink-0" />
-                            {isTogglingApproval ? tc('changing') : t('approveProject')}
-                          </>
-                        )}
-                      </button>
-                    )}
                     <button
                       role="menuitem"
                       type="button"

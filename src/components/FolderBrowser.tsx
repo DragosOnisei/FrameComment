@@ -29,6 +29,7 @@ import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
+import { formatBytes } from '@/lib/project-gradient'
 import FolderCard from './FolderCard'
 import VideoCard from './VideoCard'
 import NewFolderDialog from './NewFolderDialog'
@@ -135,6 +136,26 @@ export interface FolderBrowserProps {
  * FolderBrowser (e.g. a unified top action bar). Pair with
  * `hideHeaderActions` to avoid duplicate UI.
  */
+// 3.5.x: guard against accidental gigantic downloads. Clicking
+// "Download All" at a project root (e.g. VDA holds ~2 TB) would
+// otherwise kick off a massive transfer with no warning. When the
+// total of what's about to be downloaded exceeds this threshold we
+// pop a confirmation first. 10 GiB.
+const LARGE_DOWNLOAD_THRESHOLD = 10 * 1024 * 1024 * 1024
+
+// Sizes arrive as string | number | bigint | null from the API
+// (Prisma BigInt → string). Coerce to a plain number of bytes for
+// summing; anything unparseable counts as 0 so it never blocks.
+function coerceBytes(
+  v: string | number | bigint | null | undefined,
+): number {
+  if (v == null) return 0
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'bigint') return Number(v)
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
 export interface FolderBrowserHandle {
   openNewFolderDialog: (restricted?: boolean) => void
   downloadAll: () => void
@@ -170,6 +191,10 @@ interface VideoRow {
    *  Used as the new card name when the Split-versions modal pulls
    *  this row out of its group (1.0.8+). */
   originalFileName?: string | null
+  /** Stringified byte size of this version's source file (the folder
+   *  API serialises the BigInt to a string). Drives the List view's
+   *  Size column. */
+  originalFileSize?: string | number | null
   duration?: number | null
   approved?: boolean
   thumbnailPath?: string | null
@@ -232,6 +257,8 @@ interface VideoGroup {
   createdAt?: string | Date
   /** 1.0.9+: media type of the latest version. */
   mediaType?: 'VIDEO' | 'IMAGE'
+  /** Byte size of the latest version's source file — List view Size. */
+  originalFileSize?: string | number | null
 }
 
 function FolderBrowserInner(
@@ -982,6 +1009,7 @@ function FolderBrowserInner(
         uploaderName,
         createdAt: latest.createdAt,
         mediaType: latest.mediaType,
+        originalFileSize: latest.originalFileSize ?? null,
       })
     }
     // Folders are ordered by name asc on the server; mirror that for
@@ -1404,15 +1432,55 @@ function FolderBrowserInner(
   // banner state. Same Bearer auth via apiFetch — passed as the
   // custom fetcher so /stat is also authed.
   const { startStreamDownload } = useDownloadManager()
+
+  // 3.5.x: anything over LARGE_DOWNLOAD_THRESHOLD gets a confirmation
+  // first so nobody accidentally kicks off a multi-terabyte transfer
+  // (the VDA project root is the worst case). Under the threshold the
+  // download just runs. We reuse the shared ConfirmModal via
+  // confirmState — same glass treatment as every other confirm.
+  const guardLargeDownload = useCallback(
+    (bytes: number, run: () => void) => {
+      if (bytes <= LARGE_DOWNLOAD_THRESHOLD) {
+        run()
+        return
+      }
+      setConfirmState({
+        open: true,
+        title: 'Download this much?',
+        description: (
+          <>
+            You&apos;re about to download{' '}
+            <span className="font-semibold text-white">
+              {formatBytes(bytes)}
+            </span>
+            . That can take a long time and a lot of disk space. Continue?
+          </>
+        ),
+        confirmLabel: 'Download anyway',
+        variant: 'destructive',
+        onConfirm: () => {
+          setConfirmState({ open: false, title: '' })
+          run()
+        },
+      })
+    },
+    [],
+  )
+
   const handleDownloadFolder = useCallback((folderId: string) => {
-    startStreamDownload({
-      label: 'Folder.zip',
-      url: `/api/folders/${folderId}/download`,
-      statUrl: `/api/folders/${folderId}/download/stat`,
-      fetcher: apiFetch as any,
-      fallbackFilename: 'folder.zip',
+    const bytes = coerceBytes(
+      folders.find((f) => f.id === folderId)?.totalSize,
+    )
+    guardLargeDownload(bytes, () => {
+      startStreamDownload({
+        label: 'Folder.zip',
+        url: `/api/folders/${folderId}/download`,
+        statUrl: `/api/folders/${folderId}/download/stat`,
+        fetcher: apiFetch as any,
+        fallbackFilename: 'folder.zip',
+      })
     })
-  }, [startStreamDownload])
+  }, [startStreamDownload, folders, guardLargeDownload])
 
   const handleBulkDownload = useCallback(() => {
     // 2.0.x+: each selected folder gets its OWN ZIP — exactly as if
@@ -1426,25 +1494,78 @@ function FolderBrowserInner(
     // Selected LOOSE videos (i.e. selectedVideoIds outside any
     // selected folder) still go through the original
     // single-file-per-click pipeline — they have no folder to ZIP.
-    for (const folderId of selectedFolderIds) {
-      startStreamDownload({
-        label: 'Folder.zip', // overwritten by stat with the real name
-        url: `/api/folders/${folderId}/download`,
-        statUrl: `/api/folders/${folderId}/download/stat`,
-        fetcher: apiFetch as any,
-        fallbackFilename: 'folder.zip',
-      })
-    }
     const looseVideoIds = Array.from(selectedVideoIds)
-    if (looseVideoIds.length > 0) {
-      downloadVideos(looseVideoIds)
-    }
-  }, [selectedVideoIds, selectedFolderIds, downloadVideos, startStreamDownload])
+    const folderBytes = Array.from(selectedFolderIds).reduce(
+      (sum, fid) => sum + coerceBytes(folders.find((f) => f.id === fid)?.totalSize),
+      0,
+    )
+    const videoBytes = looseVideoIds.reduce(
+      (sum, vid) =>
+        sum + coerceBytes(videoGroups.find((g) => g.id === vid)?.originalFileSize),
+      0,
+    )
+    guardLargeDownload(folderBytes + videoBytes, () => {
+      for (const folderId of selectedFolderIds) {
+        startStreamDownload({
+          label: 'Folder.zip', // overwritten by stat with the real name
+          url: `/api/folders/${folderId}/download`,
+          statUrl: `/api/folders/${folderId}/download/stat`,
+          fetcher: apiFetch as any,
+          fallbackFilename: 'folder.zip',
+        })
+      }
+      if (looseVideoIds.length > 0) {
+        downloadVideos(looseVideoIds)
+      }
+    })
+  }, [
+    selectedVideoIds,
+    selectedFolderIds,
+    downloadVideos,
+    startStreamDownload,
+    folders,
+    videoGroups,
+    guardLargeDownload,
+  ])
 
   const handleDownloadAll = useCallback(() => {
-    const ids = videoGroups.map((g) => g.id)
-    downloadVideos(ids)
-  }, [videoGroups, downloadVideos])
+    // 3.5.x: "Download All" now grabs EVERYTHING at this level — each
+    // folder as its own ZIP (recursive, via the stream endpoint) plus
+    // any loose videos. Previously it only pulled loose videos, so at
+    // a folders-only level (e.g. the 01_VDA root) clicking it did
+    // nothing at all. Same per-folder-ZIP + per-video pipeline as the
+    // bulk-selection download.
+    const looseVideoIds = videoGroups.map((g) => g.id)
+    if (folders.length === 0 && looseVideoIds.length === 0) return
+    const folderBytes = folders.reduce(
+      (sum, f) => sum + coerceBytes(f.totalSize),
+      0,
+    )
+    const videoBytes = videoGroups.reduce(
+      (sum, g) => sum + coerceBytes(g.originalFileSize),
+      0,
+    )
+    guardLargeDownload(folderBytes + videoBytes, () => {
+      for (const f of folders) {
+        startStreamDownload({
+          label: 'Folder.zip', // overwritten by stat with the real name
+          url: `/api/folders/${f.id}/download`,
+          statUrl: `/api/folders/${f.id}/download/stat`,
+          fetcher: apiFetch as any,
+          fallbackFilename: 'folder.zip',
+        })
+      }
+      if (looseVideoIds.length > 0) {
+        downloadVideos(looseVideoIds)
+      }
+    })
+  }, [
+    videoGroups,
+    folders,
+    downloadVideos,
+    startStreamDownload,
+    guardLargeDownload,
+  ])
 
   // Expose New Folder + Download All triggers to a parent page that
   // wants to render those actions in its own top toolbar (1.0.9+).
@@ -2853,6 +2974,12 @@ function FolderBrowserInner(
           onToggleVideo={handleToggleVideoSelect}
           onOpenFolder={handleOpenFolder}
           onOpenVideo={handleOpenVideo}
+          // 3.5.x: drag-and-drop parity with the grid. Same bulk-aware
+          // handlers — dragging a selected row carries the whole
+          // selection (stack onto a video, move into a folder).
+          onStackVideo={handleStackVideos}
+          onMoveVideoToFolder={handleMoveVideoToFolder}
+          onDropFolderOnFolder={handleDropOnFolder}
         />
       )}
       {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode !== 'table' && (
@@ -3176,6 +3303,27 @@ function FolderBrowserInner(
           // size >= 1, so the kind/id hints are only used at exactly
           // 0 selected (which shouldn't reach here anyway).
           void handleDuplicate()
+        }}
+        // 3.5.x: "Split versions" — only for a single selected video
+        // that actually has more than one version. Integrated into the
+        // existing right-click menu (no separate popup).
+        canSplitVersions={(() => {
+          if (selectedVideoIds.size !== 1 || selectedFolderIds.size !== 0)
+            return false
+          const firstVideo = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          if (!firstVideo) return false
+          const grp = videoGroups.find((g) => g.allIds.includes(firstVideo))
+          return !!grp && grp.versionCount > 1
+        })()}
+        onSplitVersions={() => {
+          const firstVideo = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          if (!firstVideo) return
+          const grp = videoGroups.find((g) => g.allIds.includes(firstVideo))
+          handleSplitVersions(firstVideo, grp?.name ?? '')
         }}
       />
 

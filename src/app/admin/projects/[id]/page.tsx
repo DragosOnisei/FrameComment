@@ -9,14 +9,14 @@ import FolderBrowser, {
   type FolderBrowserHandle,
 } from '@/components/FolderBrowser'
 import AdminVideoManager, { type AdminVideoManagerHandle } from '@/components/AdminVideoManager'
-import ProjectActions from '@/components/ProjectActions'
 import ProjectUploadsBlock from '@/components/ProjectUploadsBlock'
 import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
-import { ArrowLeft, FolderUp } from 'lucide-react'
+import { ArrowLeft, FolderUp, Upload, Download } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
+import ViewModeToggle from '@/components/ViewModeToggle'
 import {
   createFolderHierarchy,
   uniqueDirectoryPaths,
@@ -41,7 +41,7 @@ export default function ProjectPage() {
   // view-mode store; the actual toggle UI lives in AdminHeader.
   // The hook keeps every consumer (dashboard, project page, folder
   // page) in lockstep via a window custom event.
-  const [folderView] = useAdminViewMode()
+  const [folderView, setFolderView] = useAdminViewMode()
   // FolderBrowser imperative handle (1.0.9+) — lets the top action
   // bar drive the New-Folder dialog so the button can sit alongside
   // Project settings instead of inline next to the breadcrumb.
@@ -327,17 +327,39 @@ export default function ProjectPage() {
         </Link>
       </TopbarLeftSlot>
       <TopbarRightSlot>
-        {/* 2.5.0+: New Folder lives as an in-grid tile next to the
-            folder cards (Frame.io / Projects-dashboard style). Project
-            Settings moved into the ProjectActions kebab. Topbar right
-            slot keeps only the kebab now. */}
-        <ProjectActions
-          project={project}
-          videos={project.videos}
-          onRefresh={fetchProject}
-          shareUrl={shareUrl}
-          recipients={project.recipients || []}
-        />
+        {/* 3.5.x: Grid / List view toggle now lives inside the project
+            too, not just on the dashboard. It writes the shared
+            per-user preference (useAdminViewMode) so the choice carries
+            into folders and back. */}
+        <ViewModeToggle value={folderView} onChange={setFolderView} />
+        {/* 3.5.x: the ⋮ ProjectActions kebab is gone from the project
+            root — we now mirror the folder view's toolbar (Upload +
+            Download All) for consistency, since the same actions are
+            what users reach for at the root and inside a folder. The
+            project-level Share / Archive / Delete actions still live on
+            the projects dashboard kebab (ProjectCardKebab). */}
+        {project.status !== 'APPROVED' && (
+          <Button
+            variant="default"
+            size="sm"
+            className="w-9 px-0 shrink-0"
+            onClick={() => videoManagerRef.current?.triggerUpload()}
+            aria-label={t('uploadVideos')}
+            title={t('uploadVideos')}
+          >
+            <Upload className="w-4 h-4" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-9 px-0 shrink-0 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
+          onClick={() => folderBrowserRef.current?.downloadAll()}
+          aria-label="Download All"
+          title="Download All"
+        >
+          <Download className="w-4 h-4" />
+        </Button>
       </TopbarRightSlot>
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
 
