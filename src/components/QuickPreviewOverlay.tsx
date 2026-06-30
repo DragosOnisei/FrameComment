@@ -631,7 +631,7 @@ function FolderPreviewBody({
         </div>
       </div>
       <div
-        className="p-4 overflow-y-auto"
+        className="p-4 overflow-y-auto custom-scrollbar"
         // Width is FIXED (not min/max) so any layout change inside
         // (e.g. a video tile's intrinsic dims showing through during
         // hover-scrub) can't jostle the panel. The 1/2/3-tile
