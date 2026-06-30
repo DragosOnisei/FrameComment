@@ -794,14 +794,29 @@ function FolderCover({
 
 // 3.5.x: per-tile hover-scrub for the folder mosaic. Mirrors the
 // VideoCard storyboard scrub — one tiny JPEG packs a 10×10 grid of
-// frames; we shift `background-position` to swap cells based on the
-// horizontal cursor position within THIS tile. Each tile owns its own
-// scrub state so hovering the top-left clip scrubs that clip, the
-// bottom-right clip scrubs its own, and so on. Tiles without a
-// storyboard URL fall back to a static thumbnail.
+// frames; we move through them based on the horizontal cursor position
+// within THIS tile. Each tile owns its own scrub state.
+//
+// The worker bakes every storyboard cell into a FIXED 192×108 (16:9)
+// box, letter-boxing vertical / non-16:9 clips with black bars (see
+// generateStoryboard's scale+pad). So a raw 9:16 cell is a tiny frame
+// with big black side bars — which is why a vertical clip's scrub used
+// to suddenly read as 16:9 even though its static thumbnail is full
+// 9:16. We CROP the letter-box back out: using the clip's native aspect
+// (read from the thumbnail image), we find the real content region
+// inside the cell and scale + offset the sprite so ONLY that region
+// fills an aspect-correct box, which is then contained + centred in the
+// tile exactly like the static thumbnail. Result: the scrub frame is
+// framed identically to the thumbnail and never flips aspect ratio —
+// and it works on existing videos too (no re-processing needed).
 const STORY_COLS = 10
 const STORY_ROWS = 10
 const STORY_CELLS = STORY_COLS * STORY_ROWS
+// Worker cell geometry — keep in sync with generateStoryboard().
+const CELL_W = 192
+const CELL_H = 108
+const SHEET_W = CELL_W * STORY_COLS
+const SHEET_H = CELL_H * STORY_ROWS
 
 function ScrubTile({
   thumbnailUrl,
@@ -813,30 +828,96 @@ function ScrubTile({
   const ref = useRef<HTMLDivElement>(null)
   // 0…1 while hovering, null otherwise (overlay hidden → static thumb).
   const [scrubFraction, setScrubFraction] = useState<number | null>(null)
+  // Tile pixel size, sampled on hover so we can size the crop box.
+  const [tileSize, setTileSize] = useState<{ w: number; h: number } | null>(
+    null,
+  )
+  // Native aspect (w/h) of the clip, read from the thumbnail image, used
+  // to undo the cell's letter-box. Falls back to 16:9 until it loads.
+  const [nativeAspect, setNativeAspect] = useState<number | null>(null)
   const canScrub = !!storyboardUrl
 
   const handleScrub = (e: React.MouseEvent) => {
     if (!canScrub || !ref.current) return
     const rect = ref.current.getBoundingClientRect()
+    setTileSize({ w: rect.width, h: rect.height })
     const fraction = (e.clientX - rect.left) / Math.max(1, rect.width)
     setScrubFraction(Math.max(0, Math.min(1, fraction)))
   }
 
-  const spriteStyle = (() => {
-    if (!canScrub || scrubFraction === null) return undefined
+  // Crop box (size) + sprite background (scaled/offset to show only the
+  // letter-box-free content region of the current cell).
+  const crop = (() => {
+    if (!canScrub || scrubFraction === null || !tileSize) return null
     const idx = Math.max(
       0,
       Math.min(STORY_CELLS - 1, Math.floor(scrubFraction * STORY_CELLS)),
     )
     const col = idx % STORY_COLS
     const row = Math.floor(idx / STORY_COLS)
-    const xPct = (col / (STORY_COLS - 1)) * 100
-    const yPct = (row / (STORY_ROWS - 1)) * 100
+
+    const cellAspect = CELL_W / CELL_H // 16:9
+    const av = nativeAspect ?? cellAspect // clip's true aspect (w/h)
+
+    // Real content region inside the 192×108 cell (contain-fit of `av`,
+    // centred — exactly what the worker's scale + pad produces).
+    let contentW: number
+    let contentH: number
+    let offX: number
+    let offY: number
+    if (av >= cellAspect) {
+      contentW = CELL_W
+      contentH = CELL_W / av
+      offX = 0
+      offY = (CELL_H - contentH) / 2
+    } else {
+      contentH = CELL_H
+      contentW = CELL_H * av
+      offX = (CELL_W - contentW) / 2
+      offY = 0
+    }
+
+    // The box MUST stay exactly the thumbnail's contained size (aspect
+    // `av`) so the scrub frame and the static thumbnail are pixel-for-
+    // pixel the same — no size/aspect jump on hover.
+    const tileAspect = tileSize.w / tileSize.h
+    let boxW: number
+    let boxH: number
+    if (tileAspect > av) {
+      boxH = tileSize.h
+      boxW = boxH * av
+    } else {
+      boxW = tileSize.w
+      boxH = boxW / av
+    }
+
+    // Letter-box trim. A 16:9 clip fills the cell exactly (no black), so
+    // it's left pixel-perfect — `f = 0`, nothing changes. A letter-boxed
+    // clip (9:16 etc.) has black bars baked into the cell whose exact
+    // edge FFmpeg rounds to even pixels; we can't predict it to the
+    // pixel, so we zoom the content ~4% PROPORTIONALLY inside the same
+    // box (keeps aspect `av`, so the box size is unchanged) to push the
+    // residue out of view. Integer-rounded offsets stop the browser
+    // sampling a sub-pixel into the bar.
+    const hasLetterbox = contentW < CELL_W - 0.5 || contentH < CELL_H - 0.5
+    const f = hasLetterbox ? 0.04 : 0
+    const cx = offX + contentW * f
+    const cy = offY + contentH * f
+    const ch = contentH * (1 - 2 * f)
+
+    // Scale mapping the (zoomed) content region onto the box; the sprite
+    // is sized + offset so only that region lands in the box (the box
+    // clips its own background — no overflow wrapper needed). Because the
+    // inset is proportional, `cw/ch == av == boxW/boxH`, so this single
+    // scale fills the box on both axes.
+    const s = boxH / ch
     return {
+      width: `${boxW}px`,
+      height: `${boxH}px`,
       backgroundImage: `url(${storyboardUrl})`,
       backgroundRepeat: 'no-repeat' as const,
-      backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
-      backgroundPosition: `${xPct}% ${yPct}%`,
+      backgroundSize: `${Math.ceil(SHEET_W * s)}px ${Math.ceil(SHEET_H * s)}px`,
+      backgroundPosition: `${Math.round(-(s * (col * CELL_W + cx)))}px ${Math.round(-(s * (row * CELL_H + cy)))}px`,
     }
   })()
 
@@ -855,26 +936,23 @@ function ScrubTile({
         // the tile rather than cropping them to a strip.
         className="w-full h-full object-contain"
         loading="lazy"
+        onLoad={(e) => {
+          const img = e.currentTarget
+          if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+            setNativeAspect(img.naturalWidth / img.naturalHeight)
+          }
+        }}
       />
-      {/* Storyboard sprite overlay — sits on top of the thumbnail and
-          only becomes visible while the cursor is over this tile.
-          3.5.x bugfix: the sprite must NEVER change the frame's aspect
-          ratio while scrubbing. The mosaic tiles aren't all 16:9 (a
-          2-up split makes each tile ~8:9 portrait), and filling them
-          with `background-size: 1000%` stretched the 16:9 cell to the
-          tile's shape. We fix it by constraining the sprite to a fixed
-          16:9 box that's centred + letter-boxed inside the tile — the
-          same framing `object-contain` gives the static thumbnail.
-          (Safe because no mosaic tile is ever wider than 16:9, so a
-          `width:100%` 16:9 box always fits within the tile height.) */}
+      {/* Storyboard scrub overlay — only visible while hovering. The crop
+          box matches the clip's native aspect (letter-box removed) and
+          is contained in the tile, so the scrub frame is framed exactly
+          like the static thumbnail above and never flips aspect ratio. */}
       {canScrub && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div
             aria-hidden
-            className={`w-full transition-opacity duration-75 ${
-              scrubFraction !== null ? 'opacity-100' : 'opacity-0'
-            }`}
-            style={{ aspectRatio: '16 / 9', maxHeight: '100%', ...spriteStyle }}
+            className="transition-opacity duration-75"
+            style={crop ? { ...crop, opacity: 1 } : { opacity: 0 }}
           />
         </div>
       )}
