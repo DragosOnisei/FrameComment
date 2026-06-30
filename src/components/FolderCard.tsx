@@ -857,15 +857,26 @@ function ScrubTile({
         loading="lazy"
       />
       {/* Storyboard sprite overlay — sits on top of the thumbnail and
-          only becomes visible while the cursor is over this tile. */}
+          only becomes visible while the cursor is over this tile.
+          3.5.x bugfix: the sprite must NEVER change the frame's aspect
+          ratio while scrubbing. The mosaic tiles aren't all 16:9 (a
+          2-up split makes each tile ~8:9 portrait), and filling them
+          with `background-size: 1000%` stretched the 16:9 cell to the
+          tile's shape. We fix it by constraining the sprite to a fixed
+          16:9 box that's centred + letter-boxed inside the tile — the
+          same framing `object-contain` gives the static thumbnail.
+          (Safe because no mosaic tile is ever wider than 16:9, so a
+          `width:100%` 16:9 box always fits within the tile height.) */}
       {canScrub && (
-        <div
-          aria-hidden
-          className={`absolute inset-0 pointer-events-none transition-opacity duration-75 ${
-            scrubFraction !== null ? 'opacity-100' : 'opacity-0'
-          }`}
-          style={spriteStyle}
-        />
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div
+            aria-hidden
+            className={`w-full transition-opacity duration-75 ${
+              scrubFraction !== null ? 'opacity-100' : 'opacity-0'
+            }`}
+            style={{ aspectRatio: '16 / 9', maxHeight: '100%', ...spriteStyle }}
+          />
+        </div>
       )}
     </div>
   )

@@ -282,37 +282,15 @@ export default function ProjectPage() {
   // topbar stay mounted from the layout, so users perceive an
   // instant navigation. The fetch resolves quickly enough that an
   // empty pane reads as "page rendering", not "page broken".
-  if (loading) return null
-
-  if (!project) {
-    return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">{t('projectNotFound')}</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  // Filter comments to only show comments for active videos
-  const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
-  const iconBadgeIconClassName = 'w-4 h-4 text-primary'
-
-  return (
-    // 2.5.0+: drop the `bg-background` solid — it was covering the
-    // layout's spotlight gradient, which is what gives the frosted
-    // glass cards (FolderCard, VideoCard) their depth + light source.
-    // The page is now transparent and just floats on top of the global
-    // light spot. Also dropped `max-w-screen-2xl mx-auto` so the grid
-    // flows flush-left next to the sidebar (Frame.io-style) instead
-    // of being centred with empty margins on wide screens.
-    <div className="flex-1 min-h-0">
-      {/* 2.5.0+: action bar lives in the global topbar via portal
-          slots so each page header reuses the same row. Back goes
-          left (next to where Projects title sat); New Folder +
-          Project Settings + the ProjectActions kebab go right. */}
+  // 3.5.x: the topbar action slots (Back, view toggle, Upload, Download
+  // All) are rendered in EVERY state — loading, not-found and the normal
+  // view — so they stay put when navigating into/out of a folder instead
+  // of blinking out while the page refetches. The search pill + bell
+  // already behave this way (they live in the persistent layout); this
+  // matches them. Buttons whose handlers need the page body (Upload /
+  // Download via refs) simply no-op for the brief loading moment.
+  const topbarSlots = (
+    <>
       <TopbarLeftSlot>
         <Link href="/admin/projects">
           <Button
@@ -327,18 +305,10 @@ export default function ProjectPage() {
         </Link>
       </TopbarLeftSlot>
       <TopbarRightSlot>
-        {/* 3.5.x: Grid / List view toggle now lives inside the project
-            too, not just on the dashboard. It writes the shared
-            per-user preference (useAdminViewMode) so the choice carries
-            into folders and back. */}
+        {/* Grid / List view toggle — shares the per-user preference so
+            the choice carries into folders and back. */}
         <ViewModeToggle value={folderView} onChange={setFolderView} />
-        {/* 3.5.x: the ⋮ ProjectActions kebab is gone from the project
-            root — we now mirror the folder view's toolbar (Upload +
-            Download All) for consistency, since the same actions are
-            what users reach for at the root and inside a folder. The
-            project-level Share / Archive / Delete actions still live on
-            the projects dashboard kebab (ProjectCardKebab). */}
-        {project.status !== 'APPROVED' && (
+        {(!project || project.status !== 'APPROVED') && (
           <Button
             variant="default"
             size="sm"
@@ -361,6 +331,46 @@ export default function ProjectPage() {
           <Download className="w-4 h-4" />
         </Button>
       </TopbarRightSlot>
+    </>
+  )
+
+  if (loading) return topbarSlots
+
+  if (!project) {
+    return (
+      <>
+        {topbarSlots}
+        <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+          <Card>
+            <CardContent className="py-12 text-center">
+              <p className="text-muted-foreground">{t('projectNotFound')}</p>
+            </CardContent>
+          </Card>
+        </div>
+      </>
+    )
+  }
+
+  // Filter comments to only show comments for active videos
+  const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
+  const iconBadgeIconClassName = 'w-4 h-4 text-primary'
+
+  return (
+    // 2.5.0+: drop the `bg-background` solid — it was covering the
+    // layout's spotlight gradient, which is what gives the frosted
+    // glass cards (FolderCard, VideoCard) their depth + light source.
+    // The page is now transparent and just floats on top of the global
+    // light spot. Also dropped `max-w-screen-2xl mx-auto` so the grid
+    // flows flush-left next to the sidebar (Frame.io-style) instead
+    // of being centred with empty margins on wide screens.
+    <div className="flex-1 min-h-0">
+      {/* 2.5.0+: action bar lives in the global topbar via portal
+          slots so each page header reuses the same row. Back goes
+          left (next to where Projects title sat); New Folder +
+          Project Settings + the ProjectActions kebab go right. */}
+      {/* 3.5.x: topbar slots defined above so they persist across the
+          loading state (no flicker on folder navigation). */}
+      {topbarSlots}
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
 
         {/* Frame.io-clean project view (1.0.6+): the page is just the

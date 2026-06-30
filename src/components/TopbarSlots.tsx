@@ -31,15 +31,25 @@ import { createPortal } from 'react-dom'
  */
 
 function useSlotTarget(slotId: string) {
-  const [target, setTarget] = useState<HTMLElement | null>(null)
+  // 3.5.x: resolve the slot node SYNCHRONOUSLY on the first render via a
+  // lazy initializer instead of waiting for a post-mount useEffect. The
+  // layout's <AdminTopBar> is persistent and sits above every page, so
+  // the slot div already exists in the DOM whenever a page (re)mounts —
+  // including on client navigation into/out of a folder. The old
+  // useEffect-only lookup left the portal target null for one render, so
+  // the page's Back / view-toggle / upload / download buttons blinked
+  // out and back in on every navigation (the search pill + bell didn't,
+  // because they live in the persistent topbar, not these portals).
+  // Resolving up-front means the portal content is present on the very
+  // first paint of the new page — no empty frame, no flicker.
+  const [target, setTarget] = useState<HTMLElement | null>(() =>
+    typeof document !== 'undefined' ? document.getElementById(slotId) : null,
+  )
   useEffect(() => {
-    // Look up the DOM node on mount. Because the layout's
-    // <AdminTopBar> sits above this page in the React tree, the
-    // div with the slot id is guaranteed to be present in the DOM
-    // by the time this effect runs. If a future layout decides to
-    // hide the topbar (share player view), the lookup returns
-    // null and we render nothing.
-    setTarget(document.getElementById(slotId))
+    // Safety net: re-resolve in case the node wasn't in the DOM yet at
+    // the very first render (e.g. first paint before the layout mounted).
+    const el = document.getElementById(slotId)
+    setTarget((prev) => (prev === el ? prev : el))
   }, [slotId])
   return target
 }

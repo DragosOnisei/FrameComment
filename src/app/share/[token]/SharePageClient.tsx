@@ -145,6 +145,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     startY: 0,
     startHeight: 0,
   })
+  // 3.5.x: the natural (default) split height of the video on mobile.
+  // Captured the first time the user drags from the un-resized state.
+  // It's the MAXIMUM the video is allowed to be — you can drag the grip
+  // UP to shrink/hide the video, but never DOWN to grow it past default.
+  const defaultMobileVideoHeightRef = useRef<number | null>(null)
   const playerColRef = useRef<HTMLDivElement>(null)
   const mainContentRef = useRef<HTMLDivElement>(null)
   const storageKey = token || ''
@@ -1025,19 +1030,25 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const beginMobileResize = useCallback((clientY: number) => {
     const el = playerColRef.current
     if (!el) return
+    const startHeight = el.getBoundingClientRect().height
+    // The default natural split is the MAX video size. Capture it the
+    // first time we drag from the un-resized (null) state so we can clamp
+    // against it forever after.
+    if (mobileVideoHeight === null) {
+      defaultMobileVideoHeightRef.current = startHeight
+    }
     mobileResizeRef.current = {
       active: true,
       startY: clientY,
-      startHeight: el.getBoundingClientRect().height,
+      startHeight,
     }
     const clampHeight = (h: number) => {
-      const container = mainContentRef.current
-      const avail = container
-        ? container.getBoundingClientRect().height
-        : window.innerHeight
-      // Keep at least ~150px of video and ~160px of comments visible.
-      const max = Math.max(180, avail - 160)
-      return Math.max(150, Math.min(h, max))
+      // 3.5.x: the video can shrink all the way to 0 (drag the grip UP to
+      // hide it and leave just the comments — the grip stays pinned at
+      // the top so it can be pulled back down), but it can NEVER grow
+      // past the default natural height (no dragging DOWN past default).
+      const max = defaultMobileVideoHeightRef.current ?? startHeight
+      return Math.max(0, Math.min(h, max))
     }
     const move = (cy: number) => {
       if (!mobileResizeRef.current.active) return
@@ -1063,7 +1074,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     window.addEventListener('mouseup', end)
     window.addEventListener('touchmove', onTouchMove, { passive: false })
     window.addEventListener('touchend', end)
-  }, [])
+  }, [mobileVideoHeight])
 
   const handleDownloadAll = useCallback(async () => {
     if (downloadingAll || !shareToken) return

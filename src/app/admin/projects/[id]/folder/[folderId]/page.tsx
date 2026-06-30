@@ -236,41 +236,13 @@ export default function ProjectFolderPage() {
   // 2.5.0+: render nothing while the first fetch is in flight — see
   // the matching note on the project root page. Sidebar + topbar
   // stay mounted from the layout, so navigation feels instant.
-  if (loading) return null
-
-  if (error || !folder || !project) {
-    return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
-        <Card>
-          <CardContent className="py-12 text-center space-y-3">
-            <p className="text-muted-foreground">{error || 'Folder not found'}</p>
-            <Link href={`/admin/projects/${projectId}`}>
-              <Button variant="outline">Back to project</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  // Build the breadcrumb shape FolderBrowser expects (id + name only;
-  // slug is internal to the helper return value).
-  const breadcrumbForBrowser = breadcrumb.map((b) => ({ id: b.id, name: b.name }))
-
-  return (
-    // 2.5.0+: drop the `bg-background` solid so the layout's spotlight
-    // gradient shows through behind FolderCard / VideoCard glass; also
-    // drop the centred max-w wrapper so folders flow flush-left next
-    // to the sidebar.
-    <div className="flex-1 min-h-0">
-      {/* 2.5.0+: action bar lives in the global topbar via portal slots
-          — same recipe as the project root page.
-          2.5.1+: Back navigates ONE step up the tree. If the current
-          folder has a `parentFolderId`, jump to that folder's page;
-          otherwise we're a top-level folder under the project, so
-          fall back to the project root. Previously it always went
-          to the project root which lost the user's place when they
-          were 2+ levels deep (e.g. VDA > Test Folder > YouTube). */}
+  // 3.5.x: topbar action slots rendered in EVERY state (loading, error,
+  // normal) so Back / view-toggle / Upload / Download don't blink out
+  // while the page refetches on each folder navigation — matching the
+  // persistent search pill + bell. Handlers that need the page body
+  // (Upload/Download via refs) just no-op during the brief load.
+  const topbarSlots = (
+    <>
       <TopbarLeftSlot>
         <Link
           href={
@@ -291,16 +263,8 @@ export default function ProjectFolderPage() {
         </Link>
       </TopbarLeftSlot>
       <TopbarRightSlot>
-        {/* 3.5.x: Grid / List view toggle available inside folders too,
-            sharing the per-user preference so it persists everywhere. */}
         <ViewModeToggle value={folderView} onChange={setFolderView} />
-        {/* 2.5.0+: New Folder is an in-grid tile now; Project Settings
-            moved into the ProjectActions kebab on the project root.
-            We keep Upload + Download All here because they're the
-            primary actions inside a folder. Text collapses to icon
-            below `md` so the toolbar lines up with the search pill's
-            own icon-only state — every group expands together. */}
-        {project && project.status !== 'APPROVED' && (
+        {(!project || project.status !== 'APPROVED') && (
           <Button
             variant="default"
             size="sm"
@@ -323,6 +287,50 @@ export default function ProjectFolderPage() {
           <Download className="w-4 h-4" />
         </Button>
       </TopbarRightSlot>
+    </>
+  )
+
+  if (loading) return topbarSlots
+
+  if (error || !folder || !project) {
+    return (
+      <>
+        {topbarSlots}
+        <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+          <Card>
+            <CardContent className="py-12 text-center space-y-3">
+              <p className="text-muted-foreground">{error || 'Folder not found'}</p>
+              <Link href={`/admin/projects/${projectId}`}>
+                <Button variant="outline">Back to project</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </>
+    )
+  }
+
+  // Build the breadcrumb shape FolderBrowser expects (id + name only;
+  // slug is internal to the helper return value).
+  const breadcrumbForBrowser = breadcrumb.map((b) => ({ id: b.id, name: b.name }))
+
+  return (
+    // 2.5.0+: drop the `bg-background` solid so the layout's spotlight
+    // gradient shows through behind FolderCard / VideoCard glass; also
+    // drop the centred max-w wrapper so folders flow flush-left next
+    // to the sidebar.
+    <div className="flex-1 min-h-0">
+      {/* 2.5.0+: action bar lives in the global topbar via portal slots
+          — same recipe as the project root page.
+          2.5.1+: Back navigates ONE step up the tree. If the current
+          folder has a `parentFolderId`, jump to that folder's page;
+          otherwise we're a top-level folder under the project, so
+          fall back to the project root. Previously it always went
+          to the project root which lost the user's place when they
+          were 2+ levels deep (e.g. VDA > Test Folder > YouTube). */}
+      {/* 3.5.x: topbar slots defined above so they persist across the
+          loading state (no flicker on folder navigation). */}
+      {topbarSlots}
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
 
         <div className="space-y-6">

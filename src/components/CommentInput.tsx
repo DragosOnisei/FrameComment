@@ -425,7 +425,13 @@ export default function CommentInput({
     // `spotlight-bg` wash (and the CommentSection card's accent
     // gradient) bleed through to the input area. Border kept as a
     // hairline white divider matching the rest of the glass system.
-    <div className="border-t border-white/10 p-3 sm:p-4 flex-shrink-0 min-w-0">
+    // 3.5.x: on MOBILE (stacked layout, < lg) the comments panel is
+    // short, so the centred "No messages yet…" empty state sits right
+    // behind the composer and bled through the transparent surface,
+    // making the placeholder illegible. Give the composer an opaque
+    // backing on mobile so it always reads clearly; keep it transparent
+    // on lg+ where the panel is tall and the glass bleed looks good.
+    <div className="border-t border-white/10 p-3 sm:p-4 flex-shrink-0 min-w-0 bg-background lg:bg-transparent">
       {/* Restriction Warning */}
       {currentVideoRestricted && restrictionMessage && (
         <div className="mb-3 p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">

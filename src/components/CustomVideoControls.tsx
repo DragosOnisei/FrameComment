@@ -241,6 +241,14 @@ export default function CustomVideoControls({
   const volumeTrackRef = useRef<HTMLDivElement>(null)
   const [isDraggingVolume, setIsDraggingVolume] = useState(false)
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null)
+  // 3.5.x: smooth playhead clock. The `currentTime` prop is throttled
+  // to ~200ms in VideoPlayer and the browser's `timeupdate` fires
+  // irregularly, which made the progress bar lurch — glide, freeze,
+  // glide, every second. We keep a local high-frequency clock driven
+  // by requestAnimationFrame off the real <video> element so the fill
+  // + playhead advance at the display refresh rate (~60fps). The prop
+  // still drives everything else (seeks, frame steps, range capture).
+  const [smoothTime, setSmoothTime] = useState(currentTime)
   // 1.3.1+: viewport-width tracker. Used to apply inline-style width
   // on the timeline-comment tooltip on phones because Tailwind's
   // arbitrary-value classes inside template literals can fail to
@@ -924,7 +932,28 @@ export default function CustomVideoControls({
     }
   }, [isDraggingVolume, computeVolumeFromClientX, onVolumeChange])
 
-  const progress = videoDuration > 0 ? (currentTime / videoDuration) * 100 : 0
+  // Keep the smooth clock pinned to the prop whenever we're NOT
+  // free-running (paused, seeked, frame-stepped, version-switched), so
+  // seeks land instantly and there's no drift after a pause.
+  useEffect(() => {
+    if (!isPlaying) setSmoothTime(currentTime)
+  }, [isPlaying, currentTime])
+
+  // While playing, sample the real <video> currentTime every animation
+  // frame so the bar advances continuously instead of in 200ms steps.
+  useEffect(() => {
+    if (!isPlaying) return
+    let raf = 0
+    const tick = () => {
+      const v = _videoRef?.current
+      if (v) setSmoothTime(v.currentTime)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [isPlaying, _videoRef])
+
+  const progress = videoDuration > 0 ? (smoothTime / videoDuration) * 100 : 0
   // 1.3.2+: range-aware playhead positioning.
   //
   // WHITE BALL (IN marker):
@@ -1035,21 +1064,19 @@ export default function CustomVideoControls({
             <div className="absolute inset-0 bg-white/30" />
 
             {/* Progress.
-                1.9.1+: 200 ms linear transition matches the
-                videoTimeUpdated throttle window in VideoPlayer
-                (also 200 ms), so the blue fill interpolates
-                continuously between samples instead of jumping in
-                frame chunks. Linear (not ease) keeps the visual
-                speed constant — anything cubic would look like the
-                playback was speeding up/slowing down between
-                samples. */}
+                3.5.x: the old 200 ms linear width transition was
+                dropped. It existed to interpolate between the throttled
+                200 ms time samples, but `displayedProgress` is now
+                driven by the rAF `smoothTime` clock (≈60fps), so the
+                fill already advances frame-by-frame. Keeping a 200 ms
+                transition on top of 60fps updates just smeared/lagged
+                the bar — removing it is what makes playback glide. */}
             <div
               className="absolute inset-y-0 left-0"
               style={{
                 width: `${displayedProgress}%`,
                 backgroundColor: 'hsl(var(--spotlight-tint))',
                 boxShadow: '0 0 8px hsl(var(--spotlight-tint) / 0.4)',
-                transition: 'width 200ms linear',
               }}
             />
           </div>
@@ -1226,9 +1253,12 @@ export default function CustomVideoControls({
                   style={{
                     left: `${yellowPct}%`,
                     transform: 'translateX(-50%)',
-                    transition: isDraggingOutHandle
-                      ? 'transform 150ms ease'
-                      : 'left 200ms linear, transform 150ms ease',
+                    // 3.5.x: dropped the `left 200ms linear` channel —
+                    // the playhead now tracks the rAF smoothTime clock,
+                    // so a left transition only lags it behind the
+                    // white ball during playback. Keep the transform
+                    // transition for the hover/drag scale pop.
+                    transition: 'transform 150ms ease',
                   }}
                   title="Drag right to mark the comment's end point"
                   aria-label="Drag to set comment out point"
@@ -1284,7 +1314,9 @@ export default function CustomVideoControls({
             // when range-edit toggles still feels punchy.
             style={{
               left: `${displayedProgress}%`,
-              transition: 'left 200ms linear, opacity 150ms ease',
+              // 3.5.x: dropped `left 200ms linear` — see the fill above.
+              // The white playhead now rides the rAF smoothTime clock.
+              transition: 'opacity 150ms ease',
             }}
           >
             <div className="w-[2px] h-[3px] group-hover:h-1.5 sm:group-hover:h-2 bg-white -translate-x-1/2 transition-[height] duration-150" />
@@ -1912,7 +1944,7 @@ export default function CustomVideoControls({
 
         {/* CENTER: time */}
         <div className="text-white/85 text-xs sm:text-sm font-mono tabular-nums whitespace-nowrap shrink-0">
-          {formatTimeWithMode(currentTime, videoFps, videoDuration, timestampDisplayMode)}
+          {formatTimeWithMode(smoothTime, videoFps, videoDuration, timestampDisplayMode)}
           <span className="text-white/40"> / </span>
           {formatTimeWithMode(videoDuration, videoFps, videoDuration, timestampDisplayMode)}
         </div>
