@@ -818,7 +818,7 @@ const CELL_H = 108
 const SHEET_W = CELL_W * STORY_COLS
 const SHEET_H = CELL_H * STORY_ROWS
 
-function ScrubTile({
+export function ScrubTile({
   thumbnailUrl,
   storyboardUrl,
 }: {

@@ -4,6 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 import { AccentColorProvider } from "@/components/AccentColorProvider";
 import { ServiceWorkerProvider } from "@/components/ServiceWorkerProvider";
+import DisableNativeTooltips from "@/components/DisableNativeTooltips";
 import { StorageConfigProvider, type StorageProvider } from "@/components/StorageConfigProvider";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
@@ -172,6 +173,7 @@ export default async function RootLayout({
           <StorageConfigProvider provider={storageProvider}>
             <AccentColorProvider />
             <ServiceWorkerProvider />
+            <DisableNativeTooltips />
             <main className="flex-1 min-h-0 flex flex-col">{children}</main>
           </StorageConfigProvider>
         </NextIntlClientProvider>

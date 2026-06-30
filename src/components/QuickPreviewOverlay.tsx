@@ -6,6 +6,7 @@ import { X, Film, Image as ImageIcon, Folder as FolderIcon } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
+import { ScrubTile } from './FolderCard'
 
 /**
  * 1.7.0+: macOS Quick Look-style preview overlay. Opens when the
@@ -314,7 +315,14 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
 /* ---------------- FOLDER body ---------------- */
 
 type PreviewTile =
-  | { kind: 'video'; videoId: string; thumbnailUrl: string }
+  | {
+      kind: 'video'
+      videoId: string
+      thumbnailUrl: string
+      // 3.5.x: hover-scrub the sub-folder mosaic tiles inside Quick
+      // Preview too, same as the main folder grid.
+      storyboardUrl?: string
+    }
   | { kind: 'folder'; folderId: string }
 
 interface FolderContents {
@@ -508,20 +516,13 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
     t.kind === 'video' ? `v:${t.videoId}` : `f:${t.folderId}`
   const renderTile = (t: PreviewTile, size: 'big' | 'small') => {
     if (t.kind === 'video') {
+      // 3.5.x: reuse the grid's ScrubTile so each mosaic tile in Quick
+      // Preview hover-scrubs its clip's storyboard too (and crops the
+      // baked 16:9 letter-box for 9:16 clips), identical to the main
+      // folder grid. Falls back to a static thumbnail when the clip has
+      // no storyboard.
       return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={t.thumbnailUrl}
-          alt=""
-          draggable={false}
-          // `object-contain` so vertical clips show their full frame
-          // (letter-boxed inside the tile) instead of being cropped
-          // to the tile's box like the grid cards do — Quick Preview
-          // is for SEEING the content, not for the high-density
-          // dashboard scan, so the trade-off here flips.
-          className="w-full h-full object-contain"
-          loading="lazy"
-        />
+        <ScrubTile thumbnailUrl={t.thumbnailUrl} storyboardUrl={t.storyboardUrl} />
       )
     }
     // 2.5.2+: matches FolderCard's `w-10` / `w-7` so folder glyphs in
