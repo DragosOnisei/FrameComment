@@ -8,6 +8,7 @@ import {
   Calendar,
   Loader2,
   AlertTriangle,
+  Gift,
 } from 'lucide-react'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
 import { apiFetch } from '@/lib/api-client'
@@ -31,26 +32,26 @@ interface UsageResponse {
 interface BillingStatus {
   configured: boolean
   testMode: boolean
-  status: 'none' | 'active' | 'past_due' | string
+  status: string
   billingEmail: string | null
   card: { brand: string | null; last4: string } | null
+  hasCard: boolean
   nextBillingAt: string | null
-  lastInvoice: {
-    id: string
-    amount: number | null
-    status: string | null
-    at: string | null
-  } | null
+  lastInvoice: { id: string; amount: number | null; status: string | null; at: string | null } | null
+  freeTier: { users: number; gib: number }
+  overFreeTier: boolean
+  suspended: boolean
+  issueSince: string | null
+  graceDaysLeft: number | null
 }
 
 /**
- * 3.7.0+: Billing pane, now Stripe-connected.
+ * 3.8.0+: Billing pane.
  *
- * Shows the current month-to-date estimate at the flat tariff
- * ($25/user/month + $0.10/GB/month), plus the real payment state from
- * Stripe: connect a card via Checkout, then the monthly invoice is
- * charged automatically off-session. "Manage" opens the Stripe Billing
- * Portal (update card / view invoices).
+ * Usage-based, prorated (averaged over the period) with a free tier
+ * (1 user + 10 GB). You pay only for usage ABOVE the tier. A card is
+ * required only once you exceed the tier; if it's unpaid/missing for
+ * 5 business days the admin is suspended (billing wall).
  */
 export function BillingSection({
   show,
@@ -62,14 +63,13 @@ export function BillingSection({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
 
   const loadStatus = useCallback(async () => {
     try {
       const res = await apiFetch('/api/billing/status')
       if (res.ok) setBilling((await res.json()) as BillingStatus)
     } catch {
-      /* non-fatal — the estimate still renders */
+      /* non-fatal */
     }
   }, [])
 
@@ -103,16 +103,13 @@ export function BillingSection({
     }
   }, [])
 
-  // Returning from Stripe Checkout (?billing=success): the card is
-  // saved by the webhook, which can land a beat after the redirect.
-  // Re-poll the status a couple of times so the connected card shows
-  // without a manual refresh, then tidy the URL.
+  // Re-poll after returning from Stripe Checkout (webhook lands a beat
+  // after the redirect), then tidy the URL.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const flag = new URLSearchParams(window.location.search).get('billing')
     if (flag !== 'success') return
     const timers = [800, 2500, 5000].map((ms) => setTimeout(loadStatus, ms))
-    // Strip the query param so a refresh doesn't re-trigger.
     const url = new URL(window.location.href)
     url.searchParams.delete('billing')
     window.history.replaceState({}, '', url.toString())
@@ -137,26 +134,6 @@ export function BillingSection({
     }
   }, [])
 
-  const handleTestCharge = useCallback(async () => {
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    try {
-      const res = await apiFetch('/api/billing/test-charge', { method: 'POST' })
-      const data = await res.json().catch(() => ({}))
-      if (res.ok && data.ok) {
-        setNotice(`${data.message}. Check Stripe → Invoices to confirm.`)
-        await loadStatus()
-      } else {
-        setError(data.message || data.error || 'Test charge failed.')
-      }
-    } catch {
-      setError('Test charge failed.')
-    } finally {
-      setBusy(false)
-    }
-  }, [loadStatus])
-
   const handleManage = useCallback(async () => {
     setBusy(true)
     setError(null)
@@ -177,15 +154,25 @@ export function BillingSection({
 
   const bytesPerGiB = 1024 ** 3
   const usedGiB = usage ? usage.storageBytes / bytesPerGiB : 0
-  // Bill whole GB (rounded) so the estimate matches the invoice, which
-  // charges "N GB × $0.10" with an integer quantity.
-  const billedGiB = Math.round(usedGiB)
-  const userCost = usage ? usage.userCount * usage.pricing.perUserPerMonth : 0
-  const storageCost = usage ? billedGiB * usage.pricing.perGigabytePerMonth : 0
+  const freeUsers = billing?.freeTier.users ?? 1
+  const freeGiB = billing?.freeTier.gib ?? 10
+
+  // Free tier subtracted: pay only for usage above the allowance.
+  const billableUsers = usage ? Math.max(0, usage.userCount - freeUsers) : 0
+  const billableGiB = Math.max(0, Math.round(usedGiB - freeGiB))
+  const userCost = usage ? billableUsers * usage.pricing.perUserPerMonth : 0
+  const storageCost = usage
+    ? billableGiB * usage.pricing.perGigabytePerMonth
+    : 0
   const totalCost = userCost + storageCost
 
-  // Prefer the real scheduled charge date from Stripe status; fall back
-  // to the last day of the current month for the pre-connect estimate.
+  const overTier = billing?.overFreeTier ?? totalCost > 0
+  const withinFreeTier = !overTier
+  const card = billing?.card ?? null
+  const pastDue = billing?.status === 'past_due'
+  const suspended = !!billing?.suspended
+  const needsCard = overTier && !card
+
   const today = new Date()
   const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
   const nextBilling = billing?.nextBillingAt
@@ -206,9 +193,6 @@ export function BillingSection({
     return `${(b / 1024 ** 4).toFixed(2)} TB`
   }
 
-  const card = billing?.card ?? null
-  const pastDue = billing?.status === 'past_due'
-
   return (
     <CollapsibleSection
       className="border-0 bg-white/[0.04] ring-1 ring-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] text-white"
@@ -228,17 +212,32 @@ export function BillingSection({
           Loading usage…
         </div>
       )}
-      {error && (
-        <p className="text-xs text-destructive">{error}</p>
-      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
 
       {usage && (
         <>
-          {/* Test-mode badge so a sandbox charge is never mistaken for
-              a real one. */}
           {billing?.testMode && (
             <div className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 ring-1 ring-amber-400/30 px-2 py-1 text-[11px] font-medium text-amber-300">
               Stripe test mode — no real charges
+            </div>
+          )}
+
+          {/* Free-tier banner */}
+          {withinFreeTier && (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 ring-1 ring-emerald-400/25 px-3 py-2 text-xs text-emerald-300">
+              <Gift className="w-4 h-4 shrink-0" />
+              You&apos;re on the free tier — up to {freeUsers} user
+              {freeUsers === 1 ? '' : 's'} + {freeGiB} GB are free. No card
+              needed.
+            </div>
+          )}
+
+          {/* Suspended banner */}
+          {suspended && (
+            <div className="flex items-center gap-2 rounded-xl bg-destructive/10 ring-1 ring-destructive/30 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              Access is suspended for the admin until billing is resolved.
+              Add a payment method below to restore it.
             </div>
           )}
 
@@ -260,7 +259,7 @@ export function BillingSection({
             </p>
           </div>
 
-          {/* Line-item breakdown */}
+          {/* Line-item breakdown (free allowance shown) */}
           <div className="space-y-2">
             <div className="flex items-center gap-3 rounded-xl ring-1 ring-white/10 bg-white/[0.04] p-3">
               <div className="w-9 h-9 rounded-lg bg-primary/15 text-primary ring-1 ring-primary/30 flex items-center justify-center shrink-0">
@@ -269,7 +268,8 @@ export function BillingSection({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white">Users</p>
                 <p className="text-xs text-white/55">
-                  {usage.userCount.toLocaleString()} ×{' '}
+                  {usage.userCount.toLocaleString()} total · {freeUsers} free ·{' '}
+                  {billableUsers.toLocaleString()} ×{' '}
                   {formatCurrency(usage.pricing.perUserPerMonth)}
                 </p>
               </div>
@@ -285,7 +285,8 @@ export function BillingSection({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white">Storage</p>
                 <p className="text-xs text-white/55">
-                  {formatBytes(usage.storageBytes)} ({billedGiB.toLocaleString()} GB) ×{' '}
+                  {formatBytes(usage.storageBytes)} total · {freeGiB} GB free ·{' '}
+                  {billableGiB.toLocaleString()} GB ×{' '}
                   {formatCurrency(usage.pricing.perGigabytePerMonth)}/GB
                 </p>
               </div>
@@ -295,7 +296,7 @@ export function BillingSection({
             </div>
           </div>
 
-          {/* Next billing date */}
+          {/* Next billing */}
           <div className="flex items-center gap-3 rounded-xl ring-1 ring-white/10 bg-white/[0.04] p-3">
             <Calendar className="w-4 h-4 text-white/55 shrink-0" />
             <div className="flex-1 min-w-0">
@@ -311,11 +312,23 @@ export function BillingSection({
             </div>
           </div>
 
-          {/* Past-due warning */}
-          {pastDue && (
+          {/* Past-due / grace warning */}
+          {pastDue && !suspended && (
             <div className="flex items-center gap-2 rounded-xl bg-destructive/10 ring-1 ring-destructive/30 px-3 py-2 text-xs text-destructive">
               <AlertTriangle className="w-4 h-4 shrink-0" />
-              Last payment failed. Update your card to avoid interruption.
+              Last payment failed. Update your card to avoid interruption
+              {billing?.graceDaysLeft != null
+                ? ` (${billing.graceDaysLeft} business day${billing.graceDaysLeft === 1 ? '' : 's'} left).`
+                : '.'}
+            </div>
+          )}
+          {needsCard && !suspended && (
+            <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 ring-1 ring-amber-400/25 px-3 py-2 text-xs text-amber-300">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              You&apos;re over the free tier. Add a card to keep access
+              {billing?.graceDaysLeft != null
+                ? ` (${billing.graceDaysLeft} business day${billing.graceDaysLeft === 1 ? '' : 's'} left).`
+                : '.'}
             </div>
           )}
 
@@ -349,7 +362,9 @@ export function BillingSection({
                 <p className="text-xs text-white/55">
                   {billing && !billing.configured
                     ? 'Stripe is not configured on this server yet'
-                    : 'No payment method connected'}
+                    : needsCard
+                      ? 'Required — you are over the free tier'
+                      : 'Optional while on the free tier'}
                 </p>
               </div>
               <button
@@ -372,42 +387,14 @@ export function BillingSection({
             </div>
           )}
 
-          {/* Test charge — TEST MODE ONLY. Validates the full
-              invoice → pay flow without waiting for the monthly anchor.
-              The endpoint itself is hard-gated to sk_test_ keys. */}
-          {billing?.testMode && card && (
-            <div className="flex items-center gap-3 rounded-xl ring-1 ring-amber-400/20 bg-amber-500/[0.06] p-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white">Test charge</p>
-                <p className="text-xs text-white/55">
-                  Charge the saved card now to verify the flow — test mode,
-                  no real money.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleTestCharge}
-                disabled={busy}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 hover:ring-white/25 text-white transition-colors disabled:opacity-60 shrink-0"
-              >
-                {busy ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  'Test charge now'
-                )}
-              </button>
-            </div>
-          )}
-          {notice && (
-            <p className="text-xs text-emerald-300">{notice}</p>
-          )}
-
           {/* Pricing footnote */}
           <p className="text-[11px] text-white/55">
-            Tariff: {formatCurrency(usage.pricing.perUserPerMonth)} per user
+            Free tier: {freeUsers} user{freeUsers === 1 ? '' : 's'} +{' '}
+            {freeGiB} GB. Beyond that:{' '}
+            {formatCurrency(usage.pricing.perUserPerMonth)} per extra user
             per month + {formatCurrency(usage.pricing.perGigabytePerMonth)} per
-            GB per month. Storage counts every file the app holds, including
-            soft-deleted projects in Trash.
+            extra GB per month, prorated over the period. Storage counts every
+            file the app holds, including soft-deleted projects in Trash.
           </p>
         </>
       )}

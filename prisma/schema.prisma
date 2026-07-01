@@ -703,8 +703,31 @@ model Settings {
   lastInvoiceStatus  String? // paid | open | uncollectible | void | failed
   lastChargedAt      DateTime? // when the last invoice was charged
 
+  // 3.8.0+: dunning. `billingIssueSince` is set when an unresolved
+  // billing problem starts (payment failed, OR over the free tier with
+  // no card). After 5 business days unresolved the daily job flips
+  // `billingSuspended` — the admin UI shows a billing wall (client
+  // share links stay live). Both clear automatically once resolved.
+  billingIssueSince DateTime?
+  billingSuspended  Boolean   @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/**
+ * 3.8.0+: daily usage meter. One row per calendar day capturing the
+ * instance's user count + total storage bytes. The monthly invoice
+ * averages these over the billing period so usage that changes mid-
+ * period is prorated correctly (a user added a day before billing pays
+ * ~1/30; a user removed the day before still pays for the days used).
+ */
+model BillingSnapshot {
+  id           String   @id @default(cuid())
+  day          DateTime @unique // midnight UTC of the snapshot day
+  userCount    Int
+  storageBytes BigInt
+  createdAt    DateTime @default(now())
 }
 
 model NotificationDestination {

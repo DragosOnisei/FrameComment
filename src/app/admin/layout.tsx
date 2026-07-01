@@ -10,6 +10,7 @@ import { DownloadBanners } from '@/components/DownloadBanners'
 import { ProcessingStatusProvider } from '@/contexts/ProcessingStatusContext'
 import { ProcessingStatusBanners } from '@/components/ProcessingStatusBanners'
 import { GlobalDropOverlay } from '@/components/GlobalDropOverlay'
+import BillingWall from '@/components/BillingWall'
 import { usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 
@@ -107,6 +108,10 @@ export default function AdminLayout({
       <NotificationsProvider>
       <DownloadManagerProvider>
         <ProcessingStatusProvider>
+          {/* 3.8.0+: billing wall — overlays the admin (except Settings)
+              when the account is suspended for unpaid/over-tier billing.
+              Client share routes are separate and unaffected. */}
+          <BillingWall />
           {hidesChrome ? (
             // Share-player preview: no sidebar, no topbar — render
             // children straight onto the background. Preserves the

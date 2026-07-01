@@ -1,4 +1,8 @@
-import { runBillingCycleIfDue } from '../lib/billing'
+import {
+  runBillingCycleIfDue,
+  recordDailySnapshotIfNeeded,
+  evaluateBillingHealth,
+} from '../lib/billing'
 import { logError, logMessage } from '../lib/logging'
 
 /**
@@ -13,6 +17,13 @@ import { logError, logMessage } from '../lib/logging'
  */
 export async function processBillingCycle() {
   try {
+    // 1) Meter: record today's usage snapshot (once/day, idempotent) so
+    //    the monthly invoice can average + prorate.
+    await recordDailySnapshotIfNeeded()
+    // 2) Dunning: start/clear the grace clock, suspend after 5 business
+    //    days unresolved.
+    await evaluateBillingHealth()
+    // 3) Charge if the monthly anchor is due.
     const result = await runBillingCycleIfDue()
     // Only log the interesting (non-skip) outcomes to keep the every-
     // minute logs quiet.
