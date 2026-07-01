@@ -62,6 +62,7 @@ export function BillingSection({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -135,6 +136,26 @@ export function BillingSection({
       setBusy(false)
     }
   }, [])
+
+  const handleTestCharge = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const res = await apiFetch('/api/billing/test-charge', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.ok) {
+        setNotice(`${data.message}. Check Stripe → Invoices to confirm.`)
+        await loadStatus()
+      } else {
+        setError(data.message || data.error || 'Test charge failed.')
+      }
+    } catch {
+      setError('Test charge failed.')
+    } finally {
+      setBusy(false)
+    }
+  }, [loadStatus])
 
   const handleManage = useCallback(async () => {
     setBusy(true)
@@ -346,6 +367,36 @@ export function BillingSection({
                 )}
               </button>
             </div>
+          )}
+
+          {/* Test charge — TEST MODE ONLY. Validates the full
+              invoice → pay flow without waiting for the monthly anchor.
+              The endpoint itself is hard-gated to sk_test_ keys. */}
+          {billing?.testMode && card && (
+            <div className="flex items-center gap-3 rounded-xl ring-1 ring-amber-400/20 bg-amber-500/[0.06] p-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white">Test charge</p>
+                <p className="text-xs text-white/55">
+                  Charge the saved card now to verify the flow — test mode,
+                  no real money.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleTestCharge}
+                disabled={busy}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 hover:ring-white/25 text-white transition-colors disabled:opacity-60 shrink-0"
+              >
+                {busy ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  'Test charge now'
+                )}
+              </button>
+            </div>
+          )}
+          {notice && (
+            <p className="text-xs text-emerald-300">{notice}</p>
           )}
 
           {/* Pricing footnote */}

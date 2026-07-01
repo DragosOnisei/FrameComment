@@ -99,45 +99,41 @@ export function addOneMonth(from: Date): Date {
  * calls this every minute). Safe no-op when Stripe/billing isn't set
  * up. Returns a short status string for logs.
  */
-export async function runBillingCycleIfDue(): Promise<string> {
+export interface ChargeResult {
+  ok: boolean
+  message: string
+  invoiceId?: string
+  amountCents?: number
+}
+
+/**
+ * Charge the instance for its CURRENT usage right now: build the two
+ * invoice line items, create + finalize a Stripe invoice, and pay it
+ * off-session on the saved default card. Used by both the monthly cycle
+ * and the (test-mode-only) "Test charge now" button. Requires a Stripe
+ * customer with a default payment method (i.e. a card was connected).
+ */
+export async function chargeInstance(): Promise<ChargeResult> {
   const stripe = getStripe()
-  if (!stripe) return 'skip: stripe not configured'
+  if (!stripe) return { ok: false, message: 'Stripe is not configured.' }
 
   const settings = (await prisma.settings.findUnique({
     where: { id: 'default' },
   })) as any
-  if (!settings) return 'skip: no settings'
-
-  const customerId: string | null = settings.stripeCustomerId ?? null
-  const status: string = settings.billingStatus ?? 'none'
-  const nextAt: Date | null = settings.nextBillingAt ?? null
-
-  // Only bill when a card is connected (status active/past_due) and the
-  // scheduled moment has passed.
-  if (!customerId) return 'skip: no customer'
-  if (status === 'none') return 'skip: not active'
-  if (!nextAt || new Date(nextAt).getTime() > Date.now()) return 'skip: not due'
-
-  // Move the anchor forward FIRST so a failure/retry next minute doesn't
-  // re-enter this same cycle repeatedly. The real payment state is
-  // reconciled by webhooks (invoice.paid / invoice.payment_failed).
-  const newNext = addOneMonth(new Date(nextAt))
-  await prisma.settings.update({
-    where: { id: 'default' },
-    data: { nextBillingAt: newNext } as any,
-  })
+  const customerId: string | null = settings?.stripeCustomerId ?? null
+  if (!customerId) {
+    return { ok: false, message: 'No card connected yet.' }
+  }
 
   try {
     const usage = await computeBillingUsage()
     const { gib, userCents, storageCents, totalCents } = computeLineItems(usage)
 
     if (totalCents <= 0) {
-      logMessage('[billing] cycle due but total is $0 — nothing to charge')
-      return 'ok: $0, skipped charge'
+      return { ok: true, message: 'Total is $0 — nothing to charge.', amountCents: 0 }
     }
 
-    // Pending invoice items auto-attach to the next invoice we create
-    // for this customer.
+    // Pending invoice items auto-attach to the next invoice we create.
     await stripe.invoiceItems.create({
       customer: customerId,
       amount: userCents,
@@ -174,19 +170,60 @@ export async function runBillingCycleIfDue(): Promise<string> {
         billingStatus: paid.status === 'paid' ? 'active' : 'past_due',
       } as any,
     })
-    logMessage(`[billing] charged ${(totalCents / 100).toFixed(2)} ${BILLING_PRICING.currency} (invoice ${invoiceId})`)
-    return `ok: charged ${totalCents}`
+    logMessage(
+      `[billing] charged ${(totalCents / 100).toFixed(2)} ${BILLING_PRICING.currency} (invoice ${invoiceId})`,
+    )
+    return {
+      ok: true,
+      message: `Charged $${(totalCents / 100).toFixed(2)}`,
+      invoiceId,
+      amountCents: totalCents,
+    }
   } catch (err) {
-    // Payment/charge failed — mark past_due. The webhook will also
-    // reconcile, and the customer keeps their nextBillingAt (already
-    // advanced) so we retry next cycle.
-    logError('[billing] cycle failed:', err)
+    // Payment/charge failed — mark past_due. Webhooks also reconcile.
+    logError('[billing] charge failed:', err)
     await prisma.settings
       .update({
         where: { id: 'default' },
         data: { billingStatus: 'past_due' } as any,
       })
       .catch(() => {})
-    return 'error: charge failed'
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : 'Charge failed.',
+    }
   }
+}
+
+/**
+ * Run one billing cycle for the singleton instance IF it's due.
+ * Advances nextBillingAt BEFORE charging so a crash mid-cycle won't
+ * double-charge on the next minute (the worker calls this every
+ * minute). Safe no-op when Stripe/billing isn't set up.
+ */
+export async function runBillingCycleIfDue(): Promise<string> {
+  const stripe = getStripe()
+  if (!stripe) return 'skip: stripe not configured'
+
+  const settings = (await prisma.settings.findUnique({
+    where: { id: 'default' },
+  })) as any
+  if (!settings) return 'skip: no settings'
+
+  const customerId: string | null = settings.stripeCustomerId ?? null
+  const status: string = settings.billingStatus ?? 'none'
+  const nextAt: Date | null = settings.nextBillingAt ?? null
+
+  if (!customerId) return 'skip: no customer'
+  if (status === 'none') return 'skip: not active'
+  if (!nextAt || new Date(nextAt).getTime() > Date.now()) return 'skip: not due'
+
+  // Advance the anchor first (idempotency against per-minute retries).
+  await prisma.settings.update({
+    where: { id: 'default' },
+    data: { nextBillingAt: addOneMonth(new Date(nextAt)) } as any,
+  })
+
+  const result = await chargeInstance()
+  return result.ok ? `ok: ${result.message}` : `error: ${result.message}`
 }
