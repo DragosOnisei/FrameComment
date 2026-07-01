@@ -1,6 +1,13 @@
+import type Stripe from 'stripe'
 import { prisma } from '@/lib/db'
 import { getStripe } from '@/lib/stripe'
 import { logError, logMessage } from '@/lib/logging'
+
+// Stripe types `unit_amount_decimal` as a branded `Decimal`, but the
+// API accepts a plain cents string ("2500" = $25.00). Small helper to
+// satisfy the type without sprinkling casts.
+const decimal = (cents: number) =>
+  String(cents) as unknown as Stripe.Decimal
 
 /**
  * 3.7.0+: usage-based billing.
@@ -65,14 +72,18 @@ export async function computeBillingUsage(): Promise<BillingUsage> {
   }
 }
 
-/** The two invoice line items (in cents) for a usage snapshot. */
+/** The two invoice line items for a usage snapshot. We bill whole GB
+ *  (rounded) as the QUANTITY at $0.10/GB, and users as the quantity at
+ *  $25.00 each — so the Stripe invoice renders proper "Qty × unit
+ *  price" columns (9 × $25.00, 2441 × $0.10) instead of one lump line. */
 export function computeLineItems(usage: BillingUsage) {
   const gib = usage.storageBytes / BYTES_PER_GIB
+  const gbQty = Math.round(gib)
   const userCents = usage.userCount * BILLING_PRICING.perUserPerMonthCents
-  // $0.10/GiB → 10 cents × GiB, rounded to the nearest cent.
-  const storageCents = Math.round(gib * BILLING_PRICING.perGibPerMonthCents)
+  const storageCents = gbQty * BILLING_PRICING.perGibPerMonthCents
   return {
     gib,
+    gbQty,
     userCents,
     storageCents,
     totalCents: userCents + storageCents,
@@ -127,7 +138,7 @@ export async function chargeInstance(): Promise<ChargeResult> {
 
   try {
     const usage = await computeBillingUsage()
-    const { gib, userCents, storageCents, totalCents } = computeLineItems(usage)
+    const { gbQty, totalCents } = computeLineItems(usage)
 
     if (totalCents <= 0) {
       return { ok: true, message: 'Total is $0 — nothing to charge.', amountCents: 0 }
@@ -146,20 +157,24 @@ export async function chargeInstance(): Promise<ChargeResult> {
     })
     const invoiceId = invoice.id as string
 
+    // Users: quantity × unit price → invoice shows "9 × $25.00".
     await stripe.invoiceItems.create({
       customer: customerId,
       invoice: invoiceId,
-      amount: userCents,
+      quantity: usage.userCount,
+      unit_amount_decimal: decimal(BILLING_PRICING.perUserPerMonthCents),
       currency: BILLING_PRICING.currency,
-      description: `Users — ${usage.userCount} × $${BILLING_PRICING.perUserPerMonth.toFixed(2)}`,
+      description: 'Users (per seat / month)',
     })
-    if (storageCents > 0) {
+    // Storage: whole GB × $0.10 → invoice shows "2441 × $0.10".
+    if (gbQty > 0) {
       await stripe.invoiceItems.create({
         customer: customerId,
         invoice: invoiceId,
-        amount: storageCents,
+        quantity: gbQty,
+        unit_amount_decimal: decimal(BILLING_PRICING.perGibPerMonthCents),
         currency: BILLING_PRICING.currency,
-        description: `Storage — ${gib.toFixed(2)} GB × $${BILLING_PRICING.perGibPerMonth.toFixed(2)}/GB`,
+        description: 'Storage (per GB / month)',
       })
     }
     // Finalizing a `charge_automatically` invoice that has a default

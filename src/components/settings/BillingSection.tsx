@@ -177,8 +177,11 @@ export function BillingSection({
 
   const bytesPerGiB = 1024 ** 3
   const usedGiB = usage ? usage.storageBytes / bytesPerGiB : 0
+  // Bill whole GB (rounded) so the estimate matches the invoice, which
+  // charges "N GB × $0.10" with an integer quantity.
+  const billedGiB = Math.round(usedGiB)
   const userCost = usage ? usage.userCount * usage.pricing.perUserPerMonth : 0
-  const storageCost = usage ? usedGiB * usage.pricing.perGigabytePerMonth : 0
+  const storageCost = usage ? billedGiB * usage.pricing.perGigabytePerMonth : 0
   const totalCost = userCost + storageCost
 
   // Prefer the real scheduled charge date from Stripe status; fall back
@@ -282,7 +285,7 @@ export function BillingSection({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white">Storage</p>
                 <p className="text-xs text-white/55">
-                  {formatBytes(usage.storageBytes)} ({usedGiB.toFixed(2)} GB) ×{' '}
+                  {formatBytes(usage.storageBytes)} ({billedGiB.toLocaleString()} GB) ×{' '}
                   {formatCurrency(usage.pricing.perGigabytePerMonth)}/GB
                 </p>
               </div>
