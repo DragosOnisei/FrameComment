@@ -133,22 +133,11 @@ export async function chargeInstance(): Promise<ChargeResult> {
       return { ok: true, message: 'Total is $0 — nothing to charge.', amountCents: 0 }
     }
 
-    // Pending invoice items auto-attach to the next invoice we create.
-    await stripe.invoiceItems.create({
-      customer: customerId,
-      amount: userCents,
-      currency: BILLING_PRICING.currency,
-      description: `Users — ${usage.userCount} × $${BILLING_PRICING.perUserPerMonth.toFixed(2)}`,
-    })
-    if (storageCents > 0) {
-      await stripe.invoiceItems.create({
-        customer: customerId,
-        amount: storageCents,
-        currency: BILLING_PRICING.currency,
-        description: `Storage — ${gib.toFixed(2)} GB × $${BILLING_PRICING.perGibPerMonth.toFixed(2)}/GB`,
-      })
-    }
-
+    // Create the invoice FIRST, then attach the line items to it
+    // EXPLICITLY via `invoice: invoiceId`. Relying on Stripe's
+    // "pending invoice items auto-attach on invoice creation" produced
+    // $0 invoices on this account's API version — the items weren't
+    // pulled in. Attaching to the specific invoice id is reliable.
     const invoice = await stripe.invoices.create({
       customer: customerId,
       collection_method: 'charge_automatically',
@@ -156,6 +145,23 @@ export async function chargeInstance(): Promise<ChargeResult> {
       description: 'FrameComment usage',
     })
     const invoiceId = invoice.id as string
+
+    await stripe.invoiceItems.create({
+      customer: customerId,
+      invoice: invoiceId,
+      amount: userCents,
+      currency: BILLING_PRICING.currency,
+      description: `Users — ${usage.userCount} × $${BILLING_PRICING.perUserPerMonth.toFixed(2)}`,
+    })
+    if (storageCents > 0) {
+      await stripe.invoiceItems.create({
+        customer: customerId,
+        invoice: invoiceId,
+        amount: storageCents,
+        currency: BILLING_PRICING.currency,
+        description: `Storage — ${gib.toFixed(2)} GB × $${BILLING_PRICING.perGibPerMonth.toFixed(2)}/GB`,
+      })
+    }
     // Finalizing a `charge_automatically` invoice that has a default
     // card makes Stripe attempt payment IMMEDIATELY — so the invoice
     // may already be 'paid' by the time finalize returns. Only call
