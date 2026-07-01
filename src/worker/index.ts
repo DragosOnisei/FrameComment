@@ -28,6 +28,7 @@ import { processClientNotifications } from './client-notifications'
 import { processExternalNotificationJob } from './external-notifications/processExternalNotificationJob'
 import { createCleanPreviewWorker } from './clean-preview-processor'
 import { processDueDateReminders } from './due-date-reminders'
+import { processBillingCycle } from './billing-cycle'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { logError, logMessage } from '../lib/logging'
 
@@ -226,6 +227,10 @@ async function main() {
         processAdminNotifications(),
         processClientNotifications(),
         processDueDateReminders(),
+        // 3.7.0+: usage billing. No-op unless a card is connected AND
+        // today is the billing day — then it invoices + charges via
+        // Stripe.
+        processBillingCycle(),
       ])
 
       logMessage('Notification check completed')

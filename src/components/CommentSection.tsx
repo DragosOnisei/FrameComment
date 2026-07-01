@@ -1087,8 +1087,27 @@ export default function CommentSection({
         ? displayComments.filter((c: any) => !!c.isResolved)
         : displayComments
 
-  // Sort top-level comments chronologically
+  // 3.6.x: order top-level comments by their VIDEO TIMECODE (00:00
+  // first → latest last), not by when they were posted. Reviewers read
+  // top-to-bottom following the timeline. Comments with no timecode
+  // (e.g. image assets or general notes) sink to the bottom, and
+  // createdAt breaks ties (two notes on the same frame stay in the
+  // order they were written).
+  const commentSortKey = (c: Comment): number => {
+    const tc = c.timecode
+    if (typeof tc !== 'string' || tc.trim() === '') {
+      return Number.POSITIVE_INFINITY
+    }
+    const fps = videos.find((v) => v.id === c.videoId)?.fps || 24
+    const secs = timecodeToSeconds(tc, fps)
+    return Number.isFinite(secs) ? secs : Number.POSITIVE_INFINITY
+  }
   const sortedComments = [...visibleComments].sort((a, b) => {
+    const ka = commentSortKey(a)
+    const kb = commentSortKey(b)
+    // `ka !== kb` is false when both are +Infinity, so we never compute
+    // Infinity - Infinity (which would be NaN and corrupt the sort).
+    if (ka !== kb) return ka - kb
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   })
 

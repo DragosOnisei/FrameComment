@@ -26,13 +26,14 @@ export async function GET() {
     })
 
     return NextResponse.json({
-      defaultTheme: settings?.defaultTheme || 'auto',
+      // 3.6.x: dark is the app default (see layout bootstrap).
+      defaultTheme: settings?.defaultTheme || 'dark',
       accentColor: settings?.accentColor || 'blue',
       brandingLogoPath: settings?.brandingLogoPath || null,
       appDomain: settings?.appDomain || null,
     })
   } catch (error) {
     // Default values on error
-    return NextResponse.json({ defaultTheme: 'auto', accentColor: 'blue', brandingLogoPath: null, appDomain: null })
+    return NextResponse.json({ defaultTheme: 'dark', accentColor: 'blue', brandingLogoPath: null, appDomain: null })
   }
 }

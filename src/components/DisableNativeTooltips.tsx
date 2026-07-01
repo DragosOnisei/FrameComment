@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 
 /**
- * 3.5.x: app-wide kill-switch for the browser's native hover tooltips.
+ * 3.6.x: app-wide kill-switch for the browser's native hover tooltips.
  *
  * Hundreds of elements across the app carry a `title` attribute (buttons,
  * cards, icons, truncated filenames, …). The browser shows that text as a
@@ -11,50 +11,33 @@ import { useEffect } from 'react'
  * the team found noisy — e.g. the long "…_916_v3.mp4" filename popping up
  * over a video card.
  *
- * There's no CSS to disable native tooltips, and stripping `title` from 245
- * call sites by hand would be brittle. Instead we strip the attribute at
- * runtime: once on mount, then via a MutationObserver as React (re)renders
- * add or update nodes. `aria-label` is left untouched, so screen-reader
- * accessibility is preserved — only the visible tooltip goes away.
+ * There's no CSS to disable native tooltips. We strip the attribute at
+ * runtime, but ONLY on hover: a capture-phase `mouseover` listener removes
+ * the `title` from whatever the cursor just entered. Because the OS waits
+ * ~0.5s before showing the tooltip, removing the attribute the instant the
+ * pointer arrives reliably suppresses it — with none of the downsides of
+ * the earlier approach:
  *
- * Removing a `title` is itself an attribute mutation, but the observer
- * no-ops the second time (the attribute is already gone), so there's no
- * loop. We watch only the `title` attribute, so the 60fps style updates in
- * the video player never wake this up.
+ *   - An initial DOM sweep / MutationObserver ran during React's
+ *     (concurrent) hydration and stripped `title`s out of the server HTML
+ *     before deeper components hydrated, tripping hydration mismatches
+ *     (e.g. the login page's PasswordInput toggle). `mouseover` only fires
+ *     on real user interaction, always well after hydration, so the DOM
+ *     React hydrates against is never touched.
+ *   - `aria-label` is left intact, so screen-reader accessibility is
+ *     preserved — only the visible tooltip goes away.
  */
 export default function DisableNativeTooltips() {
   useEffect(() => {
-    const stripFrom = (node: Node) => {
-      if (node.nodeType !== Node.ELEMENT_NODE) return
-      const el = node as Element
-      if (el.hasAttribute('title')) el.removeAttribute('title')
-      el.querySelectorAll?.('[title]').forEach((child) =>
-        child.removeAttribute('title'),
-      )
+    const onPointerOver = (e: Event) => {
+      const target = e.target as Element | null
+      const el = target?.closest?.('[title]')
+      if (el && el.hasAttribute('title')) el.removeAttribute('title')
     }
-
-    // Initial sweep of everything already in the DOM.
-    stripFrom(document.body)
-
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        if (m.type === 'attributes') {
-          const el = m.target as Element
-          if (el.hasAttribute('title')) el.removeAttribute('title')
-        } else if (m.type === 'childList') {
-          m.addedNodes.forEach(stripFrom)
-        }
-      }
-    })
-
-    observer.observe(document.body, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ['title'],
-    })
-
-    return () => observer.disconnect()
+    // Capture phase so we strip the attribute before the element's own
+    // handlers run and before the OS tooltip timer matters.
+    document.addEventListener('mouseover', onPointerOver, true)
+    return () => document.removeEventListener('mouseover', onPointerOver, true)
   }, [])
 
   return null

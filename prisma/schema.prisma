@@ -689,6 +689,20 @@ model Settings {
   privacyDisclosureEnabled Boolean @default(false)
   privacyDisclosureText    String? // Custom text; null = use default i18n text
 
+  // 3.7.0+: Stripe billing (single-account platform model — all money
+  // lands in the company's one Stripe account; keys live in env vars).
+  stripeCustomerId   String? // Stripe Customer created for this instance
+  billingEmail       String? // where Stripe emails invoices/receipts
+  paymentMethodBrand String? // saved card brand, e.g. "visa" (UI only)
+  paymentMethodLast4 String? // saved card last 4 digits (UI only)
+  billingStatus      String    @default("none") // none | active | past_due
+  billingAnchorDay   Int? // day-of-month to bill (1-28); null = end of month
+  nextBillingAt      DateTime? // next scheduled automatic charge
+  lastInvoiceId      String? // most recent Stripe invoice id
+  lastInvoiceAmount  Int? // most recent invoice total, in cents
+  lastInvoiceStatus  String? // paid | open | uncollectible | void | failed
+  lastChargedAt      DateTime? // when the last invoice was charged
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

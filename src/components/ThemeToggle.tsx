@@ -31,38 +31,26 @@ export default function ThemeToggle() {
         // Cache the admin default for future page loads
         localStorage.setItem('adminDefaultTheme', adminDefault)
 
-        // Determine which theme to use
-        let themeToUse: 'light' | 'dark'
-        if (adminDefault === 'auto') {
-          // Use system preference
-          themeToUse = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        } else {
-          themeToUse = adminDefault as 'light' | 'dark'
-        }
-
+        // 3.6.x: default is dark. Anything that isn't an explicit
+        // 'light' (including legacy 'auto') resolves to dark, so a
+        // light-mode OS never forces the app to light.
+        const themeToUse: 'light' | 'dark' = adminDefault === 'light' ? 'light' : 'dark'
         setTheme(themeToUse)
         applyTheme(themeToUse)
       } else if (cachedDefault) {
-        // API failed, use cached default
-        let themeToUse: 'light' | 'dark'
-        if (cachedDefault === 'auto') {
-          themeToUse = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        } else {
-          themeToUse = cachedDefault as 'light' | 'dark'
-        }
+        // API failed, use cached default (same dark-default rule).
+        const themeToUse: 'light' | 'dark' = cachedDefault === 'light' ? 'light' : 'dark'
         setTheme(themeToUse)
         applyTheme(themeToUse)
       } else {
-        // No cached default and API failed - fall back to system preference
-        const systemPreference = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        setTheme(systemPreference)
-        applyTheme(systemPreference)
+        // No cached default and API failed — default to dark.
+        setTheme('dark')
+        applyTheme('dark')
       }
     } catch {
-      // On error, fall back to system preference
-      const systemPreference = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      setTheme(systemPreference)
-      applyTheme(systemPreference)
+      // On error, default to dark.
+      setTheme('dark')
+      applyTheme('dark')
     }
   }, [])
 
@@ -80,23 +68,9 @@ export default function ThemeToggle() {
       // No saved preference - fetch admin default and apply
       fetchAndApplyDefaultTheme()
     }
-
-    // Listen for system preference changes (when user changes OS theme)
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const handleChange = (e: MediaQueryListEvent) => {
-      // Only update if user hasn't set a manual preference AND admin default is 'auto'
-      if (!localStorage.getItem('theme')) {
-        const adminDefault = localStorage.getItem('adminDefaultTheme')
-        if (!adminDefault || adminDefault === 'auto') {
-          const newTheme = e.matches ? 'dark' : 'light'
-          setTheme(newTheme)
-          applyTheme(newTheme)
-        }
-      }
-    }
-
-    mediaQuery.addEventListener('change', handleChange)
-    return () => mediaQuery.removeEventListener('change', handleChange)
+    // 3.6.x: no longer follow the OS `prefers-color-scheme`. The app is
+    // dark-by-default and 'auto' resolves to dark, so tracking the OS
+    // (which used to flip a light-mode laptop to light) is gone.
   }, [fetchAndApplyDefaultTheme])
 
   const toggleTheme = () => {

@@ -57,11 +57,13 @@ async function getAppearanceSettings() {
       select: { defaultTheme: true, accentColor: true },
     })
     return {
-      defaultTheme: settings?.defaultTheme || 'auto',
+      // 3.6.x: dark is the app default; 'auto' is treated as dark in the
+      // bootstrap, but fall back to 'dark' explicitly for clarity.
+      defaultTheme: settings?.defaultTheme || 'dark',
       accentColor: settings?.accentColor || 'blue',
     }
   } catch {
-    return { defaultTheme: 'auto', accentColor: 'blue' }
+    return { defaultTheme: 'dark', accentColor: 'blue' }
   }
 }
 
@@ -130,11 +132,12 @@ export default async function RootLayout({
                     } else if (adminDefault === 'light') {
                       document.documentElement.classList.remove('dark');
                     } else {
-                      // Admin default is 'auto' - use system preference
-                      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                        document.documentElement.classList.add('dark');
-                        isDark = true;
-                      }
+                      // 3.6.x: default is DARK. Previously 'auto' followed
+                      // the OS (prefers-color-scheme), which forced light
+                      // on light-mode laptops. The app is dark-first, so
+                      // any non-explicit value now resolves to dark.
+                      document.documentElement.classList.add('dark');
+                      isDark = true;
                     }
                   }
 
