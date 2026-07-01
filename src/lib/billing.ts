@@ -156,26 +156,43 @@ export async function chargeInstance(): Promise<ChargeResult> {
       description: 'FrameComment usage',
     })
     const invoiceId = invoice.id as string
-    await stripe.invoices.finalizeInvoice(invoiceId)
-    // Charge the customer's default payment method off-session.
-    const paid = await stripe.invoices.pay(invoiceId)
+    // Finalizing a `charge_automatically` invoice that has a default
+    // card makes Stripe attempt payment IMMEDIATELY — so the invoice
+    // may already be 'paid' by the time finalize returns. Only call
+    // pay() if it's still open, and treat an "already paid" race as the
+    // success it is (previously this surfaced a bogus "Invoice is
+    // already paid" error even though the charge went through).
+    const finalized = await stripe.invoices.finalizeInvoice(invoiceId)
+    let invoiceObj = finalized
+    if (finalized.status !== 'paid') {
+      try {
+        invoiceObj = await stripe.invoices.pay(invoiceId)
+      } catch (payErr) {
+        const fresh = await stripe.invoices.retrieve(invoiceId)
+        if (fresh.status !== 'paid') throw payErr
+        invoiceObj = fresh
+      }
+    }
+    const wasPaid = invoiceObj.status === 'paid'
 
     await prisma.settings.update({
       where: { id: 'default' },
       data: {
         lastInvoiceId: invoiceId,
         lastInvoiceAmount: totalCents,
-        lastInvoiceStatus: paid.status ?? 'paid',
+        lastInvoiceStatus: invoiceObj.status ?? 'paid',
         lastChargedAt: new Date(),
-        billingStatus: paid.status === 'paid' ? 'active' : 'past_due',
+        billingStatus: wasPaid ? 'active' : 'past_due',
       } as any,
     })
     logMessage(
-      `[billing] charged ${(totalCents / 100).toFixed(2)} ${BILLING_PRICING.currency} (invoice ${invoiceId})`,
+      `[billing] invoice ${invoiceId} → ${invoiceObj.status} (${(totalCents / 100).toFixed(2)} ${BILLING_PRICING.currency})`,
     )
     return {
-      ok: true,
-      message: `Charged $${(totalCents / 100).toFixed(2)}`,
+      ok: wasPaid,
+      message: wasPaid
+        ? `Charged $${(totalCents / 100).toFixed(2)}`
+        : `Invoice ${invoiceObj.status}`,
       invoiceId,
       amountCents: totalCents,
     }
