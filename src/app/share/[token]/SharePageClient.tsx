@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl'
 import { useSearchParams, usePathname, useRouter } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
+import ShareOnboarding from '@/components/ShareOnboarding'
+import { getAccessToken } from '@/lib/token-store'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
@@ -115,6 +117,52 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // onVideoStateChange. Used by ThumbnailReel to highlight the active row
   // in the version dropdown.
   const [activeVideoId, setActiveVideoId] = useState<string | undefined>(undefined)
+  // 3.8.x: seamless routing for a logged-in admin. If a valid admin
+  // session exists (token in localStorage), we send them into the FULL
+  // admin app for this content — where Back reveals sibling folders —
+  // instead of the limited client share. Guests (no token) never trigger
+  // this and stay on the share. We use a manual fetch (NOT apiFetch) so a
+  // 401 can't bounce a guest to /login via the refresh interceptor.
+  const [isLoggedInAdmin, setIsLoggedInAdmin] = useState(false)
+  useEffect(() => {
+    const token = getAccessToken()
+    if (!token) return
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await fetch('/api/auth/session', {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        if (!res.ok) return
+        const data = await res.json().catch(() => null)
+        if (alive && data?.authenticated) setIsLoggedInAdmin(true)
+      } catch {
+        /* ignore — stay on the share */
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // Once we know it's a logged-in admin AND the project has loaded, send
+  // them into the admin app. We aim for the folder that holds the shared
+  // content (so Back reveals sibling folders); fall back to the project
+  // root when we can't resolve a folder.
+  useEffect(() => {
+    if (!isLoggedInAdmin || !project?.id) return
+    const vids = (project as any)?.videos as
+      | Array<{ id: string; folderId?: string | null }>
+      | undefined
+    const active = vids?.find((v) => v.id === activeVideoId) || vids?.[0]
+    const folderId = urlFolderId || active?.folderId || null
+    const target = folderId
+      ? `/admin/projects/${project.id}/folder/${folderId}`
+      : `/admin/projects/${project.id}`
+    router.replace(target)
+  }, [isLoggedInAdmin, project, activeVideoId, urlFolderId, router])
+
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
@@ -1879,6 +1927,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                   setActiveVideoId(state.selectedVideo?.id)
                 }}
               />
+              {/* 3.8.x: first-visit 3-step onboarding (name → range handle
+                  → annotate). Only runs once, and never for a logged-in
+                  admin. Mounts with the player so its anchors exist. */}
+              <ShareOnboarding />
             </div>
 
             {/* 3.2.x: mobile-only drag grip between the video and the

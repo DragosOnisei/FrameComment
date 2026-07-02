@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
 import { logError } from '@/lib/logging'
+import { getAccessToken } from '@/lib/token-store'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 
 /**
@@ -139,6 +140,40 @@ function PublicFolderSharePageInner() {
 
   const [data, setData] = useState<FolderShareResponse | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // 3.8.x: seamless routing — a logged-in admin opening a folder share
+  // link is sent into the FULL admin folder view (Back reveals sibling
+  // folders) instead of the limited client share. Guests (no token)
+  // stay on the share. Manual fetch (not apiFetch) so a 401 can't bounce
+  // a guest to /login.
+  const [isLoggedInAdmin, setIsLoggedInAdmin] = useState(false)
+  useEffect(() => {
+    const token = getAccessToken()
+    if (!token) return
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await fetch('/api/auth/session', {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        if (!res.ok) return
+        const body = await res.json().catch(() => null)
+        if (alive && body?.authenticated) setIsLoggedInAdmin(true)
+      } catch {
+        /* stay on the share */
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+  useEffect(() => {
+    if (!isLoggedInAdmin || !data?.folder) return
+    router.replace(
+      `/admin/projects/${data.folder.projectId}/folder/${data.folder.id}`,
+    )
+  }, [isLoggedInAdmin, data?.folder, router])
   const [authMode, setAuthMode] = useState<AuthMode | null>(null)
   const [needsPassword, setNeedsPassword] = useState(false)
   const [password, setPassword] = useState('')

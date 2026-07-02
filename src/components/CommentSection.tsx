@@ -57,6 +57,11 @@ interface CommentSectionProps {
   clientSessionId?: string | null
 }
 
+// 3.8.x: GLOBAL guest-name key (not scoped to a project). The chosen
+// review name is mirrored here so it follows the reviewer across EVERY
+// project — set it once, never retype it on the next share link.
+const GLOBAL_GUEST_NAME_LS_KEY = 'framecomment:guest-name'
+
 /**
  * 1.3.2+: lightweight inline reply input rendered inside MessageBubble.
  * Owns its own draft text + submit state so the user can keep typing a
@@ -713,7 +718,12 @@ export default function CommentSection({
   useEffect(() => {
     if (isAdminView) return
     try {
-      const cached = window.localStorage.getItem(GUEST_NAME_LS_KEY)
+      // Prefer a name already chosen for THIS project; otherwise fall
+      // back to the GLOBAL name so a first-time visit to a new project
+      // is pre-filled with the reviewer's usual name.
+      const cached =
+        window.localStorage.getItem(GUEST_NAME_LS_KEY) ||
+        window.localStorage.getItem(GLOBAL_GUEST_NAME_LS_KEY)
       if (cached) {
         setGuestName(cached)
         return
@@ -835,6 +845,8 @@ export default function CommentSection({
       setGuestName(trimmed)
       try {
         window.localStorage.setItem(GUEST_NAME_LS_KEY, trimmed)
+        // Mirror to the global key so the name carries to other projects.
+        window.localStorage.setItem(GLOBAL_GUEST_NAME_LS_KEY, trimmed)
       } catch {
         /* ignore quota errors — UI state still updates */
       }
@@ -1530,7 +1542,7 @@ export default function CommentSection({
           top bar, so the duplicate read-only line just added noise.
         */}
         {!isAdminView && (
-          <div className="mt-2 flex items-center gap-2 text-sm">
+          <div className="mt-2 flex items-center gap-2 text-sm" data-tutorial="tour-name">
             <span className="text-muted-foreground shrink-0">Name:</span>
             {isEditingName ? (
               <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -1783,7 +1795,7 @@ export default function CommentSection({
           scrolling.
         */}
         {mobileCollapsible && !isAdminView && !isMobileCollapsed && (
-          <div className="order-2 lg:hidden px-3 py-2 border-b border-border/50 flex items-center gap-2 text-sm bg-muted/10">
+          <div className="order-2 lg:hidden px-3 py-2 border-b border-border/50 flex items-center gap-2 text-sm bg-muted/10" data-tutorial="tour-name">
             <span className="text-muted-foreground shrink-0">Name:</span>
             {isEditingName ? (
               <div className="flex items-center gap-1.5 min-w-0 flex-1">

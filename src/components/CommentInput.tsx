@@ -740,6 +740,7 @@ export default function CommentInput({
                     disabled={loading}
                     title={t('drawOnVideo')}
                     aria-label={t('drawOnVideo')}
+                    data-tutorial="tour-annotate"
                     className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       pendingAnnotation
                         ? 'bg-[hsl(var(--spotlight-tint)/0.18)] text-[hsl(var(--spotlight-tint))] ring-1 ring-[hsl(var(--spotlight-tint)/0.35)] hover:bg-[hsl(var(--spotlight-tint)/0.25)]'

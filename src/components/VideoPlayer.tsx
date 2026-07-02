@@ -89,6 +89,22 @@ interface VideoPlayerProps {
  * Returns the highest available level as a safe fallback when no
  * variant clears the threshold.
  */
+/**
+ * 3.8.x: AUTO caps playback at HD+ (1080p). Returns the index of the
+ * highest level whose height is ≤ ~1080p; 4K (2160p) is opt-in — the
+ * client/admin must pick it manually from the quality menu. If the clip
+ * somehow only has higher variants, fall back to the lowest available.
+ */
+function pickAutoCappedLevelIdx(levels: Array<{ height?: number }>): number {
+  if (!levels || levels.length === 0) return 0
+  const CAP_H = 1080 * 1.1 // tolerance for cinematic crops (~1088)
+  let capIdx = -1
+  for (let i = 0; i < levels.length; i++) {
+    if ((levels[i]?.height || 0) <= CAP_H) capIdx = i // ascending → last ≤cap = highest ≤cap
+  }
+  return capIdx >= 0 ? capIdx : 0
+}
+
 function pickInitialHlsLevelIdx(
   levels: Array<{ height?: number }>,
   defaultQuality: string,
@@ -103,7 +119,8 @@ function pickInitialHlsLevelIdx(
         ? defaultQuality
         : null
 
-  if (!target) return levels.length - 1
+  // Both auto → HD+ cap (never auto-start at 4K).
+  if (!target) return pickAutoCappedLevelIdx(levels)
 
   const targetH =
     target === '2160p' ? 2160 :
@@ -378,11 +395,13 @@ export default function VideoPlayer({
     }
 
     if (q === 'auto') {
-      // Auto = "pin to highest currently in hls.levels". Cheap
-      // path, instant; no reload, no destroy.
+      // 3.8.x: Auto caps at HD+ (1080p) — pin to the highest level
+      // ≤ 1080, NOT the absolute highest. 4K stays opt-in. Cheap path,
+      // instant; no reload, no destroy.
       if (hls && hls.levels && hls.levels.length > 0) {
-        hls.nextLevel = hls.levels.length - 1
-        hls.currentLevel = hls.levels.length - 1
+        const idx = pickAutoCappedLevelIdx(hls.levels)
+        hls.nextLevel = idx
+        hls.currentLevel = idx
       }
       return
     }

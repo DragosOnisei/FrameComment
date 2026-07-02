@@ -1262,6 +1262,7 @@ export default function CustomVideoControls({
                   }}
                   title="Drag right to mark the comment's end point"
                   aria-label="Drag to set comment out point"
+                  data-tutorial="tour-range"
                 >
                   {/* 1.4.x: invisible hit-zone extension for phones —
                       makes the yellow ball easier to grab without
