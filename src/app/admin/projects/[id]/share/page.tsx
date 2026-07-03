@@ -423,25 +423,6 @@ function AdminSharePageInner() {
             tokenHls && (video as any).hlsQualities && (video as any).hlsQualities.length > 0
               ? `/api/videos/${video.id}/hls/master.m3u8?token=${encodeURIComponent(tokenHls)}`
               : ''
-          // ==== DIAGNOSTIC LOGS (3.2.0 stuck-loading debug, remove before ship) ====
-          console.warn('[SP-DIAG] tokenize result for video', {
-            videoId: video.id?.slice(0, 12),
-            name: (video as any).originalFileName?.slice(0, 40),
-            status: video.status,
-            hlsQualities: (video as any).hlsQualities,
-            hlsBasePath: (video as any).hlsBasePath,
-            preview480Path: !!(video as any).preview480Path,
-            preview720Path: !!(video as any).preview720Path,
-            preview1080Path: !!(video as any).preview1080Path,
-            preview2160Path: !!(video as any).preview2160Path,
-            tokenHls: tokenHls ? tokenHls.slice(0, 12) + '…' : '(empty)',
-            token480: token480 ? '✓' : '✗',
-            token720: token720 ? '✓' : '✗',
-            token1080: token1080 ? '✓' : '✗',
-            token2160: token2160 ? '✓' : '✗',
-            hlsUrl_built: hlsUrl ? hlsUrl.slice(0, 80) : '(empty)',
-          })
-          // ==== END DIAGNOSTIC ====
 
           const tokenized = {
             ...video,

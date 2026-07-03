@@ -675,36 +675,44 @@ function FolderBrowserInner(
       // when configured) so editors on the LAN don't accidentally
       // copy a 192.168.x.x link out to clients.
       const url = `${getPublicShareOrigin()}/share/folder/${folder.slug}`
-      // 1.4.x+: also read the folder's current shareExpiresAt so the
-      // modal can pre-fill its toggle (ON when there's no expiry, OFF
-      // with the chosen date when one is set). Best-effort — if the
-      // fetch fails we just open with the default "no expiration".
-      let initialExpiresAt: string | null = null
-      try {
-        const res = await apiFetch(`/api/folders/${folderId}`)
-        if (res.ok) {
-          const data = await res.json()
-          const raw = data?.folder?.shareExpiresAt
-          if (raw) {
-            initialExpiresAt =
-              typeof raw === 'string' ? raw : new Date(raw).toISOString()
-          }
-        }
-      } catch {
-        /* best-effort */
-      }
-      // 1.0.8+: replace the OS alert with the Frame.io-style share
-      // modal (Link copied + Copy button + Done). The modal itself
-      // does the clipboard write so the user can re-copy without
-      // dismissing first.
+      // 3.8.x PERF: open the modal INSTANTLY. The long folder URL is
+      // already known from the in-memory folder (its slug), so there's
+      // nothing to wait for. We used to `await` a GET on
+      // /api/folders/[id] here purely to read `shareExpiresAt` for the
+      // expiration toggle — but that endpoint mints preview tokens for
+      // every item in the folder and can take several seconds, during
+      // which the modal didn't even appear (the "takes forever to
+      // generate the link" bug). Now we open first, then hydrate the
+      // expiry in the BACKGROUND and patch it into the open modal when
+      // it arrives (the toggle populates a beat later; the URL + short
+      // link generation start immediately).
       setShareState({
         open: true,
         title: folder.name,
         shareUrl: url,
         kind: 'folder',
         targetId: folderId,
-        initialExpiresAt,
+        initialExpiresAt: null,
       })
+      // Best-effort background expiry hydration — never blocks the modal.
+      void (async () => {
+        try {
+          const res = await apiFetch(`/api/folders/${folderId}`)
+          if (!res.ok) return
+          const data = await res.json()
+          const raw = data?.folder?.shareExpiresAt
+          if (!raw) return
+          const iso =
+            typeof raw === 'string' ? raw : new Date(raw).toISOString()
+          setShareState((prev) =>
+            prev.open && prev.targetId === folderId
+              ? { ...prev, initialExpiresAt: iso }
+              : prev,
+          )
+        } catch {
+          /* best-effort — modal already open with the working link */
+        }
+      })()
       return
     },
     [folders],
@@ -1837,21 +1845,36 @@ function FolderBrowserInner(
       // project's share-token gate, so expiration lives on the
       // project. Best-effort — fall back to "no expiration" UI on any
       // failure.
-      let initialExpiresAt: string | null = null
-      try {
-        const meta = await apiFetch(`/api/projects/${projectId}`)
-        if (meta.ok) {
+      // 3.8.x PERF: fetch the project's shareExpiresAt in PARALLEL with
+      // minting the signed URL (they used to run strictly one after the
+      // other, doubling the wait before the modal appeared). The expiry
+      // only seeds the expiration toggle, so we never block the modal on
+      // it — we open as soon as the (required) signed URL is ready and
+      // patch the expiry in when it lands.
+      const expiryPromise: Promise<string | null> = (async () => {
+        try {
+          const meta = await apiFetch(`/api/projects/${projectId}`)
+          if (!meta.ok) return null
           const data = await meta.json()
           const raw =
             data?.project?.shareExpiresAt ?? data?.shareExpiresAt ?? null
-          if (raw) {
-            initialExpiresAt =
-              typeof raw === 'string' ? raw : new Date(raw).toISOString()
-          }
+          if (!raw) return null
+          return typeof raw === 'string' ? raw : new Date(raw).toISOString()
+        } catch {
+          return null
         }
-      } catch {
-        /* best-effort */
+      })()
+      const patchExpiry = () => {
+        void expiryPromise.then((iso) => {
+          if (!iso) return
+          setShareState((prev) =>
+            prev.open && prev.targetId === projectId && prev.title === videoName
+              ? { ...prev, initialExpiresAt: iso }
+              : prev,
+          )
+        })
       }
+
       // 1.2.0+: ask the server for an HMAC-signed URL that scopes the
       // share to this one video. Server-side filters lock the response
       // to this video name so a reviewer opening the link can't see
@@ -1877,8 +1900,9 @@ function FolderBrowserInner(
               shareUrl: data.url,
               kind: 'project',
               targetId: projectId,
-              initialExpiresAt,
+              initialExpiresAt: null,
             })
+            patchExpiry()
             return
           }
         }
@@ -1897,8 +1921,9 @@ function FolderBrowserInner(
         shareUrl: url,
         kind: 'project',
         targetId: projectId,
-        initialExpiresAt,
+        initialExpiresAt: null,
       })
+      patchExpiry()
     },
     [_projectSlug, currentFolderId, projectId],
   )

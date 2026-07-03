@@ -2,8 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { apiFetch } from '@/lib/api-client'
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
+import { apiFetch, attemptRefresh } from '@/lib/api-client'
+import { clearTokens, getAccessToken, getRefreshToken } from '@/lib/token-store'
 
 interface User {
   id: string
@@ -81,46 +81,21 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
     }
   }, [])
 
-  const refreshWithToken = useCallback(async (refreshToken: string) => {
-    try {
-      const response = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${refreshToken}`,
-        },
-      })
-      if (!response.ok) {
-        clearTokens()
-        return false
-      }
-
-      const data = await response.json()
-      if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
-        setTokens({
-          accessToken: data.tokens.accessToken,
-          refreshToken: data.tokens.refreshToken,
-        })
-        return true
-      }
-      clearTokens()
-      return false
-    } catch (error) {
-      clearTokens()
-      return false
-    }
-  }, [])
-
   const bootstrap = useCallback(async () => {
     setLoading(true)
-    const refreshToken = getRefreshToken()
-    const hasAccess = getAccessToken()
-
-    if (!hasAccess && refreshToken) {
-      await refreshWithToken(refreshToken)
+    // Only mint a fresh access token when we don't already have one in
+    // memory. `attemptRefresh()` is the SHARED, de-duplicated refresh
+    // (the very same in-flight lock `apiFetch` uses on a 401), so a
+    // bootstrap refresh can never race a concurrent apiFetch refresh.
+    // That race used to send the SAME refresh token twice; the server
+    // rotates + reuse-detects refresh tokens, so the second (stale)
+    // one tripped "token reuse → revoke ALL user tokens", nuking the
+    // session and producing the /api/auth/refresh + /session 401 storm.
+    if (!getAccessToken()) {
+      await attemptRefresh()
     }
-
     await checkAuth()
-  }, [checkAuth, refreshWithToken])
+  }, [checkAuth])
 
   useEffect(() => {
     // 2.5.0+: bootstrap once on mount, NOT on every pathname change.

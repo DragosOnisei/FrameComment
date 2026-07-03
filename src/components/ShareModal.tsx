@@ -326,15 +326,20 @@ export function ShareModal({
   // 3.5.x: anti-hang safety net ONLY. If the short-link POST never
   // answers (server down / network black hole), reveal the long URL
   // after a generous window so the modal isn't stuck on "Generating
-  // link…" forever. This is intentionally long (8s) so a merely-slow
-  // POST always wins the race — we never copy the long URL out from
-  // under a short link that's about to arrive.
+  // link…" forever.
+  // 3.8.x: bumped 8s → 15s. A merely-slow POST (busy DB / cold route)
+  // was occasionally answering just AFTER the 8s grace fired, so the
+  // long URL flashed in first and the short link swapped in a moment
+  // later — exactly the "long then short" bug. On the normal path the
+  // POST resolves in well under a second and this timer never matters;
+  // it only guards a genuine no-response hang, which apiFetch would
+  // otherwise turn into a rejection (→ fall back to long via `catch`).
   useEffect(() => {
     if (!open) {
       setGraceElapsed(false)
       return
     }
-    const t = setTimeout(() => setGraceElapsed(true), 8_000)
+    const t = setTimeout(() => setGraceElapsed(true), 15_000)
     return () => clearTimeout(t)
   }, [open])
 

@@ -7,17 +7,27 @@ export const LOCALE_NAMES: Record<string, string> = {
   en: 'English',
 }
 
-/**
- * Get the configured language from the database.
- * Falls back to 'en' if not set or on error.
- */
+// 3.8.x PERF: in-memory cache for the configured locale. This function
+// is called at the TOP of nearly every API route (to localise error
+// messages), including the video content route which runs on EVERY
+// range request while streaming/scrubbing. Hitting the DB each time was
+// a needless query on the hottest path. The language setting changes
+// almost never, so a short TTL is plenty — a change propagates within
+// CACHE_TTL_MS across the process.
+let localeCache: { value: string; expiresAt: number } | null = null
+const LOCALE_CACHE_TTL_MS = 60_000
+
 export async function getConfiguredLocale(): Promise<string> {
+  const now = Date.now()
+  if (localeCache && localeCache.expiresAt > now) return localeCache.value
   try {
     const settings = await prisma.settings.findUnique({
       where: { id: 'default' },
       select: { language: true },
     })
-    return settings?.language || 'en'
+    const value = settings?.language || 'en'
+    localeCache = { value, expiresAt: now + LOCALE_CACHE_TTL_MS }
+    return value
   } catch {
     return 'en'
   }

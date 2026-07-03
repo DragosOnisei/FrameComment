@@ -23,6 +23,44 @@ export const dynamic = 'force-dynamic'
 
 const CONTENT_SESSION_WINDOW_SECONDS = 60
 
+// 3.8.x PERF: short-TTL in-memory cache for the video+project record.
+// This route re-reads it on EVERY range request while a viewer
+// scrubs/seeks a clip — but for a given videoId the record is
+// effectively immutable during a viewing session (storage paths,
+// approval, and project flags don't change second-to-second). Collapsing
+// those identical `findUnique({ include: { project } })` joins into one
+// DB hit per TTL is the single biggest win for seek/scrub latency.
+// A change (e.g. approval) still propagates within VIDEO_CACHE_TTL_MS.
+const videoWithProjectCache = new Map<
+  string,
+  { value: any; expiresAt: number }
+>()
+const VIDEO_CACHE_TTL_MS = 10_000
+
+async function getVideoWithProjectCached(videoId: string): Promise<any> {
+  const now = Date.now()
+  const hit = videoWithProjectCache.get(videoId)
+  if (hit && hit.expiresAt > now) return hit.value
+  const video = await prisma.video.findUnique({
+    where: { id: videoId },
+    include: { project: true },
+  })
+  if (video) {
+    videoWithProjectCache.set(videoId, {
+      value: video,
+      expiresAt: now + VIDEO_CACHE_TTL_MS,
+    })
+    // Opportunistic prune so the map can't grow unbounded on a
+    // long-lived process serving many clips.
+    if (videoWithProjectCache.size > 500) {
+      for (const [k, v] of videoWithProjectCache) {
+        if (v.expiresAt <= now) videoWithProjectCache.delete(k)
+      }
+    }
+  }
+  return video
+}
+
 
 /**
  * Content delivery endpoint - streams video/thumbnail content with security checks
@@ -67,9 +105,6 @@ export async function GET(
       return ipRateLimitResult
     }
 
-    // Get authentication context once
-    const authContext = await getAuthContext(request)
-
     const redis = getRedis()
     const tokenKey = `video_access:${token}`
     const rawTokenData = await redis.get(tokenKey)
@@ -83,20 +118,21 @@ export async function GET(
     // Use token's session ID for all users
     const sessionId = preliminaryTokenData.sessionId
 
-    // Determine if this is an admin request (JWT token OR explicit isAdmin flag in token data)
-    const isAdminRequest = authContext.isAdmin || preliminaryTokenData.isAdmin === true
-
-    // For admin users, verify they have access to the project
-    if (isAdminRequest) {
-      const project = await prisma.project.findUnique({
-        where: { id: preliminaryTokenData.projectId },
-        select: { id: true }
-      })
-
-      if (!project) {
-  return NextResponse.json({ error: shareMessages.accessDenied || 'Access denied' }, { status: 403 })
-      }
-    }
+    // Determine if this is an admin request. 3.8.x PERF: an admin video
+    // token carries `isAdmin: true`, so on the admin player's hot path
+    // (every range request while scrubbing) we skip `getAuthContext`
+    // entirely — that call does a JWT verify + user DB lookup + RLS
+    // context set + share-token verify, all pointless when the token
+    // already proves admin. Share/guest tokens (no flag) still resolve
+    // it, which is cheap (guests have no admin JWT to look up).
+    // The project-existence check the admin branch used to run here was
+    // redundant with the `video.projectId === verifiedToken.projectId`
+    // check further down (a video can't exist without its project), so
+    // it's dropped — one fewer DB query per admin request.
+    const isAdminRequest =
+      preliminaryTokenData.isAdmin === true
+        ? true
+        : (await getAuthContext(request)).isAdmin
 
     if (!sessionId) {
   return NextResponse.json({ error: shareMessages.accessDenied || 'Access denied' }, { status: 401 })
@@ -175,10 +211,7 @@ export async function GET(
       }
     }
 
-    const video = await prisma.video.findUnique({
-      where: { id: verifiedToken.videoId },
-      include: { project: true }
-    })
+    const video = await getVideoWithProjectCached(verifiedToken.videoId)
 
     if (!video || video.projectId !== verifiedToken.projectId) {
   return NextResponse.json({ error: shareMessages.accessDenied || 'Access denied' }, { status: 404 })

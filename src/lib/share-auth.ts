@@ -1,8 +1,5 @@
-import {
-  getAccessToken,
-  getRefreshToken,
-  setTokens,
-} from '@/lib/token-store'
+import { getAccessToken } from '@/lib/token-store'
+import { attemptRefresh } from '@/lib/api-client'
 
 /**
  * 3.8.x: detect a logged-in admin on the PUBLIC share pages.
@@ -13,9 +10,9 @@ import {
  * (`token-store`), so on a fresh page load — exactly what happens when
  * an admin clicks a share link — `getAccessToken()` is null even though
  * the admin is logged in. The REFRESH token, however, persists in
- * localStorage. So we mirror AuthProvider.refreshWithToken: if there's
- * no access token but there is a refresh token, mint a fresh access
- * token first, THEN check the session.
+ * localStorage. So if there's no access token we mint one via the shared
+ * `attemptRefresh()` (the same de-duplicated refresh apiFetch uses),
+ * THEN check the session.
  *
  * Everything here is fail-closed to `false` and uses manual fetch (never
  * apiFetch) so a 401 can't bounce a genuine guest to /login. A guest —
@@ -26,30 +23,17 @@ export async function detectLoggedInAdmin(): Promise<boolean> {
 
   let accessToken = getAccessToken()
 
-  // No in-memory access token (fresh load) → try to mint one from the
-  // persisted refresh token, same flow the AuthProvider uses.
+  // No in-memory access token (fresh load) → mint one from the persisted
+  // refresh token via the SHARED, de-duplicated refresh (`attemptRefresh`
+  // — the same in-flight lock apiFetch + AuthProvider use). This is what
+  // stops this call from sending the refresh token concurrently with
+  // another path and tripping the server's refresh-token-reuse
+  // revocation (which would revoke ALL the admin's tokens). A genuine
+  // guest has no refresh token, so attemptRefresh returns false at once.
   if (!accessToken) {
-    const refreshToken = getRefreshToken()
-    if (!refreshToken) return false // genuine guest
-    try {
-      const res = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${refreshToken}` },
-      })
-      if (!res.ok) return false
-      const data = await res.json().catch(() => null)
-      if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
-        setTokens({
-          accessToken: data.tokens.accessToken,
-          refreshToken: data.tokens.refreshToken,
-        })
-        accessToken = data.tokens.accessToken as string
-      } else {
-        return false
-      }
-    } catch {
-      return false
-    }
+    const ok = await attemptRefresh()
+    if (!ok) return false
+    accessToken = getAccessToken()
   }
 
   if (!accessToken) return false

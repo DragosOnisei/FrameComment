@@ -9,6 +9,42 @@ import fs from 'fs'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// 3.8.x PERF: short-TTL in-memory cache for the HLS video row. hls.js
+// fires a separate request per segment (dozens while filling the buffer
+// at startup — the "stuck at 00:00 for ~10s" symptom), and each used to
+// do its own `video.findUnique`. Caching collapses those into one DB hit
+// per TTL. Kept short (5s) so a tier finishing encoding mid-watch still
+// shows up on the master-manifest poll within a few seconds.
+const hlsVideoCache = new Map<string, { value: any; expiresAt: number }>()
+const HLS_VIDEO_CACHE_TTL_MS = 5_000
+
+async function getHlsVideoCached(videoId: string): Promise<any> {
+  const now = Date.now()
+  const hit = hlsVideoCache.get(videoId)
+  if (hit && hit.expiresAt > now) return hit.value
+  const video = (await prisma.video.findUnique({
+    where: { id: videoId },
+    select: {
+      id: true,
+      projectId: true,
+      hlsBasePath: true,
+      hlsQualities: true,
+    } as any,
+  })) as any
+  if (video) {
+    hlsVideoCache.set(videoId, {
+      value: video,
+      expiresAt: now + HLS_VIDEO_CACHE_TTL_MS,
+    })
+    if (hlsVideoCache.size > 500) {
+      for (const [k, v] of hlsVideoCache) {
+        if (v.expiresAt <= now) hlsVideoCache.delete(k)
+      }
+    }
+  }
+  return video
+}
+
 /**
  * 1.9.4+ Phase B: HLS streaming endpoints.
  *
@@ -129,15 +165,9 @@ export async function GET(
   }
 
   // Lookup video — we need hlsBasePath + hlsQualities for routing.
-  const video = await prisma.video.findUnique({
-    where: { id: videoId },
-    select: {
-      id: true,
-      projectId: true,
-      hlsBasePath: true,
-      hlsQualities: true,
-    } as any,
-  }) as any
+  // 3.8.x PERF: served from a 5s in-memory cache (see getHlsVideoCached)
+  // so a burst of segment requests doesn't fan out into a DB query each.
+  const video = await getHlsVideoCached(videoId)
 
   if (!video) {
     return new NextResponse('Video not found', { status: 404 })
