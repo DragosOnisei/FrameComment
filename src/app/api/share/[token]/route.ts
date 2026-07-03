@@ -205,6 +205,10 @@ export async function GET(
       approved: video.approved,
       approvedAt: video.approvedAt,
       thumbnailPath: video.thumbnailPath,
+      // 3.8.x: storyboard sprite path — lets SharePageClient mint a
+      // storyboard token so the player timeline gets the same
+      // hover-scrub frame preview the folder/version thumbnails have.
+      storyboardPath: video.storyboardPath ?? null,
       // folderId surfaced (1.0.6+) so the share page can scope the
       // title-flyout to videos from one folder when arriving via a
       // folder share link.
@@ -301,6 +305,7 @@ export async function GET(
       downloadUrl: video.downloadUrl,
       thumbnailUrl: video.thumbnailUrl,
       thumbnailPath: video.thumbnailPath,
+      storyboardPath: video.storyboardPath ?? null,
     })) : videosSanitizedBase
 
     const sanitizedVideosByName = isGuest ? Object.keys(sortedVideosByName).reduce((acc: any, name: string) => {
@@ -319,6 +324,7 @@ export async function GET(
         downloadUrl: video.downloadUrl,
         thumbnailUrl: video.thumbnailUrl,
         thumbnailPath: video.thumbnailPath,
+        storyboardPath: video.storyboardPath ?? null,
       }))
       return acc
     }, {}) : sortedVideosByName

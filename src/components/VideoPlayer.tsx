@@ -90,14 +90,41 @@ interface VideoPlayerProps {
  * variant clears the threshold.
  */
 /**
- * 3.8.x: AUTO caps playback at HD+ (1080p). Returns the index of the
- * highest level whose height is ≤ ~1080p; 4K (2160p) is opt-in — the
- * client/admin must pick it manually from the quality menu. If the clip
- * somehow only has higher variants, fall back to the lowest available.
+ * 3.8.x: the AUTO cap is DEVICE-AWARE.
+ *  - small screens (phones) → HD (720p): >720p is invisible on a phone
+ *    and just wastes bandwidth,
+ *  - larger screens (tablets / desktops) → HD+ (1080p).
+ * 4K (2160p) is always opt-in on every device, and the user can still
+ * pick ANY tier manually from the quality menu. This is a resolution-
+ * only, auth-agnostic decision computed from the viewport, so it
+ * applies identically on public share links (guests included).
+ *
+ * "Small" keys off the SHORTER viewport dimension so it's robust to
+ * orientation — a phone in landscape (e.g. 932×430) still reads as
+ * small because its short side (430) is < the threshold, while a
+ * desktop or tablet stays large.
  */
-function pickAutoCappedLevelIdx(levels: Array<{ height?: number }>): number {
+const SMALL_DEVICE_MAX = 768
+function isSmallDevice(): boolean {
+  if (typeof window === 'undefined') return false
+  return Math.min(window.innerWidth, window.innerHeight) < SMALL_DEVICE_MAX
+}
+function autoCapHeight(): number {
+  return isSmallDevice() ? 720 : 1080
+}
+
+/**
+ * AUTO caps playback at the device-appropriate height (see
+ * `autoCapHeight`). Returns the index of the highest level whose height
+ * is ≤ the cap; higher tiers are opt-in. If the clip somehow only has
+ * higher variants, fall back to the lowest available.
+ */
+function pickAutoCappedLevelIdx(
+  levels: Array<{ height?: number }>,
+  capH: number = autoCapHeight(),
+): number {
   if (!levels || levels.length === 0) return 0
-  const CAP_H = 1080 * 1.1 // tolerance for cinematic crops (~1088)
+  const CAP_H = capH * 1.1 // tolerance for cinematic crops (~1088 / ~792)
   let capIdx = -1
   for (let i = 0; i < levels.length; i++) {
     if ((levels[i]?.height || 0) <= CAP_H) capIdx = i // ascending → last ≤cap = highest ≤cap
@@ -119,7 +146,8 @@ function pickInitialHlsLevelIdx(
         ? defaultQuality
         : null
 
-  // Both auto → HD+ cap (never auto-start at 4K).
+  // Both auto → device-aware cap (720p on phones, 1080p on larger
+  // screens); never auto-start at 4K.
   if (!target) return pickAutoCappedLevelIdx(levels)
 
   const targetH =
@@ -395,8 +423,9 @@ export default function VideoPlayer({
     }
 
     if (q === 'auto') {
-      // 3.8.x: Auto caps at HD+ (1080p) — pin to the highest level
-      // ≤ 1080, NOT the absolute highest. 4K stays opt-in. Cheap path,
+      // 3.8.x: Auto caps at the device-appropriate height (720p on
+      // phones, 1080p on larger screens) — pin to the highest level
+      // ≤ cap, NOT the absolute highest. 4K stays opt-in. Cheap path,
       // instant; no reload, no destroy.
       if (hls && hls.levels && hls.levels.length > 0) {
         const idx = pickAutoCappedLevelIdx(hls.levels)
@@ -959,24 +988,36 @@ export default function VideoPlayer({
         // honestly says "480p" (not "720p HD") so the user
         // understands why higher options aren't visible yet.
         if (effectiveQuality === 'auto') {
-          // 2.2.0+ fix: project set to auto + user hasn't picked a
-          // tier yet → start at the highest available tier. Without
-          // this branch the else-fallback at the bottom of the
-          // ladder mis-categorised "auto" as the lowest tier, so a
-          // shared 1080p clip opened at 480p even though the higher
-          // streams were ready.
-          if ((selectedVideo as any).streamUrl2160p) {
-            url = (selectedVideo as any).streamUrl2160p
-            qualityUsed = '2160p'
-          } else if ((selectedVideo as any).streamUrl1080p) {
-            url = (selectedVideo as any).streamUrl1080p
-            qualityUsed = '1080p'
-          } else if ((selectedVideo as any).streamUrl720p) {
-            url = (selectedVideo as any).streamUrl720p
-            qualityUsed = '720p'
-          } else if ((selectedVideo as any).streamUrl480p) {
-            url = (selectedVideo as any).streamUrl480p
-            qualityUsed = '480p'
+          // 2.2.0+: project set to auto + user hasn't picked a tier
+          // yet → start at the highest available tier so a shared
+          // fully-processed clip doesn't open at 480p.
+          // 3.8.x: BUT the auto pick is now DEVICE-CAPPED — HD (720p)
+          // on phones, HD+ (1080p) on larger screens — matching the
+          // HLS path (`pickAutoCappedLevelIdx`). We prefer the highest
+          // tier AT/BELOW the cap, and only fall back UP to a bigger
+          // tier when nothing at/below the cap was encoded. 4K is never
+          // auto-selected; the user can still pick it (or any tier)
+          // manually from the quality menu on any device. Auth-agnostic,
+          // so guests on a public share get the same behaviour.
+          const s = selectedVideo as any
+          const urlByTier: Record<string, string | undefined> = {
+            '2160p': s.streamUrl2160p,
+            '1080p': s.streamUrl1080p,
+            '720p': s.streamUrl720p,
+            '480p': s.streamUrl480p,
+          }
+          // Highest→lowest ≤cap, then lowest→highest above cap as a
+          // last resort.
+          const order =
+            autoCapHeight() >= 1080
+              ? ['1080p', '720p', '480p', '2160p']
+              : ['720p', '480p', '1080p', '2160p']
+          for (const tier of order) {
+            if (urlByTier[tier]) {
+              url = urlByTier[tier]
+              qualityUsed = tier as '480p' | '720p' | '1080p' | '2160p'
+              break
+            }
           }
         } else if (effectiveQuality === '2160p') {
           // Prefer 2160p, fall back through the ladder.
@@ -2214,6 +2255,7 @@ export default function VideoPlayer({
                   comments={comments}
                   videoFps={selectedVideo?.fps || 24}
                   videoId={selectedVideo?.id}
+                  storyboardUrl={(selectedVideo as any)?.storyboardUrl || null}
                   isAdmin={isAdmin}
                   timestampDisplayMode={timestampDisplayMode}
                   onMarkerClick={onCommentFocus}

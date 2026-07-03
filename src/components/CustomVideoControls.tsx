@@ -34,6 +34,12 @@ interface CustomVideoControlsProps {
   comments?: CommentWithReplies[]
   videoFps?: number
   videoId?: string
+  /** 3.8.x: signed URL of the storyboard sprite-sheet (10×10 grid of
+   *  frames). When present the timeline shows a Frame.io-style
+   *  hover-scrub frame preview — the same sprite the folder/version
+   *  thumbnails use. Null on clips without a sprite (older / still
+   *  processing) → the timeline falls back to a plain timecode badge. */
+  storyboardUrl?: string | null
   isAdmin?: boolean
   timestampDisplayMode?: 'TIMECODE' | 'AUTO'
   onMarkerClick?: (commentId: string) => void // Callback when a timeline marker is clicked
@@ -150,6 +156,37 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
+// 3.8.x: storyboard sprite-scrub. Same 10×10 (=100 frames) grid the
+// worker produces (192×108 letterboxed cells) and the same math
+// FolderCard / ThumbnailReel use — map a 0…1 timeline fraction to the
+// matching sprite cell and shift `background-position`. No video seek,
+// no extra request: instant frame preview on hover.
+const STORY_COLS = 10
+const STORY_ROWS = 10
+const STORY_CELLS = STORY_COLS * STORY_ROWS
+function storyboardCellStyle(
+  url: string,
+  fraction: number,
+): React.CSSProperties {
+  // The worker samples exactly STORY_CELLS evenly-spaced frames, so
+  // sprite frame `i` represents video time `i * duration / STORY_CELLS`.
+  // To line the preview up with where a *seek* to the hovered time
+  // lands, pick the NEAREST frame (round), not the start of the 1%
+  // bucket (floor) — floor lagged the preview by up to a full bucket
+  // (~duration/100), which on a long clip is many seconds off.
+  const idx = Math.max(0, Math.min(STORY_CELLS - 1, Math.round(fraction * STORY_CELLS)))
+  const col = idx % STORY_COLS
+  const row = Math.floor(idx / STORY_COLS)
+  const xPct = (col / (STORY_COLS - 1)) * 100
+  const yPct = (row / (STORY_ROWS - 1)) * 100
+  return {
+    backgroundImage: `url(${url})`,
+    backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
+    backgroundPosition: `${xPct}% ${yPct}%`,
+    backgroundRepeat: 'no-repeat',
+  }
+}
+
 function formatTimeWithMode(
   seconds: number,
   fps: number,
@@ -214,6 +251,7 @@ export default function CustomVideoControls({
   comments = [],
   videoFps = 24,
   videoId = '',
+  storyboardUrl = null,
   isAdmin: _isAdmin = false,
   timestampDisplayMode = 'TIMECODE',
   onMarkerClick,
@@ -1329,17 +1367,48 @@ export default function CustomVideoControls({
               spots near the user's finger. The hover-scrub UX it
               serves doesn't translate to touch anyway, so we just
               hide it below `sm:`. */}
-          {hoveredTime !== null && !isDragging && (
-            <div
-              className="hidden sm:block absolute bottom-full mb-2 px-2 py-1 bg-black/90 text-white text-xs font-mono rounded border border-white/20 shadow-lg whitespace-nowrap pointer-events-none"
-              style={{
-                left: `${(hoveredTime / videoDuration) * 100}%`,
-                transform: 'translateX(-50%)',
-              }}
-            >
-              {formatTime(hoveredTime)}
-            </div>
-          )}
+          {hoveredTime !== null && !isDragging && videoDuration > 0 && (() => {
+            const frac = Math.max(0, Math.min(1, hoveredTime / videoDuration))
+            const leftPct = frac * 100
+            const tc = formatTimeWithMode(
+              hoveredTime,
+              videoFps && videoFps > 0 ? videoFps : 24,
+              videoDuration,
+              timestampDisplayMode,
+            )
+            // With a storyboard we render a ~160px-wide frame preview and
+            // clamp its center so the box never spills past either edge
+            // of the timeline (half-width ≈ 84px). Without a sprite we
+            // keep the original compact timecode badge.
+            return (
+              <div
+                className="hidden sm:block absolute bottom-full mb-3 pointer-events-none z-30"
+                style={{
+                  left: storyboardUrl
+                    ? `clamp(84px, ${leftPct}%, calc(100% - 84px))`
+                    : `${leftPct}%`,
+                  transform: 'translateX(-50%)',
+                }}
+              >
+                {storyboardUrl ? (
+                  <div className="rounded-lg overflow-hidden ring-1 ring-white/20 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.85)] bg-black">
+                    <div
+                      className="w-[160px] aspect-video bg-black"
+                      style={storyboardCellStyle(storyboardUrl, frac)}
+                      aria-hidden
+                    />
+                    <div className="px-2 py-1 text-center text-[11px] font-mono text-white bg-black/85 border-t border-white/10 tabular-nums whitespace-nowrap">
+                      {tc}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-2 py-1 bg-black/90 text-white text-xs font-mono rounded border border-white/20 shadow-lg whitespace-nowrap tabular-nums">
+                    {tc}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
 

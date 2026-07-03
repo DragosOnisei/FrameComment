@@ -49,6 +49,7 @@ export async function GET(
       projectId: true,
       approved: true,
       thumbnailPath: true,
+      storyboardPath: true,
       preview480Path: true,
       preview720Path: true,
       preview1080Path: true,
@@ -84,6 +85,12 @@ export async function GET(
     return NextResponse.json({ token: '' })
   }
   if (quality === '2160p' && !video.preview2160Path) {
+    return NextResponse.json({ token: '' })
+  }
+  // 3.8.x: storyboard sprite for the timeline hover-scrub. Return an
+  // empty token when the sprite doesn't exist yet (older clips, or
+  // still-processing) so the client just skips the preview overlay.
+  if (quality === 'storyboard' && !video.storyboardPath) {
     return NextResponse.json({ token: '' })
   }
 

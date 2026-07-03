@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
 import { logError } from '@/lib/logging'
-import { getAccessToken } from '@/lib/token-store'
+import { detectLoggedInAdmin } from '@/lib/share-auth'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 
 /**
@@ -148,21 +148,13 @@ function PublicFolderSharePageInner() {
   // a guest to /login.
   const [isLoggedInAdmin, setIsLoggedInAdmin] = useState(false)
   useEffect(() => {
-    const token = getAccessToken()
-    if (!token) return
     let alive = true
     ;(async () => {
-      try {
-        const res = await fetch('/api/auth/session', {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
-        })
-        if (!res.ok) return
-        const body = await res.json().catch(() => null)
-        if (alive && body?.authenticated) setIsLoggedInAdmin(true)
-      } catch {
-        /* stay on the share */
-      }
+      // Refresh-then-session check: the access token is memory-only and
+      // gone on a fresh load, so we mint one from the persisted refresh
+      // token before asking /api/auth/session (see share-auth.ts).
+      const ok = await detectLoggedInAdmin()
+      if (alive && ok) setIsLoggedInAdmin(true)
     })()
     return () => {
       alive = false

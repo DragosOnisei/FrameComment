@@ -6,7 +6,7 @@ import { useSearchParams, usePathname, useRouter } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
 import ShareOnboarding from '@/components/ShareOnboarding'
-import { getAccessToken } from '@/lib/token-store'
+import { detectLoggedInAdmin } from '@/lib/share-auth'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
@@ -125,21 +125,13 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // 401 can't bounce a guest to /login via the refresh interceptor.
   const [isLoggedInAdmin, setIsLoggedInAdmin] = useState(false)
   useEffect(() => {
-    const token = getAccessToken()
-    if (!token) return
     let alive = true
     ;(async () => {
-      try {
-        const res = await fetch('/api/auth/session', {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
-        })
-        if (!res.ok) return
-        const data = await res.json().catch(() => null)
-        if (alive && data?.authenticated) setIsLoggedInAdmin(true)
-      } catch {
-        /* ignore — stay on the share */
-      }
+      // Refresh-then-session check: the access token is memory-only and
+      // gone on a fresh load, so we mint one from the persisted refresh
+      // token before asking /api/auth/session (see share-auth.ts).
+      const ok = await detectLoggedInAdmin()
+      if (alive && ok) setIsLoggedInAdmin(true)
     })()
     return () => {
       alive = false
@@ -776,6 +768,17 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             }
           }
 
+          // 3.8.x: mint the storyboard sprite token so the player
+          // timeline can show the Frame.io-style hover-scrub frame
+          // preview. The token route returns '' when there's no sprite.
+          let storyboardUrl = null
+          if (video.storyboardPath) {
+            const storyboardToken = await fetchVideoTokenWithRetry(video.id, 'storyboard')
+            if (storyboardToken) {
+              storyboardUrl = `/api/content/${storyboardToken}`
+            }
+          }
+
           const tokenized = {
             ...video,
             streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
@@ -784,6 +787,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             streamUrl2160p: streamToken2160p ? `/api/content/${streamToken2160p}` : '',
             downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
             thumbnailUrl,
+            storyboardUrl,
           }
 
           // Only cache successful tokenization results.
