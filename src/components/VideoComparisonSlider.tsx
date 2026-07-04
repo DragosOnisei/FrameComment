@@ -97,8 +97,7 @@ export default function VideoComparisonSlider({
   return (
     <div
       ref={containerRef}
-      className="relative w-full overflow-hidden rounded-xl bg-muted/50 backdrop-blur-sm select-none"
-      style={{ aspectRatio: '16 / 9' }}
+      className="relative w-full h-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10 select-none"
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
     >

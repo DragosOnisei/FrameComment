@@ -502,20 +502,18 @@ export default function VideoComparison({
                 <div className="flex-1 min-w-0">{renderVersionPicker('A')}</div>
                 <div className="flex-1 min-w-0">{renderVersionPicker('B')}</div>
               </div>
-              <div className="flex-1 min-h-0 flex items-center justify-center">
-                <div className="w-full max-h-full" style={{ aspectRatio: '16 / 9' }}>
-                  <VideoComparisonSlider
-                    videoRefA={videoRefA}
-                    videoRefB={videoRefB}
-                    videoUrlA={videoUrlA}
-                    videoUrlB={videoUrlB}
-                    labelA=""
-                    labelB=""
-                    posterA={(versionA as any)?.thumbnailUrl}
-                    posterB={(versionB as any)?.thumbnailUrl}
-                    onLoadedMetadata={handleLoadedMetadata}
-                  />
-                </div>
+              <div className="flex-1 min-h-0 relative">
+                <VideoComparisonSlider
+                  videoRefA={videoRefA}
+                  videoRefB={videoRefB}
+                  videoUrlA={videoUrlA}
+                  videoUrlB={videoUrlB}
+                  labelA=""
+                  labelB=""
+                  posterA={(versionA as any)?.thumbnailUrl}
+                  posterB={(versionB as any)?.thumbnailUrl}
+                  onLoadedMetadata={handleLoadedMetadata}
+                />
               </div>
             </div>
           )}
