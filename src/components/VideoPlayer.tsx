@@ -835,6 +835,21 @@ export default function VideoPlayer({
     }
   }, [displayVideos])
 
+  // 3.8.x: open the side-by-side version comparison overlay when the
+  // top-bar "Compare" button (ThumbnailReel) is clicked. Same window-event
+  // pattern as selectVideoVersion above. The overlay + button are gated to
+  // ≥2 versions (and the button to large screens), so a stray event on a
+  // single-version clip is a harmless no-op.
+  useEffect(() => {
+    const handleOpenComparison = () => {
+      if (displayVideos.length >= 2) setShowComparison(true)
+    }
+    window.addEventListener('openVersionComparison', handleOpenComparison as EventListener)
+    return () => {
+      window.removeEventListener('openVersionComparison', handleOpenComparison as EventListener)
+    }
+  }, [displayVideos])
+
   // Safety check: ensure selectedVideo exists before accessing properties
   const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
 

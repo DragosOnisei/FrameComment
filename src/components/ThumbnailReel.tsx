@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Film, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Film, GitCompareArrows, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -508,6 +508,32 @@ export default function ThumbnailReel({
                 >
                   <span>{activeVersionLabel}</span>
                   {currentVersions.length > 1 && <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              )}
+
+              {/* 3.8.x: Compare versions — opens the existing side-by-side
+                  comparison overlay (VideoPlayer listens for the event).
+                  Shown ONLY when there are ≥2 versions AND only on large
+                  screens (`hidden lg:inline-flex`) — the two-video layout
+                  needs the width and it's a desktop review affordance,
+                  matching Frame.io. Placed next to the version chip so it
+                  reads as a version-related action. */}
+              {currentVersions.length >= 2 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('openVersionComparison'))
+                  }
+                  className={cn(
+                    'hidden lg:inline-flex items-center gap-1.5 shrink-0 h-7 px-2.5 rounded-full',
+                    'text-xs font-medium',
+                    'bg-white/[0.06] ring-1 ring-white/10 text-white',
+                    'hover:bg-white/[0.12] hover:ring-white/20 active:scale-95 transition-colors cursor-pointer'
+                  )}
+                  title="Compare versions"
+                >
+                  <GitCompareArrows className="w-3.5 h-3.5" />
+                  <span>Compare</span>
                 </button>
               )}
 

@@ -112,7 +112,14 @@ export default function VideoComparisonControls({
   }, [isDragging])
 
   return (
-    <div className="bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 sm:p-3 rounded-b-xl">
+    <div
+      className="p-2 sm:p-3 rounded-xl ring-1 ring-white/10"
+      style={{
+        backgroundColor: 'rgba(30, 48, 72, 0.40)',
+        backdropFilter: 'blur(24px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+      }}
+    >
       {/* Timeline */}
       <div className="mb-2 sm:mb-3 px-1">
         <div
@@ -130,8 +137,12 @@ export default function VideoComparisonControls({
           <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-1.5 sm:h-2 bg-white/20 rounded-full overflow-hidden">
             <div className="absolute inset-0 bg-white/30" />
             <div
-              className="absolute inset-y-0 left-0 bg-primary transition-all duration-100"
-              style={{ width: `${progress}%` }}
+              className="absolute inset-y-0 left-0 transition-all duration-100"
+              style={{
+                width: `${progress}%`,
+                backgroundColor: 'hsl(var(--spotlight-tint))',
+                boxShadow: '0 0 8px hsl(var(--spotlight-tint) / 0.4)',
+              }}
             />
           </div>
 
@@ -140,7 +151,10 @@ export default function VideoComparisonControls({
             className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-20"
             style={{ left: `${progress}%` }}
           >
-            <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 border-primary -translate-x-1/2 group-hover:scale-110 transition-transform" />
+            <div
+              className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full shadow-lg border-2 -translate-x-1/2 group-hover:scale-110 transition-transform"
+              style={{ borderColor: 'hsl(var(--spotlight-tint))' }}
+            />
           </div>
 
           {/* Hover Time Indicator */}

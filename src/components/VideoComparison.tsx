@@ -3,8 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { Video } from '@prisma/client'
-import { X, ChevronDown } from 'lucide-react'
-import { Button } from './ui/button'
+import { X, ChevronDown, GitCompareArrows } from 'lucide-react'
 import VideoComparisonControls from './VideoComparisonControls'
 import VideoComparisonSlider from './VideoComparisonSlider'
 
@@ -293,79 +292,99 @@ export default function VideoComparison({
     setIsPlaying(false)
   }, [versionAIndex, versionBIndex, mode])
 
+  const stripExt = (n: string) => {
+    const dot = n.lastIndexOf('.')
+    return dot > 0 ? n.slice(0, dot) : n
+  }
+
+  // 3.8.x: per-video header (centered, above each clip) — filename + an
+  // inline version dropdown so you can re-pick either side right where
+  // you're looking. Styled in the app's glass vocabulary; a small
+  // sky/emerald dot keeps the A/B sides identifiable (esp. in slider mode).
+  const renderVersionPicker = (side: 'A' | 'B') => {
+    const isA = side === 'A'
+    const idx = isA ? versionAIndex : versionBIndex
+    const otherIdx = isA ? versionBIndex : versionAIndex
+    const setIdx = isA ? setVersionAIndex : setVersionBIndex
+    const show = isA ? showSelectorA : showSelectorB
+    const setShow = isA ? setShowSelectorA : setShowSelectorB
+    const closeOther = isA ? setShowSelectorB : setShowSelectorA
+    const v = sorted[idx]
+    const rawName = (v as any)?.originalFileName || v?.name || ''
+    return (
+      <div className="flex items-center justify-center gap-2 mb-2 px-2 min-w-0">
+        <span className={`h-2 w-2 rounded-full shrink-0 ${isA ? 'bg-sky-400' : 'bg-emerald-400'}`} />
+        <span className="text-xs text-white/70 truncate max-w-[55%]" title={rawName}>
+          {stripExt(rawName) || '—'}
+        </span>
+        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => { setShow(!show); closeOther(false) }}
+            className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1.5 rounded-full text-xs font-semibold uppercase tracking-wider tabular-nums bg-white/[0.08] ring-1 ring-white/15 text-white hover:bg-white/[0.16] hover:ring-white/25 active:scale-95 transition-colors"
+            title="Switch version"
+          >
+            {v?.versionLabel}
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+          {show && (
+            <div
+              className="absolute top-full mt-1 left-1/2 -translate-x-1/2 z-50 min-w-[130px] py-1 rounded-lg ring-1 ring-white/15 shadow-2xl"
+              style={{
+                backgroundColor: 'rgba(22, 37, 51, 0.95)',
+                backdropFilter: 'blur(24px) saturate(160%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+              }}
+            >
+              {sorted.map((ver, i) => (
+                <button
+                  key={ver.id}
+                  type="button"
+                  onClick={() => { setIdx(i); setShow(false) }}
+                  disabled={i === otherIdx}
+                  className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
+                    i === idx ? 'bg-white/[0.12] font-semibold text-white' : 'text-white/85 hover:bg-white/[0.08]'
+                  } ${i === otherIdx ? 'opacity-40 cursor-not-allowed' : ''}`}
+                >
+                  {ver.versionLabel}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <h2 className="text-sm font-semibold text-foreground truncate">
+    <div
+      className="fixed inset-0 z-50 flex flex-col text-white"
+      style={{
+        backgroundColor: 'rgba(22, 37, 51, 0.88)',
+        backgroundImage:
+          'radial-gradient(120% 85% at 50% -10%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 42%, transparent 72%)',
+        backdropFilter: 'blur(40px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+      }}
+    >
+      {/* Header — app glass. Version pickers moved above each video, so the
+          header stays minimal: title + a glass close button. */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <GitCompareArrows className="w-4 h-4 text-white/70 shrink-0" />
+          <h2 className="text-sm font-semibold text-white truncate">
             {t('compareVersions')}
           </h2>
-          <span className="text-xs text-muted-foreground hidden sm:inline">
-            {versionA?.name}
-          </span>
         </div>
 
-        {/* Version Selectors */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Version A Selector */}
-          <div className="relative">
-            <button
-              onClick={() => { setShowSelectorA(!showSelectorA); setShowSelectorB(false) }}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-blue-500/15 text-blue-500 rounded-md border border-blue-500/30 hover:bg-blue-500/25 transition-colors"
-            >
-              A: {versionA?.versionLabel}
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            {showSelectorA && (
-              <div className="absolute top-full mt-1 right-0 bg-popover border border-border rounded-lg shadow-xl z-50 min-w-[120px] py-1">
-                {sorted.map((v, i) => (
-                  <button
-                    key={v.id}
-                    onClick={() => { setVersionAIndex(i); setShowSelectorA(false) }}
-                    disabled={i === versionBIndex}
-                    className={`w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors ${
-                      i === versionAIndex ? 'bg-accent font-semibold' : ''
-                    } ${i === versionBIndex ? 'opacity-40 cursor-not-allowed' : ''}`}
-                  >
-                    {v.versionLabel}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Version B Selector */}
-          <div className="relative">
-            <button
-              onClick={() => { setShowSelectorB(!showSelectorB); setShowSelectorA(false) }}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-green-500/15 text-green-500 rounded-md border border-green-500/30 hover:bg-green-500/25 transition-colors"
-            >
-              B: {versionB?.versionLabel}
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            {showSelectorB && (
-              <div className="absolute top-full mt-1 right-0 bg-popover border border-border rounded-lg shadow-xl z-50 min-w-[120px] py-1">
-                {sorted.map((v, i) => (
-                  <button
-                    key={v.id}
-                    onClick={() => { setVersionBIndex(i); setShowSelectorB(false) }}
-                    disabled={i === versionAIndex}
-                    className={`w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors ${
-                      i === versionBIndex ? 'bg-accent font-semibold' : ''
-                    } ${i === versionAIndex ? 'opacity-40 cursor-not-allowed' : ''}`}
-                  >
-                    {v.versionLabel}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <Button variant="ghost" size="sm" onClick={onClose} className="ml-1">
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="h-8 w-8 rounded-full bg-white/[0.08] ring-1 ring-white/15 text-white flex items-center justify-center hover:bg-white/[0.16] hover:ring-white/25 active:scale-95 transition-colors shrink-0"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Video Area */}
@@ -380,10 +399,8 @@ export default function VideoComparison({
             <div className="h-full flex flex-col sm:flex-row gap-2">
               {/* Video A */}
               <div className="flex-1 min-h-0 flex flex-col">
-                <div className="text-xs font-medium text-blue-500 mb-1 px-1">
-                  A: {versionA?.versionLabel}
-                </div>
-                <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-muted/50 backdrop-blur-sm"
+                {renderVersionPicker('A')}
+                <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-black/30 ring-1 ring-white/10"
                   style={{ aspectRatio: '16 / 9' }}
                 >
                   <video
@@ -403,10 +420,8 @@ export default function VideoComparison({
 
               {/* Video B */}
               <div className="flex-1 min-h-0 flex flex-col">
-                <div className="text-xs font-medium text-green-500 mb-1 px-1">
-                  B: {versionB?.versionLabel}
-                </div>
-                <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-muted/50 backdrop-blur-sm"
+                {renderVersionPicker('B')}
+                <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-black/30 ring-1 ring-white/10"
                   style={{ aspectRatio: '16 / 9' }}
                 >
                   <video
