@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { Video } from '@prisma/client'
-import { X, ChevronDown, GitCompareArrows } from 'lucide-react'
+import { X, ChevronDown, GitCompareArrows, Volume2, VolumeX } from 'lucide-react'
 import VideoComparisonControls from './VideoComparisonControls'
 import VideoComparisonSlider from './VideoComparisonSlider'
 
@@ -55,6 +55,11 @@ export default function VideoComparison({
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
   const [showSelectorA, setShowSelectorA] = useState(false)
   const [showSelectorB, setShowSelectorB] = useState(false)
+  // 3.8.x: which side is the AUDIO source. Both clips play in sync, but
+  // only one is audible at a time (otherwise the two audio tracks overlap
+  // into noise). Default = B (the latest version). Clicking a window moves
+  // the audio there — news-panel "which camera is live" style.
+  const [activeAudio, setActiveAudio] = useState<'A' | 'B'>('B')
 
   const videoRefA = useRef<HTMLVideoElement | null>(null)
   const videoRefB = useRef<HTMLVideoElement | null>(null)
@@ -190,9 +195,17 @@ export default function VideoComparison({
     if (dur && dur !== Infinity) {
       setVideoDuration(dur)
     }
-    if (a) a.playbackRate = playbackSpeed
-    if (b) b.playbackRate = playbackSpeed
-  }, [playbackSpeed])
+    if (a) { a.playbackRate = playbackSpeed; a.muted = activeAudio !== 'A' }
+    if (b) { b.playbackRate = playbackSpeed; b.muted = activeAudio !== 'B' }
+  }, [playbackSpeed, activeAudio])
+
+  // Apply audio focus: mute the non-active side. Re-applied whenever the
+  // active side changes or either version reloads (the <video> elements
+  // remount on version change, so we re-assert `muted` here).
+  useEffect(() => {
+    if (videoRefA.current) videoRefA.current.muted = activeAudio !== 'A'
+    if (videoRefB.current) videoRefB.current.muted = activeAudio !== 'B'
+  }, [activeAudio, versionAIndex, versionBIndex, mode])
 
   // Keyboard shortcuts — match the main player exactly (Ctrl+ prefix)
   useEffect(() => {
@@ -216,7 +229,7 @@ export default function VideoComparison({
         e.preventDefault()
         e.stopPropagation()
         setPlaybackSpeed(prev => {
-          const next = Math.max(0.25, prev - 0.25)
+          const next = Math.max(0.75, prev - 0.25)
           if (videoRefA.current) videoRefA.current.playbackRate = next
           if (videoRefB.current) videoRefB.current.playbackRate = next
           return next
@@ -400,7 +413,12 @@ export default function VideoComparison({
               {/* Video A */}
               <div className="flex-1 min-h-0 flex flex-col">
                 {renderVersionPicker('A')}
-                <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-black/30 ring-1 ring-white/10"
+                <div
+                  className={`flex-1 min-h-0 relative rounded-xl overflow-hidden transition-shadow duration-200 ${
+                    activeAudio === 'A'
+                      ? 'ring-2 ring-red-500 shadow-[0_0_26px_-4px_rgba(239,68,68,0.75)]'
+                      : 'ring-1 ring-white/10'
+                  }`}
                   style={{ aspectRatio: '16 / 9' }}
                 >
                   <video
@@ -408,20 +426,42 @@ export default function VideoComparison({
                     key={`a-${versionA?.id}`}
                     src={videoUrlA}
                     poster={(versionA as any)?.thumbnailUrl || undefined}
-                    className="w-full h-full object-contain cursor-pointer"
+                    className="w-full h-full object-contain cursor-pointer bg-black"
                     crossOrigin="anonymous"
                     playsInline
                     preload="auto"
+                    muted={activeAudio !== 'A'}
                     onLoadedMetadata={handleLoadedMetadata}
-                    onClick={togglePlayPause}
+                    onClick={() => setActiveAudio('A')}
                   />
+                  {/* Audio-focus badge. Red + Volume2 = this side is the
+                      live audio source; muted icon = click to move audio here.
+                      (Clicking anywhere on the video does the same.) */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveAudio('A')}
+                    aria-label={activeAudio === 'A' ? 'Audio source' : 'Play audio from this version'}
+                    title={activeAudio === 'A' ? 'Audio: this version' : 'Play audio from this version'}
+                    className={`absolute top-2 right-2 z-20 h-8 w-8 rounded-full flex items-center justify-center transition-colors ${
+                      activeAudio === 'A'
+                        ? 'bg-red-500 text-white shadow-lg'
+                        : 'bg-black/50 text-white/60 ring-1 ring-white/15 hover:bg-black/70 hover:text-white'
+                    }`}
+                  >
+                    {activeAudio === 'A' ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
 
               {/* Video B */}
               <div className="flex-1 min-h-0 flex flex-col">
                 {renderVersionPicker('B')}
-                <div className="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-black/30 ring-1 ring-white/10"
+                <div
+                  className={`flex-1 min-h-0 relative rounded-xl overflow-hidden transition-shadow duration-200 ${
+                    activeAudio === 'B'
+                      ? 'ring-2 ring-red-500 shadow-[0_0_26px_-4px_rgba(239,68,68,0.75)]'
+                      : 'ring-1 ring-white/10'
+                  }`}
                   style={{ aspectRatio: '16 / 9' }}
                 >
                   <video
@@ -429,31 +469,53 @@ export default function VideoComparison({
                     key={`b-${versionB?.id}`}
                     src={videoUrlB}
                     poster={(versionB as any)?.thumbnailUrl || undefined}
-                    className="w-full h-full object-contain cursor-pointer"
+                    className="w-full h-full object-contain cursor-pointer bg-black"
                     crossOrigin="anonymous"
                     playsInline
                     preload="auto"
+                    muted={activeAudio !== 'B'}
                     onLoadedMetadata={handleLoadedMetadata}
-                    onClick={togglePlayPause}
+                    onClick={() => setActiveAudio('B')}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setActiveAudio('B')}
+                    aria-label={activeAudio === 'B' ? 'Audio source' : 'Play audio from this version'}
+                    title={activeAudio === 'B' ? 'Audio: this version' : 'Play audio from this version'}
+                    className={`absolute top-2 right-2 z-20 h-8 w-8 rounded-full flex items-center justify-center transition-colors ${
+                      activeAudio === 'B'
+                        ? 'bg-red-500 text-white shadow-lg'
+                        : 'bg-black/50 text-white/60 ring-1 ring-white/15 hover:bg-black/70 hover:text-white'
+                    }`}
+                  >
+                    {activeAudio === 'B' ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
             </div>
           ) : (
-            /* Slider Mode */
-            <div className="h-full flex items-center justify-center">
-              <div className="w-full max-h-full" style={{ aspectRatio: '16 / 9' }}>
-                <VideoComparisonSlider
-                  videoRefA={videoRefA}
-                  videoRefB={videoRefB}
-                  videoUrlA={videoUrlA}
-                  videoUrlB={videoUrlB}
-                  labelA={`A: ${versionA?.versionLabel}`}
-                  labelB={`B: ${versionB?.versionLabel}`}
-                  posterA={(versionA as any)?.thumbnailUrl}
-                  posterB={(versionB as any)?.thumbnailUrl}
-                  onLoadedMetadata={handleLoadedMetadata}
-                />
+            /* Slider Mode — same name + version pickers on top as
+               side-by-side (A left, B right); the in-slider corner
+               "A: vX / B: vX" labels are dropped in favour of these. */
+            <div className="h-full flex flex-col">
+              <div className="flex items-stretch gap-2">
+                <div className="flex-1 min-w-0">{renderVersionPicker('A')}</div>
+                <div className="flex-1 min-w-0">{renderVersionPicker('B')}</div>
+              </div>
+              <div className="flex-1 min-h-0 flex items-center justify-center">
+                <div className="w-full max-h-full" style={{ aspectRatio: '16 / 9' }}>
+                  <VideoComparisonSlider
+                    videoRefA={videoRefA}
+                    videoRefB={videoRefB}
+                    videoUrlA={videoUrlA}
+                    videoUrlB={videoUrlB}
+                    labelA=""
+                    labelB=""
+                    posterA={(versionA as any)?.thumbnailUrl}
+                    posterB={(versionB as any)?.thumbnailUrl}
+                    onLoadedMetadata={handleLoadedMetadata}
+                  />
+                </div>
               </div>
             </div>
           )}

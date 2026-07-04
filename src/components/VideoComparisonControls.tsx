@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { Play, Pause, SkipBack, SkipForward, Columns2, SplitSquareHorizontal } from 'lucide-react'
 import { secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
+import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 
 function formatTimeWithMode(
   seconds: number,
@@ -215,20 +216,13 @@ export default function VideoComparisonControls({
 
         {/* Right Controls */}
         <div className="flex items-center gap-1 sm:gap-2">
-          {/* Speed */}
-          <button
-            onClick={() => {
-              const speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2]
-              const idx = speeds.indexOf(playbackSpeed)
-              const next = idx >= 0 && idx < speeds.length - 1 ? speeds[idx + 1] : speeds[0]
-              onSpeedChange(next)
-            }}
-            className="px-2 py-1 sm:px-2.5 sm:py-1.5 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-white text-xs sm:text-sm font-mono touch-manipulation"
-            aria-label={t('playbackSpeed')}
-            title={t('cycleSpeed')}
-          >
-            {playbackSpeed}x
-          </button>
+          {/* Speed — popup menu that opens ABOVE the button (glass, accent),
+              instead of cycling through speeds on each click. */}
+          <PlaybackSpeedMenu
+            value={playbackSpeed}
+            onChange={onSpeedChange}
+            options={[0.75, 1, 1.25, 1.5, 2]}
+          />
 
           {/* Mode Toggle */}
           <button

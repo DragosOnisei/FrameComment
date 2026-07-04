@@ -14,12 +14,15 @@ import { useEffect, useRef, useState } from 'react'
  * — Chrome and Safari typically clamp at ~16x — but 8x is a sensible
  * upper bound that matches what Frame.io exposes for review playback.
  */
-const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0] as const
+const DEFAULT_SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0] as const
 
 interface PlaybackSpeedMenuProps {
   value: number
   onChange: (speed: number) => void
   className?: string
+  /** Override the list of speeds. Defaults to the full 0.5×–8× ladder.
+   *  The comparison view passes a tighter 0.75×–2× set. */
+  options?: readonly number[]
 }
 
 function formatSpeed(s: number): string {
@@ -32,6 +35,7 @@ export default function PlaybackSpeedMenu({
   value,
   onChange,
   className = '',
+  options = DEFAULT_SPEED_OPTIONS,
 }: PlaybackSpeedMenuProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -101,7 +105,7 @@ export default function PlaybackSpeedMenu({
             Playback speed
           </div>
           <div className="grid grid-cols-1 gap-0.5">
-            {SPEED_OPTIONS.map((s) => {
+            {options.map((s) => {
               const isActive = Math.abs(s - value) < 0.001
               return (
                 <button

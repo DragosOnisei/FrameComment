@@ -131,13 +131,19 @@ export default function VideoComparisonSlider({
         />
       </div>
 
-      {/* Version Labels */}
-      <div className="absolute top-3 left-3 px-2 py-1 bg-black/70 text-white text-xs font-medium rounded backdrop-blur-sm z-10 pointer-events-none">
-        {labelA}
-      </div>
-      <div className="absolute top-3 right-3 px-2 py-1 bg-black/70 text-white text-xs font-medium rounded backdrop-blur-sm z-10 pointer-events-none">
-        {labelB}
-      </div>
+      {/* Version Labels — only when provided. Side-by-side + slider now
+          show name + version pickers ABOVE the video, so these in-corner
+          badges are suppressed when the caller passes empty labels. */}
+      {labelA && (
+        <div className="absolute top-3 left-3 px-2 py-1 bg-black/70 text-white text-xs font-medium rounded backdrop-blur-sm z-10 pointer-events-none">
+          {labelA}
+        </div>
+      )}
+      {labelB && (
+        <div className="absolute top-3 right-3 px-2 py-1 bg-black/70 text-white text-xs font-medium rounded backdrop-blur-sm z-10 pointer-events-none">
+          {labelB}
+        </div>
+      )}
 
       {/* Slider Divider Line */}
       <div
