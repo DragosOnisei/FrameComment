@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, type CSSProperties } from 'react'
 import { useTranslations } from 'next-intl'
 import { Video } from '@prisma/client'
-import { X, ChevronDown, GitCompareArrows, Volume2, VolumeX } from 'lucide-react'
+import { X, ChevronDown, GitCompareArrows, Volume2, VolumeX, Film, CheckCircle2 } from 'lucide-react'
 import VideoComparisonControls from './VideoComparisonControls'
 import VideoComparisonSlider from './VideoComparisonSlider'
 
@@ -24,6 +24,26 @@ function getVideoUrl(video: Video, quality: '720p' | '1080p' | '2160p'): string 
     return (video as any).streamUrl1080p || (video as any).streamUrl720p || (video as any).streamUrl2160p || ''
   }
   return (video as any).streamUrl720p || (video as any).streamUrl1080p || (video as any).streamUrl2160p || ''
+}
+
+// 3.8.x: storyboard sprite-scrub for the version thumbnails in the compare
+// picker — same 10×10 grid the rest of the app uses. Hovering a thumbnail
+// maps the mouse X to the nearest frame via background-position.
+const STORY_COLS = 10
+const STORY_ROWS = 10
+const STORY_CELLS = STORY_COLS * STORY_ROWS
+function storyboardCellStyle(url: string, fraction: number): CSSProperties {
+  const idx = Math.max(0, Math.min(STORY_CELLS - 1, Math.round(fraction * STORY_CELLS)))
+  const col = idx % STORY_COLS
+  const row = Math.floor(idx / STORY_COLS)
+  const xPct = (col / (STORY_COLS - 1)) * 100
+  const yPct = (row / (STORY_ROWS - 1)) * 100
+  return {
+    backgroundImage: `url(${url})`,
+    backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
+    backgroundPosition: `${xPct}% ${yPct}%`,
+    backgroundRepeat: 'no-repeat',
+  }
 }
 
 export default function VideoComparison({
@@ -60,6 +80,13 @@ export default function VideoComparison({
   // into noise). Default = B (the latest version). Clicking a window moves
   // the audio there — news-panel "which camera is live" style.
   const [activeAudio, setActiveAudio] = useState<'A' | 'B'>('B')
+  // 3.8.x: hover-scrub state for the version-picker thumbnails (which side,
+  // which version index, and the 0..1 fraction from the mouse X).
+  const [hoverScrub, setHoverScrub] = useState<{
+    side: 'A' | 'B'
+    idx: number
+    f: number
+  } | null>(null)
 
   const videoRefA = useRef<HTMLVideoElement | null>(null)
   const videoRefB = useRef<HTMLVideoElement | null>(null)
@@ -342,26 +369,102 @@ export default function VideoComparison({
           </button>
           {show && (
             <div
-              className="absolute top-full mt-1 left-1/2 -translate-x-1/2 z-50 min-w-[130px] py-1 rounded-lg ring-1 ring-white/15 shadow-2xl"
+              className={`absolute top-full mt-2 z-50 w-[300px] max-h-[340px] overflow-y-auto p-2 rounded-xl ring-1 ring-white/15 shadow-[0_20px_50px_-16px_rgba(0,0,0,0.8)] ${
+                isA ? 'left-0' : 'right-0'
+              }`}
               style={{
-                backgroundColor: 'rgba(22, 37, 51, 0.95)',
+                backgroundColor: 'rgba(22, 37, 51, 0.92)',
+                backgroundImage:
+                  'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.16) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
                 backdropFilter: 'blur(24px) saturate(160%)',
                 WebkitBackdropFilter: 'blur(24px) saturate(160%)',
               }}
             >
-              {sorted.map((ver, i) => (
-                <button
-                  key={ver.id}
-                  type="button"
-                  onClick={() => { setIdx(i); setShow(false) }}
-                  disabled={i === otherIdx}
-                  className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
-                    i === idx ? 'bg-white/[0.12] font-semibold text-white' : 'text-white/85 hover:bg-white/[0.08]'
-                  } ${i === otherIdx ? 'opacity-40 cursor-not-allowed' : ''}`}
-                >
-                  {ver.versionLabel}
-                </button>
-              ))}
+              <div className="px-1 pb-1.5 text-[10px] uppercase tracking-wide text-white/50">
+                Versions
+              </div>
+              {/* Vertical list of version rows — thumbnail + label. The
+                  thumbnail hover-scrubs through the storyboard sprite (move
+                  the mouse across it to preview frames), same as the app's
+                  version reel. */}
+              <div className="flex flex-col gap-1.5">
+                {sorted.map((ver, i) => {
+                  const active = i === idx
+                  const disabled = i === otherIdx
+                  const thumb = (ver as any).thumbnailUrl as string | undefined
+                  const storyboard = (ver as any).storyboardUrl as string | undefined
+                  const scrubbing =
+                    !!hoverScrub &&
+                    hoverScrub.side === side &&
+                    hoverScrub.idx === i &&
+                    !!storyboard
+                  return (
+                    <button
+                      key={ver.id}
+                      type="button"
+                      onClick={() => { setIdx(i); setShow(false) }}
+                      disabled={disabled}
+                      title={
+                        disabled
+                          ? 'Already shown on the other side'
+                          : (ver as any).originalFileName || ver.versionLabel
+                      }
+                      className={`flex items-center gap-2.5 p-1.5 rounded-lg text-left ring-1 transition-colors ${
+                        active
+                          ? 'bg-white/[0.12] ring-white/25'
+                          : 'bg-white/[0.03] ring-white/10 hover:bg-white/[0.08] hover:ring-white/20'
+                      } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    >
+                      <div
+                        className="w-[104px] aspect-video shrink-0 rounded-md overflow-hidden bg-black ring-1 ring-white/10 relative"
+                        onMouseMove={(e) => {
+                          if (!storyboard || disabled) return
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          const f = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                          setHoverScrub({ side, idx: i, f })
+                        }}
+                        onMouseLeave={() =>
+                          setHoverScrub((p) =>
+                            p && p.side === side && p.idx === i ? null : p,
+                          )
+                        }
+                      >
+                        {thumb && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={thumb}
+                            alt=""
+                            draggable={false}
+                            className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-75 ${
+                              scrubbing ? 'opacity-0' : 'opacity-100'
+                            }`}
+                          />
+                        )}
+                        {!thumb && !scrubbing && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <Film className="w-4 h-4 text-white/40" />
+                          </div>
+                        )}
+                        {storyboard && (
+                          <div
+                            aria-hidden
+                            className={`absolute inset-0 transition-opacity duration-75 ${
+                              scrubbing ? 'opacity-100' : 'opacity-0'
+                            }`}
+                            style={scrubbing ? storyboardCellStyle(storyboard, hoverScrub!.f) : undefined}
+                          />
+                        )}
+                      </div>
+                      <span className="flex-1 text-xs font-semibold uppercase tracking-wider tabular-nums text-white">
+                        {ver.versionLabel}
+                      </span>
+                      {(ver as any).approved && (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>
