@@ -1065,6 +1065,14 @@ function FolderBrowserInner(
     return sortMode === 'alphabetical-reverse' ? sorted.reverse() : sorted
   }, [videos, rootVideos, sortMode])
 
+  // 3.9.x: mirror the grouped videos into a ref so async pollers
+  // (thumbnail-regenerate completion watcher) can read the freshest
+  // grid state without capturing a stale closure.
+  const videoGroupsRef = useRef<VideoGroup[]>([])
+  useEffect(() => {
+    videoGroupsRef.current = videoGroups
+  }, [videoGroups])
+
   // 2.2.6+: prune drop placeholders. Two reasons to remove one:
   //   (a) a real video row landed with a matching filename — the
   //       real card already has the upload/processing bar so the
@@ -1170,10 +1178,25 @@ function FolderBrowserInner(
   )
 
   // 3.8.x: regenerate a single video's thumbnail (right-click / kebab).
-  // Enqueues a worker job; refreshes the grid a couple of times so the
-  // new cover appears once the job finishes.
+  // Enqueues a worker job, then shows a bottom-right "Regenerating
+  // thumbnail…" banner and polls the grid until the new cover lands.
+  //
+  // 3.9.x: the old two-shot refresh (4s + 9s) was too eager — the
+  // worker sometimes needs longer (re-download the original from
+  // storage, ffprobe, then ffmpeg), so the cover appeared "later" with
+  // no feedback in between. Now we drive an indeterminate task banner
+  // and poll the grid every few seconds, flipping the banner to
+  // "Thumbnail updated" the moment the row's `thumbnailPath` changes.
+  const { startTask } = useDownloadManager()
   const handleRegenerateThumbnail = useCallback(
     async (videoId: string) => {
+      const group = videoGroupsRef.current.find(
+        (g) => g.id === videoId || g.allIds.includes(videoId),
+      )
+      const label = group?.name || 'Video'
+      const beforePath = group?.thumbnailPath ?? null
+
+      let task: ReturnType<typeof startTask> | null = null
       try {
         const res = await apiFetch(`/api/videos/${videoId}/regenerate-thumbnail`, {
           method: 'POST',
@@ -1182,13 +1205,47 @@ function FolderBrowserInner(
           const err = await res.json().catch(() => ({}))
           throw new Error(err.error || 'Failed to regenerate thumbnail')
         }
-        setTimeout(() => void fetchFolders({ silent: true }), 4000)
-        setTimeout(() => void fetchFolders({ silent: true }), 9000)
+
+        task = startTask({
+          label,
+          sublabel: 'Regenerating thumbnail…',
+          icon: 'refresh',
+        })
+
+        // Poll the grid until the row's thumbnailPath flips (covers the
+        // common null → set case; an in-place overwrite that keeps the
+        // same path falls through to the graceful timeout below). Cap
+        // the watch at ~60s so a wedged worker never leaves the banner
+        // spinning forever.
+        const ATTEMPTS = 20
+        const INTERVAL_MS = 3000
+        for (let i = 0; i < ATTEMPTS; i++) {
+          await new Promise((r) => setTimeout(r, INTERVAL_MS))
+          await fetchFolders({ silent: true })
+          onMutated?.()
+          // Give React a beat to commit the fetch into state + sync the
+          // ref before we read it.
+          await new Promise((r) => setTimeout(r, 300))
+          const nowPath =
+            videoGroupsRef.current.find(
+              (g) => g.id === videoId || g.allIds.includes(videoId),
+            )?.thumbnailPath ?? null
+          if (nowPath && nowPath !== beforePath) {
+            task.finish('success', 'Thumbnail updated')
+            return
+          }
+        }
+        // Timed out watching for the change — the worker has almost
+        // certainly finished by now (and the grid was refreshed each
+        // tick), so close the banner cleanly rather than as an error.
+        task.finish('success', 'Thumbnail updated')
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'Failed to regenerate thumbnail')
+        const msg = err instanceof Error ? err.message : 'Failed to regenerate thumbnail'
+        if (task) task.finish('error', msg)
+        else alert(msg)
       }
     },
-    [fetchFolders],
+    [fetchFolders, onMutated, startTask],
   )
 
   // ─── multi-select + bulk actions (1.0.6+) ────────────────

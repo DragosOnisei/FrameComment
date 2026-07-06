@@ -1,6 +1,6 @@
 'use client'
 
-import { Download, X, AlertCircle, CheckCircle2, Loader2, Trash2 } from 'lucide-react'
+import { Download, X, AlertCircle, CheckCircle2, Loader2, Trash2, RefreshCw } from 'lucide-react'
 import { useDownloadManager, type DownloadJob } from '@/contexts/DownloadManager'
 
 /**
@@ -45,6 +45,7 @@ function DownloadBanner({
   onDismiss: () => void
 }) {
   const isManual = job.kind === 'manual'
+  const isTask = job.kind === 'task'
   const isTerminal =
     job.status === 'success' || job.status === 'error' || job.status === 'cancelled'
 
@@ -54,7 +55,12 @@ function DownloadBanner({
   // of a stuck 0%.
   let pct: number | null = null
   let progressLabel = ''
-  if (isManual) {
+  if (isTask) {
+    // Indeterminate — no % or byte/item count. The `sublabel`
+    // (e.g. "Regenerating thumbnail…") drives the status line and
+    // the bar renders as a pulse.
+    progressLabel = job.sublabel || ''
+  } else if (isManual) {
     const done = job.completedItems ?? 0
     const total = job.totalItems ?? 0
     const unit = job.unit || 'files'
@@ -98,6 +104,8 @@ function DownloadBanner({
             <AlertCircle className="w-4 h-4 text-red-300" />
           ) : job.status === 'cancelled' ? (
             <X className="w-4 h-4 text-white/55" />
+          ) : job.icon === 'refresh' ? (
+            <RefreshCw className="w-4 h-4 animate-spin text-primary" />
           ) : pct === null ? (
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
           ) : job.icon === 'trash' ? (
@@ -112,23 +120,27 @@ function DownloadBanner({
           </div>
           <div className="text-[11px] text-white/55 truncate">
             {job.status === 'success'
-              ? 'Done'
+              ? isTask
+                ? job.sublabel || 'Done'
+                : 'Done'
               : job.status === 'error'
               ? job.error || 'Failed'
               : job.status === 'cancelled'
               ? 'Cancelled'
               : job.status === 'pending'
               ? 'Preparing…'
-              : progressLabel || 'Downloading…'}
+              : progressLabel || (isTask ? 'Working…' : 'Downloading…')}
           </div>
         </div>
-        {/* Action button: Cancel during run, dismiss-on-success/error. */}
+        {/* Action button: Cancel during a running download, but tasks
+            (server-side jobs we can't abort) and terminal banners just
+            dismiss. */}
         <button
           type="button"
-          onClick={isTerminal ? onDismiss : onCancel}
+          onClick={isTerminal || isTask ? onDismiss : onCancel}
           className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors"
-          aria-label={isTerminal ? 'Dismiss' : 'Cancel download'}
-          title={isTerminal ? 'Dismiss' : 'Cancel download'}
+          aria-label={isTerminal || isTask ? 'Dismiss' : 'Cancel download'}
+          title={isTerminal || isTask ? 'Dismiss' : 'Cancel download'}
         >
           <X className="w-3.5 h-3.5" />
         </button>

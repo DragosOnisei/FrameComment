@@ -48,7 +48,11 @@ export type DownloadJobStatus =
 export type DownloadJob = {
   id: string
   label: string
-  kind: 'stream' | 'manual'
+  // 3.9.x: 'task' is an indeterminate, server-driven job (e.g. a
+  // single-video thumbnail regenerate). No byte/item totals — the
+  // banner shows a spinner + `sublabel` status line and the caller
+  // resolves it with `finish()` once it observes completion.
+  kind: 'stream' | 'manual' | 'task'
   status: DownloadJobStatus
   /** Bytes received from server (kind='stream'). */
   bytesReceived?: number
@@ -62,8 +66,13 @@ export type DownloadJob = {
    *  Defaults to "files"; the Trash flow passes "items". */
   unit?: string
   /** 3.3.x: which glyph the banner shows. Defaults to a download
-   *  arrow; the Trash flow passes 'trash'. */
-  icon?: 'download' | 'trash'
+   *  arrow; the Trash flow passes 'trash'. 3.9.x adds 'refresh' for
+   *  the thumbnail-regenerate task. */
+  icon?: 'download' | 'trash' | 'refresh'
+  /** 3.9.x: status line for `kind='task'` jobs (e.g.
+   *  "Regenerating thumbnail…" → "Thumbnail updated"). Ignored for
+   *  stream/manual jobs, which derive their status from progress. */
+  sublabel?: string
   /** Error message — set when status='error'. */
   error?: string
   /** Stable reference to the underlying controller so the banner can
@@ -97,6 +106,16 @@ type StartManualOpts = {
   icon?: 'download' | 'trash'
 }
 
+type StartTaskOpts = {
+  /** Title line (e.g. the video name). */
+  label: string
+  /** Initial status line (e.g. "Regenerating thumbnail…"). */
+  sublabel?: string
+  /** Banner glyph. Defaults to the download arrow; the thumbnail
+   *  regenerate flow passes 'refresh' for a spinning icon. */
+  icon?: 'download' | 'trash' | 'refresh'
+}
+
 type DownloadManagerCtx = {
   jobs: DownloadJob[]
   /** Start a streamed ZIP download. Returns the jobId. */
@@ -109,6 +128,14 @@ type DownloadManagerCtx = {
     signal: AbortSignal
     bumpItem: () => void
     finish: (status: 'success' | 'error', errorMsg?: string) => void
+  }
+  /** 3.9.x: start an indeterminate task banner (no progress bar %).
+   *  Returns { jobId, update, finish } so the caller can retitle the
+   *  status line while it runs and resolve it when done. */
+  startTask: (opts: StartTaskOpts) => {
+    jobId: string
+    update: (sublabel: string) => void
+    finish: (status: 'success' | 'error', sublabelOrError?: string) => void
   }
   /** User-initiated cancel. Aborts the underlying controller, marks
    *  the job cancelled, and schedules its removal. */
@@ -318,9 +345,56 @@ export function DownloadManagerProvider({ children }: { children: React.ReactNod
     [patchJob, removeJob],
   )
 
+  const startTask = useCallback(
+    (opts: StartTaskOpts) => {
+      const jobId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      // Tasks don't stream anything, but the job shape wants a
+      // controller — we keep a dummy one so the banner's Cancel/
+      // dismiss plumbing stays uniform.
+      const abortController = new AbortController()
+      const job: DownloadJob = {
+        id: jobId,
+        label: opts.label,
+        kind: 'task',
+        status: 'active',
+        sublabel: opts.sublabel,
+        icon: opts.icon,
+        abortController,
+      }
+      jobsRef.current.set(jobId, job)
+      setJobs((prev) => [...prev, job])
+
+      const update = (sublabel: string) => patchJob(jobId, { sublabel })
+      const finish = (
+        status: 'success' | 'error',
+        sublabelOrError?: string,
+      ) => {
+        if (status === 'error') {
+          patchJob(jobId, { status, error: sublabelOrError })
+        } else {
+          patchJob(jobId, {
+            status,
+            sublabel: sublabelOrError ?? job.sublabel,
+          })
+        }
+        const delay = status === 'success' ? 2500 : 5000
+        setTimeout(() => removeJob(jobId), delay)
+      }
+      return { jobId, update, finish }
+    },
+    [patchJob, removeJob],
+  )
+
   const value = useMemo<DownloadManagerCtx>(
-    () => ({ jobs, startStreamDownload, startManualDownload, cancel, dismiss }),
-    [jobs, startStreamDownload, startManualDownload, cancel, dismiss],
+    () => ({
+      jobs,
+      startStreamDownload,
+      startManualDownload,
+      startTask,
+      cancel,
+      dismiss,
+    }),
+    [jobs, startStreamDownload, startManualDownload, startTask, cancel, dismiss],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
