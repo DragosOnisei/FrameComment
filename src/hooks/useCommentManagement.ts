@@ -555,7 +555,11 @@ export function useCommentManagement({
         ? secondsToTimecode(selectedTimestamp, fps)
         : '00:00:00:00'
 
-    const optimisticComment: CommentWithReplies = {
+    // NOTE: built with `as CommentWithReplies` (not a `: CommentWithReplies`
+    // annotation) so it type-checks both against the freshly-generated
+    // Prisma client (where `isCopied` is a required field) AND older
+    // generated clients (where it isn't). We DO set isCopied below.
+    const optimisticComment = {
       id: `temp-${Date.now()}`,
       projectId,
       videoId: validatedVideoId,
@@ -581,6 +585,8 @@ export function useCommentManagement({
         : (authorName?.trim() || (isPasswordProtected ? authorName : 'Client')),
       authorEmail: isInternalComment ? null : (clientEmail || null),
       isInternal: isInternalComment,
+      // 3.8.x: fresh comments are never "copied" (only paste marks them).
+      isCopied: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       parentId: replyingToCommentId,
@@ -592,7 +598,7 @@ export function useCommentManagement({
       resolvedAt: null,
       resolvedBy: null,
       replies: [],
-    }
+    } as CommentWithReplies
 
     setOptimisticComments(prev => [...prev, optimisticComment])
 
