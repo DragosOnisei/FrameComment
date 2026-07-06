@@ -1292,6 +1292,8 @@ export default function CommentSection({
         timecode: item.timecode,
         content: item.content,
         isInternal: !!isAdminView,
+        // 3.8.x: flag pasted comments so the thread shows a "Copied" tag.
+        isCopied: true,
       }
       if (item.timecodeEnd) body.timecodeEnd = item.timecodeEnd
       if (typeof item.timestampMs === 'number') body.timestampMs = item.timestampMs

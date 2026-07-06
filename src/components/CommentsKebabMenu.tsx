@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MoreVertical, ClipboardCopy, ClipboardPaste, Check } from 'lucide-react'
+import { MoreVertical, ClipboardCopy, ClipboardPaste } from 'lucide-react'
 
 /**
  * Three-dot menu that lives in the top-right of the comments sidebar
@@ -40,12 +40,6 @@ export default function CommentsKebabMenu({
   hasClipboard,
 }: CommentsKebabMenuProps) {
   const [open, setOpen] = useState(false)
-  const [recentAction, setRecentAction] = useState<
-    | { kind: 'copied'; count: number }
-    | { kind: 'pasted'; count: number }
-    | { kind: 'error'; message: string }
-    | null
-  >(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -98,41 +92,25 @@ export default function CommentsKebabMenu({
     }
   }, [open])
 
-  // Auto-clear the inline toast after a few seconds so it doesn't
-  // linger forever next to the menu.
-  useEffect(() => {
-    if (!recentAction) return
-    const t = window.setTimeout(() => setRecentAction(null), 2400)
-    return () => window.clearTimeout(t)
-  }, [recentAction])
-
+  // 3.8.x: the inline "Copied N / Pasted N" confirmation pill was removed
+  // — it rendered over the neighbouring "Send to editor" button. Copy/paste
+  // still run; the pasted comments (and the "Copied" tags on them) are the
+  // feedback now.
   const runCopy = async () => {
     setOpen(false)
     try {
-      const r = await onCopy()
-      if (r && typeof r === 'object' && 'count' in r) {
-        setRecentAction({ kind: 'copied', count: r.count })
-      }
-    } catch (err) {
-      setRecentAction({
-        kind: 'error',
-        message: err instanceof Error ? err.message : 'Copy failed',
-      })
+      await onCopy()
+    } catch {
+      /* no inline toast */
     }
   }
 
   const runPaste = async () => {
     setOpen(false)
     try {
-      const r = await onPaste()
-      if (r && typeof r === 'object' && 'count' in r) {
-        setRecentAction({ kind: 'pasted', count: r.count })
-      }
-    } catch (err) {
-      setRecentAction({
-        kind: 'error',
-        message: err instanceof Error ? err.message : 'Paste failed',
-      })
+      await onPaste()
+    } catch {
+      /* no inline toast */
     }
   }
 
@@ -159,25 +137,6 @@ export default function CommentsKebabMenu({
       >
         <MoreVertical className="w-4 h-4" />
       </button>
-
-      {/* Inline status pill — small, next to the trigger, auto-dismisses */}
-      {recentAction && (
-        <span
-          role="status"
-          className={`
-            absolute right-full mr-2 top-1/2 -translate-y-1/2 whitespace-nowrap
-            inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium
-            ${recentAction.kind === 'error'
-              ? 'bg-destructive/15 text-destructive'
-              : 'bg-success/15 text-success'}
-          `}
-        >
-          {recentAction.kind !== 'error' && <Check className="w-3 h-3" />}
-          {recentAction.kind === 'copied' && `Copied ${recentAction.count}`}
-          {recentAction.kind === 'pasted' && `Pasted ${recentAction.count}`}
-          {recentAction.kind === 'error' && recentAction.message}
-        </span>
-      )}
 
       {open && coords && typeof document !== 'undefined' && createPortal(
         // 2.5.1+: TRUE frosted glass — portalled to document.body

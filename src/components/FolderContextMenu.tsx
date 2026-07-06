@@ -11,8 +11,11 @@ import {
   FolderLock,
   Layers,
   Pencil,
+  RefreshCw,
   Share2,
+  Smartphone,
   Trash2,
+  Youtube,
 } from 'lucide-react'
 
 /**
@@ -42,6 +45,10 @@ export interface FolderContextMenuProps {
   onUploadFolder?: () => void
   onNewFolder?: () => void
   onNewRestrictedFolder?: () => void
+  /** 3.8.x: folder-structure templates. UGC → creates "9:16" + "4:5";
+   *  YT → creates "IN EDIT" + "CLEAN" + "FINAL" inside the current folder. */
+  onUgcTemplate?: () => void
+  onYtTemplate?: () => void
   /** Number of selected video cards on the page (1.0.9+). When >= 1
    *  the menu shows a bulk-actions block at the top; when 0 it stays
    *  exactly as before. */
@@ -70,6 +77,10 @@ export interface FolderContextMenuProps {
    *  multi-version video selected). */
   canSplitVersions?: boolean
   onSplitVersions?: () => void
+  /** 3.8.x: regenerate the single selected video's thumbnail. Shown only
+   *  when `canRegenerateThumbnail` (exactly one video selected). */
+  canRegenerateThumbnail?: boolean
+  onRegenerateThumbnail?: () => void
 }
 
 export default function FolderContextMenu({
@@ -81,6 +92,8 @@ export default function FolderContextMenu({
   onUploadFolder,
   onNewFolder,
   onNewRestrictedFolder,
+  onUgcTemplate,
+  onYtTemplate,
   bulkSelectionCount = 0,
   canBulkMoveUp = false,
   onBulkMoveUp,
@@ -92,6 +105,8 @@ export default function FolderContextMenu({
   onBulkDuplicate,
   canSplitVersions = false,
   onSplitVersions,
+  canRegenerateThumbnail = false,
+  onRegenerateThumbnail,
 }: FolderContextMenuProps) {
   const hasSelection = bulkSelectionCount > 0
   // 1.1.0+: Share + Rename are single-target only — they don't make
@@ -133,7 +148,7 @@ export default function FolderContextMenu({
   // so we use a generous upper bound that fits the widest label
   // ("New Folder with N videos") on a single line.
   const MENU_W = 270
-  const MENU_H = hasSelection ? 320 : 220
+  const MENU_H = hasSelection ? 320 : 300
   const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1024
   const viewportH = typeof window !== 'undefined' ? window.innerHeight : 768
   const left = Math.min(x, Math.max(8, viewportW - MENU_W - 8))
@@ -248,6 +263,13 @@ export default function FolderContextMenu({
               onClick={onSplitVersions}
             />
           )}
+          {singleTarget && canRegenerateThumbnail && (
+            <Row
+              icon={<RefreshCw className="w-4 h-4" />}
+              label="Regenerate thumbnail"
+              onClick={onRegenerateThumbnail}
+            />
+          )}
           <div className="my-1 h-px bg-white/10" role="separator" />
           <Row
             icon={<ArrowUpFromLine className="w-4 h-4" />}
@@ -290,6 +312,18 @@ export default function FolderContextMenu({
             icon={<FolderLock className="w-4 h-4" />}
             label="New Restricted Folder"
             onClick={onNewRestrictedFolder}
+          />
+          <div className="my-1 h-px bg-white/10" role="separator" />
+          {/* 3.8.x: one-click folder-structure templates. */}
+          <Row
+            icon={<Smartphone className="w-4 h-4" />}
+            label="UGC Template"
+            onClick={onUgcTemplate}
+          />
+          <Row
+            icon={<Youtube className="w-4 h-4" />}
+            label="YT Template"
+            onClick={onYtTemplate}
           />
         </>
       )}

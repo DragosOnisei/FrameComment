@@ -231,6 +231,7 @@ export async function POST(request: NextRequest) {
       recipientId,
       parentId,
       isInternal,
+      isCopied,
       assetIds,
       annotations,
     } = validation.data
@@ -395,6 +396,23 @@ export async function POST(request: NextRequest) {
         }
       }
     })
+
+    // 3.8.x: mark pasted comments as "copied" via a best-effort raw UPDATE.
+    // Doing it as a separate raw statement (instead of in the create above)
+    // keeps NORMAL comment creation bulletproof: it never depends on the
+    // generated Prisma client knowing the `isCopied` column, so a stale
+    // client / not-yet-run migration can't break posting comments.
+    if (isCopied && comment?.id) {
+      try {
+        await prisma.$executeRawUnsafe(
+          'UPDATE "Comment" SET "isCopied" = true WHERE id = $1',
+          comment.id,
+        )
+        ;(comment as any).isCopied = true
+      } catch {
+        /* column absent on older DBs — non-fatal; comment is still created */
+      }
+    }
 
     // Link client assets to comment
     if (assetIds && assetIds.length > 0) {

@@ -1031,65 +1031,82 @@ export async function generateThumbnail(
     })
   }
 
-  const args = [
-    '-v', 'verbose', // Enable verbose logging for debug
-    '-ss', timestamp.toString(), // Seek before input (faster - avoids decoding entire video)
-    '-i', inputPath,
-    '-vframes', '1', // Extract single frame
-    '-vf', 'scale=w=min(1280\\,iw):h=min(720\\,ih):force_original_aspect_ratio=decrease', // Scale down if needed, preserve aspect ratio, no padding
-    '-q:v', '2', // High quality JPEG (1-31 scale, 2 = excellent quality)
-    '-y', // Overwrite output file
-    outputPath
-  ]
+  const scaleFilter =
+    'scale=w=min(1280\\,iw):h=min(720\\,ih):force_original_aspect_ratio=decrease'
 
-  if (DEBUG) {
-    logMessage('[FFMPEG DEBUG] Thumbnail command:', 'nice -n 10', ffmpegPath, args.join(' '))
+  // Run one ffmpeg attempt. Resolves with the exit code + stderr instead
+  // of rejecting, so the caller can fall through to the next strategy.
+  const runOnce = (
+    seekArgs: string[],
+  ): Promise<{ code: number | null; stderr: string }> =>
+    new Promise((resolve) => {
+      const args = [
+        '-v', DEBUG ? 'verbose' : 'error',
+        ...seekArgs,
+        '-vframes', '1', // single frame
+        '-vf', scaleFilter,
+        '-q:v', '2', // high-quality JPEG
+        '-y',
+        outputPath,
+      ]
+      // Lower CPU priority to keep the system responsive.
+      const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let stderr = ''
+      ffmpeg.stderr.on('data', (d) => {
+        stderr += d.toString()
+      })
+      ffmpeg.on('close', (code) => resolve({ code, stderr }))
+      ffmpeg.on('error', (err) =>
+        resolve({ code: -1, stderr: `Failed to start FFmpeg: ${err.message}` }),
+      )
+    })
+
+  // A usable thumbnail is a real, non-empty JPEG. Fast input-seek can
+  // silently emit a 0-byte / broken file when the seek overshoots the
+  // last keyframe on some clips — which is exactly what leaves a video
+  // with a missing thumbnail. So we validate the OUTPUT, not just the
+  // exit code.
+  const outputUsable = (): boolean => {
+    try {
+      const st = fs.statSync(outputPath)
+      return st.isFile() && st.size > 100
+    } catch {
+      return false
+    }
   }
 
-  return new Promise((resolve, reject) => {
-    // Run with lower CPU priority to keep system responsive
-    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args], {
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-    let stderr = ''
+  // Progressively safer strategies:
+  //   1) fast input-seek (before -i)     — fastest, the usual path
+  //   2) accurate output-seek (after -i) — decodes to the exact time and
+  //      lands a real frame even when fast-seek overshot
+  //   3) very first frame                — last resort; yields a frame if
+  //      the file decodes at all
+  const strategies: Array<{ label: string; seek: string[] }> = [
+    { label: 'fast-seek', seek: ['-ss', String(timestamp), '-i', inputPath] },
+    { label: 'accurate-seek', seek: ['-i', inputPath, '-ss', String(timestamp)] },
+    { label: 'first-frame', seek: ['-i', inputPath] },
+  ]
 
-    if (DEBUG) {
-      logMessage('[FFMPEG DEBUG] Thumbnail process spawned, PID:', ffmpeg.pid)
+  let lastStderr = ''
+  for (const strat of strategies) {
+    const { code, stderr } = await runOnce(strat.seek)
+    lastStderr = stderr
+    if (code === 0 && outputUsable()) {
+      if (DEBUG) {
+        logMessage(`[FFMPEG DEBUG] Thumbnail generated via ${strat.label}`)
+      }
+      return
     }
+    logMessage(
+      `[FFMPEG] Thumbnail strategy "${strat.label}" produced no usable frame (code=${code}) — trying fallback`,
+    )
+  }
 
-    ffmpeg.stderr.on('data', (data) => {
-      const text = data.toString()
-      stderr += text
-      if (DEBUG) {
-        logMessage('[FFMPEG THUMBNAIL STDERR]', text.trim())
-      }
-    })
-
-    ffmpeg.on('close', (code) => {
-      if (DEBUG) {
-        logMessage('[FFMPEG DEBUG] Thumbnail process exited with code:', code)
-      }
-
-      if (code === 0) {
-        if (DEBUG) {
-          logMessage('[FFMPEG DEBUG] Thumbnail generated successfully')
-        }
-        resolve()
-      } else {
-        if (DEBUG) {
-          logError('[FFMPEG DEBUG] Thumbnail generation failed:', stderr)
-        }
-        reject(new Error(`FFmpeg thumbnail generation failed: ${stderr}`))
-      }
-    })
-
-    ffmpeg.on('error', (err) => {
-      if (DEBUG) {
-        logError('[FFMPEG DEBUG] Failed to spawn FFmpeg for thumbnail:', err)
-      }
-      reject(new Error(`Failed to start FFmpeg: ${err.message}`))
-    })
-  })
+  throw new Error(
+    `FFmpeg thumbnail generation failed after all strategies: ${lastStderr}`,
+  )
 }
 
 /**

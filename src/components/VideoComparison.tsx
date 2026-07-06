@@ -243,6 +243,29 @@ export default function VideoComparison({
         return
       }
 
+      // Space (no modifiers): Play/Pause BOTH clips. In compare mode the
+      // overlay owns Space — the main player yields to it — so a plain
+      // tap toggles the comparison, not the video behind it. Skip while
+      // typing so Space in a field still inserts a space.
+      if (
+        e.code === 'Space' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
+        const target = e.target as HTMLElement | null
+        const isEditable =
+          !!target?.isContentEditable ||
+          (target instanceof HTMLElement &&
+            ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+        if (isEditable) return
+        e.preventDefault()
+        e.stopPropagation()
+        togglePlayPause()
+        return
+      }
+
       // Ctrl+Space: Play/Pause
       if (e.ctrlKey && !e.metaKey && e.code === 'Space') {
         e.preventDefault()

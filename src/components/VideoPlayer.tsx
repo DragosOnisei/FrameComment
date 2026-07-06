@@ -752,6 +752,14 @@ export default function VideoPlayer({
 
   // Comparison mode state
   const [showComparison, setShowComparison] = useState(false)
+  // Mirror into a ref so the keyboard handlers (which don't re-bind on
+  // every toggle) can cheaply check whether the compare overlay is open
+  // and YIELD Space / shortcuts to it — otherwise pressing Space in
+  // compare mode would play/pause the main player behind the overlay.
+  const showComparisonRef = useRef(false)
+  useEffect(() => {
+    showComparisonRef.current = showComparison
+  }, [showComparison])
 
   // Drawing mode state
   // Drawing/annotation state lives in a shared Context so the toolbar can
@@ -1452,6 +1460,8 @@ export default function VideoPlayer({
   // Keyboard shortcuts: Ctrl+Space (play/pause), Ctrl+,/. (speed), Ctrl+/ (reset speed), Ctrl+J/L (frame step)
   useEffect(() => {
     const handleKeyboard = (e: KeyboardEvent) => {
+      // Compare overlay is open → it owns the player shortcuts.
+      if (showComparisonRef.current) return
       if (!videoRef.current) return
 
       const video = videoRef.current
@@ -1747,6 +1757,8 @@ export default function VideoPlayer({
   // the player and stealing Space mid-sentence would be terrible.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Compare overlay is open → it owns Space (play/pause both clips).
+      if (showComparisonRef.current) return
       // Ignore when the user is typing somewhere: <input>,
       // <textarea>, <select>, or any element with contentEditable.
       const target = e.target as HTMLElement | null

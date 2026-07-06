@@ -450,6 +450,10 @@ model Comment {
   authorName   String? // made optional to allow anonymous comments
   authorEmail  String?
   isInternal   Boolean  @default(false) // true = from studio, false = from client
+  // 3.8.x: true when this comment was pasted in from another version via
+  // Copy/Paste comments. Surfaces a "Copied" tag in the thread so reviewers
+  // can tell carried-over notes apart from fresh ones.
+  isCopied     Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

@@ -369,7 +369,18 @@ export default function MessageBubble({
                 1.2.0+: resolved replaces the sequence number badge with a
                 green check chip; otherwise we keep the #N indicator.
               */}
-              <div className="ml-auto shrink-0">
+              <div className="ml-auto shrink-0 flex items-center gap-1.5">
+                {/* 3.8.x: "Copied" tag for comments pasted in from another
+                    version (Frame.io-style), so carried-over notes are
+                    distinguishable from fresh ones. */}
+                {(comment as any).isCopied && (
+                  <span
+                    className="text-[10px] font-medium text-white/50 uppercase tracking-wide"
+                    title="Copied from another version"
+                  >
+                    Copied
+                  </span>
+                )}
                 {isResolved ? (
                   <span
                     className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-white shadow-sm"

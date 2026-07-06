@@ -632,7 +632,13 @@ export default function CustomVideoControls({
           authorName: effectiveAuthorName,
           initials: initialsFromName(effectiveAuthorName),
           colorKey,
-          content: normalizedContent.slice(0, 100),
+          // 3.8.x: timeline popover preview — up to 300 chars, with a
+        // trailing " [...]" marker when the comment was actually longer
+        // so the reader knows there's more in the full thread.
+        content:
+          normalizedContent.length > 300
+            ? `${normalizedContent.slice(0, 300).trimEnd()} [...]`
+            : normalizedContent,
           position: Math.min(100, Math.max(0, (timestamp / videoDuration) * 100)),
           audioAsset: audio
             ? {
@@ -1765,7 +1771,7 @@ export default function CustomVideoControls({
                             text first, then the player below.
                           */}
                           {marker.content ? (
-                            <p className="pt-2.5 text-sm sm:text-xs text-white/90 leading-relaxed break-all sm:break-words whitespace-pre-wrap">
+                            <p className="pt-2.5 text-sm sm:text-xs text-white/90 leading-relaxed break-words whitespace-pre-wrap">
                               {marker.content}
                             </p>
                           ) : !marker.audioAsset ? (

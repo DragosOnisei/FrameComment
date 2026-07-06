@@ -114,6 +114,10 @@ export function sanitizeComment(
     annotations: comment.annotations || null,
     content: comment.content,
     isInternal: comment.isInternal,
+    // 3.8.x: true when this comment was pasted in from another version.
+    // Drives the "Copied" tag in the thread. Coerced to boolean so a
+    // stale row (pre-migration) surfaces as false instead of undefined.
+    isCopied: !!comment.isCopied,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     parentId: comment.parentId,

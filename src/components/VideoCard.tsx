@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   MoreVertical,
   Pencil,
+  RefreshCw,
   Scissors,
   Share2,
   Trash2,
@@ -123,6 +124,9 @@ export interface VideoCardProps {
    *  `versionCount > 1`; the menu item is hidden otherwise so a
    *  single-version card never shows a useless action. */
   onSplitVersions?: (id: string, currentName: string) => void
+  /** 3.8.x: regenerate this video's thumbnail (single-video only). Shown
+   *  when wired — used when a clip ended up with a missing/broken cover. */
+  onRegenerateThumbnail?: (id: string) => void
   /** Number of selected video cards on the page (1.0.9+). Drives
    *  bulk-aware kebab gating:
    *    ≥ 2  → hides Rename / Share / Split versions (none of those
@@ -303,6 +307,7 @@ export default function VideoCard({
   onMoveUp,
   onShare,
   onSplitVersions,
+  onRegenerateThumbnail,
   bulkSelectionCount = 0,
   onNewFolderWithSelection,
   bulkDragThumbnails,
@@ -320,6 +325,7 @@ export default function VideoCard({
   const showRename = !!onRename && !isBulk
   const showShare = !!onShare && !isBulk
   const showSplit = !!onSplitVersions && versionCount > 1 && !isBulk
+  const showRegenThumb = !!onRegenerateThumbnail && !isBulk
   // "New Folder with Selection" surfaces as soon as there's a
   // selection — even of just 1 video — so the user can quickly box a
   // video into its own folder.
@@ -792,6 +798,7 @@ export default function VideoCard({
           <div
             className="text-base font-semibold text-white truncate"
             title={name}
+            data-keep-title
           >
             {name}
           </div>
@@ -887,7 +894,7 @@ export default function VideoCard({
                   Share video
                 </button>
               )}
-              {(showDownload || showShare) && (showDuplicate || showRename || showSplit) && (
+              {(showDownload || showShare) && (showDuplicate || showRename || showSplit || showRegenThumb) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {showDuplicate && (
@@ -932,7 +939,21 @@ export default function VideoCard({
                   Split versions
                 </button>
               )}
-              {(showDuplicate || showRename || showSplit) && (onMoveUp || showNewFolder) && (
+              {showRegenThumb && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onRegenerateThumbnail!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
+                >
+                  <RefreshCw className="w-4 h-4 shrink-0" />
+                  Regenerate thumbnail
+                </button>
+              )}
+              {(showDuplicate || showRename || showSplit || showRegenThumb) && (onMoveUp || showNewFolder) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onMoveUp && (
@@ -967,7 +988,7 @@ export default function VideoCard({
                     : 'New Folder with selection'}
                 </button>
               )}
-              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showDownload || showShare) && (
+              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showRegenThumb || showDownload || showShare) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onDelete && (

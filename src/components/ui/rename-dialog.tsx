@@ -90,14 +90,29 @@ export function RenameDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next) }}>
-      <DialogContent className="sm:max-w-md">
+      {/* 3.8.x: v2.5 frosted-glass surface — same recipe as ShareModal
+          (translucent navy + accent radial + backdrop blur) instead of
+          the default flat `bg-background` card. */}
+      <DialogContent
+        className="sm:max-w-md border-0 ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.85)] text-white"
+        style={{
+          backgroundColor: 'rgba(22, 37, 51, 0.55)',
+          backgroundImage:
+            'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+          backdropFilter: 'blur(40px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          transform: 'translate3d(-50%, -50%, 0)',
+          willChange: 'backdrop-filter, transform',
+          isolation: 'isolate',
+        }}
+      >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Pencil className="w-4 h-4 text-muted-foreground" />
+          <DialogTitle className="flex items-center gap-2 text-white">
+            <Pencil className="w-4 h-4 text-white/60" />
             {title}
           </DialogTitle>
           {description && (
-            <DialogDescription>{description}</DialogDescription>
+            <DialogDescription className="text-white/60">{description}</DialogDescription>
           )}
         </DialogHeader>
         <form
@@ -125,6 +140,7 @@ export function RenameDialog({
             placeholder={placeholder}
             disabled={busy}
             autoComplete="off"
+            className="bg-white/[0.06] ring-1 ring-white/10 border-0 text-white placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-[hsl(var(--spotlight-tint)/0.55)]"
           />
           <DialogFooter className="mt-4">
             <Button
@@ -132,6 +148,7 @@ export function RenameDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={busy}
+              className="bg-white/[0.06] ring-1 ring-white/15 border-0 text-white hover:bg-white/[0.12] hover:ring-white/25 transition-colors"
             >
               Cancel
             </Button>

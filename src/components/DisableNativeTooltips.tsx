@@ -32,7 +32,12 @@ export default function DisableNativeTooltips() {
     const onPointerOver = (e: Event) => {
       const target = e.target as Element | null
       const el = target?.closest?.('[title]')
-      if (el && el.hasAttribute('title')) el.removeAttribute('title')
+      if (!el || !el.hasAttribute('title')) return
+      // 3.8.x: opt-out. Elements (or their ancestors) marked with
+      // `data-keep-title` keep their native tooltip — used for the
+      // truncated video-card title so hovering reveals the full name.
+      if (el.closest('[data-keep-title]')) return
+      el.removeAttribute('title')
     }
     // Capture phase so we strip the attribute before the element's own
     // handlers run and before the OS tooltip timer matters.

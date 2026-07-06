@@ -618,6 +618,33 @@ function FolderBrowserInner(
     [projectId, currentFolderId, fetchFolders, onMutated],
   )
 
+  // 3.8.x: folder-structure templates (right-click menu). Creates a set
+  // of public sub-folders inside the CURRENT folder in one shot, then
+  // refreshes once. Best-effort per name so one failure doesn't abort
+  // the rest.
+  const handleCreateTemplate = useCallback(
+    async (names: string[]) => {
+      for (const name of names) {
+        try {
+          await apiFetch('/api/folders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId,
+              parentFolderId: currentFolderId,
+              name,
+            }),
+          })
+        } catch {
+          /* keep going with the remaining folders */
+        }
+      }
+      await fetchFolders({ silent: true })
+      onMutated?.()
+    },
+    [projectId, currentFolderId, fetchFolders, onMutated],
+  )
+
   const handleOpenFolder = useCallback(
     (folderId: string) => {
       router.push(`/admin/projects/${projectId}/folder/${folderId}`)
@@ -630,6 +657,12 @@ function FolderBrowserInner(
   // rendered at the bottom of the component; the kebab handler
   // (`handleRename`) just sets the target folderId + opens it.
   const [renameTarget, setRenameTarget] = useState<{
+    id: string
+    name: string
+  } | null>(null)
+  // 3.8.x: same themed dialog for VIDEO rename (was a native
+  // window.prompt). Separate target so it can't collide with folder rename.
+  const [renameVideoTarget, setRenameVideoTarget] = useState<{
     id: string
     name: string
   } | null>(null)
@@ -1104,12 +1137,20 @@ function FolderBrowserInner(
     [router, projectId, currentFolderId],
   )
 
+  // Opens the themed rename dialog (glass) instead of the native
+  // window.prompt. The actual PATCH happens in handleRenameVideoSubmit.
   const handleRenameVideo = useCallback(
-    async (videoId: string, currentName: string) => {
-      const next = window.prompt('Rename video to:', currentName)
-      if (!next || !next.trim() || next.trim() === currentName) return
+    (videoId: string, currentName: string) => {
+      setRenameVideoTarget({ id: videoId, name: currentName })
+    },
+    [],
+  )
+
+  const handleRenameVideoSubmit = useCallback(
+    async (next: string) => {
+      if (!renameVideoTarget) return
       try {
-        const res = await apiFetch(`/api/videos/${videoId}`, {
+        const res = await apiFetch(`/api/videos/${renameVideoTarget.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: next.trim() }),
@@ -1120,10 +1161,34 @@ function FolderBrowserInner(
         }
         onMutated?.()
       } catch (err) {
+        // Keep the dialog open so the user can retry / fix the name.
         alert(err instanceof Error ? err.message : 'Failed to rename video')
+        return false
       }
     },
-    [onMutated],
+    [renameVideoTarget, onMutated],
+  )
+
+  // 3.8.x: regenerate a single video's thumbnail (right-click / kebab).
+  // Enqueues a worker job; refreshes the grid a couple of times so the
+  // new cover appears once the job finishes.
+  const handleRegenerateThumbnail = useCallback(
+    async (videoId: string) => {
+      try {
+        const res = await apiFetch(`/api/videos/${videoId}/regenerate-thumbnail`, {
+          method: 'POST',
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to regenerate thumbnail')
+        }
+        setTimeout(() => void fetchFolders({ silent: true }), 4000)
+        setTimeout(() => void fetchFolders({ silent: true }), 9000)
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to regenerate thumbnail')
+      }
+    },
+    [fetchFolders],
   )
 
   // ─── multi-select + bulk actions (1.0.6+) ────────────────
@@ -3164,6 +3229,7 @@ function FolderBrowserInner(
               onMoveUp={canMoveUp ? handleMoveVideoUp : undefined}
               onShare={handleShareVideo}
               onSplitVersions={handleSplitVersions}
+              onRegenerateThumbnail={handleRegenerateThumbnail}
               bulkSelectionCount={totalSelected}
               onNewFolderWithSelection={handleNewFolderWithSelection}
               bulkDragThumbnails={bulkDragThumbs}
@@ -3261,6 +3327,8 @@ function FolderBrowserInner(
           setNewDialogRestricted(true)
           setShowNewDialog(true)
         }}
+        onUgcTemplate={() => handleCreateTemplate(['9:16', '4:5'])}
+        onYtTemplate={() => handleCreateTemplate(['IN EDIT', 'CLEAN', 'FINAL'])}
         // 1.0.9+ / 1.1.0+: surface the same bulk actions that live
         // in the video/folder kebabs when there's an active selection.
         // The count reflects the COMBINED selection (videos +
@@ -3355,6 +3423,16 @@ function FolderBrowserInner(
           const grp = videoGroups.find((g) => g.allIds.includes(firstVideo))
           handleSplitVersions(firstVideo, grp?.name ?? '')
         }}
+        // 3.8.x: regenerate thumbnail — single video selected (any version).
+        canRegenerateThumbnail={
+          selectedVideoIds.size === 1 && selectedFolderIds.size === 0
+        }
+        onRegenerateThumbnail={() => {
+          const firstVideo = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          if (firstVideo) void handleRegenerateThumbnail(firstVideo)
+        }}
       />
 
       {/* Frame.io-style confirmation + share dialogs (1.0.8+). One
@@ -3381,6 +3459,13 @@ function FolderBrowserInner(
         title="Rename folder"
         initialValue={renameTarget?.name || ''}
         onSubmit={handleRenameSubmit}
+      />
+      <RenameDialog
+        open={!!renameVideoTarget}
+        onOpenChange={(next) => { if (!next) setRenameVideoTarget(null) }}
+        title="Rename video"
+        initialValue={renameVideoTarget?.name || ''}
+        onSubmit={handleRenameVideoSubmit}
       />
       <ShareModal
         open={shareState.open}

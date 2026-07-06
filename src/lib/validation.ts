@@ -459,6 +459,8 @@ export const createCommentSchema = z
     recipientId: cuidSchema.optional().nullable(),
     parentId: cuidSchema.optional(),
     isInternal: z.boolean().optional(),
+    // 3.8.x: set when the comment is pasted in from another version.
+    isCopied: z.boolean().optional(),
     assetIds: z.array(z.string()).max(50).optional(),
     annotations: annotationDataSchema.optional().nullable(),
   })
