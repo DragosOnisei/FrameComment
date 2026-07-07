@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
@@ -93,6 +93,13 @@ function AdminSharePageInner() {
   const urlVideoName = searchParams?.get('video') || null
   const urlVersion = searchParams?.get('version') ? parseInt(searchParams.get('version')!, 10) : null
   const urlFocusCommentId = searchParams?.get('comment') || null
+  // 3.9.x: the folder the video was opened from (FolderBrowser appends
+  // `&folderId=`). CRITICAL for version scoping: two videos with the
+  // SAME name in DIFFERENT folders (e.g. a low-res stack in "IN EDIT"
+  // and the HQ export in "FINAL") are DIFFERENT assets, not versions of
+  // each other. We use this to scope the version group to one folder so
+  // the player + version reel never merge them. null = project root.
+  const urlFolderId = searchParams?.get('folderId') || null
 
   const [focusCommentId, setFocusCommentId] = useState<string | null>(urlFocusCommentId)
   const [project, setProject] = useState<any>(null)
@@ -299,6 +306,29 @@ function AdminSharePageInner() {
       videosByName
     }
   }
+
+  // 3.9.x: narrow a name-group down to the videos that actually live in
+  // the folder the player was opened from. `videosByName` keys purely by
+  // NAME, so a same-named asset in another folder (the classic case: a
+  // low-res 3-version stack in "IN EDIT" + the HQ single export in
+  // "FINAL") would otherwise be treated as extra versions — that's the
+  // "double-clicking FINAL jumps to IN EDIT's v3" / "v1 shows twice" bug.
+  //
+  // Fallback: if scoping yields NOTHING (e.g. the in-page grid selected a
+  // video from some other folder while urlFolderId is null), we keep the
+  // full group so playback never breaks — we only ever REMOVE wrong-folder
+  // siblings, never leave the player empty.
+  const scopeGroupToFolder = useCallback(
+    (group: any[] | undefined | null): any[] => {
+      const g = Array.isArray(group) ? group : []
+      if (g.length === 0) return g
+      const scoped = g.filter(
+        (v: any) => (v?.folderId ?? null) === (urlFolderId ?? null),
+      )
+      return scoped.length > 0 ? scoped : g
+    },
+    [urlFolderId],
+  )
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     const sessionId = sessionIdRef.current
@@ -665,7 +695,9 @@ function AdminSharePageInner() {
 
         setActiveVideoName(videoNameToUse)
 
-        const videos = project.videosByName[videoNameToUse]
+        // 3.9.x: scope to the opened folder so same-named assets in
+        // other folders don't leak into this video's version stack.
+        const videos = scopeGroupToFolder(project.videosByName[videoNameToUse])
         // 2.2.0+: refuse to seed `activeVideosRaw` with an empty
         // array on the very first project load — the rest of the
         // pipeline assumes that once we have a videoNameToUse we
@@ -685,7 +717,7 @@ function AdminSharePageInner() {
           setInitialSeekTime(urlTimestamp)
         }
       } else {
-        const videos = project.videosByName[activeVideoName]
+        const videos = scopeGroupToFolder(project.videosByName[activeVideoName])
         // 2.2.0+: only push a fresh raw-videos array down to the
         // tokenize effect when something the tokenizer cares about
         // has actually changed. The polling effect upstream calls
@@ -708,7 +740,7 @@ function AdminSharePageInner() {
         }
       }
     }
-  }, [project, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos])
+  }, [project, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos, scopeGroupToFolder])
 
   // 2.2.0+: A tokenized video is "useful" when at least one playable
   // surface is available (any tier stream URL, an HLS master, a
@@ -985,7 +1017,7 @@ function AdminSharePageInner() {
   const handleVideoSelect = useCallback((videoName: string) => {
     enteredViaGridRef.current = true
     setActiveVideoName(videoName)
-    setActiveVideosRaw(project.videosByName[videoName])
+    setActiveVideosRaw(scopeGroupToFolder(project.videosByName[videoName]))
     setViewState('player')
     // 2.2.0+: switching to a different video group means the
     // last-known-good `activeVideos` snapshot is for the OLD group
@@ -998,7 +1030,33 @@ function AdminSharePageInner() {
     const params = new URLSearchParams(searchParams?.toString() || '')
     params.set('video', videoName)
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-  }, [project?.videosByName, searchParams, pathname, router])
+  }, [project?.videosByName, searchParams, pathname, router, scopeGroupToFolder])
+
+  // 3.9.x: folder-scoped view of `videosByName` for the player's version
+  // reel (ThumbnailReel). Each name-group is narrowed to the current
+  // folder so the reel shows only THIS asset's real versions — not a
+  // same-named asset sitting in another folder. Groups with nothing in
+  // this folder are dropped so the "switch video" list stays scoped too;
+  // the active group is force-kept as a safety net. The GRID view keeps
+  // the full, unscoped `project.videosByName` (it's the all-project
+  // picker), so this only affects the in-player reel.
+  const playerVideosByName = useMemo(() => {
+    const src = project?.videosByName as Record<string, any[]> | undefined
+    if (!src) return {} as Record<string, any[]>
+    const out: Record<string, any[]> = {}
+    for (const [name, group] of Object.entries(src)) {
+      const scoped = (group || []).filter(
+        (v: any) => (v?.folderId ?? null) === (urlFolderId ?? null),
+      )
+      if (scoped.length > 0) out[name] = scoped
+    }
+    // Never let the active group vanish (e.g. grid selection of a video
+    // from another folder while urlFolderId is null).
+    if (activeVideoName && !out[activeVideoName] && src[activeVideoName]) {
+      out[activeVideoName] = src[activeVideoName]
+    }
+    return out
+  }, [project?.videosByName, urlFolderId, activeVideoName])
 
   // Handle the player's "Back" button.
   const handleBackToGrid = useCallback(() => {
@@ -1241,7 +1299,7 @@ function AdminSharePageInner() {
           version / Copy / Paste comments / Switch theme). Public share
           page keeps the original ThemeToggle. */}
       <ThumbnailReel
-        videosByName={project.videosByName}
+        videosByName={playerVideosByName}
         thumbnailsByName={thumbnailsByName}
         activeVideoName={activeVideoName}
         activeVideoId={activeVideoId}

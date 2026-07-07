@@ -66,6 +66,10 @@ interface FolderBrowserTableProps {
    *  `onDropOSFiles`. We hand over the raw DataTransfer so the parent
    *  can snapshot the FileSystemEntry tree synchronously. */
   onDropOSFiles?: (targetFolderId: string, dataTransfer: DataTransfer) => void
+  /** 3.9.x: OS files dropped onto a VIDEO ROW upload as a NEW VERSION
+   *  of that video — list-view parity with the grid card's
+   *  `onDropOSFiles` on VideoCard. */
+  onDropOSFilesOnVideo?: (targetVideoId: string, dataTransfer: DataTransfer) => void
 }
 
 export default function FolderBrowserTable({
@@ -81,6 +85,7 @@ export default function FolderBrowserTable({
   onMoveVideoToFolder,
   onDropFolderOnFolder,
   onDropOSFiles,
+  onDropOSFilesOnVideo,
 }: FolderBrowserTableProps) {
   // Local drag bookkeeping (visual only — the actual move/stack logic
   // lives in the parent handlers).
@@ -265,6 +270,10 @@ export default function FolderBrowserTable({
               // from being treated as an "empty space" click that clears
               // the selection.
               data-video-id={v.id}
+              // 3.9.x: OS-file drop target marker so the container drop
+              // handler bails (this row routed the files into a new
+              // version of the video).
+              data-accepts-os-files={onDropOSFilesOnVideo ? 'true' : undefined}
               role="button"
               tabIndex={0}
               aria-selected={selected}
@@ -288,9 +297,20 @@ export default function FolderBrowserTable({
               }}
               onDragEnd={clearDrag}
               onDragOver={(e) => {
-                // Videos accept only video drops (stacking).
-                if (!Array.from(e.dataTransfer.types).includes(VIDEO_MIME))
+                const types = Array.from(e.dataTransfer.types)
+                const isVideo = types.includes(VIDEO_MIME)
+                const isFiles = types.includes('Files')
+                // 3.9.x: real OS files → upload as a new version of this
+                // video. No stopPropagation (container bails via the
+                // data-accepts-os-files marker; window resets its overlay).
+                if (isFiles && !isVideo && onDropOSFilesOnVideo) {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                  if (dropHoverId !== v.id) setDropHoverId(v.id)
                   return
+                }
+                // Otherwise videos accept only video drops (stacking).
+                if (!isVideo) return
                 if (draggingId === v.id) return // onto self
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'move'
@@ -308,6 +328,14 @@ export default function FolderBrowserTable({
                 }
               }}
               onDrop={(e) => {
+                const types = Array.from(e.dataTransfer.types)
+                // 3.9.x: OS file drop → upload as a new version.
+                if (types.includes('Files') && onDropOSFilesOnVideo) {
+                  e.preventDefault()
+                  onDropOSFilesOnVideo(v.id, e.dataTransfer)
+                  clearDrag()
+                  return
+                }
                 const src = e.dataTransfer.getData(VIDEO_MIME)
                 if (src && src !== v.id) {
                   e.preventDefault()

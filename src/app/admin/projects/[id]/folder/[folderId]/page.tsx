@@ -362,6 +362,18 @@ export default function ProjectFolderPage() {
             onUploadFolderTreeToFolder={(targetId, entries, extras) =>
               handleUploadFolderTree(entries, extras, targetId)
             }
+            onUploadFilesAsVersion={(targetVideoId, files) =>
+              videoManagerRef.current?.triggerUploadWithFolderTree(
+                files.map((file) => ({
+                  // Videos in this view live in `folderId`; the new
+                  // version uploads into the same folder before it's
+                  // stacked onto the target.
+                  file,
+                  folderId,
+                  stackOntoVideoId: targetVideoId,
+                })),
+              )
+            }
             videos={videos}
             hideHeaderActions
             stretch

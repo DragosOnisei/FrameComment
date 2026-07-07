@@ -16,6 +16,7 @@ import {
   Trash2,
   MessageSquare,
   Check,
+  UploadCloud,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
 import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
@@ -102,6 +103,11 @@ export interface VideoCardProps {
   onStartVideoDrag?: (id: string) => void
   onEndVideoDrag?: () => void
   onStackOnto?: (sourceId: string, targetId: string) => void
+  /** 3.9.x: files dragged from the OS onto this card upload as a NEW
+   *  VERSION of this video (same targeted-upload logic as dropping
+   *  files onto a folder). The parent snapshots the DataTransfer and
+   *  routes the upload through the stack-as-version path. */
+  onDropOSFiles?: (targetVideoId: string, dataTransfer: DataTransfer) => void
   /** Visual flag: this card is currently the drag source. Renders
    *  ghosted so the user sees what they're moving. */
   isBeingDragged?: boolean
@@ -299,6 +305,7 @@ export default function VideoCard({
   onStartVideoDrag,
   onEndVideoDrag,
   onStackOnto,
+  onDropOSFiles,
   isBeingDragged,
   isPotentialStackTarget,
   onOpen,
@@ -336,6 +343,10 @@ export default function VideoCard({
   // Hover state for the drop-target ring. Only set when ANOTHER
   // video is being dragged over THIS card.
   const [isStackHover, setIsStackHover] = useState(false)
+  // 3.9.x: separate from `isStackHover` (in-app video→video stacking) —
+  // lights up when the user drags real files from their OS over this
+  // card, to upload them as a new version.
+  const [isOSFileDropHover, setIsOSFileDropHover] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [thumbErrored, setThumbErrored] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -584,24 +595,58 @@ export default function VideoCard({
         setIsStackHover(false)
         onEndVideoDrag?.()
       }}
-      // Drop TARGET — accept ONLY the custom video MIME (so OS file
-      // drops and folder drags don't try to "stack" into a video).
+      // Drop TARGET — the custom video MIME stacks an in-app video as a
+      // new version; 3.9.x adds OS file drops which UPLOAD as a new
+      // version. Folder drags are ignored.
       onDragOver={(e) => {
-        if (!onStackOnto) return
-        const isVideo = Array.from(e.dataTransfer.types).includes(VIDEO_MIME)
-        if (!isVideo) return
-        if (isBeingDragged) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
+        const types = Array.from(e.dataTransfer.types)
+        const isVideo = types.includes(VIDEO_MIME)
+        const isFiles = types.includes('Files')
+        if (isVideo && onStackOnto) {
+          if (isBeingDragged) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          return
+        }
+        // 3.9.x: real OS files → offer to upload as a new version. No
+        // stopPropagation (container bails via data-accepts-os-files;
+        // window resets its drop overlay).
+        if (isFiles && !isVideo && onDropOSFiles) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+          if (!isOSFileDropHover) setIsOSFileDropHover(true)
+        }
       }}
       onDragEnter={(e) => {
-        if (!onStackOnto) return
-        if (!Array.from(e.dataTransfer.types).includes(VIDEO_MIME)) return
-        if (isBeingDragged) return
-        setIsStackHover(true)
+        const types = Array.from(e.dataTransfer.types)
+        const isVideo = types.includes(VIDEO_MIME)
+        const isFiles = types.includes('Files')
+        if (isVideo && onStackOnto) {
+          if (isBeingDragged) return
+          setIsStackHover(true)
+          return
+        }
+        if (isFiles && !isVideo && onDropOSFiles) {
+          setIsOSFileDropHover(true)
+        }
       }}
-      onDragLeave={() => setIsStackHover(false)}
+      onDragLeave={(e) => {
+        // Only clear when the pointer truly leaves the card (children
+        // fire spurious leaves otherwise).
+        const next = e.relatedTarget as Node | null
+        if (next && e.currentTarget.contains(next)) return
+        setIsStackHover(false)
+        setIsOSFileDropHover(false)
+      }}
       onDrop={(e) => {
+        const types = Array.from(e.dataTransfer.types)
+        // OS file/folder drop → upload as a new version of this video.
+        if (types.includes('Files') && onDropOSFiles) {
+          e.preventDefault()
+          setIsOSFileDropHover(false)
+          onDropOSFiles(id, e.dataTransfer)
+          return
+        }
         if (!onStackOnto) return
         const sourceId = e.dataTransfer.getData(VIDEO_MIME)
         setIsStackHover(false)
@@ -610,7 +655,9 @@ export default function VideoCard({
         onStackOnto(sourceId, id)
       }}
       className={`group relative flex flex-col rounded-xl bg-white/[0.04] cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] ${
-        isBeingDragged
+        isOSFileDropHover
+          ? 'ring-2 ring-primary/70 bg-primary/15'
+          : isBeingDragged
           ? 'opacity-40 ring-1 ring-white/10 scale-[0.98]'
           : isStackHover
             ? 'ring-2 ring-primary/60 bg-primary/10'
@@ -619,6 +666,10 @@ export default function VideoCard({
               : 'ring-1 ring-white/10 hover:ring-white/20 hover:shadow-[0_12px_28px_-12px_rgba(0,0,0,0.7)]'
       }`}
       data-video-id={id}
+      // 3.9.x: marks this card as an OS-file drop target so the
+      // FolderBrowser container drop handler bails (the card already
+      // routed the files into a new version of this video).
+      data-accepts-os-files={onDropOSFiles ? 'true' : undefined}
     >
       {/* Cover — thumbnail (or Film icon fallback) with overlays. The
           card area is a fixed 16:9 box, but we use `object-contain`
@@ -636,6 +687,17 @@ export default function VideoCard({
           if (videoRef.current) videoRef.current.pause()
         }}
       >
+        {/* 3.9.x: "New version" affordance shown only while dragging real
+            files from the OS over this card. pointer-events-none so it
+            never eats the drop. */}
+        {isOSFileDropHover && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-1.5 bg-primary/25 backdrop-blur-[2px] pointer-events-none">
+            <UploadCloud className="w-8 h-8 text-white drop-shadow" />
+            <span className="text-xs font-semibold text-white drop-shadow">
+              New version
+            </span>
+          </div>
+        )}
         {hasThumb ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

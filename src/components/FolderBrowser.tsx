@@ -132,6 +132,11 @@ export interface FolderBrowserProps {
     entries: FileTreeEntry[],
     extras?: { directoryPaths?: string[] },
   ) => void
+  /** 3.9.x: OS flat-file drop onto a VIDEO card/row — upload each file
+   *  as a NEW VERSION of that video (same targeted-upload path, then
+   *  stacked onto the target). When omitted, videos don't accept OS
+   *  file drops. */
+  onUploadFilesAsVersion?: (targetVideoId: string, files: File[]) => void
   /** Hide the inline Download-All / New-Folder buttons that sit next
    *  to the breadcrumb (1.0.9+). Use this when the parent page wants
    *  to render those actions in its own top bar and drive them
@@ -296,6 +301,7 @@ function FolderBrowserInner(
     onUploadFolderTree,
     onUploadFilesToFolder,
     onUploadFolderTreeToFolder,
+    onUploadFilesAsVersion,
     hideHeaderActions = false,
     viewMode = 'grid',
   }: FolderBrowserProps,
@@ -2740,6 +2746,21 @@ function FolderBrowserInner(
     [onUploadFilesToFolder, onUploadFolderTreeToFolder],
   )
 
+  // 3.9.x: OS files dropped onto a VIDEO card/row → upload each as a
+  // new version of that video. We only take the flat file list (a whole
+  // OS folder dropped onto a single video doesn't map to "a version",
+  // so directory entries are ignored here). The parent uploads them
+  // into the current folder and stacks each onto the target.
+  const handleDropOSFilesOnVideo = useCallback(
+    (targetVideoId: string, dataTransfer: DataTransfer) => {
+      if (!onUploadFilesAsVersion) return
+      const files = Array.from(dataTransfer.files)
+      if (files.length === 0) return
+      onUploadFilesAsVersion(targetVideoId, files)
+    },
+    [onUploadFilesAsVersion],
+  )
+
   const hasItems = folders.length > 0 || videoGroups.length > 0
 
   // 1.7.0+: Space opens a macOS Quick Look-style preview for the
@@ -3224,6 +3245,9 @@ function FolderBrowserInner(
               ? handleDropOSFilesOnFolder
               : undefined
           }
+          onDropOSFilesOnVideo={
+            onUploadFilesAsVersion ? handleDropOSFilesOnVideo : undefined
+          }
         />
       )}
       {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode !== 'table' && (
@@ -3368,6 +3392,9 @@ function FolderBrowserInner(
               onStartVideoDrag={(id) => setDraggingVideoId(id)}
               onEndVideoDrag={() => setDraggingVideoId(null)}
               onStackOnto={handleStackVideos}
+              onDropOSFiles={
+                onUploadFilesAsVersion ? handleDropOSFilesOnVideo : undefined
+              }
               // 1.0.9+: ghost all selected siblings while one of them
               // is being dragged, not just the source card. Visually
               // mirrors Finder / Frame.io batch drags.

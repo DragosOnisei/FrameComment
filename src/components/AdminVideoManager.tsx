@@ -41,7 +41,13 @@ export interface AdminVideoManagerHandle {
    *  video lands in the matching sub-folder that we just created in
    *  FrameComment (1.0.7+). */
   triggerUploadWithFolderTree: (
-    entries: Array<{ file: File; folderId: string | null }>,
+    entries: Array<{
+      file: File
+      folderId: string | null
+      /** 3.9.x: drop-onto-video path — stack this upload as a new
+       *  version of the given video once its record is created. */
+      stackOntoVideoId?: string
+    }>,
   ) => void
 }
 
@@ -91,7 +97,11 @@ const AdminVideoManager = forwardRef<AdminVideoManagerHandle, AdminVideoManagerP
   // the parent calls `triggerUploadWithFolderTree`, cleared when the
   // modal closes.
   const [pendingInitialFilesWithFolders, setPendingInitialFilesWithFolders] =
-    useState<Array<{ file: File; folderId: string | null }> | null>(null)
+    useState<Array<{
+      file: File
+      folderId: string | null
+      stackOntoVideoId?: string
+    }> | null>(null)
 
   // Monotonic counter that increments on EVERY call to
   // `triggerUpload`. We need this because setting

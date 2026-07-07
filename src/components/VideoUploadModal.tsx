@@ -7,6 +7,7 @@ import { Upload, Video, X, Pause, Play, CheckCircle2 } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import * as tus from 'tus-js-client'
 import { apiPost, apiDelete } from '@/lib/api-client'
+import { logError } from '@/lib/logging'
 import { getAccessToken } from '@/lib/token-store'
 import { getTusUploadErrorMessage, createTusAfterResponseHandler, createTusShouldRetryHandler, resetTusAuthRetry } from '@/lib/tus-error'
 import { getTusChunkSizeBytes, TUS_RETRY_DELAYS_MS } from '@/lib/transfer-tuning'
@@ -37,6 +38,12 @@ interface PendingUpload {
    *  newly-created FrameComment folder it belongs to — overrides the
    *  top-level `folderId` prop just for this row. */
   folderIdOverride?: string | null
+  /** 3.9.x: when set, this upload is a NEW VERSION of an existing
+   *  video. After the video record is created we POST
+   *  /api/videos/[newId]/stack with `{ targetVideoId: stackOntoVideoId }`
+   *  so the fresh upload joins that video's version stack (same logic
+   *  as dragging one video card onto another). */
+  stackOntoVideoId?: string
 }
 
 interface VideoUploadModalProps {
@@ -61,7 +68,13 @@ interface VideoUploadModalProps {
    *  FrameComment first, then hand the upload modal a list of
    *  `(file, folderId)` pairs so each video lands in the correct
    *  sub-folder. The list is also consumed once per array identity. */
-  initialFilesWithFolders?: Array<{ file: File; folderId: string | null }> | null
+  initialFilesWithFolders?: Array<{
+    file: File
+    folderId: string | null
+    /** 3.9.x: drop-onto-video path — stack this upload as a new
+     *  version of the given video after its record is created. */
+    stackOntoVideoId?: string
+  }> | null
   /** Optional folder to upload into. When set, the server attaches
    *  the new video to this folder; when null/undefined, the video
    *  goes to the project root (legacy / dashboard behaviour). */
@@ -287,7 +300,7 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
   // routes the new record into the right sub-folder. Used by the
   // folder-tree drag-and-drop path.
   const seededWithFoldersRef = useRef<
-    Array<{ file: File; folderId: string | null }> | null
+    Array<{ file: File; folderId: string | null; stackOntoVideoId?: string }> | null
   >(null)
   useEffect(() => {
     if (!isOpen) return
@@ -310,6 +323,7 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
       progress: 0,
       speed: 0,
       folderIdOverride: entry.folderId,
+      stackOntoVideoId: entry.stackOntoVideoId,
     }))
     setPendingUploads((prev) => [...prev, ...newUploads])
     setSeededActive(true)
@@ -521,6 +535,22 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
           versionLabel: trimmedVersionLabel,
           targetName: trimmedVideoName,
         })
+
+        // 3.9.x: drop-onto-video path — the freshly created record is
+        // its own v1 group; stack it onto the target so it becomes the
+        // newest version (same server call as dragging one video card
+        // onto another). Metadata-only op, safe to run before the file
+        // finishes uploading. Best-effort: a stack failure shouldn't
+        // abort the upload itself.
+        if (uploadItem.stackOntoVideoId) {
+          try {
+            await apiPost(`/api/videos/${videoId}/stack`, {
+              targetVideoId: uploadItem.stackOntoVideoId,
+            })
+          } catch (stackErr) {
+            logError('[VideoUploadModal] stack-as-version failed:', stackErr)
+          }
+        }
       }
 
       setPendingUploads(prev => prev.map(u =>

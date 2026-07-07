@@ -411,12 +411,13 @@ export default function MessageBubble({
             */}
             {isEditing ? (
               <div className="mt-1 flex flex-col gap-2">
-                <textarea
+                <EditTextarea
                   value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  rows={Math.min(8, Math.max(2, editValue.split('\n').length))}
-                  autoFocus
-                  className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  onChange={setEditValue}
+                  onSave={handleSaveEdit}
+                  onCancel={handleCancelEdit}
+                  disabled={isSaving}
+                  ariaLabel={t('editComment')}
                 />
                 <div className="flex items-center gap-2">
                   <button
@@ -716,12 +717,13 @@ export default function MessageBubble({
                   </div>
                   {editingReplyId === reply.id ? (
                     <div className="mt-1 flex flex-col gap-2">
-                      <textarea
+                      <EditTextarea
                         value={replyEditValue}
-                        onChange={(e) => setReplyEditValue(e.target.value)}
-                        rows={Math.min(8, Math.max(2, replyEditValue.split('\n').length))}
-                        autoFocus
-                        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        onChange={setReplyEditValue}
+                        onSave={() => handleSaveEditReply(reply.id)}
+                        onCancel={handleCancelEditReply}
+                        disabled={isSavingReply}
+                        ariaLabel={t('editComment')}
                       />
                       <div className="flex items-center gap-2">
                         <button
@@ -766,5 +768,84 @@ export default function MessageBubble({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * 3.9.x: glass edit input for comments/replies. Replaces the old
+ * `bg-background` (near-black) textarea with the app's v2.5 glass
+ * vocabulary, and fixes two UX papercuts:
+ *   - AUTO-GROW: the box expands to fit the whole comment (no inner
+ *     scrollbar) instead of being capped at 8 rows.
+ *   - Enter SAVES, Shift+Enter inserts a newline, Esc cancels — matches
+ *     the "Leave your comment" composer.
+ */
+function EditTextarea({
+  value,
+  onChange,
+  onSave,
+  onCancel,
+  disabled,
+  ariaLabel,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onSave: () => void
+  onCancel: () => void
+  disabled?: boolean
+  ariaLabel?: string
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  // Grow the textarea to fit its content so the full comment is visible
+  // without an inner scrollbar.
+  const resize = () => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
+
+  // Size + focus (caret at end) on mount.
+  useEffect(() => {
+    resize()
+    const el = ref.current
+    if (el) {
+      el.focus()
+      const len = el.value.length
+      try {
+        el.setSelectionRange(len, len)
+      } catch {
+        /* some browsers throw on programmatic selection — ignore */
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Re-grow whenever the value changes (typing, paste, external set).
+  useEffect(() => {
+    resize()
+  }, [value])
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      rows={1}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        // Enter saves; Shift+Enter is a newline; Esc cancels.
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          onSave()
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          onCancel()
+        }
+      }}
+      className="w-full resize-none overflow-hidden rounded-lg bg-white/[0.06] ring-1 ring-white/15 px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+    />
   )
 }
