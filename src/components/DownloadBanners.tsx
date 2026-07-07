@@ -12,18 +12,34 @@ import { useDownloadManager, type DownloadJob } from '@/contexts/DownloadManager
  * Mounted once at the root of every page that wants downloads
  * (admin app shell + the public folder share page). Renders nothing
  * when there are no jobs.
+ *
+ * 3.9.x: `hideTaskBanners` drops the low-priority indeterminate
+ * `task` banners (e.g. "Regenerating thumbnail…") while keeping the
+ * download/upload ZIP banners visible. The admin layout sets this in
+ * the player view where the bottom-right corner collides with the
+ * "Leave your comment" input — same reasoning that hides
+ * ProcessingStatusBanners there. Big ZIP transfers still show through
+ * so an admin can watch a 5 GB download while reviewing a clip.
  */
-export function DownloadBanners() {
+export function DownloadBanners({
+  hideTaskBanners = false,
+}: {
+  hideTaskBanners?: boolean
+} = {}) {
   const { jobs, cancel, dismiss } = useDownloadManager()
 
-  if (jobs.length === 0) return null
+  const visibleJobs = hideTaskBanners
+    ? jobs.filter((j) => j.kind !== 'task')
+    : jobs
+
+  if (visibleJobs.length === 0) return null
 
   return (
     <div
       className="fixed bottom-4 right-4 z-[2147483600] flex flex-col gap-2 max-w-[calc(100vw-2rem)] pointer-events-none"
       aria-live="polite"
     >
-      {jobs.map((job) => (
+      {visibleJobs.map((job) => (
         <DownloadBanner
           key={job.id}
           job={job}

@@ -121,7 +121,12 @@ export default function AdminLayout({
                 {children}
               </div>
               <SessionMonitor />
-              <DownloadBanners />
+              {/* 3.9.x: hide the low-priority task banners (e.g.
+                  "Regenerating thumbnail…") in the player view — they
+                  overlap the "Leave your comment" input and block it,
+                  same as ProcessingStatusBanners. Download ZIP banners
+                  stay visible. */}
+              <DownloadBanners hideTaskBanners />
               <GlobalDropOverlay />
             </div>
           ) : (

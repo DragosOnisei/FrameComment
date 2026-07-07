@@ -118,6 +118,20 @@ export interface FolderBrowserProps {
     entries: FileTreeEntry[],
     extras?: { directoryPaths?: string[] },
   ) => void
+  /** 3.9.x: OS flat-file drop routed to a SPECIFIC folder (the tile
+   *  the user dropped onto) rather than the current view. Parent wires
+   *  this to `triggerUploadWithFolderTree` with each file tagged with
+   *  `targetFolderId`. When omitted, folder tiles don't accept OS
+   *  file drops. */
+  onUploadFilesToFolder?: (targetFolderId: string, files: File[]) => void
+  /** 3.9.x: OS directory drop routed to a SPECIFIC folder — same as
+   *  `onUploadFolderTree` but the recreated hierarchy is nested under
+   *  `targetFolderId`. */
+  onUploadFolderTreeToFolder?: (
+    targetFolderId: string,
+    entries: FileTreeEntry[],
+    extras?: { directoryPaths?: string[] },
+  ) => void
   /** Hide the inline Download-All / New-Folder buttons that sit next
    *  to the breadcrumb (1.0.9+). Use this when the parent page wants
    *  to render those actions in its own top bar and drive them
@@ -280,6 +294,8 @@ function FolderBrowserInner(
     videos = [],
     onUploadFiles,
     onUploadFolderTree,
+    onUploadFilesToFolder,
+    onUploadFolderTreeToFolder,
     hideHeaderActions = false,
     viewMode = 'grid',
   }: FolderBrowserProps,
@@ -2563,6 +2579,12 @@ function FolderBrowserInner(
   // both file and folder drops — empty-state, project root, and
   // already-populated folders all support the same gesture.
   const containerDragOver = (e: React.DragEvent) => {
+    // 3.9.x: when the cursor is over a folder tile that accepts OS
+    // files, that card owns the drop (uploads INTO the folder). Bail so
+    // we don't also light up the whole-view "drop to upload here" ring.
+    if ((e.target as HTMLElement)?.closest?.('[data-accepts-os-files="true"]')) {
+      return
+    }
     // 3.5.x: flat-file drop is allowed wherever the parent wired an
     // `onUploadFiles` handler — including the PROJECT ROOT, where
     // `currentFolderId` is null (root uploads go to folderId=null).
@@ -2589,6 +2611,14 @@ function FolderBrowserInner(
     }
   }
   const containerDrop = (e: React.DragEvent) => {
+    // 3.9.x: a folder tile already handled this drop (it routed the
+    // files into that folder). The event still bubbles here so the
+    // window-level drop overlay can reset — but WE must not re-process
+    // it, or the files would ALSO upload into the current view.
+    if ((e.target as HTMLElement)?.closest?.('[data-accepts-os-files="true"]')) {
+      setIsFileDropHover(false)
+      return
+    }
     // 3.5.x: flat-file drop is allowed wherever the parent wired an
     // `onUploadFiles` handler — including the PROJECT ROOT, where
     // `currentFolderId` is null (root uploads go to folderId=null).
@@ -2652,6 +2682,63 @@ function FolderBrowserInner(
       onUploadFiles?.(flatFiles)
     }
   }
+
+  // 3.9.x: OS files/folders dropped directly onto a FOLDER TILE upload
+  // INTO that folder (not the current view). FolderCard hands us the
+  // raw DataTransfer; we mirror containerDrop's snapshot/walk but route
+  // to the folder-targeted parent callbacks. No pending placeholders —
+  // the uploaded videos land in the child folder, not the current grid,
+  // so a ghost card here would never resolve.
+  const handleDropOSFilesOnFolder = useCallback(
+    (targetFolderId: string, dataTransfer: DataTransfer) => {
+      const canDropFiles = !!onUploadFilesToFolder
+      const canDropTree = !!onUploadFolderTreeToFolder
+      if (!canDropFiles && !canDropTree) return
+
+      // webkitGetAsEntry only works synchronously inside the drop —
+      // snapshot the entries NOW, walk them async afterwards.
+      const snapshot = canDropTree
+        ? snapshotDataTransferEntries(dataTransfer.items)
+        : null
+      const flatFiles = canDropFiles ? Array.from(dataTransfer.files) : []
+
+      if (snapshot && snapshot.length > 0) {
+        void (async () => {
+          try {
+            const walked = await walkSnapshotEntries(snapshot)
+            if (walked.hadDirectory) {
+              const videoEntries = walked.entries.filter((entry) =>
+                isAcceptedVideoFile(entry.file),
+              )
+              if (
+                videoEntries.length === 0 &&
+                walked.directoryPaths.length === 0
+              ) {
+                return
+              }
+              onUploadFolderTreeToFolder?.(targetFolderId, videoEntries, {
+                directoryPaths: walked.directoryPaths,
+              })
+              return
+            }
+            if (canDropFiles && flatFiles.length) {
+              onUploadFilesToFolder?.(targetFolderId, flatFiles)
+            }
+          } catch {
+            if (canDropFiles && flatFiles.length) {
+              onUploadFilesToFolder?.(targetFolderId, flatFiles)
+            }
+          }
+        })()
+        return
+      }
+
+      if (canDropFiles && flatFiles.length) {
+        onUploadFilesToFolder?.(targetFolderId, flatFiles)
+      }
+    },
+    [onUploadFilesToFolder, onUploadFolderTreeToFolder],
+  )
 
   const hasItems = folders.length > 0 || videoGroups.length > 0
 
@@ -3165,6 +3252,11 @@ function FolderBrowserInner(
               onDragEnd={() => setDraggingFolderId(null)}
               onDropFolder={handleDropOnFolder}
               onDropVideo={handleMoveVideoToFolder}
+              onDropOSFiles={
+                onUploadFilesToFolder || onUploadFolderTreeToFolder
+                  ? handleDropOSFilesOnFolder
+                  : undefined
+              }
               isBeingDragged={draggingFolderId === f.id}
               isPotentialDropTarget={
                 draggingFolderId !== null && draggingFolderId !== f.id

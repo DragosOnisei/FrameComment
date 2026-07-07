@@ -12,6 +12,7 @@ import {
   Pencil,
   Trash2,
   Share2,
+  UploadCloud,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
 import { formatBytes } from '@/lib/project-gradient'
@@ -88,6 +89,12 @@ export interface FolderCardProps {
    *  (1.0.7+). The parent (FolderBrowser) reparents the whole version
    *  group into this folder via PATCH /api/videos/batch. */
   onDropVideo?: (sourceVideoId: string, targetFolderId: string) => void
+  /** 3.9.x: triggered when files/folders are dropped from the OS
+   *  directly onto this folder card. The parent uploads them INTO this
+   *  folder (rather than the folder the browser is currently showing).
+   *  We hand over the raw DataTransfer so the parent can snapshot the
+   *  FileSystemEntry tree synchronously inside the drop handler. */
+  onDropOSFiles?: (targetFolderId: string, dataTransfer: DataTransfer) => void
   /** True when *this* card is currently the drag source — render
    *  ghosted so the user sees what they're moving. */
   isBeingDragged?: boolean
@@ -156,6 +163,7 @@ export default function FolderCard({
   onDragEnd,
   onDropFolder,
   onDropVideo,
+  onDropOSFiles,
   isBeingDragged,
   isPotentialDropTarget,
   isPotentialVideoDropTarget,
@@ -180,6 +188,11 @@ export default function FolderCard({
   const showDuplicate = !!onDuplicate
   const [menuOpen, setMenuOpen] = useState(false)
   const [isHoveredDropTarget, setIsHoveredDropTarget] = useState(false)
+  // 3.9.x: separate from `isHoveredDropTarget` (which is for in-app
+  // folder/video moves) — this one lights up when the user is dragging
+  // real files from their OS over this card, so we can show a distinct
+  // "Upload here" affordance.
+  const [isOSFileDropHover, setIsOSFileDropHover] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   // 2.5.0+: dropdown is rendered inline as a child of menuRef now
   // (the wrapper's backdrop-filter was dropped so position:fixed
@@ -326,6 +339,7 @@ export default function FolderCard({
         const types = Array.from(e.dataTransfer.types)
         const isFolder = types.includes(FOLDER_MIME)
         const isVideo = types.includes(VIDEO_MIME)
+        const isFiles = types.includes('Files')
         if (isFolder && onDropFolder && !isBeingDragged) {
           e.preventDefault()
           e.dataTransfer.dropEffect = 'move'
@@ -334,23 +348,50 @@ export default function FolderCard({
         if (isVideo && onDropVideo) {
           e.preventDefault()
           e.dataTransfer.dropEffect = 'move'
+          return
+        }
+        // 3.9.x: real files dragged from the OS (never both a custom
+        // MIME AND Files) → offer to upload INTO this folder. We
+        // preventDefault so the browser allows the drop on this card,
+        // but deliberately DON'T stopPropagation: the event still
+        // bubbles to the container (which bails via
+        // `data-accepts-os-files`) and to the window (so the global
+        // drop overlay can reset its counter).
+        if (isFiles && !isFolder && !isVideo && onDropOSFiles) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+          if (!isOSFileDropHover) setIsOSFileDropHover(true)
         }
       }}
       onDragEnter={(e) => {
         const types = Array.from(e.dataTransfer.types)
         const isFolder = types.includes(FOLDER_MIME)
         const isVideo = types.includes(VIDEO_MIME)
+        const isFiles = types.includes('Files')
         if (isFolder && onDropFolder && !isBeingDragged) {
           setIsHoveredDropTarget(true)
           return
         }
         if (isVideo && onDropVideo) {
           setIsHoveredDropTarget(true)
+          return
+        }
+        if (isFiles && !isFolder && !isVideo && onDropOSFiles) {
+          setIsOSFileDropHover(true)
         }
       }}
-      onDragLeave={() => setIsHoveredDropTarget(false)}
+      onDragLeave={(e) => {
+        // Only clear when the pointer actually leaves the card — moving
+        // across a child element (cover, checkbox) fires a spurious
+        // dragleave that would otherwise flicker the highlight off/on.
+        const next = e.relatedTarget as Node | null
+        if (next && e.currentTarget.contains(next)) return
+        setIsHoveredDropTarget(false)
+        setIsOSFileDropHover(false)
+      }}
       onDrop={(e) => {
         setIsHoveredDropTarget(false)
+        setIsOSFileDropHover(false)
         const folderSource = e.dataTransfer.getData(FOLDER_MIME)
         if (folderSource && onDropFolder && folderSource !== id) {
           e.preventDefault()
@@ -361,6 +402,15 @@ export default function FolderCard({
         if (videoSource && onDropVideo) {
           e.preventDefault()
           onDropVideo(videoSource, id)
+          return
+        }
+        // 3.9.x: OS file/folder drop → upload straight into this folder.
+        // Hand the DataTransfer up so the parent can snapshot the entry
+        // tree synchronously. We don't stopPropagation (see onDragOver).
+        const types = Array.from(e.dataTransfer.types)
+        if (types.includes('Files') && onDropOSFiles) {
+          e.preventDefault()
+          onDropOSFiles(id, e.dataTransfer)
         }
       }}
       onKeyDown={(e) => {
@@ -377,7 +427,9 @@ export default function FolderCard({
         rounded-xl cursor-pointer
         transition-all
         focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60
-        ${isBeingDragged
+        ${isOSFileDropHover
+          ? 'ring-2 ring-primary/70 bg-primary/15'
+          : isBeingDragged
           ? 'opacity-40 ring-1 ring-white/5 bg-white/[0.02] scale-[0.98]'
           : isHoveredDropTarget
             ? 'ring-2 ring-primary/40 bg-primary/10'
@@ -397,6 +449,10 @@ export default function FolderCard({
       // behind it, so its OWN backdrop-blur lands the frosted glass
       // effect, same as ProjectCardKebab).
       data-folder-id={id}
+      // 3.9.x: marks this card as an OS-file drop target so the
+      // FolderBrowser container drop handler bails when a file is
+      // dropped here (the card already routed it into this folder).
+      data-accepts-os-files={onDropOSFiles ? 'true' : undefined}
     >
       {/* Frame.io-style cover (1.0.7+) — takes the full card width
           with a fixed aspect ratio. When the folder has video
@@ -406,6 +462,17 @@ export default function FolderCard({
           and videos read as one consistent grid. */}
       <div className="relative aspect-video w-full bg-white/[0.03] rounded-t-xl overflow-hidden">
         <FolderCover previewItems={previewItems} />
+        {/* 3.9.x: "Upload here" affordance shown only while dragging
+            real files from the OS over this card. pointer-events-none
+            so it never eats the drop. */}
+        {isOSFileDropHover && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1.5 bg-primary/25 backdrop-blur-[2px] pointer-events-none">
+            <UploadCloud className="w-8 h-8 text-white drop-shadow" />
+            <span className="text-xs font-semibold text-white drop-shadow">
+              Upload here
+            </span>
+          </div>
+        )}
         {/* Multi-select checkbox (1.1.0+). Always visible on folder
             cards — request from the user so picking folders is one
             tap away regardless of hover state. The empty checkbox

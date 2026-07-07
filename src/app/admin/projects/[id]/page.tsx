@@ -151,6 +151,11 @@ export default function ProjectPage() {
     async (
       entries: FileTreeEntry[],
       extras?: { directoryPaths?: string[] },
+      // 3.9.x: when the user drops a folder onto a specific folder TILE,
+      // the recreated hierarchy nests under that folder instead of the
+      // project root. null = project root (the default drop-anywhere
+      // behaviour).
+      baseFolderId: string | null = null,
     ) => {
       // 1.7.1+: also accept extras.directoryPaths so empty drop
       // folders still mint a matching FrameComment folder. Bail
@@ -166,19 +171,20 @@ export default function ProjectPage() {
         const paths = uniqueDirectoryPaths(entries, extras?.directoryPaths)
         const pathToFolderId = await createFolderHierarchy(
           project.id,
-          null,
+          baseFolderId,
           paths,
         )
         const seeded = entries
           .map((entry) => {
             const dir = entry.relativePath.replace(/\/[^/]*$/, '')
             const isTopLevel = !dir || dir === entry.relativePath
-            // At project root we can't host loose files — they must
-            // live inside a folder. Drop any top-level files (this is
-            // an edge case: the user dropped a single video together
-            // with a folder).
-            if (isTopLevel) return null
-            const targetFolderId = pathToFolderId.get(dir) || null
+            // Top-level (loose) files: at the project root there's
+            // nowhere to host them so we drop them (edge case: a video
+            // dropped alongside a folder). When dropped onto a folder
+            // tile (baseFolderId set) they land directly in that folder.
+            const targetFolderId = isTopLevel
+              ? baseFolderId
+              : pathToFolderId.get(dir) || baseFolderId
             if (!targetFolderId) return null
             return { file: entry.file, folderId: targetFolderId }
           })
@@ -390,6 +396,14 @@ export default function ProjectPage() {
               videoManagerRef.current?.triggerUploadWithFiles(files)
             }
             onUploadFolderTree={handleUploadFolderTree}
+            onUploadFilesToFolder={(folderId, files) =>
+              videoManagerRef.current?.triggerUploadWithFolderTree(
+                files.map((file) => ({ file, folderId })),
+              )
+            }
+            onUploadFolderTreeToFolder={(folderId, entries, extras) =>
+              handleUploadFolderTree(entries, extras, folderId)
+            }
             hideHeaderActions
             stretch
             viewMode={folderView}

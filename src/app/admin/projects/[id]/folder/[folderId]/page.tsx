@@ -143,6 +143,10 @@ export default function ProjectFolderPage() {
     async (
       entries: FileTreeEntry[],
       extras?: { directoryPaths?: string[] },
+      // 3.9.x: dropping a folder onto a child folder TILE nests the
+      // recreated hierarchy under that tile. Defaults to the folder
+      // we're currently viewing (the drop-anywhere behaviour).
+      baseFolderId: string | null = folderId,
     ) => {
       // 1.7.1+: empty drop folders still mint a matching folder
       // in FrameComment via `extras.directoryPaths`. Skip only
@@ -157,15 +161,15 @@ export default function ProjectFolderPage() {
         const paths = uniqueDirectoryPaths(entries, extras?.directoryPaths)
         const pathToFolderId = await createFolderHierarchy(
           projectId,
-          folderId,
+          baseFolderId,
           paths,
         )
         const seeded = entries.map((entry) => {
           const dir = entry.relativePath.replace(/\/[^/]*$/, '')
           const isTopLevel = !dir || dir === entry.relativePath
           const targetFolderId = isTopLevel
-            ? folderId
-            : pathToFolderId.get(dir) || folderId
+            ? baseFolderId
+            : pathToFolderId.get(dir) || baseFolderId
           return { file: entry.file, folderId: targetFolderId }
         })
         if (seeded.length === 0) {
@@ -350,6 +354,14 @@ export default function ProjectFolderPage() {
               videoManagerRef.current?.triggerUploadWithFiles(files)
             }
             onUploadFolderTree={handleUploadFolderTree}
+            onUploadFilesToFolder={(targetId, files) =>
+              videoManagerRef.current?.triggerUploadWithFolderTree(
+                files.map((file) => ({ file, folderId: targetId })),
+              )
+            }
+            onUploadFolderTreeToFolder={(targetId, entries, extras) =>
+              handleUploadFolderTree(entries, extras, targetId)
+            }
             videos={videos}
             hideHeaderActions
             stretch
