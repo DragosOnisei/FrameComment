@@ -555,8 +555,15 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
-    if (project?.videosByName) {
-      const videoNames = Object.keys(project.videosByName)
+    // 3.9.x/4.0: use the FOLDER-SCOPED map (effectiveVideosByName), not
+    // the raw project map. When a client opens a folder share link
+    // (`&folderId=`), two different assets that happen to share a name in
+    // different folders (e.g. a 4:5 cut in the 4:5 folder and a 9:16 cut
+    // in the 9:16 folder) must NOT be merged into one version group —
+    // otherwise the player picks the wrong variant's stream/dimensions
+    // and a 9:16 clip renders at 4:5. Same fix as the admin player.
+    if (effectiveVideosByName) {
+      const videoNames = Object.keys(effectiveVideosByName)
       if (videoNames.length === 0) return
 
       // Determine which video group should be active
@@ -564,7 +571,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         let videoNameToUse: string | null = null
 
         // Priority 1: URL parameter for video name
-        if (urlVideoName && project.videosByName[urlVideoName]) {
+        if (urlVideoName && effectiveVideosByName[urlVideoName]) {
           videoNameToUse = urlVideoName
         }
         // Priority 2: Saved video name from recent approval
@@ -572,7 +579,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           const savedVideoName = sessionStorage.getItem('approvedVideoName')
           if (savedVideoName) {
             sessionStorage.removeItem('approvedVideoName')
-            if (project.videosByName[savedVideoName]) {
+            if (effectiveVideosByName[savedVideoName]) {
               videoNameToUse = savedVideoName
             }
           }
@@ -585,7 +592,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
         setActiveVideoName(videoNameToUse)
 
-        const videos = project.videosByName[videoNameToUse]
+        const videos = effectiveVideosByName[videoNameToUse]
         // 2.2.0+: refuse to seed `activeVideosRaw` with an empty
         // array. Mirrors the admin share page guard.
         if (Array.isArray(videos) && videos.length > 0) {
@@ -606,7 +613,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         }
       } else {
         // Keep activeVideos in sync when project data refreshes (ensures updated approval status/thumbnails/tokens)
-        const videos = project.videosByName[activeVideoName]
+        const videos = effectiveVideosByName[activeVideoName]
         // 2.2.0+: same fingerprint-based no-op suppression as the
         // admin share page — avoids re-tokenizing every refresh
         // when nothing the tokenizer cares about actually changed,
@@ -621,7 +628,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         }
       }
     }
-  }, [project?.videosByName, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos])
+  }, [effectiveVideosByName, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos])
 
   const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
@@ -1018,7 +1025,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // Handle video selection - update URL so refresh preserves state
   const handleVideoSelect = useCallback((videoName: string) => {
     setActiveVideoName(videoName)
-    setActiveVideosRaw(project.videosByName[videoName])
+    // 4.0: folder-scoped group (see the selection effect note) so a
+    // same-named clip in another folder can't leak its stream/aspect in.
+    setActiveVideosRaw(
+      effectiveVideosByName?.[videoName] ?? project.videosByName[videoName],
+    )
     setViewState('player')
     // 2.2.0+: invalidate the "last good tokenized" fallback when
     // switching clip groups so the tokenize-effect guard can't
@@ -1030,7 +1041,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     const params = new URLSearchParams(searchParams?.toString() || '')
     params.set('video', videoName)
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-  }, [project?.videosByName, searchParams, pathname, router])
+  }, [project?.videosByName, effectiveVideosByName, searchParams, pathname, router])
 
   // Handle back to grid - remove video param from URL. When the
   // share player was opened with folder context (1.0.6+), "back"
