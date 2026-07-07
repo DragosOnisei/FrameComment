@@ -53,6 +53,15 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
         name: true,
         version: true,
         versionLabel: true,
+        // 3.9.x: prefer a small preview tier as the audio SOURCE — see
+        // the note below. Reading a ~50 MB 480p preview instead of a
+        // multi-GB original is ~50× less disk I/O, which is what made
+        // audio extraction time out on slow HDDs (esp. during a ZFS
+        // scrub) for long clips.
+        preview480Path: true,
+        preview720Path: true,
+        preview1080Path: true,
+        preview2160Path: true,
       },
     })
     if (!video) {
@@ -65,21 +74,38 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
       throw new Error('No OpenAI API key configured (Settings → Video Processing).')
     }
 
+    // Pick the audio source. Whisper only needs the speech, so we read
+    // from the SMALLEST available encoded preview (they all carry the
+    // same audio track) and only fall back to the big original when no
+    // preview exists (e.g. skip-transcoding uploads). This is the fix
+    // for "Extracting audio" failing/timing out on huge files: a 2.6 GB
+    // 36-min original becomes a ~50 MB 480p read.
+    const v = video as any
+    const audioSourceStoragePath: string =
+      v.preview480Path ||
+      v.preview720Path ||
+      v.preview1080Path ||
+      v.preview2160Path ||
+      originalStoragePath
+
     // Resolve the source file — prefer reading directly from
     // STORAGE_ROOT (local mode); fall back to downloading (S3 mode),
     // mirroring the regenerate-thumbnail processor.
     let sourcePath: string
-    const localSource = getLocalSourcePath(originalStoragePath)
+    const localSource = getLocalSourcePath(audioSourceStoragePath)
     if (localSource) {
       sourcePath = localSource
     } else {
-      const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
+      const cachedOriginal = path.join(TEMP_DIR, `${videoId}-transcript-src`)
       if (!fs.existsSync(cachedOriginal)) {
-        const stream = await downloadFile(originalStoragePath)
+        const stream = await downloadFile(audioSourceStoragePath)
         await pipeline(stream, fs.createWriteStream(cachedOriginal))
       }
       sourcePath = cachedOriginal
     }
+    logMessage(
+      `[WORKER] create-transcript ${videoId}: audio source = ${audioSourceStoragePath === originalStoragePath ? 'original' : 'preview'}`,
+    )
 
     // 1) Extract compact audio.
     await job.updateProgress({ stage: 'audio' }).catch(() => {})
