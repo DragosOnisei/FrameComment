@@ -3219,6 +3219,11 @@ function FolderBrowserInner(
           onStackVideo={handleStackVideos}
           onMoveVideoToFolder={handleMoveVideoToFolder}
           onDropFolderOnFolder={handleDropOnFolder}
+          onDropOSFiles={
+            onUploadFilesToFolder || onUploadFolderTreeToFolder
+              ? handleDropOSFilesOnFolder
+              : undefined
+          }
         />
       )}
       {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode !== 'table' && (

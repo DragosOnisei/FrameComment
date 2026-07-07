@@ -61,6 +61,11 @@ interface FolderBrowserTableProps {
   onStackVideo: (sourceId: string, targetId: string) => void
   onMoveVideoToFolder: (sourceVideoId: string, targetFolderId: string) => void
   onDropFolderOnFolder: (sourceId: string, targetId: string) => void
+  /** 3.9.x: OS files/folders dropped onto a folder ROW upload straight
+   *  INTO that folder — list-view parity with the grid card's
+   *  `onDropOSFiles`. We hand over the raw DataTransfer so the parent
+   *  can snapshot the FileSystemEntry tree synchronously. */
+  onDropOSFiles?: (targetFolderId: string, dataTransfer: DataTransfer) => void
 }
 
 export default function FolderBrowserTable({
@@ -75,6 +80,7 @@ export default function FolderBrowserTable({
   onStackVideo,
   onMoveVideoToFolder,
   onDropFolderOnFolder,
+  onDropOSFiles,
 }: FolderBrowserTableProps) {
   // Local drag bookkeeping (visual only — the actual move/stack logic
   // lives in the parent handlers).
@@ -147,6 +153,10 @@ export default function FolderBrowserTable({
               // anything inside a [data-folder-id]/[data-video-id]. Without
               // it, every row click cleared the selection it just made.
               data-folder-id={f.id}
+              // 3.9.x: marks this row as an OS-file drop target so the
+              // FolderBrowser container drop handler bails (the row
+              // already routed the files into this folder).
+              data-accepts-os-files={onDropOSFiles ? 'true' : undefined}
               role="button"
               tabIndex={0}
               aria-selected={selected}
@@ -173,6 +183,18 @@ export default function FolderBrowserTable({
                 const types = Array.from(e.dataTransfer.types)
                 const isVideo = types.includes(VIDEO_MIME)
                 const isFolder = types.includes(FOLDER_MIME)
+                const isFiles = types.includes('Files')
+                // 3.9.x: real OS files dragged in → upload INTO this
+                // folder. preventDefault to allow the drop, but no
+                // stopPropagation (the container bails via the
+                // data-accepts-os-files marker; window resets its
+                // overlay).
+                if (isFiles && !isVideo && !isFolder && onDropOSFiles) {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                  if (dropHoverId !== f.id) setDropHoverId(f.id)
+                  return
+                }
                 if (!isVideo && !isFolder) return
                 if (isFolder && draggingId === f.id) return // onto self
                 e.preventDefault()
@@ -193,6 +215,16 @@ export default function FolderBrowserTable({
                 }
               }}
               onDrop={(e) => {
+                // 3.9.x: OS file/folder drop → upload straight into this
+                // folder. Hand the DataTransfer up so the parent can
+                // snapshot the entry tree synchronously.
+                const types = Array.from(e.dataTransfer.types)
+                if (types.includes('Files') && onDropOSFiles) {
+                  e.preventDefault()
+                  onDropOSFiles(f.id, e.dataTransfer)
+                  clearDrag()
+                  return
+                }
                 e.preventDefault()
                 const vid = e.dataTransfer.getData(VIDEO_MIME)
                 if (vid) {
@@ -224,7 +256,6 @@ export default function FolderBrowserTable({
         {videoGroups.map((v) => {
           const selected = selectedVideoIds.has(v.id)
           const isImage = v.mediaType === 'IMAGE'
-          const TypeIcon = isImage ? ImageIcon : Film
           const dimmed = isDimmed('video', v.id)
           const dropHover = dropHoverId === v.id
           return (
@@ -287,19 +318,7 @@ export default function FolderBrowserTable({
               className={rowClass(selected, dimmed, dropHover)}
             >
               <div className="flex items-center gap-2 min-w-0">
-                {v.thumbnailUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={v.thumbnailUrl}
-                    alt=""
-                    draggable={false}
-                    className="w-10 h-6 object-cover rounded shrink-0 bg-white/10 ring-1 ring-white/10"
-                  />
-                ) : (
-                  <div className="w-10 h-6 rounded bg-white/10 ring-1 ring-white/10 flex items-center justify-center shrink-0">
-                    <TypeIcon className="w-3.5 h-3.5 text-white/55" />
-                  </div>
-                )}
+                <RowThumb thumbnailUrl={v.thumbnailUrl} isImage={isImage} />
                 <span className="truncate" title={v.name}>
                   {v.name}
                 </span>
@@ -326,6 +345,73 @@ export default function FolderBrowserTable({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// 3.9.x: list-view thumbnail that keeps the row's fixed footprint but
+// renders the frame at the VIDEO's real aspect ratio instead of
+// cropping it into a 16:9 box (a 9:16 reel used to get squished into a
+// landscape sliver). The thumbnail JPEG is generated at the clip's
+// native aspect, so we read it straight off the loaded image
+// (naturalWidth/Height) — no extra API field needed — and size the
+// image to that aspect within a FIXED-WIDTH slot so the Name column
+// stays aligned across rows regardless of orientation.
+const THUMB_H = 24 // px — same height as the old h-6 box
+const THUMB_SLOT_W = 44 // fixed slot width → aligned text column
+const THUMB_MIN_W = 14
+const THUMB_MAX_W = 44
+
+function RowThumb({
+  thumbnailUrl,
+  isImage,
+}: {
+  thumbnailUrl?: string | null
+  isImage: boolean
+}) {
+  const [aspect, setAspect] = useState<number | null>(null)
+  const Icon = isImage ? ImageIcon : Film
+  // Fall back to 16:9 until the image resolves its natural size.
+  const a = aspect ?? 16 / 9
+  const width = Math.round(
+    Math.min(THUMB_MAX_W, Math.max(THUMB_MIN_W, THUMB_H * a)),
+  )
+
+  return (
+    <div
+      className="shrink-0 flex items-center justify-center"
+      style={{ width: THUMB_SLOT_W, height: THUMB_H }}
+    >
+      {thumbnailUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={thumbnailUrl}
+          alt=""
+          draggable={false}
+          onLoad={(e) => {
+            const img = e.currentTarget
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+              const next = img.naturalWidth / img.naturalHeight
+              setAspect((cur) =>
+                cur === null || Math.abs(cur - next) / next > 0.01
+                  ? next
+                  : cur,
+              )
+            }
+          }}
+          // Box matches the clip's aspect, so object-cover fills it
+          // exactly with no crop/stretch.
+          className="object-cover rounded bg-white/10 ring-1 ring-white/10"
+          style={{ width, height: THUMB_H }}
+        />
+      ) : (
+        <div
+          className="rounded bg-white/10 ring-1 ring-white/10 flex items-center justify-center"
+          style={{ width: Math.round(THUMB_H * (16 / 9)), height: THUMB_H }}
+        >
+          <Icon className="w-3.5 h-3.5 text-white/55" />
+        </div>
+      )}
     </div>
   )
 }
