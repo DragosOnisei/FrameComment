@@ -36,9 +36,10 @@ export async function GET(request: NextRequest) {
   if (rl) return rl
 
   try {
-    const [folderCount, projectCount, trashedVideos] = await Promise.all([
+    const [folderCount, projectCount, documentCount, trashedVideos] = await Promise.all([
       prisma.folder.count({ where: { deletedAt: { not: null } } as any }),
       prisma.project.count({ where: { deletedAt: { not: null } } as any }),
+      (prisma as any).folderDocument.count({ where: { deletedAt: { not: null } } }),
       prisma.video.findMany({
         where: { deletedAt: { not: null } } as any,
         select: { projectId: true, name: true },
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
       videoGroupKeys.add(`${v.projectId}:${v.name}`)
     }
 
-    const count = folderCount + projectCount + videoGroupKeys.size
+    const count = folderCount + projectCount + documentCount + videoGroupKeys.size
     return NextResponse.json({ count })
   } catch (error) {
     logError('[GET /api/trash/count] failed:', error)

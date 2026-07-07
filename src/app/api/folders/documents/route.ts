@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
         : folderParam
 
     const docs = await (prisma as any).folderDocument.findMany({
-      where: { projectId, folderId },
+      where: { projectId, folderId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     })
 

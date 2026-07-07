@@ -228,6 +228,10 @@ model FolderDocument {
   // document survives if the source version is later deleted.
   sourceVideoId String?
 
+  // 3.9.x: soft-delete — same semantics as Video/Folder. Deleting a
+  // document card moves it to Trash (restorable) instead of nuking it.
+  deletedAt DateTime?
+
   createdAt   DateTime @default(now())
   createdById String?
 
@@ -239,6 +243,7 @@ model FolderDocument {
   @@index([projectId])
   @@index([folderId])
   @@index([sourceVideoId])
+  @@index([deletedAt])
 }
 
 enum ProjectStatus {

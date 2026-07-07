@@ -79,9 +79,19 @@ export async function GET(request: NextRequest) {
         queue.getActive(0, 50),
         queue.getWorkers().catch(() => [] as Array<{ id?: string }>),
       ])
-      activeJobCount = active.length
+      // 3.9.x: only ENCODING jobs should light up the "Encoding tiers"
+      // banner. Maintenance jobs that happen to run on the same queue —
+      // regenerate-thumbnail and create-transcript — carry a `videoId`
+      // too, and were incorrectly marking their (already-READY) video as
+      // "processing", so a 17s clip's 2-minute transcript job showed as
+      // "Encoding tiers … 100%" and just sat there. Those jobs have their
+      // own bottom-right task banner, so we exclude them here.
+      const encodingJobs = active.filter(
+        (j) => j.name !== 'create-transcript' && j.name !== 'regenerate-thumbnail',
+      )
+      activeJobCount = encodingJobs.length
       activeVideoIds = new Set(
-        active.map((j) => (j.data as any)?.videoId).filter(Boolean)
+        encodingJobs.map((j) => (j.data as any)?.videoId).filter(Boolean)
       )
       // `getWorkers()` lists every BullMQ Worker connected to
       // this queue. With our single-process worker container

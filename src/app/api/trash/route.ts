@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     // surface items whose `deletedAt` is set; the rest of the listing
     // endpoints stay filtered out, so the Trash page is the single
     // place these rows appear.
-    const [trashedFolders, trashedVideos, trashedProjects] = await Promise.all([
+    const [trashedFolders, trashedVideos, trashedProjects, trashedDocuments] = await Promise.all([
       prisma.folder.findMany({
         where: { deletedAt: { not: null } } as any,
         orderBy: { deletedAt: 'desc' } as any,
@@ -72,6 +72,15 @@ export async function GET(request: NextRequest) {
           deletedAt: true,
           coverImagePath: true,
         } as any,
+      }),
+      // 3.9.x: trashed folder documents (transcript PDFs).
+      (prisma as any).folderDocument.findMany({
+        where: { deletedAt: { not: null } },
+        orderBy: { deletedAt: 'desc' },
+        include: {
+          project: { select: { id: true, title: true, slug: true } },
+          folder: { select: { id: true, name: true } },
+        },
       }),
     ])
 
@@ -166,7 +175,24 @@ export async function GET(request: NextRequest) {
       hasCover: !!p.coverImagePath,
     }))
 
-    const items = [...projectItems, ...folderItems, ...videoItems].sort((a, b) => {
+    const documentItems = (trashedDocuments as any[]).map((d) => ({
+      kind: 'document' as const,
+      id: d.id,
+      name: d.name,
+      projectId: d.projectId,
+      projectTitle: d.project?.title ?? '—',
+      projectSlug: d.project?.slug ?? null,
+      parent: d.folder
+        ? { kind: 'folder', id: d.folder.id, name: d.folder.name }
+        : { kind: 'root', id: null, name: 'Project root' },
+      deletedAt: d.deletedAt,
+      expiresAt: new Date(
+        new Date(d.deletedAt).getTime() +
+          TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+      ),
+    }))
+
+    const items = [...projectItems, ...folderItems, ...videoItems, ...documentItems].sort((a, b) => {
       const da = new Date(a.deletedAt).getTime()
       const db = new Date(b.deletedAt).getTime()
       return db - da

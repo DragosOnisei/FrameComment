@@ -83,6 +83,12 @@ export async function POST(
       folderId: video.folderId ?? null,
       originalStoragePath: video.originalStoragePath,
     }
+    // BullMQ dedupes by jobId — a completed/failed job with this id from
+    // a previous run would make `add` a silent no-op (nothing runs, no
+    // PDF). Remove any stale one first so re-running actually works. If
+    // it's currently active (rare), remove throws → we swallow it and the
+    // add below is a harmless no-op while the in-flight job finishes.
+    await queue.remove(`transcript-${video.id}`).catch(() => {})
     await queue.add('create-transcript', job, {
       priority: VIDEO_JOB_PRIORITY.CREATE_TRANSCRIPT,
       jobId: `transcript-${video.id}`,
@@ -95,5 +101,43 @@ export async function POST(
       { error: 'Failed to enqueue transcript job' },
       { status: 500 },
     )
+  }
+}
+
+/**
+ * 3.9.x GET /api/videos/[id]/transcript
+ *
+ * Lightweight status poll for the in-flight transcript job so the
+ * bottom-right banner can show the CURRENT step ("Extracting audio…",
+ * "Sending to OpenAI…", "Generating PDF…", "Saving…"). Reads the stage
+ * the worker reports via `job.updateProgress({ stage })`.
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) return authResult
+
+  try {
+    const { id: videoId } = await params
+    const job = await getVideoQueue().getJob(`transcript-${videoId}`)
+    if (!job) {
+      return NextResponse.json({ stage: null, state: 'unknown' })
+    }
+    const state = await job.getState().catch(() => 'unknown')
+    const progress = job.progress
+    const stage =
+      progress && typeof progress === 'object'
+        ? ((progress as any).stage ?? null)
+        : null
+    return NextResponse.json({
+      stage,
+      state,
+      failedReason: (job as any).failedReason || null,
+    })
+  } catch (error) {
+    logError('Error reading transcript job status:', error)
+    return NextResponse.json({ stage: null, state: 'unknown' })
   }
 }

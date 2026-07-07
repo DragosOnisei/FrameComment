@@ -163,8 +163,10 @@ function DownloadBanner({
       </div>
       {/* Progress bar: solid fill if we know %, indeterminate sweep
           otherwise. Hidden for success/cancelled so the banner can
-          fade out cleanly. */}
-      {!isTerminal && (
+          fade out cleanly. 3.9.x: `task` jobs have no predictable
+          duration and drive a step label instead, so they render NO
+          bar — just the spinning icon + the current step text. */}
+      {!isTerminal && !isTask && (
         <div className="mt-2.5 h-1 w-full rounded-full bg-white/10 overflow-hidden">
           {pct !== null ? (
             <div

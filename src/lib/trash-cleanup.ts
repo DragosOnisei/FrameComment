@@ -179,28 +179,55 @@ export async function hardDeleteProjectById(id: string): Promise<void> {
  * `deletedAt` is older than `TRASH_RETENTION_DAYS` days. Safe to
  * call repeatedly; the cron schedules it daily.
  */
+/**
+ * 3.9.x: permanently delete a FolderDocument (transcript PDF) by id —
+ * wipe its storage file, then drop the row. Used by Empty Trash, the
+ * per-item permanent delete, and the retention cron.
+ */
+export async function hardDeleteFolderDocumentById(id: string): Promise<void> {
+  const doc = await (prisma as any).folderDocument.findUnique({
+    where: { id },
+    select: { id: true, storagePath: true },
+  })
+  if (!doc) return
+  if (doc.storagePath) {
+    try {
+      await deleteFile(doc.storagePath)
+    } catch (err) {
+      logError(`[hardDeleteFolderDocumentById] file cleanup failed for ${id}:`, err)
+    }
+  }
+  await (prisma as any).folderDocument.delete({ where: { id } })
+}
+
 export async function purgeExpiredTrash(): Promise<{
   videos: number
   folders: number
   projects: number
+  documents: number
 }> {
   const cutoff = new Date(
     Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   )
-  const [expiredVideos, expiredFolders, expiredProjects] = await Promise.all([
-    prisma.video.findMany({
-      where: { deletedAt: { lt: cutoff } } as any,
-      select: { id: true },
-    }),
-    prisma.folder.findMany({
-      where: { deletedAt: { lt: cutoff } } as any,
-      select: { id: true },
-    }),
-    prisma.project.findMany({
-      where: { deletedAt: { lt: cutoff } } as any,
-      select: { id: true } as any,
-    }),
-  ])
+  const [expiredVideos, expiredFolders, expiredProjects, expiredDocuments] =
+    await Promise.all([
+      prisma.video.findMany({
+        where: { deletedAt: { lt: cutoff } } as any,
+        select: { id: true },
+      }),
+      prisma.folder.findMany({
+        where: { deletedAt: { lt: cutoff } } as any,
+        select: { id: true },
+      }),
+      prisma.project.findMany({
+        where: { deletedAt: { lt: cutoff } } as any,
+        select: { id: true } as any,
+      }),
+      (prisma as any).folderDocument.findMany({
+        where: { deletedAt: { lt: cutoff } },
+        select: { id: true },
+      }),
+    ])
 
   let videos = 0
   for (const v of expiredVideos) {
@@ -229,5 +256,14 @@ export async function purgeExpiredTrash(): Promise<{
       logError('[purgeExpiredTrash] project failed:', err)
     }
   }
-  return { videos, folders, projects }
+  let documents = 0
+  for (const d of expiredDocuments as any[]) {
+    try {
+      await hardDeleteFolderDocumentById(d.id)
+      documents += 1
+    } catch (err) {
+      logError('[purgeExpiredTrash] document failed:', err)
+    }
+  }
+  return { videos, folders, projects, documents }
 }

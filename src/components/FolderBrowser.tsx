@@ -24,6 +24,8 @@ import {
   Trash2,
   X,
   FileText,
+  Pencil,
+  ArrowUpFromLine,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
@@ -1244,6 +1246,12 @@ function FolderBrowserInner(
       const res = await apiFetch(`/api/documents/${docId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('delete failed')
       setDocuments((prev) => prev.filter((d) => d.id !== docId))
+      // Soft-deleted → it's now in Trash. Nudge the sidebar Trash badge
+      // to refetch immediately (it listens for this event) instead of
+      // only updating on the next navigation.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('trash:changed'))
+      }
     } catch {
       alert('Failed to delete document')
     }
@@ -1274,6 +1282,93 @@ function FolderBrowserInner(
     },
     [],
   )
+
+  // 3.9.x: right-click menu for a document card + rename dialog target.
+  const [docMenu, setDocMenu] = useState<{
+    doc: { id: string; name: string; downloadUrl: string }
+    x: number
+    y: number
+  } | null>(null)
+  const [renameDocTarget, setRenameDocTarget] = useState<{
+    id: string
+    name: string
+  } | null>(null)
+
+  const handleDuplicateDocument = useCallback(
+    async (id: string) => {
+      try {
+        const res = await apiFetch(`/api/documents/${id}/duplicate`, {
+          method: 'POST',
+        })
+        if (!res.ok) throw new Error('duplicate failed')
+        await fetchDocuments()
+      } catch {
+        alert('Failed to duplicate document')
+      }
+    },
+    [fetchDocuments],
+  )
+
+  const handleMoveDocumentUp = useCallback(
+    async (id: string) => {
+      // Move to the parent of the current folder (or the project root).
+      const target =
+        !currentFolderId
+          ? null
+          : Array.isArray(breadcrumb) && breadcrumb.length >= 2
+            ? (breadcrumb[breadcrumb.length - 2]?.id ?? null)
+            : null
+      try {
+        const res = await apiFetch(`/api/documents/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderId: target }),
+        })
+        if (!res.ok) throw new Error('move failed')
+        // It left this folder — drop it from the current grid.
+        setDocuments((prev) => prev.filter((d) => d.id !== id))
+      } catch {
+        alert('Failed to move document')
+      }
+    },
+    [currentFolderId, breadcrumb],
+  )
+
+  const handleRenameDocSubmit = useCallback(
+    async (next: string) => {
+      if (!renameDocTarget) return
+      try {
+        const res = await apiFetch(`/api/documents/${renameDocTarget.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: next.trim() }),
+        })
+        if (!res.ok) throw new Error('rename failed')
+        await fetchDocuments()
+      } catch {
+        alert('Failed to rename document')
+        return false
+      }
+    },
+    [renameDocTarget, fetchDocuments],
+  )
+
+  // Close the document context menu on outside-click / Escape / scroll.
+  useEffect(() => {
+    if (!docMenu) return
+    const close = () => setDocMenu(null)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDocMenu(null)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [docMenu])
 
   // 3.8.x: regenerate a single video's thumbnail (right-click / kebab).
   // Enqueues a worker job, then shows a bottom-right "Regenerating
@@ -1375,13 +1470,53 @@ function FolderBrowserInner(
 
         task = startTask({
           label,
-          sublabel: 'Creating transcript…',
+          sublabel: 'Preparing…',
           icon: 'refresh',
         })
 
-        const ATTEMPTS = 40 // ~2 min; transcription + OpenAI can be slow
+        // Friendly labels for the worker's reported stage — this is what
+        // makes the banner show real steps instead of a static message.
+        const STAGE_LABEL: Record<string, string> = {
+          audio: 'Extracting audio…',
+          sending: 'Sending to OpenAI…',
+          waiting: 'Waiting for OpenAI…',
+          transcribing: 'Waiting for OpenAI…', // legacy alias
+          pdf: 'Generating PDF…',
+          saving: 'Saving to folder…',
+        }
+
+        const ATTEMPTS = 60 // ~2.5 min; transcription runs at low priority
         for (let i = 0; i < ATTEMPTS; i++) {
-          await new Promise((r) => setTimeout(r, 3000))
+          await new Promise((r) => setTimeout(r, 2500))
+
+          // Read the current worker stage / state and reflect it.
+          try {
+            const sres = await apiFetch(`/api/videos/${videoId}/transcript`)
+            if (sres.ok) {
+              const { stage, state, failedReason } = await sres.json()
+              // The job errored out — surface the real reason instead of
+              // sitting there and then faking success.
+              if (state === 'failed') {
+                task.finish(
+                  'error',
+                  failedReason
+                    ? String(failedReason).slice(0, 120)
+                    : 'Transcript failed',
+                )
+                return
+              }
+              const stepLabel =
+                stage && STAGE_LABEL[stage]
+                  ? STAGE_LABEL[stage]
+                  : state === 'waiting' || state === 'delayed'
+                    ? 'Waiting in queue…'
+                    : 'Starting…'
+              task.update(stepLabel)
+            }
+          } catch {
+            /* status poll is best-effort */
+          }
+
           const arr = await fetchDocuments()
           const fresh = arr.find(
             (d) => d.sourceVideoId === videoId && !beforeIds.has(d.id),
@@ -1391,9 +1526,12 @@ function FolderBrowserInner(
             return
           }
         }
-        // Timed out watching — the job may still be running; close the
-        // banner cleanly (the card will appear on the next folder open).
-        task.finish('success', 'Transcript ready')
+        // Timed out without a document AND without an explicit failure —
+        // don't fake success. Tell the user honestly.
+        task.finish(
+          'error',
+          "Transcript didn't finish in time — check the worker or try again.",
+        )
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : 'Failed to create transcript'
@@ -3445,6 +3583,13 @@ function FolderBrowserInner(
               key={`doc:${doc.id}`}
               className="group relative flex flex-col rounded-xl cursor-pointer transition-all ring-1 ring-white/10 bg-white/[0.04] hover:bg-white/[0.06] hover:ring-white/20 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)]"
               onClick={() => void handleDownloadDocument(doc)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                // Stop the container's right-click handler from ALSO
+                // opening the folder/empty-space context menu underneath.
+                e.stopPropagation()
+                setDocMenu({ doc, x: e.clientX, y: e.clientY })
+              }}
               role="button"
               tabIndex={0}
               title={doc.name}
@@ -3837,6 +3982,98 @@ function FolderBrowserInner(
         initialValue={renameVideoTarget?.name || ''}
         onSubmit={handleRenameVideoSubmit}
       />
+      <RenameDialog
+        open={!!renameDocTarget}
+        onOpenChange={(next) => { if (!next) setRenameDocTarget(null) }}
+        title="Rename document"
+        initialValue={renameDocTarget?.name || ''}
+        onSubmit={handleRenameDocSubmit}
+      />
+
+      {/* 3.9.x: right-click menu for a document (transcript PDF). */}
+      {docMenu && (
+        <div
+          role="menu"
+          onMouseDown={(e) => e.stopPropagation()}
+          className="fixed z-[2147483600] min-w-[200px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1 text-sm"
+          style={{
+            top: Math.min(docMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320),
+            left: Math.min(docMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1000) - 220),
+            backgroundColor: '#162533',
+          }}
+        >
+          {(() => {
+            const doc = docMenu.doc
+            const Item = ({
+              icon,
+              label,
+              onClick,
+              disabled,
+              destructive,
+            }: {
+              icon: React.ReactNode
+              label: string
+              onClick: () => void
+              disabled?: boolean
+              destructive?: boolean
+            }) => (
+              <button
+                role="menuitem"
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  setDocMenu(null)
+                  onClick()
+                }}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  destructive
+                    ? 'hover:bg-destructive/10 text-destructive'
+                    : 'hover:bg-white/[0.08]'
+                }`}
+              >
+                {icon}
+                {label}
+              </button>
+            )
+            return (
+              <>
+                <Item
+                  icon={<Download className="w-4 h-4 shrink-0" />}
+                  label="Download"
+                  onClick={() => void handleDownloadDocument(doc)}
+                />
+                <div className="my-1 h-px bg-white/10" role="separator" />
+                <Item
+                  icon={<Files className="w-4 h-4 shrink-0" />}
+                  label="Duplicate"
+                  onClick={() => void handleDuplicateDocument(doc.id)}
+                />
+                <Item
+                  icon={<Pencil className="w-4 h-4 shrink-0" />}
+                  label="Rename"
+                  onClick={() =>
+                    setRenameDocTarget({ id: doc.id, name: doc.name })
+                  }
+                />
+                <div className="my-1 h-px bg-white/10" role="separator" />
+                <Item
+                  icon={<ArrowUpFromLine className="w-4 h-4 shrink-0" />}
+                  label="Move up one folder"
+                  disabled={!canMoveUp}
+                  onClick={() => void handleMoveDocumentUp(doc.id)}
+                />
+                <div className="my-1 h-px bg-white/10" role="separator" />
+                <Item
+                  icon={<Trash2 className="w-4 h-4 shrink-0" />}
+                  label="Delete"
+                  destructive
+                  onClick={() => void handleDeleteDocument(doc.id)}
+                />
+              </>
+            )
+          })()}
+        </div>
+      )}
       <ShareModal
         open={shareState.open}
         onOpenChange={(next) =>

@@ -143,6 +143,32 @@ export async function POST(
       return NextResponse.json({ success: true })
     }
 
+    if (kind === 'document') {
+      // 3.9.x: restore a trashed folder document (transcript PDF).
+      const doc = (await (prisma as any).folderDocument.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          folderId: true,
+          folder: { select: { id: true, deletedAt: true } },
+        },
+      })) as any
+      if (!doc) {
+        return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+      }
+      // If the original folder is still trashed, drop the document to the
+      // project root so it's actually visible after restore.
+      const folderStillTrashed = doc.folder && doc.folder.deletedAt !== null
+      await (prisma as any).folderDocument.update({
+        where: { id },
+        data: {
+          deletedAt: null,
+          ...(folderStillTrashed ? { folderId: null } : {}),
+        },
+      })
+      return NextResponse.json({ success: true })
+    }
+
     return NextResponse.json({ error: 'Unknown kind' }, { status: 400 })
   } catch (error) {
     logError('[POST /api/trash/.../restore] failed:', error)

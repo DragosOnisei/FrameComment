@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Film as FilmIcon,
   Folder as FolderIcon,
+  FileText,
   Loader2,
   Trash2,
   Undo2,
@@ -41,7 +42,7 @@ interface TrashItem {
   /** 1.2.0+: projects can be trashed too. They render as top-level
    *  entries with the project gradient as a thumbnail; restore brings
    *  the whole subtree (videos + folders + comments) back at once. */
-  kind: 'video' | 'folder' | 'project'
+  kind: 'video' | 'folder' | 'project' | 'document'
   id: string
   /** For video groups, all version ids — used so Permanent Delete
    *  wipes every version, not just the latest (1.0.8+). */
@@ -185,6 +186,15 @@ export default function TrashPage() {
                 const err = await res.json().catch(() => ({}))
                 throw new Error(err.error || 'Failed to delete')
               }
+            } else if (item.kind === 'document') {
+              const res = await apiFetch(
+                `/api/documents/${item.id}?permanent=true`,
+                { method: 'DELETE' },
+              )
+              if (!res.ok && res.status !== 404) {
+                const err = await res.json().catch(() => ({}))
+                throw new Error(err.error || 'Failed to delete')
+              }
             } else {
               const ids =
                 item.allIds && item.allIds.length > 0
@@ -230,6 +240,9 @@ export default function TrashPage() {
       if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
     } else if (item.kind === 'project') {
       const res = await apiFetch(`/api/projects/${item.id}?permanent=1`, { method: 'DELETE' })
+      if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+    } else if (item.kind === 'document') {
+      const res = await apiFetch(`/api/documents/${item.id}?permanent=true`, { method: 'DELETE' })
       if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
     } else {
       const ids = item.allIds && item.allIds.length > 0 ? item.allIds : [item.id]
@@ -567,6 +580,8 @@ function TrashRow({
             />
           ) : isFolder ? (
             <FolderIcon className="w-5 h-5 text-primary/70" />
+          ) : node.kind === 'document' ? (
+            <FileText className="w-5 h-5 text-primary/70" />
           ) : (
             <FilmIcon className="w-5 h-5 text-white/55" />
           )}

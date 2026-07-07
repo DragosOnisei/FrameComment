@@ -82,6 +82,7 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     }
 
     // 1) Extract compact audio.
+    await job.updateProgress({ stage: 'audio' }).catch(() => {})
     await extractAudioForTranscription(sourcePath, audioPath)
     const audioBuffer = await fs.promises.readFile(audioPath)
     if (audioBuffer.length > MAX_AUDIO_BYTES) {
@@ -101,11 +102,25 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     form.append('model', 'whisper-1')
     form.append('response_format', 'verbose_json')
 
-    const resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-    })
+    // Two distinct steps for the banner: "Sending" (the small audio
+    // upload — a second or two) then "Waiting for OpenAI" (the bulk of
+    // the time, while whisper transcribes). fetch() is a single await, so
+    // we flip to the "waiting" stage on a short timer once the request is
+    // on the wire.
+    await job.updateProgress({ stage: 'sending' }).catch(() => {})
+    const waitingTimer = setTimeout(() => {
+      void job.updateProgress({ stage: 'waiting' }).catch(() => {})
+    }, 2000)
+    let resp: Response
+    try {
+      resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+      })
+    } finally {
+      clearTimeout(waitingTimer)
+    }
     if (!resp.ok) {
       const body = await resp.text().catch(() => '')
       throw new Error(`OpenAI transcription failed (${resp.status}): ${body.slice(0, 300)}`)
@@ -129,6 +144,7 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     const versionLabel = video.versionLabel || `v${video.version}`
 
     // 3) Render the PDF (pdfkit auto-wraps + paginates).
+    await job.updateProgress({ stage: 'pdf' }).catch(() => {})
     const pdfBuffer = await renderTranscriptPdf({
       title: video.name,
       versionLabel,
@@ -138,6 +154,7 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     })
 
     // 4) Upload it into the project's documents area.
+    await job.updateProgress({ stage: 'saving' }).catch(() => {})
     const storagePath = `projects/${projectId}/documents/transcript-${videoId}-${Date.now()}.pdf`
     await uploadFile(storagePath, pdfBuffer, pdfBuffer.length, 'application/pdf')
 

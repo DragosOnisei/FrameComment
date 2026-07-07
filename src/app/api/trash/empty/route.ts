@@ -12,7 +12,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
-import { hardDeleteVideoById, hardDeleteFolderById, hardDeleteProjectById } from '@/lib/trash-cleanup'
+import { hardDeleteVideoById, hardDeleteFolderById, hardDeleteProjectById, hardDeleteFolderDocumentById } from '@/lib/trash-cleanup'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     // Pull every trashed video + folder + project, then permanently
     // delete each one. Done one at a time so a single storage
     // failure doesn't roll back the rest.
-    const [videos, folders, projects] = await Promise.all([
+    const [videos, folders, projects, documents] = await Promise.all([
       prisma.video.findMany({
         where: { deletedAt: { not: null } } as any,
         select: { id: true },
@@ -44,6 +44,10 @@ export async function POST(request: NextRequest) {
       prisma.project.findMany({
         where: { deletedAt: { not: null } } as any,
         select: { id: true } as any,
+      }),
+      (prisma as any).folderDocument.findMany({
+        where: { deletedAt: { not: null } },
+        select: { id: true },
       }),
     ])
 
@@ -88,6 +92,16 @@ export async function POST(request: NextRequest) {
         removed += 1
       } catch (err) {
         logError('[POST /api/trash/empty] folder cleanup failed:', err)
+      }
+    }
+    // 3.9.x: documents. hardDeleteFolderDocumentById no-ops if the row was
+    // already removed by a project cascade above, so no skip-set needed.
+    for (const d of documents as any[]) {
+      try {
+        await hardDeleteFolderDocumentById(d.id)
+        removed += 1
+      } catch (err) {
+        logError('[POST /api/trash/empty] document cleanup failed:', err)
       }
     }
 

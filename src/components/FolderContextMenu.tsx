@@ -270,19 +270,15 @@ export default function FolderContextMenu({
               onClick={onSplitVersions}
             />
           )}
-          {singleTarget && canRegenerateThumbnail && (
-            <Row
-              icon={<RefreshCw className="w-4 h-4" />}
-              label="Regenerate thumbnail"
-              onClick={onRegenerateThumbnail}
-            />
-          )}
           {singleTarget && canCreateTranscript && (
-            <Row
-              icon={<FileText className="w-4 h-4" />}
-              label="Create transcript"
-              onClick={onCreateTranscript}
-            />
+            <>
+              <div className="my-1 h-px bg-white/10" role="separator" />
+              <Row
+                icon={<FileText className="w-4 h-4" />}
+                label="Create transcript"
+                onClick={onCreateTranscript}
+              />
+            </>
           )}
           <div className="my-1 h-px bg-white/10" role="separator" />
           <Row
@@ -305,6 +301,13 @@ export default function FolderContextMenu({
             onClick={onBulkNewFolderWithSelection}
           />
           <div className="my-1 h-px bg-white/10" role="separator" />
+          {singleTarget && canRegenerateThumbnail && (
+            <Row
+              icon={<RefreshCw className="w-4 h-4" />}
+              label="Regenerate thumbnail"
+              onClick={onRegenerateThumbnail}
+            />
+          )}
           <Row
             icon={<Trash2 className="w-4 h-4" />}
             label={

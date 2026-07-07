@@ -1007,35 +1007,24 @@ export default function VideoCard({
                   Split versions
                 </button>
               )}
-              {showRegenThumb && (
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onRegenerateThumbnail!(id)
-                  }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
-                >
-                  <RefreshCw className="w-4 h-4 shrink-0" />
-                  Regenerate thumbnail
-                </button>
-              )}
               {showTranscript && (
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onCreateTranscript!(id)
-                  }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
-                >
-                  <FileText className="w-4 h-4 shrink-0" />
-                  Create transcript
-                </button>
+                <>
+                  <div className="my-1 h-px bg-white/10" role="separator" />
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onCreateTranscript!(id)
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
+                  >
+                    <FileText className="w-4 h-4 shrink-0" />
+                    Create transcript
+                  </button>
+                </>
               )}
-              {(showDuplicate || showRename || showSplit || showRegenThumb || showTranscript) && (onMoveUp || showNewFolder) && (
+              {(showDuplicate || showRename || showSplit || showTranscript) && (onMoveUp || showNewFolder) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onMoveUp && (
@@ -1070,8 +1059,22 @@ export default function VideoCard({
                     : 'New Folder with selection'}
                 </button>
               )}
-              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showRegenThumb || showTranscript || showDownload || showShare) && (
+              {(onDelete || showRegenThumb) && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showTranscript || showDownload || showShare) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
+              )}
+              {showRegenThumb && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onRegenerateThumbnail!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
+                >
+                  <RefreshCw className="w-4 h-4 shrink-0" />
+                  Regenerate thumbnail
+                </button>
               )}
               {onDelete && (
                 <button
