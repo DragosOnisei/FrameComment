@@ -33,6 +33,7 @@ interface Settings {
   smtpPassword: string | null
   smtpFromAddress: string | null
   smtpSecure: string | null
+  openaiApiKey: string | null
   appDomain: string | null
   // 2.4.0+: optional Frame.io-style short-link domain (e.g.
   // "fcmt.io") that fronts the URL shortener. Null = feature
@@ -149,6 +150,9 @@ export default function GlobalSettingsPage() {
   const [appDomain, setAppDomain] = useState('')
   // 2.4.0+
   const [shortLinkDomain, setShortLinkDomain] = useState('')
+  // 3.9.x: OpenAI API key (Create Transcript). Masked '••••••••' when
+  // one is already stored; leaving the mask keeps it, empty clears it.
+  const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [defaultPreviewResolution, setDefaultPreviewResolution] = useState('auto')
   const [defaultSkipTranscoding, setDefaultSkipTranscoding] = useState(false)
   const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
@@ -240,6 +244,7 @@ export default function GlobalSettingsPage() {
     setSmtpSecure(data.smtpSecure || 'STARTTLS')
     setAppDomain(data.appDomain || '')
     setShortLinkDomain(data.shortLinkDomain || '')
+    setOpenaiApiKey(data.openaiApiKey || '')
     setDefaultPreviewResolution(data.defaultPreviewResolution || 'auto')
     setDefaultSkipTranscoding(data.defaultSkipTranscoding ?? false)
     setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
@@ -553,6 +558,9 @@ export default function GlobalSettingsPage() {
         companyName: companyName || null,
         brandingLogoPath: newLogoPath || null,
         emailHeaderStyle: emailHeaderStyle || 'LOGO_AND_NAME',
+        // 3.9.x: OpenAI key for Create Transcript. Send as-is (empty →
+        // null clears it); the server skips the masked placeholder.
+        openaiApiKey: openaiApiKey || null,
         smtpServer: smtpServer || null,
         smtpPort: smtpPort ? parseInt(smtpPort, 10) : 587,
         smtpUsername: smtpUsername || null,
@@ -806,6 +814,7 @@ export default function GlobalSettingsPage() {
     defaultWatermarkOpacity, setDefaultWatermarkOpacity,
     defaultWatermarkFontSize, setDefaultWatermarkFontSize,
     defaultApplyPreviewLut, setDefaultApplyPreviewLut,
+    openaiApiKey, setOpenaiApiKey,
     // 2.2.4+: opt-in maintenance handlers (rendered as the
     // "Maintenance" card inside the section component).
     onReprocessAllVideos: () => setShowGlobalReprocessConfirm(true),

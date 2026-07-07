@@ -42,6 +42,7 @@ model User {
   pushSubscriptions PushSubscription[]
   calendarToken     CalendarToken?
   foldersCreated    Folder[]            @relation("FolderCreator")
+  folderDocuments   FolderDocument[]    @relation("FolderDocumentCreator")
   // Admin user who uploaded each video — shown as the "uploader"
   // in the Frame.io-style folder grid (1.0.6+). Nullable so any
   // historical pre-1.0.6 rows still load.
@@ -142,6 +143,7 @@ model Project {
 
   videos            Video[]
   folders           Folder[] // Optional folder tree inside the project (1.0.6+)
+  folderDocuments   FolderDocument[]
   comments          Comment[]
   securityEvents    SecurityEvent[]
   analytics         VideoAnalytics[]
@@ -198,11 +200,45 @@ model Folder {
   parentFolder Folder?  @relation("FolderHierarchy", fields: [parentFolderId], references: [id], onDelete: Cascade)
   subfolders   Folder[] @relation("FolderHierarchy")
   videos       Video[]
+  documents    FolderDocument[]
   createdBy    User?    @relation("FolderCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([parentFolderId])
   @@index([deletedAt])
+}
+
+// 3.9.x: a non-video FILE that lives inside a folder (or the project
+// root when `folderId` is null). Introduced for the "Create Transcript"
+// feature — the worker drops a timecoded transcript PDF here — but the
+// model is generic enough for any future document/file item. This is
+// what lets a folder hold something OTHER than videos + subfolders.
+model FolderDocument {
+  id          String @id @default(cuid())
+  projectId   String
+  folderId    String? // null = project root
+  name        String // display name, e.g. "Clip v3 — Transcript.pdf"
+  storagePath String // path in the storage layer
+  mimeType    String @default("application/pdf")
+  size        BigInt @default(0)
+  // What produced this document. "transcript" for the whisper flow;
+  // room for "note", "export", etc. later.
+  kind        String @default("transcript")
+  // The video this was generated from, when applicable. SetNull so the
+  // document survives if the source version is later deleted.
+  sourceVideoId String?
+
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folder      Folder? @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  sourceVideo Video?  @relation("VideoTranscripts", fields: [sourceVideoId], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation("FolderDocumentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([folderId])
+  @@index([sourceVideoId])
 }
 
 enum ProjectStatus {
@@ -344,6 +380,7 @@ model Video {
   createdBy User?            @relation("VideoCreator", fields: [createdById], references: [id], onDelete: SetNull)
   analytics VideoAnalytics[]
   assets    VideoAsset[]
+  transcripts FolderDocument[] @relation("VideoTranscripts")
   comments  Comment[]
   // 3.5.0+: in-app bell notifications that deep-link to this video.
   notifications Notification[]
@@ -639,6 +676,13 @@ model Settings {
   // "https://fcmt.io/". NULL = feature disabled, share modal copies
   // the long URL like pre-2.4.0.
   shortLinkDomain String?
+
+  // 3.9.x: OpenAI API key for the "Create Transcript" feature. The
+  // worker extracts a video's audio and sends it to OpenAI's
+  // `whisper-1` transcription endpoint, then renders a timecoded PDF
+  // into the video's folder. Stored server-side only; never exposed to
+  // the client (the settings GET redacts it — see the settings route).
+  openaiApiKey String?
 
   // Default Video Processing Settings
   // 1.9.4+ Phase A: "auto" lets the worker match the source —

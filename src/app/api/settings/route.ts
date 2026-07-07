@@ -66,10 +66,25 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // SECURITY: Never send SMTP password in cleartext — return masked placeholder
+    // 3.9.x: read the OpenAI key status via raw SQL so a stale generated
+    // client (dev box that hasn't run `prisma generate`) still reports it.
+    let openaiConfigured = false
+    try {
+      const rows = await prisma.$queryRawUnsafe<
+        Array<{ openaiApiKey: string | null }>
+      >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default')
+      openaiConfigured = !!rows?.[0]?.openaiApiKey
+    } catch {
+      /* column may not exist yet */
+    }
+
+    // SECURITY: Never send secrets in cleartext — return masked placeholders.
     const maskedSettings = {
       ...settings,
       smtpPassword: settings.smtpPassword ? '••••••••' : null,
+      // 3.9.x: OpenAI key (used by Create Transcript) is masked the same
+      // way; the client only needs to know whether one is set.
+      openaiApiKey: openaiConfigured ? '••••••••' : null,
     }
 
     // Check SMTP configuration status (reuse centralized helper)
@@ -79,6 +94,7 @@ export async function GET(request: NextRequest) {
       ...maskedSettings,
       security: securitySettings,
       smtpConfigured,
+      openaiConfigured,
     })
   } catch (error) {
     logError('Error fetching settings:', error)
@@ -153,6 +169,9 @@ export async function PATCH(request: NextRequest) {
       maxReverseShareFiles,
       privacyDisclosureEnabled,
       privacyDisclosureText,
+      // 3.9.x: OpenAI API key for Create Transcript. Encrypted at rest,
+      // handled exactly like the SMTP password (skip on masked value).
+      openaiApiKey,
     } = body
 
     // SECURITY: Validate language setting
@@ -443,6 +462,39 @@ export async function PATCH(request: NextRequest) {
       passwordUpdate = undefined
     }
 
+    // 3.9.x: OpenAI key update — mirror the SMTP password flow. Skip when
+    // the masked placeholder is echoed back, encrypt when it changes,
+    // clear when explicitly emptied.
+    //
+    // We read + write this field via RAW SQL (not the Prisma client) so a
+    // stale generated client — e.g. a dev box that hasn't run
+    // `prisma generate` after the schema change — can't throw an "Unknown
+    // field openaiApiKey" error that would fail the ENTIRE settings save.
+    // The raw path only needs the DB column, which the migration adds.
+    // The actual write happens AFTER the main upsert (see below).
+    let openaiKeyUpdate: string | null | undefined
+    if (openaiApiKey !== undefined && openaiApiKey !== '••••••••') {
+      let currentKey: string | null = null
+      try {
+        const rows = await prisma.$queryRawUnsafe<
+          Array<{ openaiApiKey: string | null }>
+        >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default')
+        const stored = rows?.[0]?.openaiApiKey
+        currentKey = stored ? decrypt(stored) : null
+      } catch {
+        // Column may not exist yet (migration not applied) — treat as unset.
+      }
+      if (openaiApiKey === null || openaiApiKey === '') {
+        openaiKeyUpdate = currentKey !== null ? null : undefined
+      } else if (openaiApiKey !== currentKey) {
+        openaiKeyUpdate = encrypt(openaiApiKey)
+      } else {
+        openaiKeyUpdate = undefined
+      }
+    } else {
+      openaiKeyUpdate = undefined
+    }
+
     // Build update data (only include password if it should be updated)
     const updateData: any = {
       language,
@@ -492,6 +544,9 @@ export async function PATCH(request: NextRequest) {
     if (passwordUpdate !== undefined) {
       updateData.smtpPassword = passwordUpdate
     }
+    // NOTE: openaiApiKey is intentionally NOT added to updateData — it's
+    // persisted via a raw UPDATE after the upsert (see below) so a stale
+    // Prisma client can't break the whole settings save.
 
     // Check if admin notification schedule is changing (to flush pending notifications)
     let previousAdminSchedule: string | null = null
@@ -538,6 +593,22 @@ export async function PATCH(request: NextRequest) {
         adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
       },
     })
+
+    // 3.9.x: persist the OpenAI key via raw SQL (see the note above). This
+    // is decoupled from the Prisma client's schema knowledge — it works as
+    // long as the `openaiApiKey` DB column exists (added by the migration).
+    // Best-effort: a failure here must not fail the whole settings save.
+    if (openaiKeyUpdate !== undefined) {
+      try {
+        await prisma.$executeRawUnsafe(
+          'UPDATE "Settings" SET "openaiApiKey" = $1 WHERE id = $2',
+          openaiKeyUpdate,
+          'default',
+        )
+      } catch (err) {
+        logError('[SETTINGS] Failed to persist openaiApiKey (has the migration run?):', err)
+      }
+    }
 
     // 1.9.4+ Phase A: cascade the global previewResolution to
      // every project so a change here actually takes effect for
@@ -589,10 +660,23 @@ export async function PATCH(request: NextRequest) {
       })
     }
 
-    // SECURITY: Never send SMTP password in cleartext — return masked placeholder
+    // Determine whether an OpenAI key is now stored (raw read — robust to
+    // a stale generated client).
+    let openaiConfiguredAfter = false
+    try {
+      const rows = await prisma.$queryRawUnsafe<
+        Array<{ openaiApiKey: string | null }>
+      >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default')
+      openaiConfiguredAfter = !!rows?.[0]?.openaiApiKey
+    } catch {
+      /* column may not exist yet */
+    }
+
+    // SECURITY: Never send secrets in cleartext — return masked placeholders.
     const maskedSettings = {
       ...settings,
       smtpPassword: settings.smtpPassword ? '••••••••' : null,
+      openaiApiKey: openaiConfiguredAfter ? '••••••••' : null,
     }
 
     return NextResponse.json(maskedSettings)

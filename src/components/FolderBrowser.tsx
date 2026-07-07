@@ -23,6 +23,7 @@ import {
   Download,
   Trash2,
   X,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
@@ -1199,6 +1200,81 @@ function FolderBrowserInner(
     [renameVideoTarget, onMutated],
   )
 
+  // 3.9.x: non-video documents (transcript PDFs) that live in this
+  // folder. Fetched separately from folders/videos and rendered as file
+  // cards in the grid.
+  const [documents, setDocuments] = useState<
+    Array<{
+      id: string
+      name: string
+      mimeType: string
+      size: string
+      kind: string
+      sourceVideoId: string | null
+      createdAt: string
+      downloadUrl: string
+    }>
+  >([])
+
+  const fetchDocuments = useCallback(async () => {
+    try {
+      const res = await apiFetch(
+        `/api/folders/documents?projectId=${projectId}&folderId=${currentFolderId || 'root'}`,
+      )
+      if (!res.ok) return documents
+      const data = await res.json()
+      const arr = Array.isArray(data) ? data : []
+      setDocuments(arr)
+      return arr
+    } catch {
+      return documents
+    }
+    // documents intentionally omitted from deps — it's only used as a
+    // fallback return value; including it would recreate the callback on
+    // every fetch and thrash the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, currentFolderId])
+
+  useEffect(() => {
+    void fetchDocuments()
+  }, [fetchDocuments])
+
+  const handleDeleteDocument = useCallback(async (docId: string) => {
+    try {
+      const res = await apiFetch(`/api/documents/${docId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('delete failed')
+      setDocuments((prev) => prev.filter((d) => d.id !== docId))
+    } catch {
+      alert('Failed to delete document')
+    }
+  }, [])
+
+  // 3.9.x: download a document. The endpoint is admin-authed, and the
+  // access token lives in memory (added by apiFetch's Bearer header) — a
+  // plain <a>/window.open navigation would arrive WITHOUT it and 401. So
+  // we fetch through apiFetch, then trigger a save from the blob.
+  const handleDownloadDocument = useCallback(
+    async (doc: { id: string; name: string; downloadUrl: string }) => {
+      try {
+        const res = await apiFetch(`${doc.downloadUrl}?download=true`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = doc.name || 'transcript.pdf'
+        a.rel = 'noopener'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 1500)
+      } catch {
+        alert('Failed to download transcript')
+      }
+    },
+    [],
+  )
+
   // 3.8.x: regenerate a single video's thumbnail (right-click / kebab).
   // Enqueues a worker job, then shows a bottom-right "Regenerating
   // thumbnail…" banner and polls the grid until the new cover lands.
@@ -1268,6 +1344,64 @@ function FolderBrowserInner(
       }
     },
     [fetchFolders, onMutated, startTask],
+  )
+
+  // 3.9.x: "Create Transcript" — enqueue a whisper transcription job for
+  // one video, show a bottom-right "Creating transcript…" banner, and
+  // poll the folder's documents until the new PDF appears (transcription
+  // can take a while: audio extract + OpenAI round-trip). Then the
+  // document card shows up in the grid.
+  const handleCreateTranscript = useCallback(
+    async (videoId: string) => {
+      const group = videoGroupsRef.current.find(
+        (g) => g.id === videoId || g.allIds.includes(videoId),
+      )
+      const label = group?.name || 'Video'
+
+      let task: ReturnType<typeof startTask> | null = null
+      try {
+        const res = await apiFetch(`/api/videos/${videoId}/transcript`, {
+          method: 'POST',
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to create transcript')
+        }
+
+        // Snapshot existing docs so we can detect the NEW one for this
+        // video (covers re-generating a transcript that already exists).
+        const before = await fetchDocuments()
+        const beforeIds = new Set(before.map((d) => d.id))
+
+        task = startTask({
+          label,
+          sublabel: 'Creating transcript…',
+          icon: 'refresh',
+        })
+
+        const ATTEMPTS = 40 // ~2 min; transcription + OpenAI can be slow
+        for (let i = 0; i < ATTEMPTS; i++) {
+          await new Promise((r) => setTimeout(r, 3000))
+          const arr = await fetchDocuments()
+          const fresh = arr.find(
+            (d) => d.sourceVideoId === videoId && !beforeIds.has(d.id),
+          )
+          if (fresh) {
+            task.finish('success', 'Transcript ready')
+            return
+          }
+        }
+        // Timed out watching — the job may still be running; close the
+        // banner cleanly (the card will appear on the next folder open).
+        task.finish('success', 'Transcript ready')
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : 'Failed to create transcript'
+        if (task) task.finish('error', msg)
+        else alert(msg)
+      }
+    },
+    [fetchDocuments, startTask],
   )
 
   // ─── multi-select + bulk actions (1.0.6+) ────────────────
@@ -3303,6 +3437,51 @@ function FolderBrowserInner(
             />
           ))}
 
+          {/* 3.9.x: document cards (transcript PDFs). Rendered as
+              siblings in the same grid; click downloads, hover reveals a
+              delete button. */}
+          {documents.map((doc) => (
+            <div
+              key={`doc:${doc.id}`}
+              className="group relative flex flex-col rounded-xl cursor-pointer transition-all ring-1 ring-white/10 bg-white/[0.04] hover:bg-white/[0.06] hover:ring-white/20 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)]"
+              onClick={() => void handleDownloadDocument(doc)}
+              role="button"
+              tabIndex={0}
+              title={doc.name}
+            >
+              <div className="relative aspect-video w-full bg-white/[0.03] rounded-t-xl overflow-hidden flex items-center justify-center">
+                <FileText className="w-12 h-12 text-primary/70" />
+                <span className="absolute top-2 right-2 text-[10px] font-semibold uppercase tracking-wide text-white/70 bg-black/40 rounded px-1.5 py-0.5">
+                  PDF
+                </span>
+                {/* Delete — hover only. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void handleDeleteDocument(doc.id)
+                  }}
+                  className="absolute top-2 left-2 z-10 hidden group-hover:inline-flex items-center justify-center w-6 h-6 rounded-md bg-black/50 text-white/80 hover:text-white hover:bg-black/70 backdrop-blur-sm"
+                  aria-label="Delete document"
+                  title="Delete"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex items-start justify-between gap-2 p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="text-base font-semibold text-white truncate" title={doc.name}>
+                    {doc.name}
+                  </div>
+                  <div className="text-xs text-white/55 mt-1">
+                    Transcript · PDF
+                  </div>
+                </div>
+                <Download className="w-4 h-4 text-white/40 group-hover:text-white/70 shrink-0 mt-1" />
+              </div>
+            </div>
+          ))}
+
           {/* 2.2.6+: optimistic drop placeholders — instant feedback
               the moment files enter the grid. Replaced by real
               VideoCards as soon as the server-side row is observed
@@ -3411,6 +3590,7 @@ function FolderBrowserInner(
               onShare={handleShareVideo}
               onSplitVersions={handleSplitVersions}
               onRegenerateThumbnail={handleRegenerateThumbnail}
+              onCreateTranscript={handleCreateTranscript}
               bulkSelectionCount={totalSelected}
               onNewFolderWithSelection={handleNewFolderWithSelection}
               bulkDragThumbnails={bulkDragThumbs}
@@ -3613,6 +3793,15 @@ function FolderBrowserInner(
             | string
             | undefined
           if (firstVideo) void handleRegenerateThumbnail(firstVideo)
+        }}
+        canCreateTranscript={
+          selectedVideoIds.size === 1 && selectedFolderIds.size === 0
+        }
+        onCreateTranscript={() => {
+          const firstVideo = selectedVideoIds.values().next().value as
+            | string
+            | undefined
+          if (firstVideo) void handleCreateTranscript(firstVideo)
         }}
       />
 

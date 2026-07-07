@@ -26,6 +26,11 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultWatermarkFontSize: (value: string) => void
   defaultApplyPreviewLut: boolean
   setDefaultApplyPreviewLut: (value: boolean) => void
+  // 3.9.x: OpenAI API key for the "Create Transcript" feature. Masked
+  // (shows "••••••••" when one is already saved). Optional so the
+  // section still renders if the parent doesn't wire it.
+  openaiApiKey?: string
+  setOpenaiApiKey?: (value: string) => void
   show: boolean
   setShow: (value: boolean) => void
   collapsible?: boolean
@@ -60,6 +65,8 @@ export function VideoProcessingSettingsSection({
   setDefaultWatermarkFontSize,
   defaultApplyPreviewLut,
   setDefaultApplyPreviewLut,
+  openaiApiKey,
+  setOpenaiApiKey,
   show,
   setShow,
   collapsible,
@@ -98,6 +105,29 @@ export function VideoProcessingSettingsSection({
       contentClassName="space-y-4 border-t border-white/10 pt-4"
       collapsible={collapsible}
     >
+      {/* 3.9.x: OpenAI API key — powers the per-video "Create Transcript"
+          right-click action. When set, the worker sends each clip's
+          audio to OpenAI whisper-1 and drops a timecoded PDF into the
+          folder. Masked once saved; leave the field on the mask to keep
+          the existing key, clear it to remove. */}
+      {setOpenaiApiKey && (
+        <div className="space-y-2 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+          <Label htmlFor="openaiApiKey">OpenAI API Key</Label>
+          <p className="text-xs text-white/55">
+            Used by the &quot;Create Transcript&quot; action (right-click a
+            video). Get a key at platform.openai.com. Stored encrypted; leave
+            the dots to keep the current key.
+          </p>
+          <Input
+            id="openaiApiKey"
+            type="password"
+            autoComplete="off"
+            placeholder="sk-..."
+            value={openaiApiKey ?? ''}
+            onChange={(e) => setOpenaiApiKey(e.target.value)}
+          />
+        </div>
+      )}
       {/* 1.5.8: Skip Transcoding global default hidden — same
           reasoning as the per-project version: it's a one-way
           deployment choice, not something operators flip from

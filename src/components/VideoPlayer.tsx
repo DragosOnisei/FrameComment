@@ -586,6 +586,23 @@ export default function VideoPlayer({
   const safeIndex = Math.min(selectedVideoIndex, displayVideos.length - 1)
   const selectedVideo = displayVideos[safeIndex >= 0 ? safeIndex : 0]
 
+  // 3.9.x: comments are per-VERSION. `comments` arrives scoped to the
+  // whole active version group (v1…vN), but a comment — and its saved
+  // annotation — belongs to ONE specific version's videoId. Without this
+  // filter, an annotation drawn on v2 (e.g. a red box at 00:22) kept
+  // rendering on v3 at the same timecode even though v3 has no comments,
+  // and v2's timeline marker showed on v3's scrubber too. We narrow to
+  // the currently-playing version so annotations + markers match the
+  // per-version comment sidebar. Comments with no videoId (rare, project-
+  // level) stay visible on every version.
+  const activeVersionComments = useMemo(
+    () =>
+      (comments as any[]).filter(
+        (c: any) => !c?.videoId || c.videoId === selectedVideo?.id,
+      ),
+    [comments, selectedVideo?.id],
+  )
+
   // 1.3.2+: Which stream qualities does THIS clip actually have?
   // We surface them to PlayerSettingsMenu so the Quality submenu only
   // shows options the server can satisfy (no point listing 4K when the
@@ -2190,7 +2207,7 @@ export default function VideoPlayer({
 
                 {/* Annotation Overlay (read-only, renders saved drawing annotations during playback) */}
                 <AnnotationOverlay
-                  comments={comments as any[]}
+                  comments={activeVersionComments as any[]}
                   currentTime={currentTimeState}
                   videoFps={selectedVideo?.fps || 24}
                   containerRef={videoWrapperRef}
@@ -2260,7 +2277,7 @@ export default function VideoPlayer({
                   onToggleMute={handleToggleMute}
                   onToggleFullscreen={handleToggleFullscreen}
                   onFrameStep={handleFrameStep}
-                  comments={comments}
+                  comments={activeVersionComments}
                   videoFps={selectedVideo?.fps || 24}
                   videoId={selectedVideo?.id}
                   storyboardUrl={(selectedVideo as any)?.storyboardUrl || null}

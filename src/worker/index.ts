@@ -6,6 +6,7 @@ import {
   EncodeTierJob,
   FinalizeVideoJob,
   RegenerateThumbnailJob,
+  CreateTranscriptJob,
   AssetProcessingJob,
   ProjectUploadProcessingJob,
   ExternalNotificationJob,
@@ -21,6 +22,7 @@ import { processPrepareVideo } from './prepare-video-processor'
 import { processEncodeTier } from './encode-tier-processor'
 import { processFinalizeVideo } from './finalize-video-processor'
 import { processRegenerateThumbnail } from './regenerate-thumbnail-processor'
+import { processCreateTranscript } from './create-transcript-processor'
 import { processAsset } from './asset-processor'
 import { processProjectUpload } from './project-upload-processor'
 import { processAdminNotifications } from './admin-notifications'
@@ -102,6 +104,10 @@ async function main() {
         // 2.2.4+: maintenance job — priority 700 (post-FINALIZE) so
         // a bulk sweep never delays an in-flight tier encode.
         return processRegenerateThumbnail(job as Job<RegenerateThumbnailJob>)
+      case 'create-transcript':
+        // 3.9.x: lowest-priority (900) — audio extract + OpenAI whisper
+        // + PDF render. Never delays encode/thumbnail work.
+        return processCreateTranscript(job as Job<CreateTranscriptJob>)
       case 'process-video':
       default:
         // Legacy path — drains any 2.1.x jobs that were enqueued

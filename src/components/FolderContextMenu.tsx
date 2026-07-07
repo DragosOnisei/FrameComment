@@ -12,6 +12,7 @@ import {
   Layers,
   Pencil,
   RefreshCw,
+  FileText,
   Share2,
   Smartphone,
   Trash2,
@@ -81,6 +82,10 @@ export interface FolderContextMenuProps {
    *  when `canRegenerateThumbnail` (exactly one video selected). */
   canRegenerateThumbnail?: boolean
   onRegenerateThumbnail?: () => void
+  /** 3.9.x: "Create Transcript" on a single video — same gate as
+   *  regenerate thumbnail. */
+  canCreateTranscript?: boolean
+  onCreateTranscript?: () => void
 }
 
 export default function FolderContextMenu({
@@ -107,6 +112,8 @@ export default function FolderContextMenu({
   onSplitVersions,
   canRegenerateThumbnail = false,
   onRegenerateThumbnail,
+  canCreateTranscript = false,
+  onCreateTranscript,
 }: FolderContextMenuProps) {
   const hasSelection = bulkSelectionCount > 0
   // 1.1.0+: Share + Rename are single-target only — they don't make
@@ -268,6 +275,13 @@ export default function FolderContextMenu({
               icon={<RefreshCw className="w-4 h-4" />}
               label="Regenerate thumbnail"
               onClick={onRegenerateThumbnail}
+            />
+          )}
+          {singleTarget && canCreateTranscript && (
+            <Row
+              icon={<FileText className="w-4 h-4" />}
+              label="Create transcript"
+              onClick={onCreateTranscript}
             />
           )}
           <div className="my-1 h-px bg-white/10" role="separator" />

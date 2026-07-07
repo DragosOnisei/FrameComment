@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Check,
   UploadCloud,
+  FileText,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
 import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
@@ -133,6 +134,9 @@ export interface VideoCardProps {
   /** 3.8.x: regenerate this video's thumbnail (single-video only). Shown
    *  when wired — used when a clip ended up with a missing/broken cover. */
   onRegenerateThumbnail?: (id: string) => void
+  /** 3.9.x: "Create Transcript" — generates a timecoded PDF transcript
+   *  of this video (OpenAI whisper-1) into the current folder. */
+  onCreateTranscript?: (id: string) => void
   /** Number of selected video cards on the page (1.0.9+). Drives
    *  bulk-aware kebab gating:
    *    ≥ 2  → hides Rename / Share / Split versions (none of those
@@ -315,6 +319,7 @@ export default function VideoCard({
   onShare,
   onSplitVersions,
   onRegenerateThumbnail,
+  onCreateTranscript,
   bulkSelectionCount = 0,
   onNewFolderWithSelection,
   bulkDragThumbnails,
@@ -333,6 +338,7 @@ export default function VideoCard({
   const showShare = !!onShare && !isBulk
   const showSplit = !!onSplitVersions && versionCount > 1 && !isBulk
   const showRegenThumb = !!onRegenerateThumbnail && !isBulk
+  const showTranscript = !!onCreateTranscript && !isBulk
   // "New Folder with Selection" surfaces as soon as there's a
   // selection — even of just 1 video — so the user can quickly box a
   // video into its own folder.
@@ -956,7 +962,7 @@ export default function VideoCard({
                   Share video
                 </button>
               )}
-              {(showDownload || showShare) && (showDuplicate || showRename || showSplit || showRegenThumb) && (
+              {(showDownload || showShare) && (showDuplicate || showRename || showSplit || showRegenThumb || showTranscript) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {showDuplicate && (
@@ -1015,7 +1021,21 @@ export default function VideoCard({
                   Regenerate thumbnail
                 </button>
               )}
-              {(showDuplicate || showRename || showSplit || showRegenThumb) && (onMoveUp || showNewFolder) && (
+              {showTranscript && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onCreateTranscript!(id)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
+                >
+                  <FileText className="w-4 h-4 shrink-0" />
+                  Create transcript
+                </button>
+              )}
+              {(showDuplicate || showRename || showSplit || showRegenThumb || showTranscript) && (onMoveUp || showNewFolder) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onMoveUp && (
@@ -1050,7 +1070,7 @@ export default function VideoCard({
                     : 'New Folder with selection'}
                 </button>
               )}
-              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showRegenThumb || showDownload || showShare) && (
+              {onDelete && (onMoveUp || showNewFolder || showDuplicate || showRename || showSplit || showRegenThumb || showTranscript || showDownload || showShare) && (
                 <div className="my-1 h-px bg-white/10" role="separator" />
               )}
               {onDelete && (

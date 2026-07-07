@@ -97,12 +97,24 @@ export interface RegenerateThumbnailJob {
 // legacy `VideoProcessingJob` here so a pre-2.2.0 `process-video`
 // job sitting in Redis at upgrade time can still be picked up
 // and re-routed (see worker/index.ts dispatch).
+// 3.9.x: per-video transcript generation. The worker extracts the
+// clip's audio, sends it to OpenAI whisper-1, renders a timecoded PDF,
+// and drops it into the video's folder as a FolderDocument. Runs at the
+// lowest priority (900) so it never delays encode/thumbnail work.
+export interface CreateTranscriptJob {
+  videoId: string
+  projectId: string
+  folderId: string | null
+  originalStoragePath: string
+}
+
 export type VideoQueueJobData =
   | VideoProcessingJob
   | PrepareVideoJob
   | EncodeTierJob
   | FinalizeVideoJob
   | RegenerateThumbnailJob
+  | CreateTranscriptJob
 
 // 2.2.0+: priorities are hard-coded constants instead of magic
 // numbers scattered around enqueue sites. BullMQ priority is
@@ -120,6 +132,7 @@ export const VIDEO_JOB_PRIORITY = {
   ENCODE_2160P: 200,
   FINALIZE: 500,
   REGENERATE_THUMBNAIL: 700,
+  CREATE_TRANSCRIPT: 900,
 } as const
 
 export function priorityForTier(tier: EncodeTierJob['tier']): number {

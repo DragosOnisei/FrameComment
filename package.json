@@ -1,6 +1,6 @@
 {
   "name": "framecomment",
-  "version": "3.9.4",
+  "version": "3.9.6",
   "description": "FrameComment — self-hosted video review and approval platform for filmmakers and video professionals.",
   "author": {
     "name": "Dragos Onisei",
@@ -65,6 +65,7 @@
     "next": "^16.1.6",
     "next-intl": "^4.9.0",
     "nodemailer": "^9.0.1",
+    "pdfkit": "^0.15.2",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "stripe": "^22.3.0",
@@ -80,6 +81,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.9",
     "@types/nodemailer": "^6.4.17",
+    "@types/pdfkit": "^0.13.9",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",

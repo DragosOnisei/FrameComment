@@ -1,6 +1,7 @@
 import { prisma } from './db'
 import { getRedis } from './redis'
 import { logError, logMessage } from '@/lib/logging'
+import { decrypt } from '@/lib/encryption'
 
 // Simple in-memory cache for frequently read settings to avoid repeated DB hits
 const SETTINGS_CACHE_TTL_MS = 60_000
@@ -103,6 +104,35 @@ export async function isSmtpConfigured(): Promise<boolean> {
     logError('Error checking SMTP configuration:', error)
     return cachedSmtpConfigured.value
   }
+}
+
+/**
+ * 3.9.x: resolve the OpenAI API key used by the Create Transcript
+ * feature. Prefers the key stored (encrypted) in Settings; falls back to
+ * the OPENAI_API_KEY environment variable so an operator can also wire
+ * it in via docker-compose if they prefer. Returns null when neither is
+ * set. Never cached — the key is read at most once per transcript job.
+ */
+export async function getOpenAiApiKey(): Promise<string | null> {
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { openaiApiKey: true } as any,
+    })
+    const stored = (settings as any)?.openaiApiKey as string | null | undefined
+    if (stored) {
+      try {
+        return decrypt(stored)
+      } catch (err) {
+        logError('Error decrypting OpenAI API key:', err)
+        // fall through to env
+      }
+    }
+  } catch (error) {
+    logError('Error reading OpenAI API key from settings:', error)
+  }
+  const envKey = process.env.OPENAI_API_KEY
+  return envKey && envKey.trim() ? envKey.trim() : null
 }
 
 /**

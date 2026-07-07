@@ -617,7 +617,6 @@ export default function CommentSection({
   // filter doesn't leak into another. Default is 'all' — most users
   // want to see the whole list when they enter a project.
   type CommentsFilter = 'all' | 'incomplete' | 'completed'
-  const COMMENTS_FILTER_LS_KEY = `framecomment:comments-filter:${projectId}`
   const [commentsFilter, setCommentsFilterState] = useState<CommentsFilter>('all')
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   // 2.5.1+: trigger ref + viewport-fixed coords so we can portal
@@ -651,27 +650,22 @@ export default function CommentSection({
       window.removeEventListener('resize', compute)
     }
   }, [filterMenuOpen])
+  // 3.9.x: the comment filter is per-VIDEO and NON-STICKY. Every time the
+  // user opens a different video (or switches version), the list snaps
+  // back to "All comments". Previously the choice persisted per-project
+  // in localStorage — which is what made a freshly-left comment look like
+  // it "vanished" (it landed on the timeline, but the list was still
+  // filtered to Completed and hid the new, unresolved comment). Resetting
+  // on every video change guarantees the comment you just wrote is
+  // visible. The user can still narrow the CURRENT video to
+  // Incomplete/Completed for as long as they stay on it.
   useEffect(() => {
-    try {
-      const cached = window.localStorage.getItem(COMMENTS_FILTER_LS_KEY)
-      if (cached === 'incomplete' || cached === 'completed' || cached === 'all') {
-        setCommentsFilterState(cached)
-      }
-    } catch {
-      /* localStorage might be disabled — ignore, default stays 'all' */
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId])
+    setCommentsFilterState('all')
+  }, [selectedVideoId])
   const setCommentsFilter = useCallback((next: CommentsFilter) => {
     setCommentsFilterState(next)
     setFilterMenuOpen(false)
-    try {
-      window.localStorage.setItem(COMMENTS_FILTER_LS_KEY, next)
-    } catch {
-      /* swallow */
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId])
+  }, [])
   // Click-outside-to-close for the filter dropdown. Both the
   // desktop header and the mobile header tag their dropdown
   // wrapper with `data-comments-filter`, so a single document
@@ -1511,8 +1505,9 @@ export default function CommentSection({
             </div>
           </CardTitle>
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* 3.5.0+: Send to editor — between the filter and the kebab. */}
-            {renderSendToEditor()}
+            {/* 3.9.x: "Send to editor" moved to its own centered row
+                below (see next block) — inline here it collided with a
+                long filter title like "Completed comments". */}
             <CommentsKebabMenu
               commentCount={displayComments.length}
               hasClipboard={hasClipboardForProject}
@@ -1531,6 +1526,12 @@ export default function CommentSection({
               </Button>
             )}
           </div>
+        </div>
+        {/* 3.9.x: Send to editor on its own centered line so it never
+            overlaps the title/filter (which can read "Completed
+            comments" etc). */}
+        <div className="mt-2 flex justify-center">
+          {renderSendToEditor()}
         </div>
         {/*
           1.2.0+: editable display-name row for guests. Lets a reviewer
@@ -1721,7 +1722,8 @@ export default function CommentSection({
             Paste comments) that desktop uses, so the mobile header
             now has feature parity with desktop. */}
         {mobileCollapsible && (
-          <div className="order-2 lg:hidden w-full px-3 py-2 flex items-center justify-between bg-muted/30">
+          <div className="order-2 lg:hidden w-full px-3 py-2 flex flex-col gap-2 bg-muted/30">
+            <div className="flex items-center justify-between w-full">
             {/* 2.2.6+: mobile mirror of the desktop filter dropdown.
                 Same state + storage key, so flipping on one device
                 width persists to the other. */}
@@ -1780,14 +1782,18 @@ export default function CommentSection({
               )}
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              {/* 3.5.0+: Send to editor — mobile mirror. */}
-              {renderSendToEditor()}
               <CommentsKebabMenu
                 commentCount={displayComments.length}
                 hasClipboard={hasClipboardForProject}
                 onCopy={handleCopyComments}
                 onPaste={handlePasteComments}
               />
+            </div>
+            </div>
+            {/* 3.9.x: Send to editor on its own centered line (mobile
+                mirror) so it never overlaps the filter title. */}
+            <div className="flex justify-center">
+              {renderSendToEditor()}
             </div>
           </div>
         )}

@@ -15,6 +15,50 @@ const ffmpegPath = 'ffmpeg'
 const ffprobePath = 'ffprobe'
 
 /**
+ * 3.9.x: extract a compact audio track for transcription (Create
+ * Transcript feature). We downmix to MONO 16 kHz MP3 (~0.5 MB per
+ * minute) — OpenAI's whisper-1 resamples to 16 kHz mono internally
+ * anyway, so we lose nothing the model uses while keeping the upload
+ * comfortably under OpenAI's 25 MB request limit for typical clips.
+ */
+export function extractAudioForTranscription(
+  inputPath: string,
+  outputPath: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-y',
+      '-i', inputPath,
+      '-vn', // drop the video stream
+      '-ac', '1', // mono
+      '-ar', '16000', // 16 kHz
+      '-b:a', '64k',
+      '-f', 'mp3',
+      outputPath,
+    ]
+    const proc = spawn(ffmpegPath, args)
+    let stderr = ''
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString()
+    })
+    proc.on('error', (err) =>
+      reject(new Error(`Failed to spawn ffmpeg for audio extraction: ${err.message}`)),
+    )
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(
+          new Error(
+            `ffmpeg audio extraction failed (exit ${code}): ${stderr.slice(-400)}`,
+          ),
+        )
+      }
+    })
+  })
+}
+
+/**
  * 1.9.4+ Phase A: hardware video encoder detection.
  *
  * Probes FFmpeg at module load to find the fastest available
