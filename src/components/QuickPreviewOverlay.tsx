@@ -244,6 +244,25 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
     video.width && video.height && video.width > 0 && video.height > 0
       ? `${video.width} / ${video.height}`
       : '16 / 9'
+
+  // 4.0.x: reliably start playback on open. `autoPlay` alone is blocked
+  // by browsers for videos WITH sound (unless the site has a high media-
+  // engagement score), which showed up as "the preview opens but just
+  // sits paused at 0:00". We try to play with sound first; if the browser
+  // rejects it, we retry MUTED (muted autoplay is always allowed) so the
+  // clip actually runs — the user can unmute from the controls.
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const tryAutoplay = () => {
+    const el = videoRef.current
+    if (!el) return
+    const p = el.play()
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {
+        el.muted = true
+        el.play().catch(() => {})
+      })
+    }
+  }
   return (
     <>
       <div
@@ -267,12 +286,14 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
         ) : video.previewUrl ? (
           <video
             key={video.id}
+            ref={videoRef}
             src={video.previewUrl}
             poster={video.thumbnailUrl || undefined}
             controls
             autoPlay
             preload="metadata"
             playsInline
+            onLoadedData={tryAutoplay}
             className="w-full h-full object-contain bg-black"
           />
         ) : video.thumbnailUrl ? (

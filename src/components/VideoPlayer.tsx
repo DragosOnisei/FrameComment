@@ -357,6 +357,24 @@ export default function VideoPlayer({
           newHls.currentLevel = chosen
           pendingPinnedHeightRef.current = null
 
+          // 4.0.x: reflect the pinned quality in the badge IMMEDIATELY,
+          // at manifest-parse time (fast — just the master playlist),
+          // instead of waiting for the first LEVEL_SWITCHED which only
+          // fires AFTER the first HD/HD+ fragment has buffered (~seconds).
+          // That wait is what made the badge sit on "SD" for a few
+          // seconds before flipping to "HD+"; the stream was already
+          // pinned to HD+ the whole time.
+          const chosenH = (newHls.levels?.[chosen] as any)?.height || 0
+          setResolvedPlaybackQuality(
+            chosenH >= 2160 * 0.9
+              ? '2160p'
+              : chosenH >= 1080 * 0.9
+                ? '1080p'
+                : chosenH >= 720 * 0.9
+                  ? '720p'
+                  : '480p',
+          )
+
           // NOW trigger fragment loading at the preserved time.
           // hls.js will request the variant playlist for the
           // pinned level (chosen), then the fragment containing
@@ -1226,6 +1244,19 @@ export default function VideoPlayer({
           )
           hls.nextLevel = chosen
           hls.currentLevel = chosen
+          // 4.0.x: set the badge to the pinned tier NOW (manifest parse
+          // is fast) instead of leaving it on the "SD" anchor until the
+          // first HD/HD+ fragment buffers seconds later.
+          const chosenH = (hls.levels?.[chosen] as any)?.height || 0
+          setResolvedPlaybackQuality(
+            chosenH >= 2160 * 0.9
+              ? '2160p'
+              : chosenH >= 1080 * 0.9
+                ? '1080p'
+                : chosenH >= 720 * 0.9
+                  ? '720p'
+                  : '480p',
+          )
           hls.startLoad(-1) // -1 = start from current playhead (0 on fresh load)
         })
 
@@ -1249,14 +1280,14 @@ export default function VideoPlayer({
           else setResolvedPlaybackQuality('480p')
         })
 
-        // 1.9.4+ Phase B: on every HLS attach, anchor the quality
-        // badge to 480p (the always-first tier). Without this the
-        // badge inherits the project's default (often "1080p")
-        // and reads HD+ even while playback is actually starting
-        // at SD — wrong for the first second or two of playback.
-        // The `resize` listener below corrects it as soon as the
-        // first frame's videoHeight is known.
-        setResolvedPlaybackQuality('480p')
+        // 4.0.x: we no longer anchor the badge to 480p on attach. The
+        // stream is pinned to the target tier at MANIFEST_PARSED (above)
+        // and the badge is set to that same tier right there — so it
+        // reads HD/HD+ from the start instead of flashing "SD" for the
+        // couple of seconds it took the first HD fragment to buffer
+        // (which is when LEVEL_SWITCHED used to first fire). The
+        // LEVEL_SWITCHED + resize listeners still keep it honest
+        // afterwards (manual quality changes, Safari native HLS).
 
         // Source of truth for "what's actually playing" is the
         // video element's videoHeight — it changes the instant

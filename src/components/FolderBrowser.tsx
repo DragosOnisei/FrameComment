@@ -3776,7 +3776,7 @@ function FolderBrowserInner(
             className="group flex flex-col rounded-xl ring-1 ring-dashed ring-white/15 bg-white/[0.02] hover:bg-white/[0.05] hover:ring-white/30 text-white/55 hover:text-white transition-colors text-left"
             aria-label="New Folder"
           >
-            <span className="relative aspect-video rounded-t-xl flex items-center justify-center">
+            <span className="relative aspect-video w-full rounded-t-xl flex items-center justify-center">
               <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/[0.06] ring-1 ring-white/10 group-hover:bg-white/[0.12] transition-colors">
                 <FolderPlus className="w-6 h-6" />
               </span>

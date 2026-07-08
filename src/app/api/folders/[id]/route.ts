@@ -133,8 +133,17 @@ export async function GET(
         // the smallest preview that exists so the browser doesn't
         // pull a 4K original just to scrub a tile.
         let previewUrl: string | null = null
+        // 4.0.x: CAP the preview at HD (720p). This URL feeds both the
+        // hover-scrub fallback AND the Quick Preview (Space) player, and
+        // we never want either to pull a 1080p/4K/original stream — the
+        // old chain climbed UP (720→1080→2160→original) when 720p was
+        // missing, which is the opposite of a cap. Now: prefer 720p, then
+        // fall DOWN to 480p, and only climb higher when no low tier exists
+        // at all (rare — 480p is always the first tier produced).
         const previewQuality = v.preview720Path
           ? '720p'
+          : v.preview480Path
+          ? '480p'
           : v.preview1080Path
           ? '1080p'
           : v.preview2160Path

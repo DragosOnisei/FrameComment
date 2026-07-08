@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowUpFromLine,
   Copy,
@@ -353,6 +354,13 @@ export default function VideoCard({
   // lights up when the user drags real files from their OS over this
   // card, to upload them as a new version.
   const [isOSFileDropHover, setIsOSFileDropHover] = useState(false)
+
+  // 4.0.x: full-title tooltip. The card title is single-line truncated;
+  // the OS's native `title` tooltip clamps long names to ~2 lines, so we
+  // render our own portal tooltip that shows the WHOLE name, wrapped, no
+  // line limit. Only shown when the title is actually truncated.
+  const titleRef = useRef<HTMLDivElement>(null)
+  const [titleTip, setTitleTip] = useState<{ x: number; y: number } | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [thumbErrored, setThumbErrored] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -864,12 +872,38 @@ export default function VideoCard({
               `text-xs mt-1` meta. Așa video, folder și New Folder
               ajung la exact aceeași înălțime în grid. */}
           <div
+            ref={titleRef}
             className="text-base font-semibold text-white truncate"
-            title={name}
-            data-keep-title
+            onMouseEnter={() => {
+              const el = titleRef.current
+              // Only show the tooltip when the name is actually cut off.
+              if (el && el.scrollWidth > el.clientWidth + 1) {
+                const r = el.getBoundingClientRect()
+                setTitleTip({ x: r.left, y: r.bottom + 6 })
+              }
+            }}
+            onMouseLeave={() => setTitleTip(null)}
           >
             {name}
           </div>
+          {titleTip && typeof document !== 'undefined' &&
+            createPortal(
+              <div
+                className="fixed z-[2147483600] max-w-[360px] rounded-md bg-[#162533] text-white text-xs px-2.5 py-1.5 ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] pointer-events-none"
+                style={{
+                  left: Math.min(
+                    titleTip.x,
+                    (typeof window !== 'undefined' ? window.innerWidth : 1200) - 372,
+                  ),
+                  top: titleTip.y,
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {name}
+              </div>,
+              document.body,
+            )}
           {subtext && (
             <div
               className="text-xs text-white/55 mt-1 truncate"
