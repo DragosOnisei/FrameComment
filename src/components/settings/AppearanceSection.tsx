@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
-import { Moon, Sun, Check, Globe } from 'lucide-react'
+import { Check, Globe } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { applyAccentColor } from '@/components/AccentColorProvider'
 
@@ -165,56 +165,10 @@ export function AppearanceSection({
       </div>
       )}
 
-      {/* 3.6.x: Light / Dark theme toggle. Default is DARK — anywhere
-          the resolved value is 'auto' (or unset) we treat it as dark
-          (see the layout bootstrap), so a device set to light mode
-          never forces the app to light. Toggling here applies the theme
-          live and caches it (`adminDefaultTheme`) so it sticks on
-          reload; Save Changes persists it to the server for good. */}
-      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
-        <Label className="text-white">{t('appearance.defaultTheme')}</Label>
-        {/* Segmented control: a padded glass "track" with two equal-width
-            segments; the active one lifts on a filled primary pill. Same
-            vocabulary as the rest of the v2.5 chrome. */}
-        <div className="flex w-full max-w-[240px] gap-1 p-1 rounded-xl bg-black/20 ring-1 ring-white/10">
-          {([
-            { value: 'light', label: t('appearance.light'), Icon: Sun },
-            { value: 'dark', label: t('appearance.dark'), Icon: Moon },
-          ] as const).map(({ value, label, Icon }) => {
-            // Dark is the active state for both 'dark' and 'auto'/unset.
-            const active =
-              value === 'light' ? defaultTheme === 'light' : defaultTheme !== 'light'
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => {
-                  setDefaultTheme(value)
-                  document.documentElement.classList.toggle(
-                    'dark',
-                    value !== 'light',
-                  )
-                  try {
-                    localStorage.setItem('adminDefaultTheme', value)
-                  } catch {
-                    /* ignore */
-                  }
-                }}
-                aria-pressed={active}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-all ${
-                  active
-                    ? 'bg-primary text-white shadow-[0_2px_8px_-2px_hsl(var(--primary)/0.55)]'
-                    : 'text-white/55 hover:text-white hover:bg-white/[0.06]'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {label}
-              </button>
-            )
-          })}
-        </div>
-        <p className="text-xs text-white/55">{t('appearance.themeToggleHint')}</p>
-      </div>
+      {/* 4.0.3: Light / Dark theme toggle removed. FrameComment is now
+          dark-only — the app always forces the `dark` class (see the
+          layout bootstrap + AccentColorProvider), so there is no theme
+          control to render here anymore. Accent color stays. */}
 
       {/* Accent Color Selection — nested floating glass card.
           Active swatch is marked by the checkmark alone — no extra

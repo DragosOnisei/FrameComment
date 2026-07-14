@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Trash2, MapPin } from 'lucide-react'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
 import { isRangeEditActive } from '@/lib/comment-range-edit'
@@ -74,7 +75,39 @@ interface CustomVideoControlsProps {
    *  voice comments play correctly under both share + admin
    *  contexts. */
   shareToken?: string | null
+  /** 4.1.0+: Premiere-style timeline markers (coloured flags) for the
+   *  active version. Distinct from the comment pins above — these are
+   *  lightweight navigation bookmarks. Click seeks to the marker; hover
+   *  shows the optional note; markers the viewer owns (`mine`) get a
+   *  delete affordance. */
+  flagMarkers?: Array<{
+    id: string
+    timestampMs: number
+    color: string
+    label: string | null
+    authorName: string | null
+    mine: boolean
+  }>
+  onFlagMarkerDelete?: (id: string) => void
+  onFlagMarkerUpdate?: (id: string, patch: { color?: string; label?: string | null }) => void
 }
+
+// 4.1.0+: fixed 4-colour palette for Premiere-style flag markers.
+const FLAG_COLOR_MAP: Record<string, string> = {
+  red: 'bg-red-500',
+  orange: 'bg-orange-500',
+  green: 'bg-green-500',
+  blue: 'bg-blue-500',
+}
+const flagColorClass = (c: string) => FLAG_COLOR_MAP[c] || FLAG_COLOR_MAP.blue
+// Text-colour variant for the location-pin icon on the timeline.
+const FLAG_TEXT_MAP: Record<string, string> = {
+  red: 'text-red-500',
+  orange: 'text-orange-500',
+  green: 'text-green-500',
+  blue: 'text-blue-500',
+}
+const flagTextClass = (c: string) => FLAG_TEXT_MAP[c] || FLAG_TEXT_MAP.blue
 
 // Frame.io-style timeline marker colours (1.0.7+) — fully opaque
 // solid fills with white text and a tiny dark ring so the dots stay
@@ -268,6 +301,9 @@ export default function CustomVideoControls({
   onRulersEnabledChange,
   onDownloadStill,
   shareToken = null,
+  flagMarkers = [],
+  onFlagMarkerDelete,
+  onFlagMarkerUpdate,
 }: CustomVideoControlsProps) {
   const t = useTranslations('controls')
   const tComments = useTranslations('comments')
@@ -279,6 +315,32 @@ export default function CustomVideoControls({
   const volumeTrackRef = useRef<HTMLDivElement>(null)
   const [isDraggingVolume, setIsDraggingVolume] = useState(false)
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null)
+  // 4.1.0+: hovered Premiere-style flag marker (separate from comment pins).
+  const [hoveredFlagId, setHoveredFlagId] = useState<string | null>(null)
+  // 4.1.0+: which flag marker's edit card (colour + note + delete) is open,
+  // plus the in-progress note draft for its inline editor.
+  const [openFlagId, setOpenFlagId] = useState<string | null>(null)
+  const [flagLabelDraft, setFlagLabelDraft] = useState('')
+  const flagEditRef = useRef<HTMLDivElement>(null)
+
+  // Close the flag edit card on outside-click / Escape.
+  useEffect(() => {
+    if (!openFlagId) return
+    const onDown = (e: MouseEvent) => {
+      if (flagEditRef.current && !flagEditRef.current.contains(e.target as Node)) {
+        setOpenFlagId(null)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenFlagId(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [openFlagId])
   // 3.5.x: smooth playhead clock. The `currentTime` prop is throttled
   // to ~200ms in VideoPlayer and the browser's `timeupdate` fires
   // irregularly, which made the progress bar lurch — glide, freeze,
@@ -1172,6 +1234,168 @@ export default function CustomVideoControls({
             )
           })}
 
+          {/* 4.1.0+: Premiere-style flag markers. Small coloured tags
+              pinned to the top of the track at their timecode. Click
+              seeks; hover shows the note + author (and a Delete action
+              for markers the viewer owns). stopPropagation on the
+              pointer handlers keeps a marker click/press from also
+              scrubbing the timeline. */}
+          {videoDuration > 0 &&
+            flagMarkers.map((m) => {
+              const seconds = m.timestampMs / 1000
+              const pos = Math.max(0, Math.min(100, (seconds / videoDuration) * 100))
+              const isHovered = hoveredFlagId === m.id
+              const isOpen = openFlagId === m.id
+              const textClass = flagTextClass(m.color)
+              return (
+                <div
+                  key={`flag-${m.id}`}
+                  // When the edit card is open we lift the whole marker above
+                  // the storyboard scrub preview (z-30). The flag container
+                  // establishes its own stacking context, so its z has to
+                  // beat the preview's for the card inside to sit on top.
+                  className={`absolute top-0 -translate-x-1/2 ${isOpen ? 'z-50' : 'z-20'}`}
+                  style={{ left: `${pos}%` }}
+                  onMouseEnter={() => setHoveredFlagId(m.id)}
+                  onMouseLeave={() =>
+                    setHoveredFlagId((cur) => (cur === m.id ? null : cur))
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label={m.label ? `Marker: ${m.label}` : 'Marker'}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      // Click opens the edit card (colour + note + delete).
+                      setFlagLabelDraft(m.label || '')
+                      setOpenFlagId((cur) => (cur === m.id ? null : m.id))
+                    }}
+                    className="block cursor-pointer leading-none"
+                  >
+                    {/* Location-pin marker, tinted by the marker colour. Its
+                        tip points down at the exact timecode. */}
+                    <MapPin
+                      className={`h-5 w-5 ${textClass} drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)]`}
+                      fill="currentColor"
+                      strokeWidth={1.5}
+                    />
+                  </button>
+
+                  {/* Hover preview (read-only) — hidden while the edit card
+                      is open. No actions here anymore. */}
+                  {isHovered && !isOpen && (m.label || m.authorName) && (
+                    <div
+                      className={`pointer-events-none absolute left-1/2 top-10 sm:top-12 mt-1 z-30 w-max min-w-[120px] max-w-[260px] -translate-x-1/2 rounded-lg px-2.5 py-1.5 text-xs text-white ring-1 ring-black/30 shadow-2xl ${flagColorClass(m.color)}`}
+                    >
+                      {m.label ? (
+                        <div className="line-clamp-3 whitespace-pre-wrap break-words font-medium">
+                          {m.label}
+                        </div>
+                      ) : (
+                        <div className="italic text-white/80">Marker</div>
+                      )}
+                      {m.authorName && (
+                        <div className="mt-0.5 text-white/80">{m.authorName}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Edit card (on click) — same glass look as the comment
+                      cards: avatar + author, inline note edit, colour
+                      swatches + delete. Read-only for markers you don't own. */}
+                  {isOpen && (
+                    <div
+                      ref={flagEditRef}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onMouseMove={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute bottom-full left-1/2 mb-2 z-50 w-64 -translate-x-1/2 rounded-xl p-3 text-white ring-1 ring-white/10 shadow-[0_18px_44px_-10px_rgba(0,0,0,0.75)]"
+                      style={{
+                        // More opaque than the timeline glass so white text
+                        // stays legible floating over a bright video frame,
+                        // while still reading as frosted glass like comments.
+                        backgroundColor: 'rgba(13, 22, 32, 0.92)',
+                        backdropFilter: 'blur(24px) saturate(160%)',
+                        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+                      }}
+                    >
+                      <div className="mb-2 flex items-center gap-2">
+                        {m.authorName && <InitialsAvatar name={m.authorName} size="sm" />}
+                        <div className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {m.authorName || 'Marker'}
+                        </div>
+                        {m.mine && onFlagMarkerDelete && (
+                          <button
+                            type="button"
+                            title="Delete"
+                            aria-label="Delete marker"
+                            onClick={() => {
+                              onFlagMarkerDelete(m.id)
+                              setOpenFlagId(null)
+                            }}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/[0.06] hover:text-red-300"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {m.mine ? (
+                        <input
+                          type="text"
+                          value={flagLabelDraft}
+                          autoFocus
+                          onChange={(e) => setFlagLabelDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              onFlagMarkerUpdate?.(m.id, { label: flagLabelDraft.trim() || null })
+                              setOpenFlagId(null)
+                            }
+                          }}
+                          onBlur={() =>
+                            onFlagMarkerUpdate?.(m.id, { label: flagLabelDraft.trim() || null })
+                          }
+                          placeholder="Note (optional)"
+                          maxLength={200}
+                          className="mb-3 w-full rounded-lg bg-white/[0.06] px-2.5 py-1.5 text-sm text-white ring-1 ring-white/10 placeholder:text-white/40 focus:outline-none focus:ring-white/25"
+                        />
+                      ) : m.label ? (
+                        <div className="mb-3 line-clamp-3 whitespace-pre-wrap break-words text-sm text-white/80">
+                          {m.label}
+                        </div>
+                      ) : (
+                        <div className="mb-3 text-sm italic text-white/50">No note</div>
+                      )}
+
+                      {m.mine && onFlagMarkerUpdate && (
+                        <div className="flex items-center gap-2">
+                          {(['red', 'orange', 'green', 'blue'] as const).map((c) => {
+                            const active = m.color === c
+                            return (
+                              <button
+                                key={c}
+                                type="button"
+                                aria-label={c}
+                                onClick={() => onFlagMarkerUpdate(m.id, { color: c })}
+                                className={`h-6 w-6 rounded-full ${flagColorClass(c)} transition-transform hover:scale-110 ${
+                                  active
+                                    ? 'ring-2 ring-white ring-offset-2 ring-offset-[#0f1b26]'
+                                    : 'ring-1 ring-black/30'
+                                }`}
+                              />
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
           {/* 1.3.2+: the inline dot/notch on the timeline track was
               removed at user request — only the colored avatar in
               the row below the timeline remains. The avatar still
@@ -1889,23 +2113,8 @@ export default function CustomVideoControls({
             )}
           </button>
 
-          <button
-            onClick={() => onFrameStep('backward')}
-            className="hidden sm:inline-flex p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
-            aria-label={t('previousFrame')}
-            title={`${t('previousFrame')} (Ctrl+J)`}
-          >
-            <SkipBack className="w-4 h-4 text-white" />
-          </button>
-
-          <button
-            onClick={() => onFrameStep('forward')}
-            className="hidden sm:inline-flex p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
-            aria-label={t('nextFrame')}
-            title={`${t('nextFrame')} (Ctrl+L)`}
-          >
-            <SkipForward className="w-4 h-4 text-white" />
-          </button>
+          {/* 4.1.0+: frame back/forward buttons removed — frame stepping
+              stays available via the ←/→ keyboard shortcuts. */}
 
           {/* Playback speed selector — hidden when the parent doesn't pass a
               setter (e.g. comparison view) */}

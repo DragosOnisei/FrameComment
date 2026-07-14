@@ -8,7 +8,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { Send, X, Paperclip, Pencil, PenTool } from 'lucide-react'
+import { Send, X, Paperclip, Pencil, PenTool, Flag } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachmentButton from './CommentAttachmentButton'
@@ -132,6 +132,13 @@ export default function CommentInput({
   // preview. While active, we hide the sibling icon buttons (draw,
   // paperclip) so the recorder UI gets the whole input row to itself.
   const [isVoiceActive, setIsVoiceActive] = useState(false)
+  // 4.1.0+: Marker (Premiere-style flag) mode. Mirrors the annotation
+  // drawing mode: clicking the flag swaps the icon row for a colour
+  // picker and turns the composer into a "Note (optional)" field. The
+  // typed note becomes the marker label; Enter (or Add marker) drops it
+  // at the current playhead via a window event the player listens for.
+  const [markerMode, setMarkerMode] = useState(false)
+  const [markerColor, setMarkerColor] = useState<'red' | 'orange' | 'green' | 'blue'>('blue')
   // 1.9.1+: when a voice message is in preview the recorder hands
   // us its uploadRecording() so the official paper-plane Send
   // button can trigger it directly. We store the function in a
@@ -404,11 +411,40 @@ export default function CommentInput({
     onSubmit()
   }
 
+  // 4.1.0+: drop a marker at the current playhead. The typed note (if
+  // any) becomes the label; the player owns the actual create call.
+  const handleAddMarker = () => {
+    if (typeof window === 'undefined') return
+    const note = newComment.trim()
+    window.dispatchEvent(
+      new CustomEvent('framecomment:addMarker', {
+        detail: { color: markerColor, label: note || null },
+      }),
+    )
+    onCommentChange('')
+    setMarkerMode(false)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Allow Ctrl+Space and other Ctrl shortcuts to pass through to VideoPlayer
     if (e.ctrlKey) {
       // Don't handle Ctrl shortcuts here - let them bubble to VideoPlayer
       return
+    }
+
+    // Marker mode: Escape exits, Enter drops the marker instead of
+    // submitting a comment (Shift+Enter still adds a newline in the note).
+    if (markerMode) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMarkerMode(false)
+        return
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        handleAddMarker()
+        return
+      }
     }
 
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -712,7 +748,7 @@ export default function CommentInput({
                     aria-hidden="true"
                     className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm leading-snug"
                   >
-                    {t('typeMessage')}
+                    {markerMode ? 'Note (optional)' : t('typeMessage')}
                   </span>
                 )}
               </div>
@@ -721,6 +757,53 @@ export default function CommentInput({
               {annotationCtx?.isDrawingMode ? (
                 // Drawing mode: replace the icon row with the inline toolbar.
                 <AnnotationToolbarInline />
+              ) : markerMode ? (
+                // 4.1.0+: Marker mode — the icon row becomes a colour
+                // picker (same idea as the annotation inline toolbar).
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {(['red', 'orange', 'green', 'blue'] as const).map((c) => {
+                    const bg =
+                      c === 'red'
+                        ? 'bg-red-500'
+                        : c === 'orange'
+                          ? 'bg-orange-500'
+                          : c === 'green'
+                            ? 'bg-green-500'
+                            : 'bg-blue-500'
+                    const active = markerColor === c
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setMarkerColor(c)}
+                        aria-label={c}
+                        className={`h-6 w-6 rounded-full ${bg} transition-transform hover:scale-110 ${
+                          active
+                            ? 'ring-2 ring-white ring-offset-2 ring-offset-[#0f1b26]'
+                            : 'ring-1 ring-black/30'
+                        }`}
+                      />
+                    )
+                  })}
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setMarkerMode(false)}
+                      title="Cancel"
+                      aria-label="Cancel marker"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddMarker}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-white transition hover:opacity-90"
+                    >
+                      <Flag className="h-3.5 w-3.5" /> Add marker
+                    </button>
+                  </div>
+                </div>
               ) : (
               <div className="flex items-center gap-1.5 min-w-0 flex-1">
                 {/* Sibling icons fade out while the voice recorder is
@@ -795,6 +878,21 @@ export default function CommentInput({
                     disabled={loading}
                   />
                 )}
+                {/* 4.1.0+: Marker button. Enters "marker mode" — the icon
+                    row swaps for a colour picker and the composer becomes a
+                    "Note (optional)" field (mirrors the annotation flow). */}
+                {!isVoiceActive && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkerMode(true)}
+                    disabled={loading}
+                    title="Add marker"
+                    aria-label="Add marker"
+                    className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Flag className="w-4 h-4" />
+                  </button>
+                )}
               </div>
               )}
               {/* 1.9.1+: single official Send. When a voice message
@@ -806,26 +904,28 @@ export default function CommentInput({
                   attachment lands. Otherwise the normal text-comment
                   path. hasVoicePending is the re-render trigger for
                   the disabled check. */}
-              <Button
-                onClick={() => {
-                  if (voiceSendRef.current) {
-                    justUploadedVoiceRef.current = true
-                    voiceSendRef.current()
-                  } else {
-                    submitWithAutoFinish()
+              {!markerMode && (
+                <Button
+                  onClick={() => {
+                    if (voiceSendRef.current) {
+                      justUploadedVoiceRef.current = true
+                      voiceSendRef.current()
+                    } else {
+                      submitWithAutoFinish()
+                    }
+                  }}
+                  variant="default"
+                  disabled={
+                    !hasVoicePending &&
+                    !canSubmit &&
+                    !annotationCtx?.isDrawingMode
                   }
-                }}
-                variant="default"
-                disabled={
-                  !hasVoicePending &&
-                  !canSubmit &&
-                  !annotationCtx?.isDrawingMode
-                }
-                size="icon"
-                className="h-8 w-8 shrink-0"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              )}
             </div>
           </div>
           {(attachmentError || attachmentNotice) && (

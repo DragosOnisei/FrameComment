@@ -130,11 +130,9 @@ export function AccentColorProvider() {
         // Apply the accent color
         applyColorVariables(colorKey)
 
-        // Apply theme if user hasn't set a preference
-        const userTheme = localStorage.getItem('theme')
-        if (!userTheme) {
-          applyDefaultTheme(defaultTheme)
-        }
+        // 4.0.3: dark-only — always enforce dark regardless of any
+        // stored preference.
+        applyDefaultTheme(defaultTheme)
       } else {
         // API failed, use cached values
         const cachedColor = localStorage.getItem('adminAccentColor') as AccentColorKey | null
@@ -155,21 +153,10 @@ export function AccentColorProvider() {
     applyAppearanceSettings()
   }, [applyAppearanceSettings])
 
-  const applyDefaultTheme = (defaultTheme: string) => {
-    const root = document.documentElement
-
-    if (defaultTheme === 'dark') {
-      root.classList.add('dark')
-    } else if (defaultTheme === 'light') {
-      root.classList.remove('dark')
-    } else {
-      // 'auto' - use system preference
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        root.classList.add('dark')
-      } else {
-        root.classList.remove('dark')
-      }
-    }
+  const applyDefaultTheme = (_defaultTheme: string) => {
+    // 4.0.3: Light mode removed. FrameComment is dark-only, so we always
+    // keep the `dark` class on <html> no matter what value is stored.
+    document.documentElement.classList.add('dark')
   }
 
   const applyColorVariables = (colorKey: AccentColorKey) => {

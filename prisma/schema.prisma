@@ -38,6 +38,7 @@ model User {
 
   projects          Project[]
   comments          Comment[]
+  markers           Marker[]
   passkeys          PasskeyCredential[]
   pushSubscriptions PushSubscription[]
   calendarToken     CalendarToken?
@@ -145,6 +146,7 @@ model Project {
   folders           Folder[] // Optional folder tree inside the project (1.0.6+)
   folderDocuments   FolderDocument[]
   comments          Comment[]
+  markers           Marker[]
   securityEvents    SecurityEvent[]
   analytics         VideoAnalytics[]
   recipients        ProjectRecipient[] // Multiple email recipients
@@ -387,6 +389,7 @@ model Video {
   assets    VideoAsset[]
   transcripts FolderDocument[] @relation("VideoTranscripts")
   comments  Comment[]
+  markers   Marker[]
   // 3.5.0+: in-app bell notifications that deep-link to this video.
   notifications Notification[]
 
@@ -537,6 +540,44 @@ model Comment {
   @@index([parentId])
   @@index([userId])
   @@index([isResolved])
+}
+
+// 4.1.0+: Premiere-style timeline markers. A coloured flag pinned to a
+// specific moment of a video version, with an optional text note + author.
+// Distinct from the comment "pins" the UI also calls markers: these are
+// lightweight navigation bookmarks (jump between them with ↑/↓) rather
+// than threaded feedback. Scoped to a video version so a marker left on
+// v2 doesn't leak onto v3 (same rule as annotations/comments).
+model Marker {
+  id           String   @id @default(cuid())
+  projectId    String
+  videoId      String
+  videoVersion Int?
+  // Sub-second position on the video, in milliseconds
+  // (Math.round(currentTime * 1000)) — the source of truth for
+  // click-to-seek + ↑/↓ navigation, same convention as Comment.timestampMs.
+  timestampMs  Int
+  // One of: red | orange | green | blue.
+  color        String   @default("blue")
+  // Optional short note shown on hover (the Premiere "marker name").
+  label        String?
+  authorName   String?
+  isInternal   Boolean  @default(false) // true = studio, false = client
+  // Admin author (null for share-side / client markers).
+  userId          String?
+  user            User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // Share-token / browser session id of the author, for self-delete
+  // authorization on the share page (mirror of Comment.editorSessionId).
+  editorSessionId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  video   Video   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([videoId])
+  @@index([userId])
 }
 
 // 1.2.0+: Quick emoji reactions on a comment. Frame.io-style — anyone

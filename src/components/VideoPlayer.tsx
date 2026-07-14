@@ -20,9 +20,26 @@ import {
   isRangeEditActive,
   setRangeEditActive,
 } from '@/lib/comment-range-edit'
+import { apiJson, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
+import { getClientId } from '@/lib/client-id'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
+}
+
+// 4.1.0+: Premiere-style timeline marker (a coloured flag at a
+// millisecond position). Distinct from comment pins.
+export type MarkerFlag = {
+  id: string
+  videoId: string
+  videoVersion: number | null
+  timestampMs: number
+  color: string // red | orange | green | blue
+  label: string | null
+  authorName: string | null
+  isInternal: boolean
+  createdAt: string
+  mine: boolean
 }
 
 interface VideoPlayerProps {
@@ -620,6 +637,155 @@ export default function VideoPlayer({
       ),
     [comments, selectedVideo?.id],
   )
+
+  // 4.1.0+: Premiere-style timeline markers (coloured flags). Fetched
+  // right here so BOTH the admin review player and the client/share view
+  // get them without threading a `markers` prop through every parent.
+  // The comment toolbar (a separate component tree) asks us to drop a
+  // marker via the `framecomment:addMarker` window event; we own the
+  // create/delete + list so all the API auth branching lives in one place.
+  const [markers, setMarkers] = useState<MarkerFlag[]>([])
+
+  const buildShareMarkerQuery = useCallback(() => {
+    if (typeof window === 'undefined') return ''
+    const sp = new URLSearchParams(window.location.search)
+    const v = (sp.get('v') || '').trim()
+    const sig = (sp.get('sig') || '').trim()
+    return v && sig ? `?v=${encodeURIComponent(v)}&sig=${encodeURIComponent(sig)}` : ''
+  }, [])
+
+  const fetchMarkers = useCallback(async () => {
+    if (!projectId) return
+    try {
+      let data: any
+      if (shareToken) {
+        const res = await fetch(`/api/share/${shareToken}/markers${buildShareMarkerQuery()}`, {
+          headers: {
+            Authorization: `Bearer ${shareToken}`,
+            'X-Framecomment-Client-Id': getClientId(),
+          },
+        })
+        if (!res.ok) return
+        data = await res.json()
+      } else {
+        data = await apiJson(`/api/markers?projectId=${encodeURIComponent(projectId)}`)
+      }
+      setMarkers(Array.isArray(data) ? data : [])
+    } catch {
+      /* non-fatal — markers are optional chrome */
+    }
+  }, [projectId, shareToken, buildShareMarkerQuery])
+
+  const createMarker = useCallback(
+    async (color: string, label: string | null) => {
+      const videoId = selectedVideoIdRef.current
+      if (!projectId || !videoId) return
+      const timestampMs = Math.max(0, Math.round((currentTimeRef.current || 0) * 1000))
+      const body: any = { projectId, videoId, timestampMs, color }
+      if (label) body.label = label
+      try {
+        if (shareToken) {
+          await fetch('/api/markers', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${shareToken}`,
+              'X-Framecomment-Client-Id': getClientId(),
+            },
+            body: JSON.stringify(body),
+          })
+        } else {
+          await apiPost('/api/markers', body)
+        }
+        await fetchMarkers()
+      } catch (err) {
+        logError('Failed to create marker:', err)
+      }
+    },
+    [projectId, shareToken, fetchMarkers],
+  )
+
+  const deleteMarker = useCallback(
+    async (id: string) => {
+      try {
+        if (shareToken) {
+          await fetch(`/api/markers/${id}`, {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${shareToken}`,
+              'X-Framecomment-Client-Id': getClientId(),
+            },
+          })
+        } else {
+          await apiDelete(`/api/markers/${id}`)
+        }
+        await fetchMarkers()
+      } catch (err) {
+        logError('Failed to delete marker:', err)
+      }
+    },
+    [shareToken, fetchMarkers],
+  )
+
+  const updateMarker = useCallback(
+    async (id: string, patch: { color?: string; label?: string | null }) => {
+      try {
+        if (shareToken) {
+          await fetch(`/api/markers/${id}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${shareToken}`,
+              'X-Framecomment-Client-Id': getClientId(),
+            },
+            body: JSON.stringify(patch),
+          })
+        } else {
+          await apiPatch(`/api/markers/${id}`, patch)
+        }
+        await fetchMarkers()
+      } catch (err) {
+        logError('Failed to update marker:', err)
+      }
+    },
+    [shareToken, fetchMarkers],
+  )
+
+  // Initial load + reload when the project changes.
+  useEffect(() => {
+    fetchMarkers()
+  }, [fetchMarkers])
+
+  // Marker-create requests from the comment toolbar + external refresh signals.
+  useEffect(() => {
+    const onAdd = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      createMarker(detail.color || 'blue', typeof detail.label === 'string' ? detail.label : null)
+    }
+    const onChanged = () => {
+      fetchMarkers()
+    }
+    window.addEventListener('framecomment:addMarker', onAdd as EventListener)
+    window.addEventListener('framecomment:markersChanged', onChanged)
+    return () => {
+      window.removeEventListener('framecomment:addMarker', onAdd as EventListener)
+      window.removeEventListener('framecomment:markersChanged', onChanged)
+    }
+  }, [createMarker, fetchMarkers])
+
+  // Per-version markers, sorted by time — feeds the timeline pins + the
+  // ↑/↓ jump navigation.
+  const activeVersionMarkers = useMemo(
+    () =>
+      markers
+        .filter((m) => m.videoId === selectedVideo?.id)
+        .sort((a, b) => a.timestampMs - b.timestampMs),
+    [markers, selectedVideo?.id],
+  )
+  const activeVersionMarkersRef = useRef<MarkerFlag[]>([])
+  useEffect(() => {
+    activeVersionMarkersRef.current = activeVersionMarkers
+  }, [activeVersionMarkers])
 
   // 1.3.2+: Which stream qualities does THIS clip actually have?
   // We surface them to PlayerSettingsMenu so the Quality submenu only
@@ -1606,6 +1772,54 @@ export default function VideoPlayer({
         return
       }
 
+      // ArrowUp / ArrowDown: jump between timeline markers on the active
+      // version (4.1.0+). ↑ = previous marker before the playhead, ↓ =
+      // next marker after it. When there's no marker left in that
+      // direction we fall back to the very first frame (↑) or the last
+      // frame (↓) — so the keys double as "back to start / go to end".
+      // Skipped while typing in an input / textarea / contenteditable and
+      // ignored with any modifier held so OS shortcuts fall through.
+      if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        if (e.ctrlKey || e.metaKey || e.altKey) return
+        const target = e.target as HTMLElement | null
+        if (target) {
+          const tag = target.tagName
+          if (
+            tag === 'INPUT' ||
+            tag === 'TEXTAREA' ||
+            tag === 'SELECT' ||
+            target.isContentEditable
+          ) {
+            return
+          }
+        }
+        e.preventDefault()
+        e.stopPropagation()
+        const goUp = e.code === 'ArrowUp'
+        const nowMs = (video.currentTime || 0) * 1000
+        const EPS = 20 // ms tolerance so we don't re-land on the marker we're on
+        const flags = activeVersionMarkersRef.current // already sorted asc
+        const duration = Number.isFinite(video.duration) ? video.duration : undefined
+        let targetSec: number
+        if (goUp) {
+          const prev = [...flags].reverse().find((m) => m.timestampMs < nowMs - EPS)
+          targetSec = prev ? prev.timestampMs / 1000 : 0
+        } else {
+          const next = flags.find((m) => m.timestampMs > nowMs + EPS)
+          targetSec = next ? next.timestampMs / 1000 : duration ?? nowMs / 1000
+        }
+        targetSec =
+          duration != null ? Math.max(0, Math.min(duration, targetSec)) : Math.max(0, targetSec)
+        video.currentTime = targetSec
+        currentTimeRef.current = targetSec
+        window.dispatchEvent(
+          new CustomEvent('videoTimeUpdated', {
+            detail: { time: targetSec, videoId: selectedVideoIdRef.current },
+          }),
+        )
+        return
+      }
+
       // ArrowLeft / ArrowRight: step one frame (1.0.7+). Same
       // behaviour as Ctrl+J / Ctrl+L but without the modifier so it
       // matches Frame.io / DaVinci Resolve muscle memory. We skip the
@@ -2315,6 +2529,9 @@ export default function VideoPlayer({
                   isAdmin={isAdmin}
                   timestampDisplayMode={timestampDisplayMode}
                   onMarkerClick={onCommentFocus}
+                  flagMarkers={activeVersionMarkers as any}
+                  onFlagMarkerDelete={deleteMarker}
+                  onFlagMarkerUpdate={updateMarker}
                   playbackSpeed={playbackSpeed}
                   onPlaybackSpeedChange={setPlaybackSpeed}
                   resolvedPlaybackQuality={resolvedPlaybackQuality as any}

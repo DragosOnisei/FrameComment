@@ -115,31 +115,17 @@ export default async function RootLayout({
                   var serverDefaultTheme = '${appearance.defaultTheme}';
                   var serverAccentColor = '${appearance.accentColor}';
 
-                  // Apply theme
-                  var userTheme = localStorage.getItem('theme');
-                  var isDark = false;
-                  if (userTheme === 'dark') {
-                    document.documentElement.classList.add('dark');
-                    isDark = true;
-                  } else if (userTheme === 'light') {
-                    document.documentElement.classList.remove('dark');
-                  } else {
-                    // No user preference - use cached admin default or server default
-                    var adminDefault = localStorage.getItem('adminDefaultTheme') || serverDefaultTheme;
-                    if (adminDefault === 'dark') {
-                      document.documentElement.classList.add('dark');
-                      isDark = true;
-                    } else if (adminDefault === 'light') {
-                      document.documentElement.classList.remove('dark');
-                    } else {
-                      // 3.6.x: default is DARK. Previously 'auto' followed
-                      // the OS (prefers-color-scheme), which forced light
-                      // on light-mode laptops. The app is dark-first, so
-                      // any non-explicit value now resolves to dark.
-                      document.documentElement.classList.add('dark');
-                      isDark = true;
-                    }
-                  }
+                  // 4.0.3: Light mode removed entirely — FrameComment is
+                  // dark-only. Always force the dark class and migrate any
+                  // legacy 'light' preference to dark so previously-light
+                  // users land on dark automatically. serverDefaultTheme is
+                  // intentionally ignored now.
+                  document.documentElement.classList.add('dark');
+                  var isDark = true;
+                  try {
+                    localStorage.removeItem('theme');
+                    localStorage.setItem('adminDefaultTheme', 'dark');
+                  } catch (e2) {}
 
                   // Apply accent color from cache or server default
                   var accentColors = {

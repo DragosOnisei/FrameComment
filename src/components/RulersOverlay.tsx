@@ -243,6 +243,10 @@ export default function RulersOverlay({
           backdropFilter: 'blur(20px) saturate(160%)',
           WebkitBackdropFilter: 'blur(20px) saturate(160%)',
           boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.06)',
+          // 4.1.0+: sit ABOVE the guide lines so the centre + draggable
+          // guides tuck behind the frosted ruler strips (Premiere-style)
+          // instead of painting over them.
+          zIndex: 1,
         }}
         onMouseDown={(e) => {
           e.preventDefault()
@@ -287,6 +291,8 @@ export default function RulersOverlay({
           backdropFilter: 'blur(20px) saturate(160%)',
           WebkitBackdropFilter: 'blur(20px) saturate(160%)',
           boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
+          // 4.1.0+: above the guide lines (see left ruler note).
+          zIndex: 1,
         }}
         onMouseDown={(e) => {
           e.preventDefault()
@@ -416,6 +422,74 @@ export default function RulersOverlay({
           }}
         />
       )}
+
+      {/* 4.1.0+: fixed centre guides (Premiere-style). Always shown while
+          rulers are on — a vertical middle line, a horizontal middle line
+          and a crisp "+" crosshair marking the exact centre of the frame.
+          Non-interactive (pointer-events-none) so drawing still passes
+          through; subtle white so they don't fight the draggable blue
+          guides. */}
+      {/* Vertical middle — same weight/opacity as the ruler ticks
+          (white/60). Centred on the exact middle point (same anchor as
+          the "+" below) so the cross bars line up perfectly. */}
+      <div
+        className="absolute pointer-events-none bg-white/60"
+        style={{
+          left: rect.left + rect.width / 2,
+          top: rect.top,
+          width: 1,
+          height: rect.height,
+          transform: 'translateX(-50%)',
+        }}
+      />
+      {/* Horizontal middle */}
+      <div
+        className="absolute pointer-events-none bg-white/60"
+        style={{
+          left: rect.left,
+          top: rect.top + rect.height / 2,
+          width: rect.width,
+          height: 1,
+          transform: 'translateY(-50%)',
+        }}
+      />
+      {/* Centre "+" crosshair — brighter than the middle lines so the
+          exact centre point reads at a glance. */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          left: rect.left + rect.width / 2,
+          top: rect.top + rect.height / 2,
+          transform: 'translate(-50%, -50%)',
+          width: 24,
+          height: 24,
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            width: 24,
+            height: 2,
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: 'rgba(255,255,255,0.95)',
+            boxShadow: '0 0 3px rgba(0,0,0,0.6)',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            width: 2,
+            height: 24,
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: 'rgba(255,255,255,0.95)',
+            boxShadow: '0 0 3px rgba(0,0,0,0.6)',
+          }}
+        />
+      </div>
     </div>
   )
 }
