@@ -646,6 +646,17 @@ export default function VideoPlayer({
   // create/delete + list so all the API auth branching lives in one place.
   const [markers, setMarkers] = useState<MarkerFlag[]>([])
 
+  // 4.1.3+: gate the "ready" player behind REAL playback readiness. On the
+  // server the first HLS fragment can take a few seconds to load off a cold
+  // disk, so the controls used to appear (00:00/00:00) before playback was
+  // buffered — pressing Play then did nothing for a few seconds. We keep a
+  // buffering overlay until the <video> fires `canplay`, so once the play
+  // button shows, playback is instant. Reset whenever the clip changes.
+  const [mediaReady, setMediaReady] = useState(false)
+  useEffect(() => {
+    setMediaReady(false)
+  }, [selectedVideo?.id])
+
   const buildShareMarkerQuery = useCallback(() => {
     if (typeof window === 'undefined') return ''
     const sp = new URLSearchParams(window.location.search)
@@ -2425,6 +2436,8 @@ export default function VideoPlayer({
                     style={{ objectFit: 'contain' }}
                     onTimeUpdate={handleTimeUpdate}
                     onLoadedMetadata={handleLoadedMetadata}
+                    onCanPlay={() => setMediaReady(true)}
+                    onPlaying={() => setMediaReady(true)}
                     onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
                     // 1.9.0+: while range-edit mode is active, a
                     // click on the <video> exits the mode and is
@@ -2448,6 +2461,21 @@ export default function VideoPlayer({
                     webkit-playsinline="true"
                     x-webkit-airplay="allow"
                   />
+                )}
+
+                {/* 4.1.3+: buffering overlay — covers the player until the
+                    video can actually play, so the controls don't tease a
+                    Play button that stalls for a few seconds on first load
+                    (cold HLS fragment on the server). */}
+                {(selectedVideo as any)?.mediaType !== 'IMAGE' && !mediaReady && (
+                  <div
+                    className="absolute inset-0 z-30 flex items-center justify-center gap-3 cursor-default"
+                    style={{ backgroundColor: 'rgba(10, 12, 16, 0.55)' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+                    <p className="text-sm font-medium text-white/85">Loading video…</p>
+                  </div>
                 )}
 
                 {/* Annotation Overlay (read-only, renders saved drawing annotations during playback) */}

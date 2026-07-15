@@ -89,6 +89,24 @@ export async function hardDeleteVideoById(id: string): Promise<void> {
         await deleteFile((video as any).storyboardPath)
       } catch {}
     }
+
+    // 4.1.4+: sweep the whole per-video asset directory. The field-by-field
+    // deletes above miss the HLS segment folder (`hls/` — the bulk of the
+    // footprint), the 480p tier, and the clean/watermark-free previews
+    // (none of which have a dedicated column here), so those leaked as
+    // orphaned GBs whenever a video was permanently deleted / emptied from
+    // Trash. Everything for a version lives under
+    // `projects/{projectId}/videos/{videoId}/` (previews + hls + storyboard
+    // + thumbnail); the original mp4 is a sibling handled above. Removing
+    // that directory reclaims all of it and is future-proof against new
+    // tiers being added later.
+    if ((video as any).projectId && video.id) {
+      try {
+        await deleteDirectory(`projects/${(video as any).projectId}/videos/${video.id}`)
+      } catch (err) {
+        logError(`[hardDeleteVideoById] video dir cleanup failed for ${id}:`, err)
+      }
+    }
   } catch (err) {
     logError(`[hardDeleteVideoById] file cleanup failed for ${id}:`, err)
   }
