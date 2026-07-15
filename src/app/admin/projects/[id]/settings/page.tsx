@@ -1386,19 +1386,8 @@ export default function ProjectSettingsPage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="allowClientAssetUpload">{t('allowClientFileAttachments')}</Label>
-                    <p className="text-xs text-muted-foreground">
-                      {t('allowClientFileAttachmentsDescription')}
-                    </p>
-                  </div>
-                  <Switch
-                    id="allowClientAssetUpload"
-                    checked={allowClientAssetUpload}
-                    onCheckedChange={setAllowClientAssetUpload}
-                  />
-                </div>
+                {/* 4.1.1+: "Allow client file attachments" toggle removed —
+                    attachments are now always enabled for every project. */}
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">

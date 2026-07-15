@@ -140,19 +140,9 @@ const tusServer: Server = new Server({
             throw { status_code: 403, body: 'Asset does not belong to your session' }
           }
 
-          // 2.3.0+: voice (category='audio') comments bypass the
-          // allowClientAssetUpload flag — see the rationale in
-          // /api/videos/[id]/client-assets/route.ts.
-          if (asset.category !== 'audio') {
-            const project = await prisma.project.findUnique({
-              where: { id: sharePayload.projectId },
-              select: { allowClientAssetUpload: true },
-            })
-
-            if (!project?.allowClientAssetUpload) {
-              throw { status_code: 403, body: 'File attachments are not enabled for this project' }
-            }
-          }
+          // 4.1.1+: File attachments are ALWAYS enabled — the
+          // `allowClientAssetUpload` gate was removed. Anyone who can
+          // comment can attach files.
         }
       }
 

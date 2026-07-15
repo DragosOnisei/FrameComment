@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { FileText, Image as ImageIcon, Music, Film, Download, Loader2, X, Play, Pause } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
@@ -274,38 +275,43 @@ function ImageLightbox({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  return (
+  // 4.1.1+: render through a portal to <body>. The comments panel is a
+  // frosted-glass surface (backdrop-filter/transform), which turns it into
+  // the containing block for `position: fixed` descendants — so without a
+  // portal the "full-screen" lightbox was trapped inside the comments
+  // column. Portalling to body lets it truly cover + centre on the viewport.
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       onClick={onClose}
     >
       <button
         type="button"
         onClick={onClose}
-        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+        className="absolute top-4 right-4 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
         aria-label="Close"
       >
         <X className="w-5 h-5" />
       </button>
       <div
-        className="max-w-[95vw] max-h-[95vh] flex flex-col items-center gap-3"
+        className="max-w-[95vw] max-h-[95vh] flex flex-col items-center"
         onClick={(e) => e.stopPropagation()}
       >
-        {loading && <Loader2 className="w-8 h-8 animate-spin text-white" />}
-        {error && <span className="text-white">{error}</span>}
+        {loading && <Loader2 className="w-8 h-8 animate-spin text-white drop-shadow" />}
+        {error && <span className="text-white drop-shadow">{error}</span>}
         {url && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={url}
             alt={asset.fileName}
-            className="max-w-full max-h-[85vh] object-contain rounded-md"
+            className="max-w-full max-h-[92vh] object-contain rounded-lg shadow-2xl"
           />
         )}
-        <div className="text-xs text-white/70">
-          {asset.fileName} · {formatFileSize(Number(asset.fileSize))}
-        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

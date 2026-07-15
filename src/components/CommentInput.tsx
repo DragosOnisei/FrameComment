@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Send, X, Paperclip, Pencil, PenTool, Flag } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
-import CommentAttachmentButton from './CommentAttachmentButton'
+import CommentAttachmentButton, { type CommentAttachmentButtonHandle } from './CommentAttachmentButton'
 import VoiceRecorderButton from './VoiceRecorderButton'
 import AnnotationToolbarInline from './AnnotationToolbarInline'
 import EmojiPicker from './EmojiPicker'
@@ -139,6 +139,9 @@ export default function CommentInput({
   // at the current playhead via a window event the player listens for.
   const [markerMode, setMarkerMode] = useState(false)
   const [markerColor, setMarkerColor] = useState<'red' | 'orange' | 'green' | 'blue'>('blue')
+  // 4.1.1+: handle to the attachment uploader so pasting an image into
+  // the composer auto-attaches it.
+  const attachmentRef = useRef<CommentAttachmentButtonHandle>(null)
   // 1.9.1+: when a voice message is in preview the recorder hands
   // us its uploadRecording() so the official paper-plane Send
   // button can trigger it directly. We store the function in a
@@ -423,6 +426,36 @@ export default function CommentInput({
     )
     onCommentChange('')
     setMarkerMode(false)
+  }
+
+  // 4.1.1+: paste-to-attach. If the clipboard holds image(s), Cmd/Ctrl+V
+  // in the composer uploads them as comment attachments instead of
+  // pasting raw data. No-op in marker mode (that field is a text note)
+  // or when the attachment uploader isn't mounted.
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (markerMode) return
+    const dt = e.clipboardData
+    if (!dt) return
+    const images: File[] = []
+    for (const item of Array.from(dt.items || [])) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (!file) continue
+        const hasExt = file.name && /\.[a-z0-9]+$/i.test(file.name)
+        const named = hasExt
+          ? file
+          : new File(
+              [file],
+              `pasted-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
+              { type: file.type || 'image/png' },
+            )
+        images.push(named)
+      }
+    }
+    if (images.length > 0 && attachmentRef.current) {
+      e.preventDefault()
+      attachmentRef.current.pasteUpload(images)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -738,6 +771,7 @@ export default function CommentInput({
                   value={newComment}
                   onChange={(e) => onCommentChange(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
                   onFocus={onInputFocus}
                   maxLength={MAX_COMMENT_LENGTH}
                   className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-snug"
@@ -833,8 +867,10 @@ export default function CommentInput({
                     <PenTool className="w-4 h-4" />
                   </button>
                 )}
-                {allowClientAssetUpload && selectedVideoIdProp && onAttachmentAdded && !isVoiceActive && (
+                {/* 4.1.1+: attachments always enabled — no allowClientAssetUpload gate. */}
+                {selectedVideoIdProp && onAttachmentAdded && !isVoiceActive && (
                   <CommentAttachmentButton
+                    ref={attachmentRef}
                     videoId={selectedVideoIdProp}
                     shareToken={shareToken}
                     onAttachmentAdded={onAttachmentAdded}

@@ -422,7 +422,9 @@ export async function POST(request: NextRequest) {
           id: { in: assetIds },
           videoId,
           uploadedBy: 'client',
-          uploadedBySessionId: uploaderSessionId,
+          // Clients may only link assets from their own session; admins
+          // (who own the project) can link any unlinked asset on the video.
+          ...(isAdmin ? {} : { uploadedBySessionId: uploaderSessionId }),
           commentId: null,
         },
       })

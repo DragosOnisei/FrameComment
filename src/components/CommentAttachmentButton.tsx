@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useTranslations } from 'next-intl'
 import { Paperclip, Loader2, CheckCircle2, AlertCircle, Upload, X, FileIcon, RotateCcw } from 'lucide-react'
 import { Button } from './ui/button'
@@ -15,6 +15,7 @@ import {
 import * as tus from 'tus-js-client'
 import { createTusAfterResponseHandler, createTusShouldRetryHandler, getTusUploadErrorMessage, resetTusAuthRetry } from '@/lib/tus-error'
 import { getTusChunkSizeBytes, TUS_RETRY_DELAYS_MS } from '@/lib/transfer-tuning'
+import { getAccessToken } from '@/lib/token-store'
 import {
   ensureFreshUploadOnContextChange,
   clearFileContext,
@@ -54,6 +55,11 @@ interface FileUploadItem {
   tusUpload?: tus.Upload
 }
 
+// 4.1.1+: imperative handle so the composer can trigger paste-to-attach.
+export type CommentAttachmentButtonHandle = {
+  pasteUpload: (files: File[]) => void
+}
+
 const DEFAULT_MAX_FILES = 10
 
 const ALLOWED_EXTENSIONS = new Set(ALL_ALLOWED_EXTENSIONS)
@@ -74,14 +80,20 @@ function validateFile(file: File): string | null {
   return null
 }
 
-export default function CommentAttachmentButton({
-  videoId,
-  shareToken,
-  onAttachmentAdded,
-  onUploadError,
-  disabled = false,
-  maxFiles: maxFilesProp,
-}: CommentAttachmentButtonProps) {
+const CommentAttachmentButton = forwardRef<
+  CommentAttachmentButtonHandle,
+  CommentAttachmentButtonProps
+>(function CommentAttachmentButton(
+  {
+    videoId,
+    shareToken,
+    onAttachmentAdded,
+    onUploadError,
+    disabled = false,
+    maxFiles: maxFilesProp,
+  }: CommentAttachmentButtonProps,
+  ref,
+) {
   const t = useTranslations('comments')
   const tc = useTranslations('common')
   const MAX_FILES = maxFilesProp ?? DEFAULT_MAX_FILES
@@ -138,13 +150,23 @@ export default function CommentAttachmentButton({
     setItems((prev) => prev.filter((i) => i.id !== id))
   }, [abortS3Upload, storageProvider])
 
-  const uploadFile = async (item: FileUploadItem): Promise<boolean> => {
+  const uploadFile = async (
+    item: FileUploadItem,
+    reportError?: (msg: string) => void,
+  ): Promise<boolean> => {
     // Step 1: Create asset record via JSON POST
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
     if (shareToken) {
       headers['Authorization'] = `Bearer ${shareToken}`
+    } else {
+      // Admin: send the access token so the asset is created under the
+      // admin session (matching the comment POST) — otherwise the asset
+      // lands under an anonymous session and the comment's attachment
+      // validation rejects it as "invalid or no longer available".
+      const token = getAccessToken()
+      if (token) headers['Authorization'] = `Bearer ${token}`
     }
 
     let assetId: string
@@ -176,6 +198,7 @@ export default function CommentAttachmentButton({
       setItems((prev) =>
         prev.map((i) => (i.id === item.id ? { ...i, status: 'error', error: message } : i))
       )
+      reportError?.(message)
       return false
     }
 
@@ -203,6 +226,7 @@ export default function CommentAttachmentButton({
             },
             onError: (err) => {
               setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, status: 'error', error: err.message, assetId } : i)))
+              reportError?.(err.message)
               s3AbortKeysRef.current.delete(item.id)
               clearUploadMetadata(item.file)
               const deleteHeaders: Record<string, string> = {}
@@ -270,6 +294,7 @@ export default function CommentAttachmentButton({
           setItems((prev) =>
             prev.map((i) => (i.id === item.id ? { ...i, status: 'error', error: errorMessage, assetId } : i))
           )
+          reportError?.(errorMessage)
 
           tusUploadsRef.current.delete(item.id)
           resetTusAuthRetry(uploadRef.current)
@@ -293,9 +318,18 @@ export default function CommentAttachmentButton({
           const xhr = req.getUnderlyingObject()
           xhr.withCredentials = true
 
-          // Use share token for auth
+          // Auth for the TUS route (which requires a Bearer token in
+          // `onUploadCreate`). Share viewers send their share token;
+          // ADMINS must send their access token too — without it the
+          // create request 401s and the upload hangs at 0% retrying.
+          // (Mirrors the admin video-upload path in VideoUpload.tsx.)
           if (shareToken) {
             xhr.setRequestHeader('Authorization', `Bearer ${shareToken}`)
+          } else {
+            const token = getAccessToken()
+            if (token && xhr?.setRequestHeader) {
+              xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+            }
           }
         },
       })
@@ -344,6 +378,37 @@ export default function CommentAttachmentButton({
     setIsUploading(false)
     uploadingRef.current = false
   }
+
+  // 4.1.1+: paste-to-attach. The composer calls this when the user pastes
+  // image(s) into the comment box. We upload SILENTLY in the background —
+  // no modal — so the image just shows up attached to the comment. On
+  // success `onAttachmentAdded` (inside uploadFile) registers it with the
+  // composer; failures surface via `onUploadError`. We don't touch the
+  // modal's `items` state, so the paperclip picker stays clean.
+  const pasteUpload = async (files: File[]) => {
+    if (!files.length) return
+    onUploadError?.(null)
+    let firstError: string | null = null
+    for (const file of files) {
+      const validationError = validateFile(file)
+      if (validationError) {
+        firstError = firstError || validationError
+        continue
+      }
+      const item: FileUploadItem = {
+        id: crypto.randomUUID?.() ?? `file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        status: 'uploading',
+        progress: 0,
+      }
+      await uploadFile(item, (msg) => {
+        firstError = firstError || msg
+      })
+    }
+    if (firstError) onUploadError?.(firstError)
+  }
+
+  useImperativeHandle(ref, () => ({ pasteUpload }))
 
   const handleDone = () => {
     setOpen(false)
@@ -416,7 +481,17 @@ export default function CommentAttachmentButton({
       </button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        {/* 4.1.1+: frosted glass (matches the app's v2.5 chrome).
+            `bg-transparent` overrides the DialogContent default
+            `bg-background` via twMerge; the inline style paints the glass. */}
+        <DialogContent
+          className="sm:max-w-md border-0 bg-transparent text-white ring-1 ring-white/10 shadow-[0_24px_60px_-15px_rgba(0,0,0,0.7)]"
+          style={{
+            backgroundColor: 'rgba(22, 37, 51, 0.72)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{t('attachFilesTitle')}</DialogTitle>
             <DialogDescription className="sr-only">{t('attachFilesDesc')}</DialogDescription>
@@ -584,4 +659,6 @@ export default function CommentAttachmentButton({
       </Dialog>
     </>
   )
-}
+})
+
+export default CommentAttachmentButton
