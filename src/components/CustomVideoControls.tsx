@@ -341,6 +341,56 @@ export default function CustomVideoControls({
       document.removeEventListener('keydown', onKey)
     }
   }, [openFlagId])
+
+  // 4.1.2+: throttled scrub seek. On HLS (the server path), setting
+  // `currentTime` on every mousemove aborts the in-flight fragment load
+  // and kicks off a new one — so nothing ever paints until the drag stops
+  // (the classic "frozen scrub", far worse on a slow server disk). Local
+  // MP4 seeks complete fast enough to look instant, which is why it only
+  // showed on the server. Throttling the drag seeks lets each one land +
+  // paint a frame → a live scrub. The final position is always flushed on
+  // release so the playhead ends up exactly where the drag stopped.
+  const SCRUB_THROTTLE_MS = 100
+  const lastScrubTsRef = useRef(0)
+  const pendingScrubRef = useRef<number | null>(null)
+  const scrubTrailingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scrubSeek = useCallback(
+    (time: number) => {
+      pendingScrubRef.current = time
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const elapsed = now - lastScrubTsRef.current
+      if (elapsed >= SCRUB_THROTTLE_MS) {
+        lastScrubTsRef.current = now
+        pendingScrubRef.current = null
+        onSeek(time)
+      } else if (scrubTrailingRef.current === null) {
+        scrubTrailingRef.current = setTimeout(() => {
+          scrubTrailingRef.current = null
+          if (pendingScrubRef.current !== null) {
+            lastScrubTsRef.current =
+              typeof performance !== 'undefined' ? performance.now() : Date.now()
+            const t = pendingScrubRef.current
+            pendingScrubRef.current = null
+            onSeek(t)
+          }
+        }, SCRUB_THROTTLE_MS - elapsed)
+      }
+    },
+    [onSeek],
+  )
+
+  const flushScrub = useCallback(() => {
+    if (scrubTrailingRef.current !== null) {
+      clearTimeout(scrubTrailingRef.current)
+      scrubTrailingRef.current = null
+    }
+    if (pendingScrubRef.current !== null) {
+      const t = pendingScrubRef.current
+      pendingScrubRef.current = null
+      onSeek(t)
+    }
+  }, [onSeek])
   // 3.5.x: smooth playhead clock. The `currentTime` prop is throttled
   // to ~200ms in VideoPlayer and the browser's `timeupdate` fires
   // irregularly, which made the progress bar lurch — glide, freeze,
@@ -581,10 +631,13 @@ export default function CustomVideoControls({
       lastTouchAtRef.current = Date.now()
       // Scrub the underlying video so the user can see the exact frame
       // where OUT will land. The DISPLAYED white playhead is decoupled
-      // via `displayedProgress` so it stays at IN.
-      onSeek(safeOut)
+      // via `displayedProgress` so it stays at IN. Throttled so HLS
+      // actually paints intermediate frames instead of freezing.
+      scrubSeek(safeOut)
     }
     const onUp = () => {
+      // Apply the final OUT frame the throttle may have skipped.
+      flushScrub()
       // Stamp at release so the synthetic click iOS fires ~0-300 ms
       // later is suppressed by the timeline-click guard regardless of
       // drag duration.
@@ -610,7 +663,7 @@ export default function CustomVideoControls({
       document.removeEventListener('touchend', onUp)
       document.removeEventListener('touchcancel', onUp)
     }
-  }, [isDraggingOutHandle, videoDuration, onSeek, videoFps])
+  }, [isDraggingOutHandle, videoDuration, scrubSeek, flushScrub, videoFps])
   // Refs so the timeline-click handler doesn't have to re-create on
   // every range update.
   const pendingInRef = useRef<number | null>(null)
@@ -862,13 +915,14 @@ export default function CustomVideoControls({
     const time = percentage * videoDuration
 
     // 1.1.1+: same — drag on the timeline just scrubs the playhead.
-    onSeek(time)
-  }, [isDragging, videoDuration, onSeek])
+    scrubSeek(time)
+  }, [isDragging, videoDuration, scrubSeek])
 
   const handleTimelineTouchEnd = useCallback(() => {
     setIsDragging(false)
     lastTouchAtRef.current = Date.now()
-  }, [])
+    flushScrub()
+  }, [flushScrub])
 
   const handleTimelineMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!timelineRef.current || !videoDuration) return
@@ -885,9 +939,9 @@ export default function CustomVideoControls({
       // The comment-range OUT point is set only when the user
       // grabs the dedicated orange handle (see the
       // `isDraggingOutHandle` effect above).
-      onSeek(time)
+      scrubSeek(time)
     }
-  }, [isDragging, videoDuration, onSeek])
+  }, [isDragging, videoDuration, scrubSeek])
 
   const handleTimelineMouseLeave = useCallback(() => {
     setHoveredTime(null)
@@ -897,12 +951,14 @@ export default function CustomVideoControls({
     const handleMouseUp = () => {
       if (isDragging) {
         setIsDragging(false)
+        // Apply the final drag position (the throttle may have skipped it).
+        flushScrub()
       }
     }
 
     window.addEventListener('mouseup', handleMouseUp)
     return () => window.removeEventListener('mouseup', handleMouseUp)
-  }, [isDragging])
+  }, [isDragging, flushScrub])
 
   const handleMarkerClick = useCallback((marker: MarkerData, e: React.MouseEvent) => {
     e.stopPropagation()
