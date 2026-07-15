@@ -81,11 +81,21 @@ export default function AdminSidebar() {
           if (!alive || !data) return
           const list = Array.isArray(data) ? data : data.projects || []
           setProjects(
-            list.map((p: any) => ({
-              id: p.id,
-              title: p.title || p.name || 'Untitled',
-              hasCover: !!p.coverImagePath,
-            })),
+            list
+              .map((p: any) => ({
+                id: p.id,
+                title: p.title || p.name || 'Untitled',
+                hasCover: !!p.coverImagePath,
+              }))
+              // 4.1.6+: sort A→Z by title with natural number ordering so
+              // "01_…", "02_…", … "99_…" read in the intended order (the
+              // API returns them newest-first, which looked reversed).
+              .sort((a: { title: string }, b: { title: string }) =>
+                a.title.localeCompare(b.title, undefined, {
+                  numeric: true,
+                  sensitivity: 'base',
+                }),
+              ),
           )
         })
         .catch(() => {})
