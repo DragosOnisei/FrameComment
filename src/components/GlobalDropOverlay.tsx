@@ -1,35 +1,34 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { UploadCloud } from 'lucide-react'
 
 /**
- * 2.0.x+: full-viewport drop overlay shown the moment the user
- * starts dragging files from their OS over the admin app.
- * Doesn't intercept the drop itself — clicks/drops fall through
- * to the underlying folder browser, which already has the right
- * handler attached. Pure visual hint.
+ * 2.0.x+: full-viewport drop overlay shown the moment the user starts
+ * dragging OS files over the admin app. The actual drop is handled by
+ * the FolderBrowser on project/folder pages — this is a visual hint.
  *
- * Why a separate global overlay instead of relying on
- * FolderBrowser's own dashed drop ring: the user shouldn't have
- * to know they're aiming at a specific element. As soon as a
- * file leaves the desktop and hovers anywhere over the admin
- * tab, we want a clear "drop anywhere to upload" affordance.
- *
- * Implementation notes:
- *   - Listens on `window`, not on a specific element. Drag
- *     events bubble out of every container, so any drag with
- *     `types.includes('Files')` triggers the overlay.
- *   - Drag-leave is tricky: every internal element transition
- *     fires `dragleave` on the previous one and `dragenter` on
- *     the next. We track a counter so the overlay only hides
- *     once the cursor has fully left the viewport (counter
- *     hits 0).
- *   - Hidden when nothing is being dragged — the overlay
- *     unmounts entirely so it doesn't capture pointer events.
+ * 4.1.8+ fixes:
+ *   - We now `preventDefault()` on `dragover` + `drop` for FILE drags at
+ *     the window level so the browser never NAVIGATES to a dropped file
+ *     (previously, on pages without an upload handler like Trash, letting
+ *     go opened the video in the browser).
+ *   - Because the browser used to swallow the drop on those pages, the
+ *     window `drop` never fired and the overlay got stuck until a reload.
+ *     Preventing default guarantees the reset fires; we also reset on
+ *     `dragend` and when the tab loses focus as belt-and-suspenders.
+ *   - The hint only appears on pages that actually accept uploads
+ *     (project / folder views), not on Trash / Users / Settings / Profile.
  */
 export function GlobalDropOverlay() {
+  const pathname = usePathname()
   const [active, setActive] = useState(false)
+
+  // Pages that don't accept drag-to-upload — never show the hint there.
+  const uploadCapable = !/^\/admin\/(trash|users|settings|profile)(\/|$)/.test(
+    pathname || '',
+  )
 
   useEffect(() => {
     let counter = 0
@@ -37,70 +36,68 @@ export function GlobalDropOverlay() {
     const isFileDrag = (e: DragEvent): boolean => {
       const types = e.dataTransfer?.types
       if (!types) return false
-      // `types` is a DOMStringList — `Array.from` so we can use
-      // `includes`. Chrome / Firefox / Safari all surface "Files"
-      // when an OS file/folder drag enters the page.
       return Array.from(types).includes('Files')
     }
 
-    /**
-     * 2.5.1+: skip the floating overlay when the page already shows
-     * the FolderBrowser's big empty-state placeholder — that card is
-     * already the drop target, and stacking a second floating popup
-     * on top of it competes for attention without adding info. We
-     * marker the empty-state with `data-empty-drop-zone="true"` so
-     * this check stays decoupled from FolderBrowser's internals.
-     */
     const hasEmptyDropZoneVisible = (): boolean => {
       if (typeof document === 'undefined') return false
       return !!document.querySelector('[data-empty-drop-zone="true"]')
     }
 
+    const reset = () => {
+      counter = 0
+      setActive(false)
+    }
+
     const onEnter = (e: DragEvent) => {
       if (!isFileDrag(e)) return
       counter++
-      if (counter === 1 && !hasEmptyDropZoneVisible()) setActive(true)
+      if (counter === 1 && uploadCapable && !hasEmptyDropZoneVisible()) {
+        setActive(true)
+      }
     }
     const onLeave = (e: DragEvent) => {
       if (!isFileDrag(e)) return
       counter = Math.max(0, counter - 1)
       if (counter === 0) setActive(false)
     }
-    const onDrop = () => {
-      counter = 0
-      setActive(false)
+    // Prevent the browser's default "open the file" for OS file drags
+    // anywhere in the app. Without this, dropping on a page that has no
+    // upload handler navigates the tab to the file (and leaves the hint
+    // stuck because the `drop` event never bubbles here).
+    const onDragOver = (e: DragEvent) => {
+      if (isFileDrag(e)) e.preventDefault()
     }
-    // `dragover` must call preventDefault somewhere on the chain
-    // or the browser refuses the drop. FolderBrowser already
-    // does that on the relevant areas, so we don't need to.
+    const onDrop = (e: DragEvent) => {
+      if (isFileDrag(e)) e.preventDefault()
+      reset()
+    }
+    const onDragEnd = () => reset()
+    const onBlur = () => reset()
 
     window.addEventListener('dragenter', onEnter)
     window.addEventListener('dragleave', onLeave)
+    window.addEventListener('dragover', onDragOver)
     window.addEventListener('drop', onDrop)
+    window.addEventListener('dragend', onDragEnd)
+    window.addEventListener('blur', onBlur)
     return () => {
       window.removeEventListener('dragenter', onEnter)
       window.removeEventListener('dragleave', onLeave)
+      window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('drop', onDrop)
+      window.removeEventListener('dragend', onDragEnd)
+      window.removeEventListener('blur', onBlur)
     }
-  }, [])
+  }, [uploadCapable])
 
   if (!active) return null
 
   return (
     <div
-      // pointer-events-none on the WRAPPER so the drag/drop
-      // events fall through to the underlying folder browser
-      // (it owns the actual drop handler). The card itself is
-      // also non-interactive — purely a hint.
       className="fixed inset-0 z-[2147483600] pointer-events-none flex items-center justify-center animate-in fade-in duration-150"
       aria-hidden="true"
     >
-      {/* 2.5.1+: v2.5 frosted glass refresh — same vocabulary as
-          ConfirmDialog / popovers (translucent navy + spotlight
-          radial tint + 40px backdrop blur). The icon sits in an
-          accent-tinted disc so it reads as the focal point even on
-          a busy background. Dashed border stays as the conventional
-          "drop here" signal but in primary/40 over the glass card. */}
       <div
         className="flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed border-primary/45 ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-12 py-10"
         style={{
