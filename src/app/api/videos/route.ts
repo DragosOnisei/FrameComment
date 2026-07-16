@@ -94,21 +94,42 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Resolve a unique name in this (project, folder) scope. Sequential
+    // uploads with the same base name get " (2)", " (3)", … Simultaneous
+    // uploads are de-duped CLIENT-SIDE within the batch before they're
+    // sent (see VideoUploadModal), which handles the multi-select case
+    // without a DB lock. (An earlier server-side advisory-lock attempt
+    // could stall uploads under concurrency, so it was removed.)
+    let finalName = videoName
+    {
+      const folderFilter =
+        resolvedFolderId === null ? { folderId: null } : { folderId: resolvedFolderId }
+      const conflicts = await prisma.video.findMany({
+        where: {
+          projectId,
+          ...folderFilter,
+          OR: [{ name: videoName }, { name: { startsWith: `${videoName} (` } }],
+        },
+        select: { name: true },
+      })
+      if (conflicts.some((v) => v.name === videoName)) {
+        let n = 2
+        const taken = new Set(conflicts.map((v) => v.name))
+        while (taken.has(`${videoName} (${n})`)) n++
+        finalName = `${videoName} (${n})`
+      }
+    }
     const nextVersion = 1
 
     // Detect whether this upload is an image or a real video (1.0.9+).
-    // We check both the MIME type AND the filename extension so the
-    // route survives browsers that hand us a bogus or generic MIME.
     const isImage =
       isImageMime(mimeType || '') ||
       isImageExtension(originalFileName || '')
 
-    // Base row fields (the unique `name` is resolved inside the locked
-    // transaction below). `mediaType` via `as any` so the route still
-    // compiles against an older generated Prisma client.
     const baseCreate = {
       projectId,
       folderId: resolvedFolderId,
+      name: finalName,
       version: nextVersion,
       versionLabel: versionLabel || `v${nextVersion}`,
       originalFileName,
@@ -121,76 +142,14 @@ export async function POST(request: NextRequest) {
       mediaType: isImage ? 'IMAGE' : 'VIDEO',
     } as any
 
-    // 4.1.7+: resolve a UNIQUE name in this (project, folder) scope and
-    // create the row, SERIALIZED per base-name with a Postgres advisory
-    // lock. Two videos uploaded AT THE SAME TIME used to both read "no
-    // conflict" before either committed, land the same `name`, and then
-    // the folder view grouped them into one card with two "v1"s
-    // (accidental auto-versioning). The lock makes the second upload see
-    // the first and fall back to "name (2)", so simultaneous uploads stay
-    // SEPARATE. Intentional versioning is unaffected — that goes through
-    // the explicit /stack endpoint, never a name collision.
-    const folderKey = resolvedFolderId === null ? 'root' : resolvedFolderId
-    const lockKey = `video-name:${projectId}:${folderKey}:${videoName}`
-    // 32-bit signed hash of the lock key (fits in a Postgres bigint).
-    let lockInt = 0
-    for (let i = 0; i < lockKey.length; i++) {
-      lockInt = (Math.imul(31, lockInt) + lockKey.charCodeAt(i)) | 0
-    }
-
-    // Resolve the next free name in this (project, folder) scope using
-    // the given client (a tx when we hold the advisory lock).
-    const resolveUniqueName = async (client: typeof prisma): Promise<string> => {
-      const folderFilter =
-        resolvedFolderId === null ? { folderId: null } : { folderId: resolvedFolderId }
-      const conflicts = await client.video.findMany({
-        where: {
-          projectId,
-          ...folderFilter,
-          OR: [{ name: videoName }, { name: { startsWith: `${videoName} (` } }],
-        },
-        select: { name: true },
-      })
-      if (conflicts.some((v: { name: string }) => v.name === videoName)) {
-        let n = 2
-        const taken = new Set(conflicts.map((v: { name: string }) => v.name))
-        while (taken.has(`${videoName} (${n})`)) n++
-        return `${videoName} (${n})`
-      }
-      return videoName
-    }
-
-    const createRow = async (client: typeof prisma, finalName: string) => {
-      try {
-        return await client.video.create({
-          data: { ...baseCreate, name: finalName, createdById: admin.id },
-        })
-      } catch {
-        // Fall back without createdById — very old dev DBs.
-        return await client.video.create({ data: { ...baseCreate, name: finalName } })
-      }
-    }
-
     let video
     try {
-      // Primary path: serialize same-name uploads with an advisory lock
-      // so two simultaneous uploads don't both land the same name (which
-      // the folder view would then group into one card = accidental
-      // versioning). `$executeRawUnsafe` avoids deserialising the void
-      // result. Held until the tx commits.
-      video = await prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock($1::bigint)', lockInt)
-        const finalName = await resolveUniqueName(tx as unknown as typeof prisma)
-        return createRow(tx as unknown as typeof prisma, finalName)
+      video = await prisma.video.create({
+        data: { ...baseCreate, createdById: admin.id },
       })
-    } catch (lockErr) {
-      // If the advisory lock / transaction isn't supported for any
-      // reason, NEVER break the upload — fall back to an unlocked create
-      // (the pre-4.1.7 behaviour). Worst case is the rare simultaneous
-      // collision, which the user can split with a rename.
-      logError('[videos] locked create failed, falling back to unlocked:', lockErr)
-      const finalName = await resolveUniqueName(prisma)
-      video = await createRow(prisma, finalName)
+    } catch {
+      // Fall back without createdById — very old dev DBs.
+      video = await prisma.video.create({ data: baseCreate })
     }
 
     // Return videoId - TUS will handle upload directly

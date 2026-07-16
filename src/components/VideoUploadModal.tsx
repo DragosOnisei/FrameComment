@@ -237,12 +237,31 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     }
   }
 
+  // 4.1.8+: give every upload in a batch a UNIQUE name up front so
+  // videos uploaded at the same time never land the same `name`
+  // server-side (which the folder view would then merge into one card
+  // with several "v1"s). Mutates `used` so successive calls keep
+  // counting. Intentional versioning is unaffected — it goes through the
+  // /stack endpoint, which renames the source anyway.
+  const dedupeName = (base: string, used: Set<string>): string => {
+    if (!used.has(base)) {
+      used.add(base)
+      return base
+    }
+    let n = 2
+    while (used.has(`${base} (${n})`)) n++
+    const name = `${base} (${n})`
+    used.add(name)
+    return name
+  }
+
   const addFiles = (files: File[]) => {
     if (files.length > 0) {
+      const used = new Set(pendingUploads.map((u) => u.videoName))
       const newUploads: PendingUpload[] = files.map(file => ({
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         file,
-        videoName: getVideoNameFromFile(file),
+        videoName: dedupeName(getVideoNameFromFile(file), used),
         versionLabel: '',
         status: 'pending',
         progress: 0,
@@ -277,10 +296,11 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     // extension-fallback for files with an empty MIME.
     const accepted = initialFiles.filter(isAcceptedUpload)
     if (accepted.length === 0) return
+    const used = new Set(pendingUploads.map((u) => u.videoName))
     const newUploads: PendingUpload[] = accepted.map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       file,
-      videoName: getVideoNameFromFile(file),
+      videoName: dedupeName(getVideoNameFromFile(file), used),
       versionLabel: '',
       status: 'pending',
       progress: 0,
@@ -314,17 +334,30 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
       isAcceptedUpload(entry.file),
     )
     if (accepted.length === 0) return
-    const newUploads: PendingUpload[] = accepted.map((entry) => ({
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      file: entry.file,
-      videoName: getVideoNameFromFile(entry.file),
-      versionLabel: '',
-      status: 'pending',
-      progress: 0,
-      speed: 0,
-      folderIdOverride: entry.folderId,
-      stackOntoVideoId: entry.stackOntoVideoId,
-    }))
+    // Dedupe names PER FOLDER — two files with the same name in different
+    // sub-folders are fine and shouldn't get a " (2)".
+    const folderKey = (fid: string | null) => fid ?? '__root__'
+    const usedByFolder = new Map<string, Set<string>>()
+    for (const u of pendingUploads) {
+      const k = folderKey(u.folderIdOverride ?? null)
+      if (!usedByFolder.has(k)) usedByFolder.set(k, new Set())
+      usedByFolder.get(k)!.add(u.videoName)
+    }
+    const newUploads: PendingUpload[] = accepted.map((entry) => {
+      const k = folderKey(entry.folderId)
+      if (!usedByFolder.has(k)) usedByFolder.set(k, new Set())
+      return {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        file: entry.file,
+        videoName: dedupeName(getVideoNameFromFile(entry.file), usedByFolder.get(k)!),
+        versionLabel: '',
+        status: 'pending' as const,
+        progress: 0,
+        speed: 0,
+        folderIdOverride: entry.folderId,
+        stackOntoVideoId: entry.stackOntoVideoId,
+      }
+    })
     setPendingUploads((prev) => [...prev, ...newUploads])
     setSeededActive(true)
     newUploads.forEach((item) => startUpload(item))
