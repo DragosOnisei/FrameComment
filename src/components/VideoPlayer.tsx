@@ -653,8 +653,22 @@ export default function VideoPlayer({
   // buffering overlay until the <video> fires `canplay`, so once the play
   // button shows, playback is instant. Reset whenever the clip changes.
   const [mediaReady, setMediaReady] = useState(false)
+  // 4.1.10+: touch devices (phones/tablets) don't pre-buffer video, so
+  // `canplay` never fires until the user taps play — the buffering overlay
+  // would stay stuck on "Loading video…". Skip the overlay there; the
+  // poster + play button are the right affordance on mobile.
+  const [coarsePointer, setCoarsePointer] = useState(false)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      setCoarsePointer(window.matchMedia('(pointer: coarse)').matches)
+    }
+  }, [])
   useEffect(() => {
     setMediaReady(false)
+    // Safety net: never let the overlay stick — clear it after a few
+    // seconds even if `canplay` never arrives (odd codecs / networks).
+    const t = setTimeout(() => setMediaReady(true), 6000)
+    return () => clearTimeout(t)
   }, [selectedVideo?.id])
 
   const buildShareMarkerQuery = useCallback(() => {
@@ -2080,47 +2094,85 @@ export default function VideoPlayer({
   const handleToggleFullscreen = () => {
     if (!containerRef.current || !videoRef.current) return
 
-    // Mobile devices (especially iOS) need special handling
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    const el = containerRef.current as any
     const video = videoRef.current as any // Type cast for webkit APIs
-    
-    if (!document.fullscreenElement) {
-      // Try native video fullscreen first (better for mobile)
-      if (isMobile && video.webkitEnterFullscreen) {
-        // iOS Safari
+    const isFs = !!(
+      document.fullscreenElement || (document as any).webkitFullscreenElement
+    )
+
+    if (!isFs) {
+      // Prefer ELEMENT fullscreen on the player container so our custom
+      // controls (timeline, comments, markers) stay visible AND the
+      // fill-CSS below stretches the video to the screen. Fall back to
+      // native VIDEO fullscreen only where element fullscreen isn't
+      // available (notably iPhone Safari, which fills natively anyway).
+      if (el.requestFullscreen) {
+        Promise.resolve(el.requestFullscreen()).catch(() => {})
+        setIsFullscreen(true)
+      } else if (el.webkitRequestFullscreen) {
+        el.webkitRequestFullscreen()
+        setIsFullscreen(true)
+      } else if (video.webkitEnterFullscreen) {
         try {
           video.webkitEnterFullscreen()
           setIsFullscreen(true)
         } catch (error) {
           logError('Failed to enter fullscreen:', error)
         }
-      } else if (isMobile && video.requestFullscreen) {
-        // Android Chrome
-        try {
-          video.requestFullscreen()
-          setIsFullscreen(true)
-        } catch (error) {
-          logError('Failed to enter fullscreen:', error)
-        }
-      } else if (containerRef.current.requestFullscreen) {
-        // Desktop browsers
-        try {
-          containerRef.current.requestFullscreen()
-          setIsFullscreen(true)
-        } catch (error) {
-          logError('Failed to enter fullscreen:', error)
-        }
+      } else if (video.requestFullscreen) {
+        Promise.resolve(video.requestFullscreen()).catch(() => {})
+        setIsFullscreen(true)
       }
     } else {
-      // Exit fullscreen
-      try {
-        document.exitFullscreen()
-        setIsFullscreen(false)
-      } catch (error) {
-        logError('Failed to exit fullscreen:', error)
+      if (document.exitFullscreen) {
+        Promise.resolve(document.exitFullscreen()).catch(() => {})
+      } else if ((document as any).webkitExitFullscreen) {
+        ;(document as any).webkitExitFullscreen()
       }
+      setIsFullscreen(false)
     }
   }
+
+  // 4.1.10+: auto-fullscreen on device rotation (mobile). Rotating to
+  // landscape enters fullscreen; rotating back to portrait exits it —
+  // the standard mobile video-player behaviour. Best-effort: some
+  // browsers (notably iOS Safari) block programmatic fullscreen without a
+  // fresh tap, in which case this silently no-ops and the fullscreen
+  // button still works.
+  useEffect(() => {
+    if (!coarsePointer) return
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mql = window.matchMedia('(orientation: landscape)')
+    const onOrientation = () => {
+      const landscape = mql.matches
+      const isFs = !!(
+        document.fullscreenElement || (document as any).webkitFullscreenElement
+      )
+      const el = containerRef.current as any
+      const video = videoRef.current as any
+      if (landscape && !isFs && el) {
+        if (el.requestFullscreen) {
+          Promise.resolve(el.requestFullscreen()).catch(() => {})
+        } else if (el.webkitRequestFullscreen) {
+          el.webkitRequestFullscreen()
+        } else if (video?.webkitEnterFullscreen) {
+          try {
+            video.webkitEnterFullscreen()
+          } catch {
+            /* blocked without a gesture — ignore */
+          }
+        }
+      } else if (!landscape && isFs) {
+        if (document.exitFullscreen) {
+          Promise.resolve(document.exitFullscreen()).catch(() => {})
+        } else if ((document as any).webkitExitFullscreen) {
+          ;(document as any).webkitExitFullscreen()
+        }
+      }
+    }
+    mql.addEventListener('change', onOrientation)
+    return () => mql.removeEventListener('change', onOrientation)
+  }, [coarsePointer])
 
   const handleFrameStep = (direction: 'forward' | 'backward') => {
     if (!videoRef.current || !selectedVideo?.fps) return
@@ -2361,7 +2413,7 @@ export default function VideoPlayer({
             <div className="rounded-xl overflow-hidden bg-black flex flex-col w-full h-full min-h-0">
               <div
                 ref={videoWrapperRef}
-                className={`relative group w-full bg-black flex items-center justify-center overflow-hidden
+                className={`fc-video-stage relative group w-full bg-black flex items-center justify-center overflow-hidden
                   aspect-video max-h-[70vh]
                   lg:aspect-auto lg:max-h-none lg:flex-1 lg:min-h-0
                   ${isDrawingMode ? '' : ''}`}
@@ -2437,6 +2489,7 @@ export default function VideoPlayer({
                     onTimeUpdate={handleTimeUpdate}
                     onLoadedMetadata={handleLoadedMetadata}
                     onCanPlay={() => setMediaReady(true)}
+                    onLoadedData={() => setMediaReady(true)}
                     onPlaying={() => setMediaReady(true)}
                     onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
                     // 1.9.0+: while range-edit mode is active, a
@@ -2467,7 +2520,7 @@ export default function VideoPlayer({
                     video can actually play, so the controls don't tease a
                     Play button that stalls for a few seconds on first load
                     (cold HLS fragment on the server). */}
-                {(selectedVideo as any)?.mediaType !== 'IMAGE' && !mediaReady && (
+                {(selectedVideo as any)?.mediaType !== 'IMAGE' && !mediaReady && !coarsePointer && (
                   <div
                     className="absolute inset-0 z-30 flex items-center justify-center gap-3 cursor-default"
                     style={{ backgroundColor: 'rgba(10, 12, 16, 0.55)' }}

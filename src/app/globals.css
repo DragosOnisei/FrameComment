@@ -685,3 +685,25 @@ textarea,
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* 4.1.10+: video fullscreen fill. When the player container is the
+   fullscreen element, the inner video "stage" keeps its letterboxed
+   `aspect-video` + `max-h-[70vh]` caps, which left the video tiny on a
+   black screen on mobile. In fullscreen we drop those caps so the stage
+   fills the screen; the <video> stays `object-contain`, so portrait clips
+   just letterbox with black bars instead of shrinking. */
+:fullscreen .fc-video-stage,
+:-webkit-full-screen .fc-video-stage {
+  max-height: none !important;
+  aspect-ratio: auto !important;
+  height: 100% !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+}
+:fullscreen .fc-video-stage video,
+:-webkit-full-screen .fc-video-stage video {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  object-fit: contain;
+}
