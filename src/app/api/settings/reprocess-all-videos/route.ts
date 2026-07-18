@@ -9,6 +9,7 @@ import {
   FinalizeVideoJob,
 } from '@/lib/queue'
 import { deleteFile } from '@/lib/storage'
+import { resolveFileBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { computeExpectedTiers, detectCompletedTiers } from '@/lib/tier-planning'
@@ -121,7 +122,8 @@ export async function POST(request: NextRequest) {
           hasCustomThumbnail ? null : video.thumbnailPath,
         ].filter(Boolean) as string[]
 
-        await Promise.allSettled(filesToDelete.map(f => deleteFile(f)))
+        const videoBackend = resolveFileBackend(video.storageBackend)
+        await Promise.allSettled(filesToDelete.map(f => deleteFile(f, videoBackend)))
 
         await prisma.video.update({
           where: { id: video.id },

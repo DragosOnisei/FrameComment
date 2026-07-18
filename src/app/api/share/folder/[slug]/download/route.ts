@@ -7,6 +7,7 @@ import {
   getShareContext,
 } from '@/lib/auth'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
+import { resolveFileBackend, type StorageBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError, logMessage } from '@/lib/logging'
 
@@ -127,7 +128,7 @@ export async function GET(
       { folderId: folderMeta.id, zipPrefix: sanitizeFolderSegment(folderMeta.name) },
     ]
     const visited = new Set<string>()
-    const filesToAdd: Array<{ storagePath: string; zipPath: string }> = []
+    const filesToAdd: Array<{ storagePath: string; zipPath: string; backend: StorageBackend }> = []
     const emptyFolderPaths = new Set<string>()
 
     while (queue.length > 0) {
@@ -149,7 +150,8 @@ export async function GET(
               version: true,
               originalFileName: true,
               originalStoragePath: true,
-            },
+              storageBackend: true,
+            } as any,
           },
         },
       })
@@ -177,6 +179,7 @@ export async function GET(
         filesToAdd.push({
           storagePath: v.originalStoragePath,
           zipPath: `${zipPrefix}/${fileName}`,
+          backend: resolveFileBackend(v.storageBackend),
         })
       }
       if (videoCount === 0 && folder.subfolders.length === 0) {
@@ -208,7 +211,7 @@ export async function GET(
     let appended = 0
     for (const file of filesToAdd) {
       try {
-        const stream = await downloadFile(file.storagePath)
+        const stream = await downloadFile(file.storagePath, file.backend)
         archive.append(stream, { name: file.zipPath })
         appended += 1
       } catch (err) {

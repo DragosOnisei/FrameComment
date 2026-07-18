@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
+import { resolveFileBackend } from '@/lib/storage-backends'
 import { logError } from '@/lib/logging'
 import { Readable } from 'stream'
 
@@ -38,7 +39,7 @@ export async function GET(
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
-    const stream = await downloadFile(doc.storagePath)
+    const stream = await downloadFile(doc.storagePath, resolveFileBackend(doc.storageBackend))
     const buffer = await streamToBuffer(stream as Readable)
 
     const wantsDownload = new URL(request.url).searchParams.get('download') === 'true'

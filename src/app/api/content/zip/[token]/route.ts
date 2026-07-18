@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
+import { resolveFileBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis, consumeTokenAtomically } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
@@ -139,7 +140,7 @@ export async function GET(
       try {
         const ext = video.originalFileName?.match(/\.[^.]+$/)?.[0] || '.mp4'
         const videoFileName = `${video.name}_${video.versionLabel}${ext}`
-        const videoStream = await downloadFile(video.originalStoragePath)
+        const videoStream = await downloadFile(video.originalStoragePath, resolveFileBackend((video as any).storageBackend))
         archive.append(videoStream, { name: videoFileName })
         appendedCount += 1
       } catch (error) {
@@ -150,7 +151,7 @@ export async function GET(
     // Add asset files to archive
     for (const asset of assets) {
       try {
-        const fileStream = await downloadFile(asset.storagePath)
+        const fileStream = await downloadFile(asset.storagePath, resolveFileBackend((asset as any).storageBackend))
         archive.append(fileStream, { name: asset.fileName })
         appendedCount += 1
       } catch (error) {

@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { getFilePath, deleteFile, sanitizeFilenameForHeader, isS3Mode, createWebReadableStream } from '@/lib/storage'
+import { getFilePath, deleteFile, sanitizeFilenameForHeader, createWebReadableStream } from '@/lib/storage'
 import { s3GetPresignedDownloadUrl, s3FileExists } from '@/lib/s3-storage'
+import { resolveReadTarget, resolveFileBackend } from '@/lib/storage-backends'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { createReadStream } from 'fs'
 import fs from 'fs'
@@ -88,9 +89,11 @@ export async function GET(
 
     const sanitizedFilename = sanitizeFilenameForHeader(asset.fileName)
 
-    // ── S3 mode: redirect directly to presigned URL ──────────────────────────
-    if (isS3Mode()) {
-      const exists = await s3FileExists(asset.storagePath)
+    // ── S3-type backend: redirect directly to presigned URL ──────────────────
+    // 4.2.0+: resolve the asset's own backend rather than a global env switch.
+    const readTarget = await resolveReadTarget((asset as any).storageBackend)
+    if (readTarget.isS3) {
+      const exists = await s3FileExists(asset.storagePath, readTarget.config)
       if (!exists) {
         return NextResponse.json({ error: videoMessages.fileNotFound || 'File not found' }, { status: 404 })
       }
@@ -98,7 +101,8 @@ export async function GET(
         asset.storagePath,
         3600,
         sanitizedFilename,
-        asset.fileType
+        asset.fileType,
+        readTarget.config
       )
       return NextResponse.redirect(presignedUrl, {
         status: 302,
@@ -219,7 +223,7 @@ export async function DELETE(
     })
 
     if (sharedCount === 0) {
-      await deleteFile(asset.storagePath)
+      await deleteFile(asset.storagePath, resolveFileBackend((asset as any).storageBackend))
     }
 
     // If this asset was the current thumbnail, revert to system-generated thumbnail

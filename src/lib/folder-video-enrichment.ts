@@ -16,6 +16,7 @@
 import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { legacyBackend } from '@/lib/storage-backends'
 import { logError } from '@/lib/logging'
 
 /** A single video row, minimally typed — we only touch the fields we
@@ -156,6 +157,9 @@ export async function enrichVideosForAdmin<T extends VideoLike>(
           typeof v.originalFileSize === 'bigint'
             ? v.originalFileSize.toString()
             : (v.originalFileSize ?? null),
+        // 4.2.0+: resolve NULL (legacy) to the instance default backend so the
+        // storage tag shows the real location for older videos at the root too.
+        storageBackend: (v as any).storageBackend ?? legacyBackend(),
         thumbnailUrl,
         previewUrl,
         storyboardUrl,

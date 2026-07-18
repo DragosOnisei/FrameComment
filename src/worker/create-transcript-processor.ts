@@ -7,6 +7,7 @@ import { CreateTranscriptJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
 import { downloadFile, getLocalSourcePath, uploadFile } from '../lib/storage'
+import { getVideoBackend } from '../lib/storage-backends'
 import { extractAudioForTranscription } from '../lib/ffmpeg'
 import { getOpenAiApiKey } from '../lib/settings'
 import { TEMP_DIR } from './cleanup'
@@ -91,14 +92,18 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     // Resolve the source file — prefer reading directly from
     // STORAGE_ROOT (local mode); fall back to downloading (S3 mode),
     // mirroring the regenerate-thumbnail processor.
+    // 4.2.0+: the audio source (preview or original) and the PDF we write both
+    // live on the video's own storage backend.
+    const backend = await getVideoBackend(videoId)
+
     let sourcePath: string
-    const localSource = getLocalSourcePath(audioSourceStoragePath)
+    const localSource = getLocalSourcePath(audioSourceStoragePath, backend)
     if (localSource) {
       sourcePath = localSource
     } else {
       const cachedOriginal = path.join(TEMP_DIR, `${videoId}-transcript-src`)
       if (!fs.existsSync(cachedOriginal)) {
-        const stream = await downloadFile(audioSourceStoragePath)
+        const stream = await downloadFile(audioSourceStoragePath, backend)
         await pipeline(stream, fs.createWriteStream(cachedOriginal))
       }
       sourcePath = cachedOriginal
@@ -182,7 +187,7 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     // 4) Upload it into the project's documents area.
     await job.updateProgress({ stage: 'saving' }).catch(() => {})
     const storagePath = `projects/${projectId}/documents/transcript-${videoId}-${Date.now()}.pdf`
-    await uploadFile(storagePath, pdfBuffer, pdfBuffer.length, 'application/pdf')
+    await uploadFile(storagePath, pdfBuffer, pdfBuffer.length, 'application/pdf', backend)
 
     // 5) Create the FolderDocument row so it appears as a file card in
     //    the same folder as the video. `prisma as any` because the
@@ -199,6 +204,7 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
         size: BigInt(pdfBuffer.length),
         kind: 'transcript',
         sourceVideoId: videoId,
+        storageBackend: backend,
       },
     })
 

@@ -4,13 +4,91 @@ import { Readable } from 'stream'
 import { ReadStream } from 'fs'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
-import { s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory } from './s3-storage'
+import { s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3FileExists, s3GetFileSize, s3ListKeys } from './s3-storage'
+import {
+  type StorageBackend,
+  type S3BackendConfig,
+  legacyBackend,
+  getS3ConfigForBackend,
+  backendIsLocalFilesystem,
+} from './storage-backends'
 
-const STORAGE_ROOT = process.env.STORAGE_ROOT || '/app/uploads'
+/** The uploads root from the environment (the original, always-present root). */
+const ENV_STORAGE_ROOT = process.env.STORAGE_ROOT || '/app/uploads'
+
+// 4.2.0+ (Phase 2d): the LOCAL backend's uploads folder is configurable via
+// Settings.localStoragePath. Cached in-process (refreshed on save + TTL) so the
+// sync path helpers stay sync. NULL cache → fall back to ENV_STORAGE_ROOT, i.e.
+// exactly the pre-4.2.0 behaviour (an instance that never sets a custom folder
+// is byte-identical). New WRITES go to the primary root; READS also fall back to
+// ENV_STORAGE_ROOT so files stored before a folder change stay reachable.
+let _localRootCache: string | null = null
+let _localRootFetchedAt = 0
+const LOCAL_ROOT_TTL_MS = 30_000
+
+/** Update the cached local root from the DB. Call on settings save + startup. */
+export async function refreshLocalStorageRoot(): Promise<void> {
+  try {
+    // Lazy import to avoid a hard prisma dependency in edge/build contexts.
+    const { prisma } = await import('./db')
+    const rows = await prisma.$queryRawUnsafe<Array<{ localStoragePath: string | null }>>(
+      'SELECT "localStoragePath" FROM "Settings" WHERE id = $1 LIMIT 1',
+      'default',
+    )
+    const v = rows?.[0]?.localStoragePath?.trim()
+    _localRootCache = v && v.length ? v : null
+  } catch {
+    // Table/column missing or DB unreachable — keep env fallback.
+    _localRootCache = null
+  }
+  _localRootFetchedAt = Date.now()
+}
+
+/** Primary local uploads root (where new writes go): DB value ?? env. Sync. */
+function getPrimaryLocalRoot(): string {
+  // Kick off a background refresh when the cache is stale; return the last known
+  // value meanwhile (env fallback until the first refresh completes).
+  if (Date.now() - _localRootFetchedAt > LOCAL_ROOT_TTL_MS) {
+    void refreshLocalStorageRoot()
+  }
+  return _localRootCache || ENV_STORAGE_ROOT
+}
+
+/** Public: the primary local uploads root (for display in Settings). */
+export function getLocalUploadsRoot(): string {
+  return getPrimaryLocalRoot()
+}
+
+/** Every local root a file could live under: primary first, then env fallback. */
+function getLocalRoots(): string[] {
+  const primary = getPrimaryLocalRoot()
+  return primary === ENV_STORAGE_ROOT ? [primary] : [primary, ENV_STORAGE_ROOT]
+}
 
 /** True when STORAGE_PROVIDER=s3 is set. */
 export function isS3Mode(): boolean {
   return process.env.STORAGE_PROVIDER === 's3'
+}
+
+/**
+ * 4.2.0+: Resolve a storage operation to either the local filesystem or a
+ * specific S3 backend config.
+ *
+ *  - `backend` omitted → legacy behaviour: local disk, or (when
+ *    STORAGE_PROVIDER=s3) the env-based S3 client with no explicit config, so
+ *    pre-4.2.0 call sites behave exactly as before.
+ *  - `backend` explicit → 'local' uses the filesystem; 'fc'/'r2'/'aws' build
+ *    the S3 config for that backend (fc = operator env, r2/aws = Settings).
+ */
+async function resolveS3Target(
+  backend?: StorageBackend
+): Promise<{ isS3: boolean; config?: S3BackendConfig }> {
+  const b = backend ?? legacyBackend()
+  // Local disk: 'local', or 'fc' when it isn't S3-backed (operator's own disk).
+  if (backendIsLocalFilesystem(b)) return { isS3: false }
+  // Legacy fallback (no explicit backend): let s3-storage use its env config.
+  if (!backend) return { isS3: true, config: undefined }
+  return { isS3: true, config: await getS3ConfigForBackend(b) }
 }
 
 /**
@@ -45,10 +123,11 @@ export function getTusUploadDir(): string {
 }
 
 /**
- * Validate a relative storage path against STORAGE_ROOT.
+ * Validate a relative storage path against a specific root.
  * Guards against null bytes, URL-encoded traversal, backslashes, and .. sequences.
+ * The traversal protection is identical regardless of which root is passed.
  */
-function validatePath(filePath: string): string {
+function validatePathIn(filePath: string, root: string): string {
   if (filePath.includes('\0')) throw new Error('Invalid file path - null byte detected')
 
   let decoded = filePath
@@ -62,9 +141,9 @@ function validatePath(filePath: string): string {
   decoded = decoded.replace(/\\/g, '/')
   while (decoded.includes('..')) decoded = decoded.replace(/\.\./g, '')
 
-  const fullPath = path.join(STORAGE_ROOT, path.normalize(decoded))
+  const fullPath = path.join(root, path.normalize(decoded))
   const realPath = path.resolve(fullPath)
-  const realRoot = path.resolve(STORAGE_ROOT)
+  const realRoot = path.resolve(root)
 
   if (!realPath.startsWith(realRoot + path.sep) && realPath !== realRoot) {
     throw new Error('Invalid file path - path traversal detected')
@@ -73,20 +152,41 @@ function validatePath(filePath: string): string {
   return fullPath
 }
 
+/** Validate against the PRIMARY local root (where new writes go). */
+function validatePath(filePath: string): string {
+  return validatePathIn(filePath, getPrimaryLocalRoot())
+}
+
+/**
+ * Resolve a relative path to the local root that actually holds it — the
+ * primary root if the file is there, else the env fallback root (so files
+ * stored before a folder change stay reachable). Always validated per-root.
+ * Falls back to the primary full path when it exists in neither.
+ */
+function resolveExistingLocalPath(filePath: string): string {
+  for (const root of getLocalRoots()) {
+    const full = validatePathIn(filePath, root)
+    if (fs.existsSync(full)) return full
+  }
+  return validatePath(filePath)
+}
+
 export async function initStorage() {
   // S3 mode: bucket must exist; no local directory needed.
   if (isS3Mode()) return
-  await mkdir(STORAGE_ROOT, { recursive: true })
+  await mkdir(getPrimaryLocalRoot(), { recursive: true })
 }
 
 export async function uploadFile(
   filePath: string,
   stream: Readable | Buffer,
   size: number,
-  contentType: string = 'application/octet-stream'
+  contentType: string = 'application/octet-stream',
+  backend?: StorageBackend
 ): Promise<void> {
-  if (isS3Mode()) {
-    await s3UploadFile(filePath, stream, contentType, size)
+  const { isS3, config } = await resolveS3Target(backend)
+  if (isS3) {
+    await s3UploadFile(filePath, stream, contentType, size, config)
     return
   }
 
@@ -136,12 +236,14 @@ export async function moveFile(
   srcAbsolutePath: string,
   destRelativePath: string,
   expectedSize: number,
+  backend?: StorageBackend,
 ): Promise<void> {
-  if (isS3Mode()) {
-    // S3 mode shouldn't use this path — the upload route stays on the
-    // streaming `uploadFile()` API. Throw so callers don't silently
-    // skip the S3 upload.
-    throw new Error('moveFile() is not supported in S3 mode')
+  const b = backend ?? legacyBackend()
+  if (!backendIsLocalFilesystem(b)) {
+    // Remote (S3-type) backends have no local rename path — the upload route
+    // stays on the streaming `uploadFile()` API. Throw so callers don't
+    // silently skip the remote upload.
+    throw new Error('moveFile() is only supported for local-disk storage')
   }
 
   const destFullPath = validatePath(destRelativePath)
@@ -177,11 +279,13 @@ export async function moveFile(
   }
 }
 
-export async function downloadFile(filePath: string): Promise<Readable> {
-  if (isS3Mode()) {
-    return s3DownloadFile(filePath)
+export async function downloadFile(filePath: string, backend?: StorageBackend): Promise<Readable> {
+  const { isS3, config } = await resolveS3Target(backend)
+  if (isS3) {
+    return s3DownloadFile(filePath, config)
   }
-  const fullPath = validatePath(filePath)
+  // Read from wherever the file actually lives (primary root, else env root).
+  const fullPath = resolveExistingLocalPath(filePath)
   return fs.createReadStream(fullPath)
 }
 
@@ -204,37 +308,102 @@ export async function downloadFile(filePath: string): Promise<Readable> {
  * path which is still correct for S3 mode (ffmpeg can't seek over an
  * HTTP body, so we have to land it on disk).
  */
-export function getLocalSourcePath(filePath: string): string | null {
-  if (isS3Mode()) return null
-  const fullPath = validatePath(filePath)
-  if (!fs.existsSync(fullPath)) return null
-  return fullPath
+export function getLocalSourcePath(filePath: string, backend?: StorageBackend): string | null {
+  const b = backend ?? legacyBackend()
+  if (!backendIsLocalFilesystem(b)) return null
+  for (const root of getLocalRoots()) {
+    const full = validatePathIn(filePath, root)
+    if (fs.existsSync(full)) return full
+  }
+  return null
 }
 
-export async function deleteFile(filePath: string): Promise<void> {
-  if (isS3Mode()) {
-    await s3DeleteFile(filePath)
+export async function deleteFile(filePath: string, backend?: StorageBackend): Promise<void> {
+  const { isS3, config } = await resolveS3Target(backend)
+  if (isS3) {
+    await s3DeleteFile(filePath, config)
     return
   }
-  const fullPath = validatePath(filePath)
-  if (fs.existsSync(fullPath)) {
-    await fs.promises.unlink(fullPath)
+  // Remove from every local root it might live under (primary + env fallback).
+  for (const root of getLocalRoots()) {
+    const full = validatePathIn(filePath, root)
+    if (fs.existsSync(full)) await fs.promises.unlink(full)
   }
 }
 
-export async function deleteDirectory(dirPath: string): Promise<void> {
-  if (isS3Mode()) {
-    await s3DeleteDirectory(dirPath)
+export async function deleteDirectory(dirPath: string, backend?: StorageBackend): Promise<void> {
+  const { isS3, config } = await resolveS3Target(backend)
+  if (isS3) {
+    await s3DeleteDirectory(dirPath, config)
     return
   }
-  const fullPath = validatePath(dirPath)
-  if (fs.existsSync(fullPath)) {
-    await fs.promises.rm(fullPath, { recursive: true, force: true })
+  for (const root of getLocalRoots()) {
+    const full = validatePathIn(dirPath, root)
+    if (fs.existsSync(full)) await fs.promises.rm(full, { recursive: true, force: true })
   }
 }
 
 export function getFilePath(filePath: string): string {
-  return validatePath(filePath)
+  return resolveExistingLocalPath(filePath)
+}
+
+/**
+ * 4.2.0+ (storage transfer helpers) — backend-aware existence / size / listing.
+ * `backend` omitted → legacy env behaviour, same as the other storage fns.
+ */
+export async function storageFileExists(filePath: string, backend?: StorageBackend): Promise<boolean> {
+  const { isS3, config } = await resolveS3Target(backend)
+  if (isS3) return s3FileExists(filePath, config)
+  for (const root of getLocalRoots()) {
+    if (fs.existsSync(validatePathIn(filePath, root))) return true
+  }
+  return false
+}
+
+export async function getStorageFileSize(filePath: string, backend?: StorageBackend): Promise<number> {
+  const { isS3, config } = await resolveS3Target(backend)
+  if (isS3) return s3GetFileSize(filePath, config)
+  const fullPath = resolveExistingLocalPath(filePath)
+  const st = await fs.promises.stat(fullPath)
+  return st.size
+}
+
+/**
+ * List every file under a directory/prefix on a backend, returned as storage
+ * paths (relative to STORAGE_ROOT for local, object keys for S3 — both are the
+ * same shape the rest of the storage API expects). Used to enumerate HLS
+ * segment folders during a transfer, which have no per-file DB row.
+ */
+export async function listStorageDirectory(dirPath: string, backend?: StorageBackend): Promise<string[]> {
+  const { isS3, config } = await resolveS3Target(backend)
+  if (isS3) return s3ListKeys(dirPath, config)
+
+  // Pick the local root that actually contains this directory (primary, else
+  // the env fallback where older files may live).
+  let root = ''
+  let fullBase = ''
+  for (const r of getLocalRoots()) {
+    const candidate = validatePathIn(dirPath, r)
+    if (fs.existsSync(candidate)) { root = path.resolve(r); fullBase = candidate; break }
+  }
+  if (!fullBase) return []
+
+  const out: string[] = []
+  async function walk(dir: string): Promise<void> {
+    let entries: fs.Dirent[]
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) await walk(full)
+      else if (e.isFile()) out.push(path.relative(root, full).split(path.sep).join('/'))
+    }
+  }
+  await walk(fullBase)
+  return out
 }
 
 const VIDEO_MIME_MAP: Record<string, string> = {

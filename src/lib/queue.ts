@@ -7,6 +7,7 @@ let assetQueueInstance: Queue<AssetProcessingJob> | null = null
 let projectUploadQueueInstance: Queue<ProjectUploadProcessingJob> | null = null
 let externalNotificationQueueInstance: Queue<ExternalNotificationJob> | null = null
 let cleanPreviewQueueInstance: Queue<CleanPreviewJob> | null = null
+let storageTransferQueueInstance: Queue<StorageTransferJob> | null = null
 
 // 2.2.0+: legacy single-shot job payload. Kept exported (not
 // removed) for two reasons:
@@ -384,6 +385,38 @@ export function getCleanPreviewQueue(): Queue<CleanPreviewJob> {
   }
 
   return cleanPreviewQueueInstance
+}
+
+// 4.2.0+ (Phase 2): storage transfer. One-shot job that migrates every file
+// off non-active backends onto the active one. Payload is empty — the worker
+// reads the active backend + progress state itself. Concurrency 1 (only one
+// transfer at a time) is enforced on the Worker side; attempts: 1 so a failure
+// isn't auto-retried (the transfer is resumable via the admin re-clicking).
+export interface StorageTransferJob {
+  // 4.2.0+ (Phase 2c): 'transfer' copies files to the active backend (keeps
+  // sources); 'purge' re-verifies + deletes every copy on `purgeBackend`.
+  mode?: 'transfer' | 'purge'
+  purgeBackend?: string
+  requestedBy?: string
+}
+
+export function getStorageTransferQueue(): Queue<StorageTransferJob> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!storageTransferQueueInstance) {
+    storageTransferQueueInstance = new Queue<StorageTransferJob>('storage-transfer', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 1,
+        removeOnComplete: { age: 86400 },
+        removeOnFail: { age: 86400 },
+      },
+    })
+  }
+
+  return storageTransferQueueInstance
 }
 
 // Export for backward compatibility, but use getter in new code

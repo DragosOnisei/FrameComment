@@ -11,6 +11,7 @@ import {
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
 import { TEMP_DIR } from './cleanup'
+import { getVideoBackend } from '../lib/storage-backends'
 import {
   TempFiles,
   downloadAndValidateVideo,
@@ -80,10 +81,14 @@ export async function processPrepareVideo(job: Job<PrepareVideoJob>) {
     // before we got here, which we swallow at the bottom.
     await updateVideoStatus(videoId, 'PROCESSING', 0)
 
+    // 4.2.0+: resolve the video's backend once and thread it through the
+    // download + thumbnail helpers (they otherwise re-resolve per call).
+    const backend = await getVideoBackend(videoId)
+
     // Stage 1: download + validate + probe. This populates tempFiles.input
     // with `/tmp/framecomment/<videoId>-original`. We leave that file in
     // place for the encode-tier jobs.
-    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles, backend)
 
     // Stage 2: load project settings to know previewResolution +
     // skipTranscoding + watermark settings (used by encode-tier).
@@ -101,6 +106,7 @@ export async function processPrepareVideo(job: Job<PrepareVideoJob>) {
         videoInfo.path,
         videoInfo.metadata.duration,
         tempFiles,
+        backend,
       )
       await finalizeVideo(
         videoId,
@@ -178,6 +184,7 @@ export async function processPrepareVideo(job: Job<PrepareVideoJob>) {
         videoInfo.path,
         videoInfo.metadata.duration,
         tempFiles,
+        backend,
       )
       try {
         await prisma.video.update({

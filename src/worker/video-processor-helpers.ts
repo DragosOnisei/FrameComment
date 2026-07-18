@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db'
 import { downloadFile, uploadFile, getLocalSourcePath } from '../lib/storage'
+import { getVideoBackend, type StorageBackend } from '../lib/storage-backends'
 import { transcodeVideo, generateThumbnail, generateStoryboard, getVideoMetadata, remuxToHls, VideoMetadata } from '../lib/ffmpeg'
 import fs from 'fs'
 import path from 'path'
@@ -106,9 +107,15 @@ export function debugLog(message: string, data?: any) {
 export async function downloadAndValidateVideo(
   videoId: string,
   storagePath: string,
-  tempFiles: TempFiles
+  tempFiles: TempFiles,
+  backend?: StorageBackend
 ): Promise<VideoInfo> {
   debugLog('Starting download and validation...')
+
+  // 4.2.0+: resolve which backend this video's original lives on so the
+  // "read straight from STORAGE_ROOT" fast path only applies to local files,
+  // and remote (fc/r2/aws) originals are streamed down instead.
+  const b = backend ?? (await getVideoBackend(videoId))
 
   // 3.1.0+: Try to use the source file directly from STORAGE_ROOT
   // (local mode). For local storage this turns the entire "download
@@ -119,7 +126,7 @@ export async function downloadAndValidateVideo(
   // through to the legacy download-to-/tmp path. In that case we
   // still set tempFiles.input so cleanupTempFiles() can unlink it.
   let tempInputPath: string
-  const localSource = getLocalSourcePath(storagePath)
+  const localSource = getLocalSourcePath(storagePath, b)
   if (localSource) {
     tempInputPath = localSource
     // Intentionally do NOT set tempFiles.input — this is the upload
@@ -134,7 +141,7 @@ export async function downloadAndValidateVideo(
     debugLog('Temp path:', tempInputPath)
 
     const downloadStart = Date.now()
-    const downloadStream = await downloadFile(storagePath)
+    const downloadStream = await downloadFile(storagePath, b)
     await pipeline(downloadStream, fs.createWriteStream(tempInputPath))
     const downloadTime = Date.now() - downloadStart
 
@@ -331,6 +338,7 @@ export async function processPreview(
   // tier (we want time-to-ready, not file-size); higher tiers
   // get the auto-selected preset for better compression.
   presetOverride?: 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow',
+  backend?: StorageBackend,
 ): Promise<string> {
   // 1.9.4+: temp filename is resolution-keyed so progressive
   // multi-tier processing doesn't collide across passes (720p →
@@ -461,7 +469,8 @@ export async function processPreview(
     previewPath,
     fs.createReadStream(tempPreviewPath),
     transcodeStats.size,
-    'video/mp4'
+    'video/mp4',
+    backend ?? (await getVideoBackend(videoId)),
   )
   const uploadTime = Date.now() - uploadStart
 
@@ -479,7 +488,8 @@ export async function processThumbnail(
   projectId: string,
   inputPath: string,
   duration: number,
-  tempFiles: TempFiles
+  tempFiles: TempFiles,
+  backend?: StorageBackend,
 ): Promise<string> {
   // Calculate thumbnail timestamp using constants
   const timestamp = Math.min(
@@ -511,7 +521,8 @@ export async function processThumbnail(
     thumbnailPath,
     fs.createReadStream(tempThumbnailPath),
     statsThumbnail.size,
-    'image/jpeg'
+    'image/jpeg',
+    backend ?? (await getVideoBackend(videoId)),
   )
   const uploadTime = Date.now() - uploadStart
 
@@ -535,6 +546,7 @@ export async function processStoryboard(
   inputPath: string,
   duration: number,
   tempFiles: TempFiles,
+  backend?: StorageBackend,
 ): Promise<string | null> {
   try {
     if (!Number.isFinite(duration) || duration <= 0) {
@@ -556,6 +568,7 @@ export async function processStoryboard(
       fs.createReadStream(tempStoryboardPath),
       stats.size,
       'image/jpeg',
+      backend ?? (await getVideoBackend(videoId)),
     )
     return storyboardPath
   } catch (err) {
@@ -947,6 +960,7 @@ export async function processHlsTier(
   mp4LocalPath: string,
   tier: QualityTier,
   tempFiles: TempFiles,
+  backend?: StorageBackend,
 ): Promise<void> {
   const localOutDir = path.join(TEMP_DIR, `${videoId}-hls-${tier}`)
   // Track the directory so cleanup walks remove it on success or
@@ -977,6 +991,7 @@ export async function processHlsTier(
     return
   }
 
+  const hlsBackend = backend ?? (await getVideoBackend(videoId))
   try {
     for (const f of files) {
       const localPath = path.join(localOutDir, f)
@@ -988,7 +1003,7 @@ export async function processHlsTier(
         : f.endsWith('.ts')
           ? 'video/mp2t'
           : 'application/octet-stream'
-      await uploadFile(remotePath, fs.createReadStream(localPath), stats.size, contentType)
+      await uploadFile(remotePath, fs.createReadStream(localPath), stats.size, contentType, hlsBackend)
     }
   } catch (err) {
     logError(`[WORKER] HLS upload failed for ${videoId} ${tier}:`, err)

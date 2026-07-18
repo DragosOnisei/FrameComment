@@ -5,6 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { getShareContext } from '@/lib/auth'
 import { validateAssetFile, sanitizeFilename, isSuspiciousFilename } from '@/lib/file-validation'
 import { deleteFile } from '@/lib/storage'
+import { resolveFileBackend } from '@/lib/storage-backends'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -199,14 +200,14 @@ export async function DELETE(
 
     const upload = await prisma.projectUpload.findFirst({
       where: { id: uploadId, projectId: project.id, uploadedBySessionId: sessionId },
-      select: { id: true, storagePath: true },
-    })
+      select: { id: true, storagePath: true, storageBackend: true } as any,
+    }) as any
 
     if (!upload) {
       return NextResponse.json({ error: 'Upload not found' }, { status: 404 })
     }
 
-    await deleteFile(upload.storagePath)
+    await deleteFile(upload.storagePath, resolveFileBackend(upload.storageBackend))
     await prisma.projectUpload.delete({ where: { id: upload.id } })
 
     return NextResponse.json({ success: true })

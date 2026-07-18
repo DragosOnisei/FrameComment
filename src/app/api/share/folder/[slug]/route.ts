@@ -319,8 +319,10 @@ export async function GET(
           logError('[GET /api/share/folder/[slug]] preview token failed:', err)
         }
 
+        // 4.2.0+: never expose internal storage location to review clients.
+        const { storageBackend: _sb, storageLocations: _sl, ...vSafe } = v as any
         return {
-          ...v,
+          ...vSafe,
           thumbnailUrl,
           storyboardUrl,
           previewUrl,

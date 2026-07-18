@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
+import { resolveFileBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis, consumeTokenAtomically } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
@@ -93,8 +94,9 @@ export async function GET(
         versionLabel: true,
         originalFileName: true,
         originalStoragePath: true,
-      },
-    })
+        storageBackend: true,
+      } as any,
+    }) as any[]
 
     if (videos.length === 0) {
       return NextResponse.json({ error: shareMessages.noApprovedVideos || 'No approved videos found' }, { status: 404 })
@@ -136,7 +138,7 @@ export async function GET(
       try {
         const ext = video.originalFileName?.match(/\.[^.]+$/)?.[0] || '.mp4'
         const fileName = `${video.name}_${video.versionLabel}${ext}`
-        const fileStream = await downloadFile(video.originalStoragePath)
+        const fileStream = await downloadFile(video.originalStoragePath, resolveFileBackend(video.storageBackend))
         archive.append(fileStream, { name: fileName })
         appendedCount += 1
       } catch (error) {

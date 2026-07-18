@@ -40,13 +40,12 @@ import {
   initStorage,
   downloadFile,
   uploadFile,
-  isS3Mode,
+  getStorageFileSize,
 } from '@/lib/storage'
+import { resolveFileBackend, backendIsLocalFilesystem, type StorageBackend } from '@/lib/storage-backends'
 import { generateUniqueFolderSlug } from '@/lib/folder-helpers'
 import { videoQueue } from '@/lib/queue'
 import { Readable } from 'stream'
-import * as fs from 'fs'
-import * as path from 'path'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -69,26 +68,13 @@ function uniqueName(base: string, existingNames: Set<string>): string {
 }
 
 /**
- * Stat helper that works for both local FS and S3. Returns the file
- * size in bytes — required by `uploadFile`.
+ * Stat helper that works for both local FS and S3. Returns the file size in
+ * bytes — required by `uploadFile`. 4.2.0+: delegates to the storage layer so
+ * it honors the configurable local root + read-fallback (and uses a cheap
+ * HeadObject for S3 instead of streaming the whole file).
  */
-async function getFileSize(storagePath: string): Promise<number> {
-  if (isS3Mode()) {
-    // The S3 helper exposes a HEAD via downloadFile.length when the
-    // stream resolves — but we want the size up front. Fall back to
-    // streaming and counting bytes.
-    const stream = await downloadFile(storagePath)
-    let total = 0
-    for await (const chunk of stream as any) {
-      total += (chunk as Buffer).length
-    }
-    return total
-  }
-  // Local FS: stat the resolved path.
-  const root = process.env.STORAGE_ROOT || '/app/uploads'
-  const full = path.join(root, storagePath)
-  const stat = await fs.promises.stat(full)
-  return stat.size
+async function getFileSize(storagePath: string, backend: StorageBackend): Promise<number> {
+  return getStorageFileSize(storagePath, backend)
 }
 
 /**
@@ -101,22 +87,23 @@ async function copyStorageFile(
   srcPath: string,
   destPath: string,
   contentType: string,
+  backend: StorageBackend,
 ): Promise<void> {
-  if (isS3Mode()) {
+  if (!backendIsLocalFilesystem(backend)) {
     // We need the size up front for uploadFile. Fetch + buffer +
     // upload — fine for thumbnails (KB); for huge originals this is
     // a memory blip but acceptable for MVP.
-    const stream = await downloadFile(srcPath)
+    const stream = await downloadFile(srcPath, backend)
     const chunks: Buffer[] = []
     for await (const chunk of stream as any) chunks.push(chunk as Buffer)
     const buf = Buffer.concat(chunks)
-    await uploadFile(destPath, buf, buf.length, contentType)
+    await uploadFile(destPath, buf, buf.length, contentType, backend)
     return
   }
   // Local FS path: stat + stream copy.
-  const size = await getFileSize(srcPath)
-  const stream = await downloadFile(srcPath)
-  await uploadFile(destPath, stream as Readable, size, contentType)
+  const size = await getFileSize(srcPath, backend)
+  const stream = await downloadFile(srcPath, backend)
+  await uploadFile(destPath, stream as Readable, size, contentType, backend)
 }
 
 /**
@@ -158,7 +145,9 @@ async function duplicateVideoRow(
           ? 'image/gif'
           : 'image/jpeg'
     : 'video/mp4'
-  await copyStorageFile(source.originalStoragePath, newOriginalPath, mime)
+  // 4.2.0+: keep the duplicate on the same backend as the source.
+  const srcBackend = resolveFileBackend(source.storageBackend)
+  await copyStorageFile(source.originalStoragePath, newOriginalPath, mime, srcBackend)
 
   // Create the new record. For images we point thumbnail at the same
   // path (the file IS the thumbnail) and go straight to READY. For
@@ -183,6 +172,7 @@ async function duplicateVideoRow(
     thumbnailPath: isImage ? newOriginalPath : null,
     mediaType,
     approved: false,
+    storageBackend: srcBackend,
   } as any
 
   const data = adminId ? { ...base, createdById: adminId } : base

@@ -4,6 +4,7 @@ import { getRedisForQueue } from '../lib/redis'
 import { getCpuAllocation } from '../lib/cpu-config'
 import { transcodeVideo, getVideoMetadata } from '../lib/ffmpeg'
 import { downloadFile, uploadFile } from '../lib/storage'
+import { getVideoBackend } from '../lib/storage-backends'
 import { CleanPreviewJob } from '../lib/queue'
 import { calculateOutputDimensions, RESOLUTION_PRESETS } from './video-processor-helpers'
 import { TEMP_DIR } from './cleanup'
@@ -57,7 +58,10 @@ export async function processCleanPreview(job: Job<CleanPreviewJob>): Promise<vo
 
     debugLog('Downloading original file from:', originalStoragePath)
 
-    const downloadStream = await downloadFile(originalStoragePath)
+    // 4.2.0+: read from and write to the video's own storage backend.
+    const backend = await getVideoBackend(videoId)
+
+    const downloadStream = await downloadFile(originalStoragePath, backend)
     await pipeline(downloadStream, fs.createWriteStream(tempInputPath))
 
     logMessage(`[CLEAN PREVIEW] Downloaded original file for video ${videoId}`)
@@ -102,7 +106,8 @@ export async function processCleanPreview(job: Job<CleanPreviewJob>): Promise<vo
       storagePath,
       fs.createReadStream(tempOutputPath),
       outputStats.size,
-      'video/mp4'
+      'video/mp4',
+      backend,
     )
 
     // Update database with clean preview path

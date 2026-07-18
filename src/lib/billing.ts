@@ -2,6 +2,7 @@ import type Stripe from 'stripe'
 import { prisma } from '@/lib/db'
 import { getStripe } from '@/lib/stripe'
 import { logError, logMessage } from '@/lib/logging'
+import { legacyBackend } from '@/lib/storage-backends'
 
 // Stripe types `unit_amount_decimal` / `quantity_decimal` as a branded
 // `Decimal`, but the API accepts a plain numeric string ("2500" cents,
@@ -48,20 +49,45 @@ export interface BillingUsage {
 }
 
 /**
- * Running totals that drive both the Billing pane and the monthly
- * invoice. Storage sums the three places the app keeps bytes:
+ * 4.2.0+ (Phase 3): Prisma `where` matching files physically stored on the
+ * FrameComment Server backend ('fc'). Per-GB storage is billed ONLY for these
+ * — Local / R2 / AWS are the customer's own storage and cost per user only.
+ *
+ * A file counts as fc when its storageBackend is 'fc', OR its storageLocations
+ * list contains 'fc' (kept on fc after a transfer), OR — on an instance whose
+ * legacy env backend is fc (STORAGE_PROVIDER=s3) — its storageBackend is NULL
+ * (pre-4.2.0 rows that resolve to fc).
+ */
+export function fcStorageWhere(): any {
+  const or: any[] = [
+    { storageBackend: 'fc' },
+    { storageLocations: { contains: 'fc' } },
+  ]
+  if (legacyBackend() === 'fc') or.push({ storageBackend: null })
+  return { OR: or }
+}
+
+/**
+ * Running totals that drive both the Billing pane and the monthly invoice.
+ *
+ * Storage counts ONLY bytes stored on the FrameComment Server backend (see
+ * fcStorageWhere) across the three places the app keeps bytes:
  *   - Video.originalFileSize  (the master uploads — the bulk)
  *   - VideoAsset.fileSize      (comment attachments, project files…)
  *   - ProjectUpload.fileSize   (reverse-share / client uploads)
- * Users = every row in the User table. Both include Trash on purpose.
+ * Local/R2/AWS bytes are the customer's own and are NOT billed per-GB.
+ * Users = every row in the User table (always billed per-user). Both include
+ * Trash on purpose. `(prisma as any)` so a stale generated client (missing the
+ * storageBackend/storageLocations fields) still accepts the where filter.
  */
 export async function computeBillingUsage(): Promise<BillingUsage> {
+  const where = fcStorageWhere()
   const [userCount, videoSum, videoAssetSum, projectUploadSum] =
     await Promise.all([
       prisma.user.count(),
-      prisma.video.aggregate({ _sum: { originalFileSize: true } }),
-      prisma.videoAsset.aggregate({ _sum: { fileSize: true } }),
-      prisma.projectUpload.aggregate({ _sum: { fileSize: true } }),
+      (prisma as any).video.aggregate({ _sum: { originalFileSize: true }, where }),
+      (prisma as any).videoAsset.aggregate({ _sum: { fileSize: true }, where }),
+      (prisma as any).projectUpload.aggregate({ _sum: { fileSize: true }, where }),
     ])
 
   const masterBytes = videoSum._sum.originalFileSize
@@ -78,6 +104,20 @@ export async function computeBillingUsage(): Promise<BillingUsage> {
     userCount,
     storageBytes: masterBytes + assetBytes + uploadBytes,
   }
+}
+
+/** Total storage across ALL backends (display context in the Billing pane —
+ *  what the customer holds vs. what is actually billed per-GB). */
+export async function computeTotalStorageBytes(): Promise<number> {
+  const [videoSum, videoAssetSum, projectUploadSum] = await Promise.all([
+    prisma.video.aggregate({ _sum: { originalFileSize: true } }),
+    prisma.videoAsset.aggregate({ _sum: { fileSize: true } }),
+    prisma.projectUpload.aggregate({ _sum: { fileSize: true } }),
+  ])
+  const master = videoSum._sum.originalFileSize ? Number(videoSum._sum.originalFileSize) : 0
+  const asset = videoAssetSum._sum.fileSize ? Number(videoAssetSum._sum.fileSize) : 0
+  const upload = projectUploadSum._sum.fileSize ? Number(projectUploadSum._sum.fileSize) : 0
+  return master + asset + upload
 }
 
 export interface BillableBreakdown {

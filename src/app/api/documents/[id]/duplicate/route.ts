@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { downloadFile, uploadFile } from '@/lib/storage'
+import { resolveFileBackend } from '@/lib/storage-backends'
 import { logError } from '@/lib/logging'
 import { Readable } from 'stream'
 
@@ -46,7 +47,9 @@ export async function POST(
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
-    const stream = await downloadFile(doc.storagePath)
+    // 4.2.0+: read from and write the copy to the source document's backend.
+    const backend = resolveFileBackend(doc.storageBackend)
+    const stream = await downloadFile(doc.storagePath, backend)
     const buffer = await streamToBuffer(stream as Readable)
 
     const newPath = `projects/${doc.projectId}/documents/copy-${Date.now()}-${id}.pdf`
@@ -55,6 +58,7 @@ export async function POST(
       buffer,
       buffer.length,
       doc.mimeType || 'application/pdf',
+      backend,
     )
 
     await (prisma as any).folderDocument.create({
@@ -67,6 +71,7 @@ export async function POST(
         size: BigInt(buffer.length),
         kind: doc.kind || 'transcript',
         sourceVideoId: doc.sourceVideoId ?? null,
+        storageBackend: backend,
       },
     })
 

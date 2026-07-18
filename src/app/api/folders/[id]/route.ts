@@ -10,6 +10,7 @@ import {
 import { encrypt } from '@/lib/encryption'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { legacyBackend } from '@/lib/storage-backends'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
 import { computeFolderSizesByProject } from '@/lib/folder-sizes'
 
@@ -189,6 +190,9 @@ export async function GET(
             typeof v.originalFileSize === 'bigint'
               ? v.originalFileSize.toString()
               : v.originalFileSize,
+          // 4.2.0+: resolve NULL (legacy) to the instance default backend so
+          // the storage tag shows the real location for older videos too.
+          storageBackend: (v as any).storageBackend ?? legacyBackend(),
           thumbnailUrl,
           previewUrl,
           storyboardUrl,

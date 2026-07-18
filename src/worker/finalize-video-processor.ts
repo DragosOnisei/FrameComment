@@ -5,6 +5,7 @@ import { pipeline } from 'stream/promises'
 import { FinalizeVideoJob, VIDEO_JOB_PRIORITY, getVideoQueue } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { downloadFile } from '../lib/storage'
+import { getVideoBackend } from '../lib/storage-backends'
 import { logMessage, logError } from '../lib/logging'
 import { TEMP_DIR } from './cleanup'
 import {
@@ -149,13 +150,15 @@ export async function processFinalizeVideo(job: Job<FinalizeVideoJob>) {
       const sourceCandidate = tierPathByPriority.find(([, p]) => !!p)
       if (sourceCandidate && Number.isFinite(row.duration) && row.duration > 0) {
         const [tier, storagePath] = sourceCandidate
+        // 4.2.0+: the preview + storyboard live on the video's own backend.
+        const backend = await getVideoBackend(videoId)
         // Try the cached local preview first; if it's not there
         // (cleaned up by encode-tier) we re-download from storage.
         const localCandidate = path.join(TEMP_DIR, `${videoId}-preview-${tier}.mp4`)
         let storyboardSource = localCandidate
         if (!fs.existsSync(localCandidate) && storagePath) {
           try {
-            const stream = await downloadFile(storagePath)
+            const stream = await downloadFile(storagePath, backend)
             await pipeline(stream, fs.createWriteStream(localCandidate))
             storyboardSource = localCandidate
             tempFiles.input = localCandidate
@@ -172,6 +175,7 @@ export async function processFinalizeVideo(job: Job<FinalizeVideoJob>) {
               storyboardSource,
               row.duration,
               tempFiles,
+              backend,
             )
             if (sbPath) {
               try {

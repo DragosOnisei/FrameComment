@@ -4,6 +4,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile, sanitizeFilename, isSuspiciousFilename } from '@/lib/file-validation'
 import { initStorage, deleteFile } from '@/lib/storage'
+import { resolveFileBackend } from '@/lib/storage-backends'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -307,15 +308,16 @@ export async function DELETE(
       select: {
         id: true,
         storagePath: true,
-      },
-    })
+        storageBackend: true,
+      } as any,
+    }) as any
 
     if (!asset) {
       return NextResponse.json({ error: videosMessages.attachmentNotFound || 'Attachment not found' }, { status: 404 })
     }
     await initStorage()
 
-    await deleteFile(asset.storagePath)
+    await deleteFile(asset.storagePath, resolveFileBackend(asset.storageBackend))
 
     await prisma.videoAsset.delete({ where: { id: asset.id } })
 

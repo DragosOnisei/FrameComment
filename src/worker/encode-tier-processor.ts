@@ -6,6 +6,7 @@ import { EncodeTierJob, getVideoQueue } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
 import { downloadFile, getLocalSourcePath } from '../lib/storage'
+import { getVideoBackend } from '../lib/storage-backends'
 import { rewriteHlsMaster } from '../lib/ffmpeg'
 import { TEMP_DIR } from './cleanup'
 import {
@@ -184,8 +185,13 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
     // can't seek inside an HTTP response body. The legacy
     // download-to-/tmp path is preserved as the fallback, with the
     // same "is it already cached?" check it had before.
+    // 4.2.0+: resolve the video's storage backend so local files are read in
+    // place and remote (fc/r2/aws) originals are streamed down / tiers pushed
+    // to the same backend.
+    const backend = await getVideoBackend(videoId)
+
     let sourcePath: string
-    const localSource = getLocalSourcePath(originalStoragePath)
+    const localSource = getLocalSourcePath(originalStoragePath, backend)
     if (localSource) {
       sourcePath = localSource
       // Intentionally NOT setting tempFiles.input — we don't own the
@@ -195,7 +201,7 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
       const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
       if (!fs.existsSync(cachedOriginal)) {
         logMessage(`[WORKER] encode-tier ${tier} for ${videoId}: cached original missing, re-downloading`)
-        const stream = await downloadFile(originalStoragePath)
+        const stream = await downloadFile(originalStoragePath, backend)
         await pipeline(stream, fs.createWriteStream(cachedOriginal))
       }
       sourcePath = cachedOriginal
@@ -237,6 +243,7 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
         tempFiles,
         metadata.duration,
         tierPreset,
+        backend,
       )
     } catch (err: any) {
       if (err?.message === 'TranscodeAborted') {
@@ -336,7 +343,7 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
     // a Set before writing.)
     const tierMp4Local = path.join(TEMP_DIR, `${videoId}-preview-${tier}.mp4`)
     try {
-      await processHlsTier(videoId, projectId, tierMp4Local, tier, tempFiles)
+      await processHlsTier(videoId, projectId, tierMp4Local, tier, tempFiles, backend)
       await rewriteHlsMaster(
         videoId,
         tier,

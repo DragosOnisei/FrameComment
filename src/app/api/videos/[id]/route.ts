@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { deleteFile } from '@/lib/storage'
+import { allFileLocations } from '@/lib/storage-backends'
 import { requireApiAdmin } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
 import { rateLimit } from '@/lib/rate-limit'
@@ -317,6 +318,12 @@ export async function DELETE(
 
     // Permanent delete — same legacy behaviour as before: wipe every
     // associated file on disk, then drop the row.
+    // 4.2.0+: delete from EVERY backend the file lives on (NULL = legacy env;
+    // 2b: storageLocations may list more than one after a keep-source transfer).
+    const backends = allFileLocations((video as any).storageBackend, (video as any).storageLocations)
+    const deleteEverywhere = async (p: string, bks = backends) => {
+      for (const b of bks) await deleteFile(p, b).catch(() => {})
+    }
     try {
       // Delete asset files only if no other assets point to the same storage path
       for (const asset of video.assets) {
@@ -328,21 +335,21 @@ export async function DELETE(
         })
 
         if (sharedCount === 0) {
-          await deleteFile(asset.storagePath)
+          await deleteEverywhere(asset.storagePath, allFileLocations((asset as any).storageBackend, (asset as any).storageLocations))
         }
       }
 
       // Delete original file
       if (video.originalStoragePath) {
-        await deleteFile(video.originalStoragePath)
+        await deleteEverywhere(video.originalStoragePath)
       }
 
       // Delete preview files
       if (video.preview1080Path) {
-        await deleteFile(video.preview1080Path)
+        await deleteEverywhere(video.preview1080Path)
       }
       if (video.preview720Path) {
-        await deleteFile(video.preview720Path)
+        await deleteEverywhere(video.preview720Path)
       }
 
       // Delete thumbnail
@@ -362,7 +369,7 @@ export async function DELETE(
 
         // Only delete if no other assets or videos reference this thumbnail path
         if (thumbnailSharedAssets === 0 && thumbnailSharedVideos === 0) {
-          await deleteFile(video.thumbnailPath)
+          await deleteEverywhere(video.thumbnailPath)
         }
       }
     } catch (error) {

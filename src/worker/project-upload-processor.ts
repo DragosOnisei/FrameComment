@@ -1,6 +1,7 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
 import { downloadFile } from '../lib/storage'
+import { getEntityBackend } from '../lib/storage-backends'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -34,7 +35,7 @@ export async function processProjectUpload(job: Job<ProjectUploadProcessingJob>)
       logMessage(`[WORKER DEBUG] Temp file path: ${tempFilePath}`)
     }
 
-    const downloadStream = await downloadFile(storagePath)
+    const downloadStream = await downloadFile(storagePath, await getEntityBackend('projectUpload', uploadId))
     await pipeline(downloadStream, fs.createWriteStream(tempFilePath))
 
     // Verify file exists and has content

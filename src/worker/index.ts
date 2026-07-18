@@ -11,7 +11,7 @@ import {
   ProjectUploadProcessingJob,
   ExternalNotificationJob,
 } from '../lib/queue'
-import { initStorage } from '../lib/storage'
+import { initStorage, refreshLocalStorageRoot } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { purgeExpiredTrash } from '../lib/trash-cleanup'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
@@ -29,6 +29,7 @@ import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processExternalNotificationJob } from './external-notifications/processExternalNotificationJob'
 import { createCleanPreviewWorker } from './clean-preview-processor'
+import { createStorageTransferWorker } from './storage-transfer-processor'
 import { processDueDateReminders } from './due-date-reminders'
 import { processBillingCycle } from './billing-cycle'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
@@ -67,6 +68,9 @@ async function main() {
     logMessage('[WORKER DEBUG] Initializing storage...')
   }
 
+  // 4.2.0+ (Phase 2d): load the configured local uploads folder before any
+  // storage op so worker writes land in the right place from the first job.
+  await refreshLocalStorageRoot()
   await initStorage()
 
   if (DEBUG) {
@@ -296,6 +300,17 @@ async function main() {
 
   logMessage('[WORKER] Clean preview worker started')
 
+  // 4.2.0+ (Phase 2): storage transfer worker — migrates files between
+  // backends on admin request. Concurrency 1; progress lives in Redis.
+  const storageTransferWorker = createStorageTransferWorker()
+  storageTransferWorker.on('completed', () => {
+    logMessage('[WORKER] Storage transfer completed')
+  })
+  storageTransferWorker.on('failed', (_job, err) => {
+    logError('[WORKER ERROR] Storage transfer failed', err)
+  })
+  logMessage('[WORKER] Storage transfer worker started')
+
   // Run cleanup on startup
   logMessage('Running initial TUS upload cleanup...')
   await runCleanup().catch((err) => {
@@ -356,6 +371,7 @@ async function main() {
       notificationWorker.close(),
       externalNotificationWorker.close(),
       cleanPreviewWorker.close(),
+      storageTransferWorker.close(),
       notificationQueue.close(),
     ])
     await closeRedisConnection()
@@ -374,6 +390,7 @@ async function main() {
       notificationWorker.close(),
       externalNotificationWorker.close(),
       cleanPreviewWorker.close(),
+      storageTransferWorker.close(),
       notificationQueue.close(),
     ])
     await closeRedisConnection()

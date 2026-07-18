@@ -16,12 +16,19 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Readable } from 'stream'
+import type { S3BackendConfig } from './storage-backends'
 
-let _s3Client: S3Client | null = null
+// 4.2.0+: multi-backend. Every function accepts an OPTIONAL trailing
+// `config: S3BackendConfig`. When omitted the legacy env-based S3 config
+// (S3_* vars, i.e. the pre-4.2.0 single-bucket behaviour) is used, so every
+// existing caller keeps working byte-for-byte. When a config is supplied the
+// call targets that specific backend (fc / r2 / aws).
 
-function getS3Client(): S3Client {
-  if (_s3Client) return _s3Client
+/** Per-config S3 client cache — one client per distinct bucket/endpoint/key. */
+const _clients = new Map<string, S3Client>()
 
+/** The legacy single-bucket config, read from the S3_* env vars. */
+function legacyEnvConfig(): S3BackendConfig {
   const endpoint = process.env.S3_ENDPOINT?.trim()
   const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim()
   const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim()
@@ -30,27 +37,47 @@ function getS3Client(): S3Client {
   if (!accessKeyId) throw new Error('S3_ACCESS_KEY_ID is not configured')
   if (!secretAccessKey) throw new Error('S3_SECRET_ACCESS_KEY is not configured')
 
-  // Validate S3 endpoint is a proper HTTP(S) URL to prevent SSRF via misconfiguration
-  try {
-    const parsed = new URL(endpoint)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`S3_ENDPOINT must use http or https (got ${parsed.protocol})`)
-    }
-  } catch (e) {
-    if (e instanceof TypeError) {
-      throw new Error(`S3_ENDPOINT is not a valid URL: ${endpoint}`)
-    }
-    throw e
-  }
+  const bucket = process.env.S3_BUCKET
+  if (!bucket) throw new Error('S3_BUCKET is not configured')
 
-  // forcePathStyle: true for MinIO/Ceph. Set S3_FORCE_PATH_STYLE=false for AWS virtual-hosted buckets.
-  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE !== 'false'
-
-  _s3Client = new S3Client({
+  return {
     endpoint,
     region: process.env.S3_REGION?.trim() || 'us-east-1',
-    credentials: { accessKeyId, secretAccessKey },
-    forcePathStyle,
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+    // forcePathStyle: true for MinIO/Ceph. Set S3_FORCE_PATH_STYLE=false for AWS virtual-hosted buckets.
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
+  }
+}
+
+function getS3Client(config?: S3BackendConfig): S3Client {
+  const cfg = config ?? legacyEnvConfig()
+
+  // Validate S3 endpoint is a proper HTTP(S) URL to prevent SSRF via misconfiguration
+  if (cfg.endpoint) {
+    try {
+      const parsed = new URL(cfg.endpoint)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`S3 endpoint must use http or https (got ${parsed.protocol})`)
+      }
+    } catch (e) {
+      if (e instanceof TypeError) {
+        throw new Error(`S3 endpoint is not a valid URL: ${cfg.endpoint}`)
+      }
+      throw e
+    }
+  }
+
+  const cacheKey = `${cfg.endpoint ?? 'aws'}|${cfg.region}|${cfg.bucket}|${cfg.accessKeyId}|${cfg.forcePathStyle}`
+  const cached = _clients.get(cacheKey)
+  if (cached) return cached
+
+  const client = new S3Client({
+    ...(cfg.endpoint ? { endpoint: cfg.endpoint } : {}),
+    region: cfg.region || 'us-east-1',
+    credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
+    forcePathStyle: cfg.forcePathStyle,
     // SDK >= 3.729.0 defaults to sending x-amz-checksum-* headers on all requests.
     // MinIO (and Cloudflare R2, DigitalOcean Spaces, Backblaze B2) return 400/501
     // for these headers. WHEN_REQUIRED disables that default for all request types.
@@ -58,10 +85,12 @@ function getS3Client(): S3Client {
     responseChecksumValidation: 'WHEN_REQUIRED',
   })
 
-  return _s3Client
+  _clients.set(cacheKey, client)
+  return client
 }
 
-export function getS3Bucket(): string {
+function getS3Bucket(config?: S3BackendConfig): string {
+  if (config) return config.bucket
   const bucket = process.env.S3_BUCKET
   if (!bucket) throw new Error('S3_BUCKET is not configured')
   return bucket
@@ -83,7 +112,8 @@ export async function s3UploadFile(
   key: string,
   body: Readable | Buffer,
   contentType: string = 'application/octet-stream',
-  size?: number
+  size?: number,
+  config?: S3BackendConfig
 ): Promise<void> {
   // Use multipart upload for files >= 100MB
   const MULTIPART_THRESHOLD = 100 * 1024 * 1024 // 100MB
@@ -91,7 +121,7 @@ export async function s3UploadFile(
 
   // If size is provided and exceeds threshold, use multipart
   if (size !== undefined && size >= MULTIPART_THRESHOLD) {
-    return s3UploadFileMultipart(key, body, contentType, size, PART_SIZE)
+    return s3UploadFileMultipart(key, body, contentType, size, PART_SIZE, config)
   }
 
   // For unknown size streams, detect by reading first chunk
@@ -118,7 +148,7 @@ export async function s3UploadFile(
           try {
             const bufferBody = Buffer.concat(chunks)
             const uploadStream = Readable.from([bufferBody, readable])
-            await s3UploadFileMultipart(key, uploadStream, contentType, totalSize, PART_SIZE)
+            await s3UploadFileMultipart(key, uploadStream, contentType, totalSize, PART_SIZE, config)
             resolve()
           } catch (err) {
             reject(formatS3Error('PUT', key, err))
@@ -130,8 +160,8 @@ export async function s3UploadFile(
         if (!uploadedUsingMultipart) {
           try {
             const bufferBody = Buffer.concat(chunks)
-            await getS3Client().send(
-              new PutObjectCommand({ Bucket: getS3Bucket(), Key: key, Body: bufferBody, ContentType: contentType })
+            await getS3Client(config).send(
+              new PutObjectCommand({ Bucket: getS3Bucket(config), Key: key, Body: bufferBody, ContentType: contentType })
             )
             resolve()
           } catch (err) {
@@ -148,8 +178,8 @@ export async function s3UploadFile(
 
   // Buffer or sized stream under threshold: use single PUT
   try {
-    await getS3Client().send(
-      new PutObjectCommand({ Bucket: getS3Bucket(), Key: key, Body: body, ContentType: contentType })
+    await getS3Client(config).send(
+      new PutObjectCommand({ Bucket: getS3Bucket(config), Key: key, Body: body, ContentType: contentType })
     )
   } catch (err) {
     throw formatS3Error('PUT', key, err)
@@ -162,48 +192,71 @@ async function s3UploadFileMultipart(
   body: Readable | Buffer,
   contentType: string,
   totalSize: number,
-  partSize: number = 25 * 1024 * 1024 // 25MB default (matches presign endpoint)
+  partSize: number = 25 * 1024 * 1024, // 25MB default (matches presign endpoint)
+  config?: S3BackendConfig
 ): Promise<void> {
   let uploadId: string | undefined
 
   try {
     // Initiate multipart upload - reuse existing exported function
-    uploadId = await s3InitiateMultipartUpload(key, contentType)
+    uploadId = await s3InitiateMultipartUpload(key, contentType, config)
 
     const parts: CompletedPart[] = []
-    const bodyBuffer = Buffer.isBuffer(body) ? body : await streamToBuffer(body)
-
-    // Upload parts
-    let offset = 0
+    const bucket = getS3Bucket(config)
     let partNumber = 1
-    while (offset < bodyBuffer.length) {
-      const end = Math.min(offset + partSize, bodyBuffer.length)
-      const chunk = bodyBuffer.subarray(offset, end)
 
-      const uploadRes = await getS3Client().send(
+    const uploadPart = async (chunk: Buffer) => {
+      const uploadRes = await getS3Client(config).send(
         new UploadPartCommand({
-          Bucket: getS3Bucket(),
+          Bucket: bucket,
           Key: key,
           UploadId: uploadId,
           PartNumber: partNumber,
           Body: chunk,
         })
       )
-
       if (!uploadRes.ETag) throw new Error(`Missing ETag for part ${partNumber}`)
       parts.push({ ETag: uploadRes.ETag, PartNumber: partNumber })
-
-      offset = end
       partNumber++
     }
 
+    if (Buffer.isBuffer(body)) {
+      // Buffer source: slice into parts (no extra memory beyond the buffer).
+      let offset = 0
+      while (offset < body.length) {
+        const end = Math.min(offset + partSize, body.length)
+        await uploadPart(body.subarray(offset, end))
+        offset = end
+      }
+    } else {
+      // Stream source: accumulate into part-sized buffers and flush each as it
+      // fills, so we never hold more than ~one part (25MB) in memory. This is
+      // what makes migrating multi-GB masters to S3 safe (no whole-file buffer).
+      let pending: Buffer[] = []
+      let pendingLen = 0
+      const flush = async () => {
+        if (pendingLen === 0) return
+        const chunk = pending.length === 1 ? pending[0] : Buffer.concat(pending, pendingLen)
+        pending = []
+        pendingLen = 0
+        await uploadPart(chunk)
+      }
+      for await (const c of body as AsyncIterable<Buffer | string>) {
+        const chunk = Buffer.isBuffer(c) ? c : Buffer.from(c)
+        pending.push(chunk)
+        pendingLen += chunk.length
+        if (pendingLen >= partSize) await flush()
+      }
+      await flush()
+    }
+
     // Complete multipart upload - reuse existing exported function
-    await s3CompleteMultipartUpload(key, uploadId, parts)
+    await s3CompleteMultipartUpload(key, uploadId, parts, config)
   } catch (err) {
     // Abort multipart upload on error to free storage - reuse existing exported function
     if (uploadId) {
       try {
-        await s3AbortMultipartUpload(key, uploadId)
+        await s3AbortMultipartUpload(key, uploadId, config)
       } catch {
         // Ignore abort errors
       }
@@ -212,21 +265,11 @@ async function s3UploadFileMultipart(
   }
 }
 
-/** Convert a readable stream to a buffer. */
-async function streamToBuffer(stream: Readable): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    stream.on('data', (chunk) => chunks.push(chunk))
-    stream.on('end', () => resolve(Buffer.concat(chunks)))
-    stream.on('error', reject)
-  })
-}
-
 /** Download an object as a readable stream — used by the worker. */
-export async function s3DownloadFile(key: string): Promise<Readable> {
+export async function s3DownloadFile(key: string, config?: S3BackendConfig): Promise<Readable> {
   let res
   try {
-    res = await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }))
+    res = await getS3Client(config).send(new GetObjectCommand({ Bucket: getS3Bucket(config), Key: key }))
   } catch (err) {
     throw formatS3Error('GET', key, err)
   }
@@ -235,18 +278,18 @@ export async function s3DownloadFile(key: string): Promise<Readable> {
 }
 
 /** Delete a single object. */
-export async function s3DeleteFile(key: string): Promise<void> {
+export async function s3DeleteFile(key: string, config?: S3BackendConfig): Promise<void> {
   try {
-    await getS3Client().send(new DeleteObjectCommand({ Bucket: getS3Bucket(), Key: key }))
+    await getS3Client(config).send(new DeleteObjectCommand({ Bucket: getS3Bucket(config), Key: key }))
   } catch (err) {
     throw formatS3Error('DELETE', key, err)
   }
 }
 
 /** Delete all objects under a key prefix (paginated). */
-export async function s3DeleteDirectory(prefix: string): Promise<void> {
-  const client = getS3Client()
-  const bucket = getS3Bucket()
+export async function s3DeleteDirectory(prefix: string, config?: S3BackendConfig): Promise<void> {
+  const client = getS3Client(config)
+  const bucket = getS3Bucket(config)
   const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`
   let continuationToken: string | undefined
 
@@ -267,9 +310,29 @@ export async function s3DeleteDirectory(prefix: string): Promise<void> {
   } while (continuationToken)
 }
 
+/** List every object key under a prefix (paginated). Used by the storage
+ * transfer to enumerate HLS segment folders (which have no DB row per file). */
+export async function s3ListKeys(prefix: string, config?: S3BackendConfig): Promise<string[]> {
+  const client = getS3Client(config)
+  const bucket = getS3Bucket(config)
+  const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`
+  const keys: string[] = []
+  let continuationToken: string | undefined
+  do {
+    const res = await client.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: normalizedPrefix, ContinuationToken: continuationToken })
+    )
+    for (const o of res.Contents ?? []) {
+      if (o.Key) keys.push(o.Key)
+    }
+    continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined
+  } while (continuationToken)
+  return keys
+}
+
 /** Return the byte size of an object via HeadObject. */
-export async function s3GetFileSize(key: string): Promise<number> {
-  const res = await getS3Client().send(new HeadObjectCommand({ Bucket: getS3Bucket(), Key: key }))
+export async function s3GetFileSize(key: string, config?: S3BackendConfig): Promise<number> {
+  const res = await getS3Client(config).send(new HeadObjectCommand({ Bucket: getS3Bucket(config), Key: key }))
   if (res.ContentLength === undefined) {
     throw new Error(`S3 HeadObject returned no ContentLength for key: ${key}`)
   }
@@ -277,9 +340,9 @@ export async function s3GetFileSize(key: string): Promise<number> {
 }
 
 /** Return true if the object exists; false on 404; rethrows on any other error. */
-export async function s3FileExists(key: string): Promise<boolean> {
+export async function s3FileExists(key: string, config?: S3BackendConfig): Promise<boolean> {
   try {
-    await getS3Client().send(new HeadObjectCommand({ Bucket: getS3Bucket(), Key: key }))
+    await getS3Client(config).send(new HeadObjectCommand({ Bucket: getS3Bucket(config), Key: key }))
     return true
   } catch (err: unknown) {
     // HeadObject throws NotFound (not NoSuchKey) per AWS SDK v3 spec
@@ -297,10 +360,11 @@ export async function s3FileExists(key: string): Promise<boolean> {
 /** Start a multipart upload and return the UploadId. */
 export async function s3InitiateMultipartUpload(
   key: string,
-  contentType: string = 'application/octet-stream'
+  contentType: string = 'application/octet-stream',
+  config?: S3BackendConfig
 ): Promise<string> {
-  const res = await getS3Client().send(
-    new CreateMultipartUploadCommand({ Bucket: getS3Bucket(), Key: key, ContentType: contentType })
+  const res = await getS3Client(config).send(
+    new CreateMultipartUploadCommand({ Bucket: getS3Bucket(config), Key: key, ContentType: contentType })
   )
   if (!res.UploadId) throw new Error('Failed to initiate multipart upload')
   return res.UploadId
@@ -311,11 +375,12 @@ export async function s3GetPresignedPartUrl(
   key: string,
   uploadId: string,
   partNumber: number,
-  expirySeconds: number = 3600
+  expirySeconds: number = 3600,
+  config?: S3BackendConfig
 ): Promise<string> {
   return getSignedUrl(
-    getS3Client(),
-    new UploadPartCommand({ Bucket: getS3Bucket(), Key: key, UploadId: uploadId, PartNumber: partNumber }),
+    getS3Client(config),
+    new UploadPartCommand({ Bucket: getS3Bucket(config), Key: key, UploadId: uploadId, PartNumber: partNumber }),
     { expiresIn: expirySeconds }
   )
 }
@@ -324,11 +389,12 @@ export async function s3GetPresignedPartUrl(
 export async function s3CompleteMultipartUpload(
   key: string,
   uploadId: string,
-  parts: CompletedPart[]
+  parts: CompletedPart[],
+  config?: S3BackendConfig
 ): Promise<void> {
-  await getS3Client().send(
+  await getS3Client(config).send(
     new CompleteMultipartUploadCommand({
-      Bucket: getS3Bucket(),
+      Bucket: getS3Bucket(config),
       Key: key,
       UploadId: uploadId,
       MultipartUpload: { Parts: parts },
@@ -337,16 +403,19 @@ export async function s3CompleteMultipartUpload(
 }
 
 /** Abort an incomplete multipart upload to free storage. */
-export async function s3AbortMultipartUpload(key: string, uploadId: string): Promise<void> {
-  await getS3Client().send(
-    new AbortMultipartUploadCommand({ Bucket: getS3Bucket(), Key: key, UploadId: uploadId })
+export async function s3AbortMultipartUpload(key: string, uploadId: string, config?: S3BackendConfig): Promise<void> {
+  await getS3Client(config).send(
+    new AbortMultipartUploadCommand({ Bucket: getS3Bucket(config), Key: key, UploadId: uploadId })
   )
 }
 
 /** Abort all multipart uploads in the bucket that were initiated before cutoffDate. */
-export async function s3AbortIncompleteMultipartUploadsOlderThan(cutoffDate: Date): Promise<number> {
-  const client = getS3Client()
-  const bucket = getS3Bucket()
+export async function s3AbortIncompleteMultipartUploadsOlderThan(
+  cutoffDate: Date,
+  config?: S3BackendConfig
+): Promise<number> {
+  const client = getS3Client(config)
+  const bucket = getS3Bucket(config)
 
   let abortedCount = 0
   let keyMarker: string | undefined
@@ -395,12 +464,13 @@ export async function s3GetPresignedDownloadUrl(
   key: string,
   expirySeconds: number = 3600,
   filename?: string,
-  contentType?: string
+  contentType?: string,
+  config?: S3BackendConfig
 ): Promise<string> {
   return getSignedUrl(
-    getS3Client(),
+    getS3Client(config),
     new GetObjectCommand({
-      Bucket: getS3Bucket(),
+      Bucket: getS3Bucket(config),
       Key: key,
       ...(filename && {
         ResponseContentDisposition:
@@ -416,12 +486,13 @@ export async function s3GetPresignedDownloadUrl(
 export async function s3GetPresignedStreamUrl(
   key: string,
   expirySeconds: number = 14400,
-  contentType?: string
+  contentType?: string,
+  config?: S3BackendConfig
 ): Promise<string> {
   return getSignedUrl(
-    getS3Client(),
+    getS3Client(config),
     new GetObjectCommand({
-      Bucket: getS3Bucket(),
+      Bucket: getS3Bucket(config),
       Key: key,
       ...(contentType && { ResponseContentType: contentType }),
     }),

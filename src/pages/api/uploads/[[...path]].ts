@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
 import { uploadFile, moveFile, initStorage, getTusUploadDir, isS3Mode, getFilePath } from '@/lib/storage'
+import { getActiveBackend, backendIsLocalFilesystem, type StorageBackend } from '@/lib/storage-backends'
 import { generateThumbnail } from '@/lib/ffmpeg'
 import path from 'path'
 import fs from 'fs'
@@ -340,6 +341,30 @@ const UPLOAD_PROGRESS_THROTTLE_MS = 1500
   }
 })
 
+/**
+ * 4.2.0+: land a finished TUS upload into its destination on the given backend.
+ *
+ *  - local  → instant same-FS rename of the staging file (no re-copy).
+ *  - fc/r2/aws → stream the staging file into the S3-compatible bucket.
+ */
+async function writeFinalizedUpload(
+  backend: StorageBackend,
+  tusServer: any,
+  upload: any,
+  tusFilePath: string,
+  destPath: string,
+  fileSize: number,
+  contentType: string,
+): Promise<void> {
+  if (backendIsLocalFilesystem(backend)) {
+    // Local disk (incl. fc-on-local): instant same-FS rename of the staging file.
+    await moveFile(tusFilePath, destPath, fileSize, backend)
+    return
+  }
+  const fileStream = (tusServer.datastore as any).read(upload.id)
+  await uploadFile(destPath, fileStream, fileSize, contentType, backend)
+}
+
 async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId: string, tusServer: any) {
   const video = await prisma.video.findUnique({
     where: { id: videoId }
@@ -357,24 +382,21 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
 
   await initStorage()
 
-  // 1.5.x+: on local storage, rename the staging file into the final
-  // layout (instant — same FS) instead of streaming-copying it. The
-  // copy used to dominate disk I/O on HDD-backed TrueNAS datasets:
-  // a 3 GB upload meant 6 GB of writes (3 GB into staging, then
-  // another 3 GB into the final path). With rename we only write
-  // once. S3 still uses the streaming path because there's no
-  // server-side staging to rename FROM.
-  if (isS3Mode()) {
-    const fileStream = (tusServer.datastore as any).read(upload.id)
-    await uploadFile(
-      video.originalStoragePath,
-      fileStream,
-      fileSize,
-      upload.metadata?.filetype as string || 'video/mp4'
-    )
-  } else {
-    await moveFile(tusFilePath, video.originalStoragePath, fileSize)
-  }
+  // 4.2.0+: multi-backend. Write the original to whatever backend is ACTIVE
+  // and record it on the row (below) so every later read / transcode / delete
+  // resolves to the same place. Local storage still uses the instant rename
+  // (1.5.x perf win — same-FS metadata flip instead of a full re-copy);
+  // S3-type backends (fc / r2 / aws) stream the staging file into the bucket.
+  const activeBackend = await getActiveBackend()
+  await writeFinalizedUpload(
+    activeBackend,
+    tusServer,
+    upload,
+    tusFilePath,
+    video.originalStoragePath,
+    fileSize,
+    upload.metadata?.filetype as string || 'video/mp4',
+  )
 
   // 1.0.9+: image uploads share the same TUS pipeline as videos but
   // skip the worker entirely. There's nothing to transcode, and the
@@ -391,6 +413,7 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
         status: 'READY',
         processingProgress: 100,
         thumbnailPath: video.originalStoragePath,
+        storageBackend: activeBackend, // 4.2.0+: where the original landed
         // Duration / width / height stay at the seed values from the
         // upload route (0). Width/height ideally come from probing the
         // image with sharp, but the player + grid already render fine
@@ -411,7 +434,8 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
     data: {
       status: 'PROCESSING',
       processingProgress: 0,
-    },
+      storageBackend: activeBackend, // 4.2.0+: where the original landed
+    } as any,
   })
 
   logMessage(`[UPLOAD] Video ${videoId} upload complete, status updated to PROCESSING`)
@@ -429,10 +453,11 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
   // own thumbnail pass is idempotent on the same storage path,
   // so a race between the two writes resolves to "same file" and
   // doesn't break anything.
-  // 1.9.4+ Phase A: instant thumbnail extraction. Local-mode only
-  // — S3 would require downloading the full original just for one
-  // frame, which doesn't pay back.
-  if (!isS3Mode()) {
+  // 1.9.4+ Phase A: instant thumbnail extraction. Local-disk only
+  // — a real S3-type backend (r2/aws, or fc-on-S3) would require downloading
+  // the full original just for one frame, which doesn't pay back. 4.2.0+: gate
+  // on whether the ACTIVE backend is served from local disk (incl. fc-on-local).
+  if (backendIsLocalFilesystem(activeBackend)) {
     // Don't await — fire and let it complete in the background.
     // Worker starts the heavy lifting in parallel.
     void Promise.race([
@@ -491,17 +516,9 @@ async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId
   // 1.5.x+: rename staging → final on local storage. See
   // handleVideoUploadFinish for the perf rationale.
   const actualFileType = upload.metadata?.filetype as string || 'application/octet-stream'
-  if (isS3Mode()) {
-    const fileStream = (tusServer.datastore as any).read(upload.id)
-    await uploadFile(
-      asset.storagePath,
-      fileStream,
-      fileSize,
-      actualFileType
-    )
-  } else {
-    await moveFile(tusFilePath, asset.storagePath, fileSize)
-  }
+  // 4.2.0+: write to the active backend and record it on the asset row.
+  const activeBackend = await getActiveBackend()
+  await writeFinalizedUpload(activeBackend, tusServer, upload, tusFilePath, asset.storagePath, fileSize, actualFileType)
 
   await prisma.videoAsset.update({
     where: { id: assetId },
@@ -509,7 +526,8 @@ async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId
       fileType: actualFileType,
       fileSize: BigInt(fileSize),
       uploadCompletedAt: new Date(),
-    },
+      storageBackend: activeBackend,
+    } as any,
   })
 
   // Queue asset for magic byte validation in worker
@@ -548,12 +566,9 @@ async function handleProjectUploadFinish(tusFilePath: string, upload: any, proje
   // 1.5.x+: rename staging → final on local storage. See
   // handleVideoUploadFinish for the perf rationale.
   const actualFileType = upload.metadata?.filetype as string || 'application/octet-stream'
-  if (isS3Mode()) {
-    const fileStream = (tusServer.datastore as any).read(upload.id)
-    await uploadFile(projectUpload.storagePath, fileStream, fileSize, actualFileType)
-  } else {
-    await moveFile(tusFilePath, projectUpload.storagePath, fileSize)
-  }
+  // 4.2.0+: write to the active backend and record it on the upload row.
+  const activeBackend = await getActiveBackend()
+  await writeFinalizedUpload(activeBackend, tusServer, upload, tusFilePath, projectUpload.storagePath, fileSize, actualFileType)
 
   await prisma.projectUpload.update({
     where: { id: projectUploadId },
@@ -561,7 +576,8 @@ async function handleProjectUploadFinish(tusFilePath: string, upload: any, proje
       fileType: actualFileType,
       fileSize: BigInt(fileSize),
       uploadCompletedAt: new Date(),
-    },
+      storageBackend: activeBackend,
+    } as any,
   })
 
   // Queue project upload for magic byte MIME detection in worker
@@ -716,7 +732,9 @@ async function initInstantThumbnail(
   const thumbnailStoragePath = `projects/${projectId}/videos/${videoId}/thumbnail.jpg`
   try {
     const buffer = fs.readFileSync(tmpThumb)
-    await uploadFile(thumbnailStoragePath, buffer, buffer.length, 'image/jpeg')
+    // 4.2.0+: instant thumbnail only runs when the active backend is local
+    // (see the caller's gate), so write it to local storage explicitly.
+    await uploadFile(thumbnailStoragePath, buffer, buffer.length, 'image/jpeg', 'local')
   } catch (err) {
     logError(`[UPLOAD] Instant thumbnail upload failed for ${videoId}:`, err)
     try { fs.unlinkSync(tmpThumb) } catch {}

@@ -21,7 +21,10 @@ interface BillingSectionProps {
 
 interface UsageResponse {
   userCount: number
-  storageBytes: number
+  storageBytes: number // 4.2.0+: BILLABLE storage (FrameComment Server only)
+  totalStorageBytes?: number // all backends — display context
+  activeBackend?: string
+  activeBackendLabel?: string
   pricing: {
     currency: string
     perUserPerMonth: number
@@ -285,10 +288,19 @@ export function BillingSection({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white">Storage</p>
                 <p className="text-xs text-white/55">
-                  {formatBytes(usage.storageBytes)} total · {freeGiB} GB free ·{' '}
+                  {/* 4.2.0+: per-GB is billed only for FrameComment Server storage. */}
+                  {formatBytes(usage.storageBytes)} on FrameComment Server · {freeGiB} GB free ·{' '}
                   {billableGiB.toLocaleString()} GB ×{' '}
                   {formatCurrency(usage.pricing.perGigabytePerMonth)}/GB
                 </p>
+                {usage.activeBackend && usage.activeBackend !== 'fc' && (
+                  <p className="text-[11px] text-white/40 mt-0.5">
+                    You&apos;re on {usage.activeBackendLabel || 'your own storage'} — no per-GB storage charge
+                    {typeof usage.totalStorageBytes === 'number' && usage.totalStorageBytes > usage.storageBytes
+                      ? ` (${formatBytes(usage.totalStorageBytes)} stored there).`
+                      : '.'}
+                  </p>
+                )}
               </div>
               <p className="text-sm font-semibold text-white tabular-nums">
                 {formatCurrency(storageCost)}
@@ -393,8 +405,11 @@ export function BillingSection({
             {freeGiB} GB. Beyond that:{' '}
             {formatCurrency(usage.pricing.perUserPerMonth)} per extra user
             per month + {formatCurrency(usage.pricing.perGigabytePerMonth)} per
-            extra GB per month, prorated over the period. Storage counts every
-            file the app holds, including soft-deleted projects in Trash.
+            extra GB per month, prorated over the period. Per-GB storage is
+            billed only for files stored on the FrameComment Server backend —
+            Local, Cloudflare R2 and AWS are your own storage and are billed per
+            user only. Storage counts every file on FrameComment Server,
+            including soft-deleted projects in Trash.
           </p>
         </>
       )}

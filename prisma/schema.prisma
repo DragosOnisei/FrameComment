@@ -221,6 +221,8 @@ model FolderDocument {
   folderId    String? // null = project root
   name        String // display name, e.g. "Clip v3 — Transcript.pdf"
   storagePath String // path in the storage layer
+  storageBackend String? // 4.2.0+: local|fc|r2|aws (NULL = legacy env)
+  storageLocations String? // 4.2.0+ (2b): all backends holding a copy (comma-separated)
   mimeType    String @default("application/pdf")
   size        BigInt @default(0)
   // What produced this document. "transcript" for the whisper flow;
@@ -284,6 +286,16 @@ model Video {
   originalFileName    String
   originalFileSize    BigInt
   originalStoragePath String
+
+  // 4.2.0+: which storage backend holds this video's files
+  // (local | fc | r2 | aws). NULL = legacy env backend (STORAGE_PROVIDER),
+  // so pre-4.2.0 rows keep resolving to their original location.
+  storageBackend String?
+  // 4.2.0+ (Phase 2b): comma-separated list of every backend this file
+  // physically lives on (e.g. "local,aws" after a keep-source transfer).
+  // NULL/empty = single location (== storageBackend). Display-only; reads
+  // always resolve via storageBackend (the active/target backend).
+  storageLocations String?
 
   // Media type (1.0.9+). Default VIDEO so all existing rows stay
   // unchanged after the migration; IMAGE skips the FFmpeg pipeline.
@@ -410,6 +422,8 @@ model VideoAsset {
   fileSize    BigInt
   fileType    String // MIME type (e.g., "application/octet-stream", "image/jpeg", "audio/mpeg")
   storagePath String // Path in storage system
+  storageBackend String? // 4.2.0+: local|fc|r2|aws (NULL = legacy env)
+  storageLocations String? // 4.2.0+ (2b): all backends holding a copy (comma-separated)
   category    String? // Optional category: "image", "audio", "project", "other"
 
   // Upload metadata
@@ -443,6 +457,8 @@ model ProjectUpload {
   fileSize    BigInt
   fileType    String  @default("application/octet-stream")
   storagePath String
+  storageBackend String? // 4.2.0+: local|fc|r2|aws (NULL = legacy env)
+  storageLocations String? // 4.2.0+ (2b): all backends holding a copy (comma-separated)
   category    String?
 
   uploadedBySessionId String?
@@ -729,6 +745,41 @@ model Settings {
   // into the video's folder. Stored server-side only; never exposed to
   // the client (the settings GET redacts it — see the settings route).
   openaiApiKey String?
+
+  // 4.2.0+: Storage backend selection (multi-backend support).
+  //
+  //   activeStorageBackend — which backend NEW uploads are written to:
+  //     'local' = the app server's own disk (STORAGE_ROOT), no per-GB cost
+  //     'fc'    = FrameComment-managed S3 bucket (operator env config),
+  //               billed per-GB — this is the product default
+  //     'r2'    = the customer's own Cloudflare R2 bucket (config below)
+  //     'aws'   = the customer's own AWS S3 bucket (config below)
+  //   NULL = legacy behaviour: follow the STORAGE_PROVIDER env var (so
+  //   nothing changes until an admin explicitly picks a backend).
+  //
+  // Existing files keep working regardless — each file row carries its own
+  // `storageBackend` (NULL there = the legacy env backend), so reads always
+  // resolve to the right place even after the active backend changes.
+  activeStorageBackend String?
+
+  // 4.2.0+ (Phase 2d): where the LOCAL backend keeps its uploads folder. NULL =
+  // use the STORAGE_ROOT env (default). When set (via the "Local Storage" dialog),
+  // new local uploads go here; pre-existing files under STORAGE_ROOT stay readable
+  // (the storage layer falls back to the env root on read).
+  localStoragePath String?
+
+  // Customer Cloudflare R2 (S3-compatible). Secret is encrypted at rest.
+  r2Endpoint          String?
+  r2Region            String? @default("auto")
+  r2Bucket            String?
+  r2AccessKeyId       String?
+  r2SecretAccessKey   String? // encrypted via lib/encryption
+
+  // Customer AWS S3. Secret is encrypted at rest.
+  awsRegion           String? @default("us-east-1")
+  awsBucket           String?
+  awsAccessKeyId      String?
+  awsSecretAccessKey  String? // encrypted via lib/encryption
 
   // Default Video Processing Settings
   // 1.9.4+ Phase A: "auto" lets the worker match the source —

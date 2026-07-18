@@ -12,6 +12,7 @@ import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
 import { logError } from '@/lib/logging'
+import { storageLocationLabels } from '@/lib/storage-labels'
 
 interface VideoListProps {
   videos: Video[]
@@ -502,6 +503,18 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
           <div>
             <p className="text-muted-foreground">{t('size')}</p>
             <p className="font-medium">{formatFileSize(Number(video.originalFileSize))}</p>
+          </div>
+          {/* 4.2.0+: which storage backend(s) this version is stored on. After
+              a keep-source transfer it can show more than one tag. */}
+          <div>
+            <p className="text-muted-foreground">Storage</p>
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {storageLocationLabels((video as any).storageBackend, (video as any).storageLocations).map((lbl, i) => (
+                <span key={i} className="inline-block px-1.5 py-0.5 rounded bg-muted text-[10px] font-medium leading-none">
+                  {lbl}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       )}

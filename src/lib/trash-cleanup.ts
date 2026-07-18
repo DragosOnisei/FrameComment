@@ -9,10 +9,24 @@
 
 import { prisma } from './db'
 import { deleteFile, deleteDirectory } from './storage'
+import { legacyBackend, allFileLocations, type StorageBackend } from './storage-backends'
 import { logError } from './logging'
 
 /** How long a trashed item lingers before the cleanup job removes it. */
 export const TRASH_RETENTION_DAYS = 30
+
+// 4.2.0+ (Phase 2b): a file may live on more than one backend (kept after a
+// transfer). Delete it from every location so nothing is orphaned.
+async function deleteFileEverywhere(path: string, backends: StorageBackend[]): Promise<void> {
+  for (const b of backends) {
+    await deleteFile(path, b).catch(() => {})
+  }
+}
+async function deleteDirectoryEverywhere(dir: string, backends: StorageBackend[]): Promise<void> {
+  for (const b of backends) {
+    await deleteDirectory(dir, b).catch(() => {})
+  }
+}
 
 /**
  * Permanently delete a video by id. Mirrors the legacy DELETE
@@ -26,6 +40,10 @@ export async function hardDeleteVideoById(id: string): Promise<void> {
   })
   if (!video) return
 
+  // 4.2.0+: delete from EVERY backend the file lives on (NULL = legacy env;
+  // 2b: storageLocations may list more than one after a keep-source transfer).
+  const backends = allFileLocations((video as any).storageBackend, (video as any).storageLocations)
+
   try {
     for (const asset of video.assets) {
       const sharedCount = await prisma.videoAsset.count({
@@ -35,35 +53,24 @@ export async function hardDeleteVideoById(id: string): Promise<void> {
         },
       })
       if (sharedCount === 0) {
-        try {
-          await deleteFile(asset.storagePath)
-        } catch (err) {
-          logError(`[hardDeleteVideoById] asset file failed:`, err)
-        }
+        await deleteFileEverywhere(
+          asset.storagePath,
+          allFileLocations((asset as any).storageBackend, (asset as any).storageLocations),
+        )
       }
     }
 
     if (video.originalStoragePath) {
-      try {
-        await deleteFile(video.originalStoragePath)
-      } catch (err) {
-        logError(`[hardDeleteVideoById] original failed:`, err)
-      }
+      await deleteFileEverywhere(video.originalStoragePath, backends)
     }
     if (video.preview1080Path) {
-      try {
-        await deleteFile(video.preview1080Path)
-      } catch {}
+      await deleteFileEverywhere(video.preview1080Path, backends)
     }
     if (video.preview720Path) {
-      try {
-        await deleteFile(video.preview720Path)
-      } catch {}
+      await deleteFileEverywhere(video.preview720Path, backends)
     }
     if (video.preview2160Path) {
-      try {
-        await deleteFile(video.preview2160Path)
-      } catch {}
+      await deleteFileEverywhere(video.preview2160Path, backends)
     }
     if (video.thumbnailPath) {
       const thumbnailSharedAssets = await prisma.videoAsset.count({
@@ -79,15 +86,11 @@ export async function hardDeleteVideoById(id: string): Promise<void> {
         },
       })
       if (thumbnailSharedAssets === 0 && thumbnailSharedVideos === 0) {
-        try {
-          await deleteFile(video.thumbnailPath)
-        } catch {}
+        await deleteFileEverywhere(video.thumbnailPath, backends)
       }
     }
     if ((video as any).storyboardPath) {
-      try {
-        await deleteFile((video as any).storyboardPath)
-      } catch {}
+      await deleteFileEverywhere((video as any).storyboardPath, backends)
     }
 
     // 4.1.4+: sweep the whole per-video asset directory. The field-by-field
@@ -101,11 +104,7 @@ export async function hardDeleteVideoById(id: string): Promise<void> {
     // that directory reclaims all of it and is future-proof against new
     // tiers being added later.
     if ((video as any).projectId && video.id) {
-      try {
-        await deleteDirectory(`projects/${(video as any).projectId}/videos/${video.id}`)
-      } catch (err) {
-        logError(`[hardDeleteVideoById] video dir cleanup failed for ${id}:`, err)
-      }
+      await deleteDirectoryEverywhere(`projects/${(video as any).projectId}/videos/${video.id}`, backends)
     }
   } catch (err) {
     logError(`[hardDeleteVideoById] file cleanup failed for ${id}:`, err)
@@ -146,43 +145,30 @@ export async function hardDeleteProjectById(id: string): Promise<void> {
   if (!project) return
 
   for (const video of project.videos) {
+    // 4.2.0+: each video may live on one or more backends (NULL = legacy env;
+    // 2b: storageLocations after a keep-source transfer).
+    const backends = allFileLocations((video as any).storageBackend, (video as any).storageLocations)
     try {
       if (video.originalStoragePath) {
-        await deleteFile(video.originalStoragePath).catch(() => {})
+        await deleteFileEverywhere(video.originalStoragePath, backends)
       }
-      if ((video as any).preview2160Path) {
-        await deleteFile((video as any).preview2160Path).catch(() => {})
-      }
-      if (video.preview1080Path) {
-        await deleteFile(video.preview1080Path).catch(() => {})
-      }
-      if (video.preview720Path) {
-        await deleteFile(video.preview720Path).catch(() => {})
-      }
-      if ((video as any).cleanPreview2160Path) {
-        await deleteFile((video as any).cleanPreview2160Path).catch(() => {})
-      }
-      if (video.cleanPreview1080Path) {
-        await deleteFile(video.cleanPreview1080Path).catch(() => {})
-      }
-      if (video.cleanPreview720Path) {
-        await deleteFile(video.cleanPreview720Path).catch(() => {})
-      }
-      if (video.thumbnailPath) {
-        await deleteFile(video.thumbnailPath).catch(() => {})
-      }
+      // Sweep the whole per-video directory on every backend — this covers the
+      // HLS folder, the 480p tier, and any file without a dedicated column.
+      await deleteDirectoryEverywhere(`projects/${id}/videos/${video.id}`, backends)
       if ((video as any).storyboardPath) {
-        await deleteFile((video as any).storyboardPath).catch(() => {})
+        await deleteFileEverywhere((video as any).storyboardPath, backends)
       }
     } catch (err) {
       logError(`[hardDeleteProjectById] file cleanup for video ${video.id}:`, err)
     }
   }
 
-  // Cover image + any other project-scoped files live under
-  // projects/{id}/, so a recursive directory removal sweeps them.
+  // Cover image + any other project-scoped files live under projects/{id}/ on
+  // the legacy/default backend (covers are written via the legacy path). A
+  // recursive removal sweeps them; the remote per-video files were already
+  // removed above on each video's own backend.
   try {
-    await deleteDirectory(`projects/${id}`)
+    await deleteDirectory(`projects/${id}`, legacyBackend())
   } catch (err) {
     logError(`[hardDeleteProjectById] directory cleanup for ${id}:`, err)
   }
@@ -205,15 +191,11 @@ export async function hardDeleteProjectById(id: string): Promise<void> {
 export async function hardDeleteFolderDocumentById(id: string): Promise<void> {
   const doc = await (prisma as any).folderDocument.findUnique({
     where: { id },
-    select: { id: true, storagePath: true },
+    select: { id: true, storagePath: true, storageBackend: true, storageLocations: true },
   })
   if (!doc) return
   if (doc.storagePath) {
-    try {
-      await deleteFile(doc.storagePath)
-    } catch (err) {
-      logError(`[hardDeleteFolderDocumentById] file cleanup failed for ${id}:`, err)
-    }
+    await deleteFileEverywhere(doc.storagePath, allFileLocations(doc.storageBackend, doc.storageLocations))
   }
   await (prisma as any).folderDocument.delete({ where: { id } })
 }

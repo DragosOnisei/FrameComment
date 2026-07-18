@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { getFilePath, sanitizeFilenameForHeader, isS3Mode, createWebReadableStream } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader, createWebReadableStream } from '@/lib/storage'
 import { s3GetPresignedDownloadUrl, s3FileExists } from '@/lib/s3-storage'
+import { resolveReadTarget } from '@/lib/storage-backends'
 import { createReadStream, existsSync } from 'fs'
 import { logError } from '@/lib/logging'
 
@@ -35,8 +36,9 @@ export async function GET(
         fileSize: true,
         fileType: true,
         storagePath: true,
-      },
-    })
+        storageBackend: true,
+      } as any,
+    }) as any
 
     if (!upload) {
       return NextResponse.json({ error: 'Upload not found' }, { status: 404 })
@@ -44,9 +46,11 @@ export async function GET(
 
     const safeFileName = sanitizeFilenameForHeader(upload.fileName)
 
-    // ── S3 mode: redirect directly to presigned URL ──────────────────────────
-    if (isS3Mode()) {
-      const exists = await s3FileExists(upload.storagePath)
+    // ── S3-type backend: redirect directly to presigned URL ──────────────────
+    // 4.2.0+: resolve the upload's own backend rather than a global env switch.
+    const readTarget = await resolveReadTarget(upload.storageBackend)
+    if (readTarget.isS3) {
+      const exists = await s3FileExists(upload.storagePath, readTarget.config)
       if (!exists) {
         return NextResponse.json({ error: 'File not found' }, { status: 404 })
       }
@@ -54,7 +58,8 @@ export async function GET(
         upload.storagePath,
         3600,
         safeFileName,
-        upload.fileType || 'application/octet-stream'
+        upload.fileType || 'application/octet-stream',
+        readTarget.config
       )
       return NextResponse.redirect(presignedUrl, {
         status: 302,

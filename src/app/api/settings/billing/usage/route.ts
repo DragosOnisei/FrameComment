@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { logError } from '@/lib/logging'
+import { computeBillingUsage, computeTotalStorageBytes } from '@/lib/billing'
+import { getActiveBackend, backendLabel } from '@/lib/storage-backends'
 
 export const runtime = 'nodejs'
 
@@ -27,41 +28,24 @@ export async function GET(request: NextRequest) {
   if (authResult instanceof Response) return authResult
 
   try {
-    // 1.9.2+: count three storage sources, not just VideoAsset.
-    // - Video.originalFileSize is the master file uploaded by the
-    //   admin (the bulk of storage — usually multi-GB per video).
-    // - VideoAsset.fileSize is the extra files attached to a video
-    //   (comment attachments, project files, audio, images).
-    // - ProjectUpload.fileSize is reverse-share / client-side
-    //   uploads that aren't directly attached to a video.
-    // The original v1.9.2 release only summed VideoAsset, which
-    // reported KBs while the project actually had GBs of master
-    // files.
-    const [userCount, videoSum, videoAssetSum, projectUploadSum] =
-      await Promise.all([
-        prisma.user.count(),
-        prisma.video.aggregate({ _sum: { originalFileSize: true } }),
-        prisma.videoAsset.aggregate({ _sum: { fileSize: true } }),
-        prisma.projectUpload.aggregate({ _sum: { fileSize: true } }),
-      ])
-
-    // BigInt aggregate sums come back as BigInt | null. Coerce to
-    // Number for the JSON response — billing is in dollars, the
-    // precision loss past 2^53 bytes (~9 PB) is theoretical.
-    const masterBytes = videoSum._sum.originalFileSize
-      ? Number(videoSum._sum.originalFileSize)
-      : 0
-    const assetBytes = videoAssetSum._sum.fileSize
-      ? Number(videoAssetSum._sum.fileSize)
-      : 0
-    const uploadBytes = projectUploadSum._sum.fileSize
-      ? Number(projectUploadSum._sum.fileSize)
-      : 0
-    const storageBytes = masterBytes + assetBytes + uploadBytes
+    // 4.2.0+ (Phase 3): storageBytes here is the BILLABLE storage — only bytes
+    // on the FrameComment Server backend ('fc') are charged per-GB (Local / R2
+    // / AWS are the customer's own storage). computeBillingUsage applies that
+    // filter. We also return the customer's TOTAL storage across all backends
+    // + the active backend so the Billing pane can explain why per-GB may be $0.
+    const [usage, totalStorageBytes, activeBackend] = await Promise.all([
+      computeBillingUsage(),
+      computeTotalStorageBytes(),
+      getActiveBackend(),
+    ])
 
     return NextResponse.json({
-      userCount,
-      storageBytes,
+      userCount: usage.userCount,
+      storageBytes: usage.storageBytes, // billable (fc only)
+      totalStorageBytes, // all backends — for display context
+      activeBackend,
+      activeBackendLabel: backendLabel(activeBackend),
+      storageBilledOnBackend: 'fc',
       // Echo the unit prices so the client doesn't have to hard-code
       // them — keeping the source of truth here makes a future
       // pricing change a single-file edit.

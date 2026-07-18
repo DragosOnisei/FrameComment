@@ -6,6 +6,7 @@ import { RegenerateThumbnailJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
 import { downloadFile, getLocalSourcePath } from '../lib/storage'
+import { getVideoBackend } from '../lib/storage-backends'
 import { getVideoMetadata } from '../lib/ffmpeg'
 import { TEMP_DIR } from './cleanup'
 import {
@@ -62,15 +63,18 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
     // 3.1.0+: Prefer reading the source DIRECTLY from STORAGE_ROOT
     // (local mode) — same fix applied to encode-tier. Falls back to
     // the legacy download-into-/tmp behaviour for S3 mode.
+    // 4.2.0+: resolve the video's storage backend for the source read.
+    const backend = await getVideoBackend(videoId)
+
     let sourcePath: string
-    const localSource = getLocalSourcePath(originalStoragePath)
+    const localSource = getLocalSourcePath(originalStoragePath, backend)
     if (localSource) {
       sourcePath = localSource
     } else {
       const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
       if (!fs.existsSync(cachedOriginal)) {
         logMessage(`[WORKER] regenerate-thumbnail ${videoId}: cached original missing, re-downloading`)
-        const stream = await downloadFile(originalStoragePath)
+        const stream = await downloadFile(originalStoragePath, backend)
         await pipeline(stream, fs.createWriteStream(cachedOriginal))
       }
       // We DON'T set tempFiles.input — the temp sweeper / a later
@@ -88,6 +92,7 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
       sourcePath,
       metadata.duration,
       tempFiles,
+      backend,
     )
 
     try {

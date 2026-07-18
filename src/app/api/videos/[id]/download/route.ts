@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getFilePath, sanitizeFilenameForHeader, getVideoContentType, isS3Mode, createWebReadableStream } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader, getVideoContentType, createWebReadableStream } from '@/lib/storage'
 import { s3GetPresignedDownloadUrl, s3FileExists } from '@/lib/s3-storage'
+import { resolveReadTarget } from '@/lib/storage-backends'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -83,13 +84,15 @@ export async function GET(
     const safeFilename = sanitizeFilenameForHeader(originalFilename)
     const contentType = getVideoContentType(originalFilename)
 
-    // ── S3 mode: redirect directly to MinIO ────────────────────────────────────
-    if (isS3Mode()) {
-      const exists = await s3FileExists(filePath)
+    // ── S3-type backend: redirect directly to the bucket ───────────────────────
+    // 4.2.0+: resolve the video's own backend rather than a global env switch.
+    const readTarget = await resolveReadTarget((video as any).storageBackend)
+    if (readTarget.isS3) {
+      const exists = await s3FileExists(filePath, readTarget.config)
       if (!exists) {
         return NextResponse.json({ error: videoMessages.fileNotFound || 'File not found' }, { status: 404 })
       }
-      const presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, safeFilename, contentType)
+      const presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, safeFilename, contentType, readTarget.config)
       return NextResponse.redirect(presignedUrl, {
         status: 302,
         headers: {

@@ -286,6 +286,9 @@ interface VideoGroup {
   mediaType?: 'VIDEO' | 'IMAGE'
   /** Byte size of the latest version's source file — List view Size. */
   originalFileSize?: string | number | null
+  /** 4.2.0+: storage backend(s) of the latest version — rendered as tags. */
+  storageBackend?: string | null
+  storageLocations?: string | null
 }
 
 function FolderBrowserInner(
@@ -1081,6 +1084,8 @@ function FolderBrowserInner(
         createdAt: latest.createdAt,
         mediaType: latest.mediaType,
         originalFileSize: latest.originalFileSize ?? null,
+        storageBackend: (latest as any).storageBackend ?? null,
+        storageLocations: (latest as any).storageLocations ?? null,
       })
     }
     // Folders are ordered by name asc on the server; mirror that for
@@ -3710,6 +3715,8 @@ function FolderBrowserInner(
               commentCount={v.commentCount}
               uploaderName={v.uploaderName ?? null}
               createdAt={v.createdAt}
+              storageBackend={(v as any).storageBackend ?? null}
+              storageLocations={(v as any).storageLocations ?? null}
               isSelected={selectedVideoIds.has(v.id)}
               onToggleSelect={handleToggleVideoSelect}
               selectionMode={totalSelected > 0}

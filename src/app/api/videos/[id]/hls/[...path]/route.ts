@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { downloadFile, isS3Mode, getFilePath } from '@/lib/storage'
+import { downloadFile, getFilePath } from '@/lib/storage'
+import { resolveReadTarget } from '@/lib/storage-backends'
 import { verifyVideoAccessToken } from '@/lib/video-access'
 import { getRedis } from '@/lib/redis'
 import { logError } from '@/lib/logging'
@@ -29,6 +30,7 @@ async function getHlsVideoCached(videoId: string): Promise<any> {
       projectId: true,
       hlsBasePath: true,
       hlsQualities: true,
+      storageBackend: true,
     } as any,
   })) as any
   if (video) {
@@ -249,11 +251,14 @@ export async function GET(
     // For .ts segments we just stream the bytes through.
     const tokenQuery = `?token=${encodeURIComponent(token)}`
 
+    // 4.2.0+: HLS files live on the video's own backend.
+    const readTarget = await resolveReadTarget((video as any).storageBackend)
+
     try {
-      if (isS3Mode()) {
+      if (readTarget.isS3) {
         if (file.endsWith('.m3u8')) {
           // S3 small files — read fully so we can rewrite.
-          const stream = await downloadFile(storagePath)
+          const stream = await downloadFile(storagePath, readTarget.backend)
           const chunks: Buffer[] = []
           await new Promise<void>((res, rej) => {
             stream.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)))
@@ -271,7 +276,7 @@ export async function GET(
           })
         }
         // Segments: stream as-is.
-        const stream = await downloadFile(storagePath)
+        const stream = await downloadFile(storagePath, readTarget.backend)
         const webStream = new ReadableStream({
           start(controller) {
             stream.on('data', (chunk) => controller.enqueue(chunk))

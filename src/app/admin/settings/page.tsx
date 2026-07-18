@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Settings as SettingsIcon, Save, Palette, Mail, Video, Shield, Building2, ShieldCheck, FolderCog, Ban, CreditCard } from 'lucide-react'
+import { Settings as SettingsIcon, Save, Palette, Mail, Video, Shield, Building2, ShieldCheck, FolderCog, Ban, CreditCard, HardDrive } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTranslations } from 'next-intl'
 import { AppearanceSection } from '@/components/settings/AppearanceSection'
 import { BrandingSection } from '@/components/settings/BrandingSection'
 import { PrivacySection } from '@/components/settings/PrivacySection'
 import { BillingSection } from '@/components/settings/BillingSection'
+import { StorageSection } from '@/components/settings/StorageSection'
 import { NotificationsSection } from '@/components/settings/NotificationsSection'
 import { VideoProcessingSettingsSection } from '@/components/settings/VideoProcessingSettingsSection'
 import { ProjectDefaultsSection } from '@/components/settings/ProjectDefaultsSection'
@@ -222,6 +223,7 @@ export default function GlobalSettingsPage() {
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
   const [showProjectDefaults, setShowProjectDefaults] = useState(false)
   const [showBlocklist, setShowBlocklist] = useState(false)
+  const [showStorage, setShowStorage] = useState(false)
 
   // Desktop sidebar navigation
   const [activeSection, setActiveSection] = useState('appearance')
@@ -739,6 +741,8 @@ export default function GlobalSettingsPage() {
     { id: 'video-processing', label: t('videoProcessing.title'), icon: Video },
     { id: 'security', label: t('security.title'), icon: Shield },
     { id: 'blocklist', label: t('blocklist.title'), icon: Ban },
+    // 4.2.0+: multi-backend storage selector (Local / FC Server / R2 / AWS).
+    { id: 'storage', label: 'Storage', icon: HardDrive },
     // 1.9.2+: usage-based billing summary. UI-only — no Stripe yet.
     { id: 'billing', label: 'Billing', icon: CreditCard },
   ]
@@ -931,6 +935,7 @@ export default function GlobalSettingsPage() {
             setShowSecuritySettings={setShowSecuritySettings}
           />
           <BlocklistSection {...blocklistProps} show={showBlocklist} setShow={setShowBlocklist} />
+          <StorageSection show={showStorage} setShow={setShowStorage} />
           <BillingSection show={showBilling} setShow={setShowBilling} />
         </div>
 
@@ -993,6 +998,9 @@ export default function GlobalSettingsPage() {
             )}
             {activeSection === 'blocklist' && (
               <BlocklistSection {...blocklistProps} show={true} setShow={() => {}} collapsible={false} />
+            )}
+            {activeSection === 'storage' && (
+              <StorageSection show={true} setShow={() => {}} collapsible={false} />
             )}
             {activeSection === 'billing' && (
               <BillingSection show={true} setShow={() => {}} collapsible={false} />

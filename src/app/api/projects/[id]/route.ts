@@ -10,6 +10,7 @@ import { hardDeleteProjectById } from '@/lib/trash-cleanup'
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured } from '@/lib/settings'
+import { legacyBackend } from '@/lib/storage-backends'
 import { flushPendingClientNotifications } from '@/lib/notifications'
 import { invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
@@ -131,6 +132,9 @@ export async function GET(
       videos: project.videos.map((video: any) => ({
         ...video,
         originalFileSize: video.originalFileSize.toString(),
+        // 4.2.0+: resolve NULL (legacy) to the instance default backend so the
+        // storage tag shows the real location for older videos too.
+        storageBackend: video.storageBackend ?? legacyBackend(),
       })),
       comments: sanitizedComments,
       sharePassword: decryptedPassword,

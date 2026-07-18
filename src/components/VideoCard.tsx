@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
 import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
+import { storageLocationLabels } from '@/lib/storage-labels'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -83,6 +84,11 @@ export interface VideoCardProps {
   commentCount?: number
   uploaderName?: string | null
   createdAt?: string | Date
+  /** 4.2.0+: storage backend(s) this version lives on — rendered as small
+   *  tags under the name (e.g. "Local storage", or "Local + AWS" after a
+   *  keep-source transfer). */
+  storageBackend?: string | null
+  storageLocations?: string | null
   /** Multi-select state — when true the top-left checkbox is filled
    *  and the card gets a primary ring. */
   isSelected?: boolean
@@ -304,6 +310,8 @@ export default function VideoCard({
   commentCount = 0,
   uploaderName,
   createdAt,
+  storageBackend,
+  storageLocations,
   isSelected = false,
   onToggleSelect,
   selectionMode = false,
@@ -910,6 +918,21 @@ export default function VideoCard({
               title={subtext}
             >
               {subtext}
+            </div>
+          )}
+          {/* 4.2.0+: storage backend tag(s) — one chip per backend the file
+              lives on (e.g. "Local storage", or both after a keep transfer).
+              Shown for every video (NULL/legacy resolves to the default). */}
+          {!isImage && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {storageLocationLabels(storageBackend, storageLocations).map((lbl, i) => (
+                <span
+                  key={i}
+                  className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10"
+                >
+                  {lbl}
+                </span>
+              ))}
             </div>
           )}
         </div>

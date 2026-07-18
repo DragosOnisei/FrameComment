@@ -3,8 +3,9 @@ import { verifyVideoAccessToken, detectHotlinking, trackVideoAccess, logSecurity
 import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
-import { getFilePath, sanitizeFilenameForHeader, getVideoContentType, isS3Mode, createWebReadableStream } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader, getVideoContentType, createWebReadableStream } from '@/lib/storage'
 import { s3GetPresignedDownloadUrl, s3GetPresignedStreamUrl, s3FileExists } from '@/lib/s3-storage'
+import { resolveReadTarget } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
@@ -262,6 +263,9 @@ export async function GET(
     let filePath: string | null = null
     let filename: string | null = null
     let contentType = getVideoContentType(video.originalFileName || '')
+    // 4.2.0+: which backend holds the file we're about to serve. Defaults to
+    // the video's backend; the asset branch overrides it with the asset's.
+    let storedBackend: string | null | undefined = (video as any).storageBackend
 
     // Handle asset download
     if (assetId && isDownload) {
@@ -287,6 +291,7 @@ export async function GET(
       filePath = asset.storagePath
       filename = asset.fileName
       contentType = asset.fileType
+      storedBackend = (asset as any).storageBackend
     } else {
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
@@ -328,9 +333,13 @@ export async function GET(
   return NextResponse.json({ error: shareMessages.accessDenied || 'Access denied' }, { status: 404 })
     }
 
-    // ── S3 mode: redirect browser directly to MinIO ───────────────────────────
-    if (isS3Mode()) {
-      const fileExistsOnS3 = await s3FileExists(filePath)
+    // ── S3-type backend: redirect browser directly to the bucket ──────────────
+    // 4.2.0+: resolve the backend PER FILE (video/asset carry their own
+    // `storageBackend`) rather than a single global env switch, so a video on
+    // R2 and one on local disk both serve correctly from the same instance.
+    const readTarget = await resolveReadTarget(storedBackend)
+    if (readTarget.isS3) {
+      const fileExistsOnS3 = await s3FileExists(filePath, readTarget.config)
       if (!fileExistsOnS3) {
         return NextResponse.json({ error: shareMessages.accessDenied || 'Access denied' }, { status: 404 })
       }
@@ -363,7 +372,7 @@ export async function GET(
         )
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const ct = assetId ? contentType : getVideoContentType(video.originalFileName || '')
-        const presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, ct)
+        const presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, ct, readTarget.config)
         return NextResponse.redirect(presignedUrl, {
           status: 302,
           headers: { 'Cache-Control': 'no-store' },
@@ -371,7 +380,7 @@ export async function GET(
       } else if (verifiedToken.quality === 'thumbnail' || verifiedToken.quality === 'storyboard') {
         // Static images (thumbnail + 1.0.6+ storyboard sprite). Short-
         // lived presigned URL minimises the window if the URL leaks.
-        const presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, 'image/jpeg')
+        const presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, 'image/jpeg', readTarget.config)
         return NextResponse.redirect(presignedUrl, {
           status: 302,
           headers: { 'Cache-Control': 'no-store' },
@@ -379,7 +388,7 @@ export async function GET(
       } else {
         // Streaming (video player): long-lived presigned URL so range requests hit S3 directly
         const ct = getVideoContentType(video.originalFileName || '')
-        const presignedUrl = await s3GetPresignedStreamUrl(filePath, 14400, ct)
+        const presignedUrl = await s3GetPresignedStreamUrl(filePath, 14400, ct, readTarget.config)
         return NextResponse.redirect(presignedUrl, {
           status: 302,
           headers: { 'Cache-Control': 'no-store' },
