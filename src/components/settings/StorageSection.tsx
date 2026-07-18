@@ -28,8 +28,8 @@ interface StorageConfig {
 const OPTIONS: Array<{ id: Backend; title: string; blurb: string; icon: typeof HardDrive; billed: string }> = [
   {
     id: 'local',
-    title: 'Local Storage',
-    blurb: "Files stay on this server's own disk. No per-GB storage charge.",
+    title: 'Personal Server',
+    blurb: 'Your own server or NAS folder, reachable by the app over the network. No per-GB storage charge.',
     icon: HardDrive,
     billed: 'Billed per user only',
   },
@@ -343,14 +343,15 @@ export function StorageSection({ show, setShow, collapsible = true }: StorageSec
             })}
           </div>
 
-          {/* Local Storage — uploads folder */}
+          {/* Personal Server — server/NAS uploads folder */}
           {selected === 'local' && (
             <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
-              <p className="text-sm font-medium">Uploads folder</p>
+              <p className="text-sm font-medium">Server folder</p>
               <p className="text-xs text-white/55">
-                Where uploads are stored on this server&apos;s disk — a dataset path on a TrueNAS/Linux
-                server, or a folder on your Mac/Windows drive. The app must have write access to it.
-                Applies to new uploads; files already stored stay where they are and keep playing.
+                The folder on your own server or NAS where uploads are stored — a dataset path on
+                TrueNAS/Linux, or a network share (SMB/NFS) mounted so the app can reach it. The app
+                must have write access. It needs to stay online for playback + sharing to work.
+                Applies to new uploads; existing files stay where they are and keep playing.
               </p>
               <div className="space-y-2">
                 <Label htmlFor="localStoragePath">Folder path</Label>
@@ -594,7 +595,7 @@ export function StorageSection({ show, setShow, collapsible = true }: StorageSec
 /** Small local label helper for the purge progress line (client-safe). */
 function storageBackendLabelSafe(b: string | null | undefined): string {
   switch (b) {
-    case 'local': return 'Local storage'
+    case 'local': return 'Personal Server'
     case 'fc': return 'FrameComment Server'
     case 'r2': return 'Cloudflare R2'
     case 'aws': return 'AWS storage'

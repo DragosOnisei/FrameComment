@@ -368,7 +368,7 @@ export async function describeBackend(backend: StorageBackend, localRoot: string
 export function backendLabel(b: StorageBackend): string {
   switch (b) {
     case 'local':
-      return 'Local Storage'
+      return 'Personal Server'
     case 'fc':
       return 'FrameComment Server'
     case 'r2':

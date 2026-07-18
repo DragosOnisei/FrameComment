@@ -8,7 +8,7 @@
 export function storageBackendLabel(backend: string | null | undefined): string {
   switch (backend) {
     case 'local':
-      return 'Local storage'
+      return 'Personal Server'
     case 'fc':
       return 'FrameComment Server'
     case 'r2':
@@ -16,8 +16,8 @@ export function storageBackendLabel(backend: string | null | undefined): string 
     case 'aws':
       return 'AWS storage'
     default:
-      // NULL / unknown = the instance default (local on a standard install).
-      return 'Local storage'
+      // NULL / unknown = the instance's own disk/NAS (the 'local' backend).
+      return 'Personal Server'
   }
 }
 
