@@ -71,17 +71,37 @@ export function isS3Backend(b: StorageBackend): boolean {
   return !backendIsLocalFilesystem(b)
 }
 
+// 4.2.0+ (Phase 2e): cache of the admin-chosen active backend, so the SYNC
+// legacyBackend() can honor a UI choice without an env var. Populated by
+// getActiveBackend() (which does the authoritative DB read) + a background
+// refresh when stale.
+let _activeBackendCache: StorageBackend | null = null
+let _activeBackendFetchedAt = 0
+const ACTIVE_BACKEND_TTL_MS = 30_000
+
 /**
  * The backend that pre-4.2.0 files (and installs that never picked one)
  * resolve to.
  *
- *  - `DEFAULT_STORAGE_BACKEND` env (when a valid backend) wins — the hosted
- *    master instance sets this to 'fc' so its disk reads as "FrameComment
- *    Server" and is billed per-GB.
- *  - Otherwise mirror the old isS3Mode() switch: STORAGE_PROVIDER=s3 → 'fc'
- *    (env S3 config), anything else → 'local'.
+ *  - If the admin picked a LOCAL-DISK backend as active (Local Storage, or
+ *    FrameComment Server on the operator's own disk), untagged files live on
+ *    that same disk → resolve them to it. This is what makes a hosted instance
+ *    read as "FrameComment Server" after choosing it in Settings — no env var.
+ *    (A REMOTE active backend like R2/AWS is NOT adopted here: pre-existing
+ *    local-disk files must keep resolving to local, not to the cloud bucket.)
+ *  - Else `DEFAULT_STORAGE_BACKEND` env, when set (headless override).
+ *  - Else the old isS3Mode() switch: STORAGE_PROVIDER=s3 → 'fc', else 'local'.
  */
 export function legacyBackend(): StorageBackend {
+  // Refresh the cache in the background when stale. Set the timestamp FIRST so
+  // getActiveBackend()'s own fallback to legacyBackend() can't re-trigger us.
+  if (Date.now() - _activeBackendFetchedAt > ACTIVE_BACKEND_TTL_MS) {
+    _activeBackendFetchedAt = Date.now()
+    void getActiveBackend().catch(() => {})
+  }
+  const active = _activeBackendCache
+  if (active && backendIsLocalFilesystem(active)) return active
+
   const forced = process.env.DEFAULT_STORAGE_BACKEND?.trim()
   if (isValidBackend(forced)) return forced
   return process.env.STORAGE_PROVIDER === 's3' ? 'fc' : 'local'
@@ -111,6 +131,9 @@ export async function getActiveBackend(): Promise<StorageBackend> {
       'default',
     )
     const v = rows?.[0]?.activeStorageBackend
+    // Warm the sync cache legacyBackend() reads (NULL = not chosen yet).
+    _activeBackendCache = isValidBackend(v) ? v : null
+    _activeBackendFetchedAt = Date.now()
     if (isValidBackend(v)) return v
   } catch {
     // Table/column missing or DB unreachable — fall through to legacy.
