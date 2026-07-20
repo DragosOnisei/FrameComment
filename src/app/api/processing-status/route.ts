@@ -3,7 +3,67 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { getVideoQueue } from '@/lib/queue'
 import { generateVideoAccessToken } from '@/lib/video-access'
-import { logError } from '@/lib/logging'
+import { isS3Mode } from '@/lib/storage'
+import { logError, logMessage } from '@/lib/logging'
+
+// 4.2.3+: reap ABANDONED uploads so the bottom-right "Uploading videos"
+// banner (and the per-card spinner) can't be pinned forever by an upload
+// that never finished — the user closed the tab mid-upload, the network
+// dropped, or the TUS client gave up. In those cases the `onUploadFinish`
+// hook never fires (the bytes never fully land) and no server-side error
+// is thrown, so the Video row is created UPLOADING and simply sits there.
+// `/api/processing-status` counts every UPLOADING row, so a single zombie
+// keeps the banner reading "1 in progress" indefinitely. This is exactly
+// the "din cand in cand apare ca upload este in progress dar nu este" bug.
+//
+// A row counts as abandoned only after a safe window of ZERO activity:
+//   - TUS mode (local / fc-on-local): every received chunk bumps
+//     `uploadProgress`, which bumps `@updatedAt`, at least every ~1.5 s
+//     during a live upload. So `updatedAt` older than 30 min means no
+//     bytes have arrived for 30 min — the upload is unambiguously dead.
+//     This never touches an upload that is actually still transferring.
+//   - S3 mode: parts stream straight to the bucket, so the row's
+//     `updatedAt` is NOT bumped during the transfer and stays at creation
+//     time for the whole upload. We use a much larger 24 h floor so a
+//     long large-file upload can never be reaped while it's still running.
+//
+// Abandoned rows are marked ERROR (NEVER deleted — this mirrors the
+// existing `markVideoAsError` failure path and leaves the row visible as a
+// "Failed" card the admin can review / remove). Scoped to UPLOADING only:
+// PROCESSING rows are left completely alone, because a big 4K encode
+// legitimately runs for a long time and must not be interrupted.
+const STALE_UPLOAD_TUS_MS = 30 * 60 * 1000 // 30 minutes
+const STALE_UPLOAD_S3_MS = 24 * 60 * 60 * 1000 // 24 hours
+// Don't run the sweep on every 3 s poll — once a minute is plenty and the
+// query is idempotent (it only matches genuinely-stale rows).
+const UPLOAD_REAP_THROTTLE_MS = 60 * 1000
+let lastUploadReapAt = 0
+
+async function reapAbandonedUploads(): Promise<void> {
+  const now = Date.now()
+  if (now - lastUploadReapAt < UPLOAD_REAP_THROTTLE_MS) return
+  lastUploadReapAt = now
+  try {
+    const staleMs = isS3Mode() ? STALE_UPLOAD_S3_MS : STALE_UPLOAD_TUS_MS
+    const cutoff = new Date(now - staleMs)
+    const reaped = await prisma.video.updateMany({
+      where: { status: 'UPLOADING', updatedAt: { lt: cutoff } },
+      data: {
+        status: 'ERROR',
+        processingError:
+          'Upload did not complete (interrupted or abandoned) and was cleared automatically.',
+      },
+    })
+    if (reaped.count > 0) {
+      logMessage(
+        `[processing-status] reaped ${reaped.count} abandoned UPLOADING row(s) older than ${Math.round(staleMs / 60000)} min`,
+      )
+    }
+  } catch (err) {
+    // Never fail the status endpoint over housekeeping.
+    logError('[processing-status] stale-upload reap failed (non-fatal):', err)
+  }
+}
 
 export const runtime = 'nodejs'
 // 2.3.1+: belt-and-suspenders against the production-only "banner
@@ -47,6 +107,10 @@ export async function GET(request: NextRequest) {
   // here are interchangeable with the ones minted there — same
   // namespacing in Redis, same TTL behaviour.
   const sessionId = `admin:${authResult.id}`
+
+  // 4.2.3+: clear zombie UPLOADING rows before we count, so the banner this
+  // request produces already reflects the reaped state (throttled internally).
+  await reapAbandonedUploads()
 
   try {
     // Ask BullMQ which video-processing jobs are *actually*

@@ -93,6 +93,52 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
   // Tracks the S3 upload key per item ID so we can abort them on remove
   const s3UploadKeys = useRef<Map<string, string>>(new Map())
 
+  // 4.2.x: reconcile stuck uploads. A TUS `onSuccess` callback can be lost to
+  // an intermittent proxy / network / background-tab-throttle blip, leaving a
+  // row stuck at a partial % ("1 in progress") even though the bytes finished
+  // and the video is already PROCESSING/READY on the server. We poll the real
+  // status of any 'uploading' row that already has a videoId and clear it once
+  // the server has moved past UPLOADING. Harmless during a genuine upload (the
+  // row stays UPLOADING server-side until all bytes land, so it's left alone).
+  const pendingUploadsRef = useRef<PendingUpload[]>([])
+  useEffect(() => { pendingUploadsRef.current = pendingUploads }, [pendingUploads])
+  // Boolean dep (not the array) so the interval isn't torn down on every
+  // progress tick — only when we cross into / out of "has a row to reconcile".
+  const hasReconcileCandidates = pendingUploads.some((u) => u.status === 'uploading' && !!u.videoId)
+  useEffect(() => {
+    if (!hasReconcileCandidates) return
+    let cancelled = false
+    const reconcile = async () => {
+      const ids = pendingUploadsRef.current
+        .filter((u) => u.status === 'uploading' && u.videoId)
+        .map((u) => u.videoId as string)
+      if (ids.length === 0) return
+      try {
+        const res = await apiPost<{ statuses: Record<string, string> }>(
+          '/api/videos/statuses',
+          { ids },
+        )
+        if (cancelled || !res?.statuses) return
+        setPendingUploads((prev) =>
+          prev.map((u) => {
+            if (u.status !== 'uploading' || !u.videoId) return u
+            const s = res.statuses[u.videoId]
+            if (!s || s === 'UPLOADING') return u // still uploading / unknown → leave as-is
+            if (s === 'ERROR') return { ...u, status: 'error' as const, error: u.error || 'Processing failed' }
+            // PROCESSING / READY = bytes finished; the onSuccess callback was
+            // just lost. Clear the stuck row.
+            return { ...u, status: 'completed' as const, progress: 100 }
+          }),
+        )
+      } catch {
+        /* transient — try again next tick */
+      }
+    }
+    const timeout = setTimeout(reconcile, 2000)
+    const interval = setInterval(reconcile, 5000)
+    return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
+  }, [hasReconcileCandidates])
+
   // 1.5.7: detects if the modal is being opened on a public hostname
   // (i.e. likely behind a CDN / reverse proxy like Cloudflare). If so we
   // surface a small hint about switching to the LAN URL over VPN for
