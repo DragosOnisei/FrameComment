@@ -205,26 +205,48 @@ export async function PATCH(
       })
     }
 
-    // Build update data object
-    const updateData: any = {}
+    // Per-ROW fields (approval + version label) apply only to THIS
+    // version. Name is handled separately below because it's the
+    // GROUP's identity, not a single row's.
+    const rowUpdate: any = {}
 
     if (approved !== undefined) {
-      updateData.approved = approved
-      updateData.approvedAt = approved ? new Date() : null
-    }
-
-    if (name !== undefined) {
-      updateData.name = name.trim()
+      rowUpdate.approved = approved
+      rowUpdate.approvedAt = approved ? new Date() : null
     }
 
     if (versionLabel !== undefined) {
-      updateData.versionLabel = versionLabel.trim()
+      rowUpdate.versionLabel = versionLabel.trim()
     }
 
-    // Update video
-    await prisma.video.update({
-      where: { id },
-      data: updateData
+    // 4.2.4+: RENAME applies to the WHOLE version group.
+    //
+    // In this app's Frame.io-style stacking every version of a video
+    // shares the same `name`; that shared name IS what groups the rows
+    // into one stack (see /api/videos/[id]/stack) and what both the grid
+    // card and the player header display. So renaming must rewrite every
+    // row in the group — otherwise (a) the one renamed row would fall
+    // out of its stack (its name no longer matches its siblings) and
+    // (b) the remaining versions would keep the old name, so the header
+    // still looked "wrong" for those. We scope by projectId + folderId +
+    // the CURRENT name, i.e. exactly the rows that form this stack.
+    const newName =
+      name !== undefined && name.trim() !== video.name ? name.trim() : null
+
+    await prisma.$transaction(async (tx) => {
+      if (newName !== null) {
+        await tx.video.updateMany({
+          where: {
+            projectId: video.projectId,
+            folderId: video.folderId,
+            name: video.name,
+          },
+          data: { name: newName },
+        })
+      }
+      if (Object.keys(rowUpdate).length > 0) {
+        await tx.video.update({ where: { id }, data: rowUpdate })
+      }
     })
 
     // Update project status if approval changed

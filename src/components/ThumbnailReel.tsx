@@ -332,18 +332,32 @@ export default function ThumbnailReel({
     activeVideo?.versionLabel ||
     (typeof activeVideo?.version === 'number' ? `v${activeVideo.version}` : 'v1')
 
-  // Display name in the header reflects the SELECTED version's
-  // original filename (1.0.6+). After Frame.io-style stacking, every
-  // version in a group shares the same `name`, so we can't fall back
-  // to it for per-version identity. Strip the extension so the bar
-  // reads "Episode 2" not "Episode 2.mp4".
+  // 4.2.4+: the header shows the video's NAME — the same value the grid
+  // card shows and the one "Rename" edits — NOT the uploaded file's
+  // original filename.
+  //
+  // History: 1.0.6+ used `originalFileName` here for "per-version
+  // identity". But in this app every version of a stack shares one
+  // `name` (see /api/videos/[id]/stack), and versions are already told
+  // apart by the Vx chip + upload timestamp below — so there's no need
+  // to derive identity from the raw filename. Worse, `originalFileName`
+  // is whatever the file was called when the editor exported it: if v3
+  // was exported as "Script 1_1.mp4", the header read "Script 1_1" even
+  // though the video is named "FFN_3 …", and a Rename (which updates
+  // `name`, never `originalFileName`) couldn't fix it. `activeVideoName`
+  // is the group key the parent maps videos by, so it always equals the
+  // current (renamed) name. Fall back to the row's `name`, then to the
+  // stripped filename only if a name is somehow missing.
   const stripExt = (filename: string | undefined | null) => {
     if (!filename) return ''
     const dot = filename.lastIndexOf('.')
     return dot > 0 ? filename.slice(0, dot) : filename
   }
   const displayedHeaderName =
-    stripExt(activeVideo?.originalFileName) || activeVideoName || ''
+    activeVideoName ||
+    (activeVideo?.name as string | undefined) ||
+    stripExt(activeVideo?.originalFileName) ||
+    ''
 
   // 1.2.0+: surface the active version's upload timestamp directly
   // under the title so the reviewer can see how long passed between

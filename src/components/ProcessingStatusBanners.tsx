@@ -353,7 +353,7 @@ function StatusBanner({
               })()
             : videos
         return (
-          <div className="border-t border-white/10 max-h-[260px] overflow-y-auto">
+          <div className="border-t border-white/10 max-h-[260px] overflow-y-auto custom-scrollbar">
             {visibleVideos.length === 0 ? (
               <div className="px-3 py-4 text-[11px] text-white/55 text-center">
                 {isDone ? 'All done. The banner will close shortly.' : 'No videos in this state.'}
