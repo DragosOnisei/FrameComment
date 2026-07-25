@@ -43,7 +43,7 @@ export async function verifyProjectAccess(
 
   // Check if user is admin (admins bypass password protection)
   const currentUser = await getCurrentUserFromRequest(request)
-  const isAdmin = isStaff(currentUser?.role)
+  const isAdmin = currentUser != null && isStaff(currentUser.role)
   const shareContext = await getShareContext(request)
 
   if (isAdmin) {

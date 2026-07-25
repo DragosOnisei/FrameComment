@@ -40,7 +40,7 @@ export async function GET(
     }
 
     const currentUser = await getCurrentUserFromRequest(request)
-    const isAdmin = isStaff(currentUser?.role)
+    const isAdmin = currentUser != null && isStaff(currentUser.role)
     const shareContext = await getShareContext(request)
     let authorized = false
     if (isAdmin) {

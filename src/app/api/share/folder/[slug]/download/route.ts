@@ -81,7 +81,7 @@ export async function GET(
 
     // Auth — mirrors the GET /api/share/folder/[slug] flow exactly.
     const currentUser = await getCurrentUserFromRequest(request)
-    const isAdmin = isStaff(currentUser?.role)
+    const isAdmin = currentUser != null && isStaff(currentUser.role)
     const shareContext = await getShareContext(request)
     let authorized = false
     if (isAdmin) {

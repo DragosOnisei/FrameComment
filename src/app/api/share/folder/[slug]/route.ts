@@ -135,7 +135,10 @@ export async function GET(
     // Admin override: a logged-in studio admin can always view any
     // folder share, no challenge needed.
     const currentUser = await getCurrentUserFromRequest(request)
-    const isAdmin = isStaff(currentUser?.role)
+    // 4.3.0: keep the `!= null` check so TypeScript still narrows `currentUser`
+    // to non-null inside `if (isAdmin)` (a bare `isStaff(currentUser?.role)`
+    // function call would lose that narrowing → "possibly null" on currentUser.id).
+    const isAdmin = currentUser != null && isStaff(currentUser.role)
     const shareContext = await getShareContext(request)
 
     let authorized = false

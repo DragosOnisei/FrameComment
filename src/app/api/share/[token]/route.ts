@@ -98,7 +98,7 @@ export async function GET(
     const bearerToken = parseBearerToken(request)
     if (bearerToken && !shareContext && projectMeta.authMode !== 'NONE') {
       const currentUser = await getCurrentUserFromRequest(request)
-      const isAdmin = isStaff(currentUser?.role)
+      const isAdmin = currentUser != null && isStaff(currentUser.role)
 
       if (!isAdmin) {
         // Token was sent but invalid/revoked - force re-authentication
