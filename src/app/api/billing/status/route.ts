@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
+import { canManageSettings } from '@/lib/permissions'
 import { getStripe, isStripeConfigured, isStripeTestMode } from '@/lib/stripe'
 import {
   computeBillingUsage,
@@ -79,6 +80,18 @@ export async function GET(request: NextRequest) {
             businessDaysBetween(new Date(issueSince), new Date()),
         )
       : null
+
+    // 4.3.0+: the suspension wall needs the `suspended` flag for EVERY internal
+    // role (Editor/Marketing/Producer included — they're locked out too when the
+    // account is suspended). But the financial details (card, invoices, billing
+    // email, next charge) are Owner/Admin only. Non-managers get just the wall
+    // essentials so nothing sensitive leaks.
+    if (!canManageSettings(authResult.role)) {
+      return NextResponse.json({
+        suspended: !!settings?.billingSuspended,
+        graceDaysLeft,
+      })
+    }
 
     return NextResponse.json({
       configured: isStripeConfigured(),

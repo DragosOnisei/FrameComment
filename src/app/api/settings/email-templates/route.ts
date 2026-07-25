@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import {
   getAllTemplates,
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   const messages = await loadLocaleMessages(configuredLocale).catch(() => null)
   const templateMessages = messages?.settings?.emailTemplates || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }

@@ -1,3 +1,4 @@
+import { isStaff } from './permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { parseBearerToken, verifyAdminAccessToken, verifyShareToken } from '@/lib/auth'
@@ -70,7 +71,7 @@ export async function verifyS3UploadAccess(
   }
 
   const adminPayload = await verifyAdminAccessToken(bearer)
-  const isAdmin = !!adminPayload?.role && adminPayload.role === 'ADMIN'
+  const isAdmin = !!adminPayload?.role && isStaff(adminPayload.role)
 
   if (!isAdmin) {
     const sharePayload = await verifyShareToken(bearer)

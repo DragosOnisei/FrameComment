@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStorageTransferQueue } from '@/lib/queue'
 import { getTransferState, requestCancel, computeBackendStatus } from '@/lib/storage-transfer'
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 
 // GET — current job progress + per-backend status (polled by the Settings UI).
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   try {
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
 
 // POST { action: 'start' | 'purge' | 'cancel', backend? }
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(request, {

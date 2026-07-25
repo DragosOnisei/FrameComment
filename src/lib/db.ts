@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import { ALL_ROLES } from './permissions'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
@@ -24,8 +25,11 @@ export async function setDatabaseUserContext(
     throw new Error('Invalid userId format - must be valid CUID')
   }
 
-  // Validate userRole is a known enum value
-  const validRoles = ['ADMIN']
+  // Validate userRole is a known enum value. 4.3.0+: this used to hardcode
+  // ['ADMIN']; it must accept every role (Owner/Admin/Editor/Marketing/Producer)
+  // or `getCurrentUserFromRequest` throws for any non-Admin — which broke the
+  // session for the Owner right after the role migration.
+  const validRoles = ALL_ROLES as readonly string[]
   if (!validRoles.includes(userRole)) {
     throw new Error(`Invalid userRole - must be one of: ${validRoles.join(', ')}`)
   }

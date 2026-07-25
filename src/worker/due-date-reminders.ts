@@ -101,7 +101,7 @@ export async function processDueDateReminders() {
       logMessage('[WORKER] SMTP not configured — skipping due date reminder emails')
     } else {
       const admins = await prisma.user.findMany({
-        where: { role: 'ADMIN' },
+        where: {}, /* 4.3.0: all internal roles (User table is staff-only) */
         select: { email: true },
       })
       const adminEmails = admins.map(a => a.email).filter(Boolean)

@@ -50,10 +50,68 @@ model User {
   videosCreated     Video[]             @relation("VideoCreator")
   // 3.5.0+: in-app bell notifications addressed to this admin.
   notifications     Notification[]      @relation("UserNotifications")
+  // 4.3.0+: ownership transfers this user initiated / received.
+  ownershipTransfersFrom OwnershipTransfer[] @relation("TransferFrom")
+  ownershipTransfersTo   OwnershipTransfer[] @relation("TransferTo")
 }
 
+// 4.3.0+: single-owner model WITH a 30-day anti-hijack safety net.
+//
+// Transferring ownership makes the target the active OWNER immediately, but the
+// previous owner stays an "intermediary owner" for 30 days (graceEndsAt): they
+// keep OWNER-level power and, crucially, can REVERSE the transfer (reclaim
+// ownership + demote the new owner) at any point in the window. This is the
+// scenario where someone hijacks a session and transfers ownership away — the
+// real owner is never locked out and can undo it. During the window the NEW
+// owner is hard-blocked (server-side) from removing/demoting the grace owner or
+// starting another transfer. After 30 days the transfer FINALIZES automatically
+// (a worker sweep + a lazy check), the previous owner drops to ADMIN, and the
+// new owner becomes the sole OWNER.
+//
+// Only one transfer can be in GRACE at a time. `toPreviousRole` records what the
+// recipient was before, so a REVERSE restores it exactly.
+model OwnershipTransfer {
+  id             String                  @id @default(cuid())
+  fromUserId     String
+  toUserId       String
+  toPreviousRole UserRole
+  status         OwnershipTransferStatus  @default(GRACE)
+  initiatedAt    DateTime                 @default(now())
+  graceEndsAt    DateTime
+  finalizedAt    DateTime?
+  reversedAt     DateTime?
+
+  from User @relation("TransferFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  to   User @relation("TransferTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([graceEndsAt])
+}
+
+// 4.3.0+: account roles (mIRC-style level hierarchy).
+//   OWNER    (level 100) — every right, incl. transferring ownership + deleting the company.
+//   ADMIN    (level  90) — every right EXCEPT owning the account; can add/delete users
+//                          and assign roles up to Admin, but can never touch the Owner
+//                          (nor a grace-period owner). Cannot transfer ownership.
+//   EDITOR / MARKETING / PRODUCER (level 50) — all content rights (videos, folders,
+//                          projects, comments, sharing) but NO user management and NO
+//                          access to Settings / Storage config / Billing. Identical for
+//                          now; kept as distinct values so they can diverge later.
+// ADMIN stays the @default so freshly-created users land at Admin unless promoted.
 enum UserRole {
+  OWNER
   ADMIN
+  EDITOR
+  MARKETING
+  PRODUCER
+}
+
+// 4.3.0+: lifecycle of an ownership transfer. Single-owner model with a 30-day
+// safety net — see the OwnershipTransfer model.
+enum OwnershipTransferStatus {
+  GRACE
+  FINALIZED
+  REVERSED
 }
 
 model Project {

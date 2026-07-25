@@ -188,7 +188,9 @@ export const createUserSchema = z.object({
   username: usernameSchema.optional(),
   password: passwordSchema,
   name: safeStringSchema(1, 255).optional(),
-  role: z.enum(['ADMIN']).optional()
+  // 4.3.0+: accept any role at the FORMAT level; authorization (who may assign
+  // what, and that OWNER is never assignable here) is enforced in the route.
+  role: z.enum(['OWNER', 'ADMIN', 'EDITOR', 'MARKETING', 'PRODUCER']).optional()
 })
 
 export const updateUserSchema = z.object({

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import {
   replacePlaceholders,
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   const settingsMessages = messages?.settings || {}
   const emailTemplateMessages = settingsMessages.emailTemplates || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }

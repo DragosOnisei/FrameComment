@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { canManageSettings, canManageUsers } from '@/lib/permissions'
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
@@ -248,29 +249,35 @@ export default function AdminSidebar() {
               <User className="w-4 h-4" />
               Profile
             </Link>
-            <Link
-              href="/admin/settings"
-              onClick={() => setShowUserMenu(false)}
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-foreground/5 transition-colors"
-              role="menuitem"
-            >
-              <SettingsIcon className="w-4 h-4" />
-              Settings
-            </Link>
+            {/* 4.3.0+: Settings is Owner/Admin only. */}
+            {canManageSettings(user?.role) && (
+              <Link
+                href="/admin/settings"
+                onClick={() => setShowUserMenu(false)}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-foreground/5 transition-colors"
+                role="menuitem"
+              >
+                <SettingsIcon className="w-4 h-4" />
+                Settings
+              </Link>
+            )}
 
             <div className="h-px bg-border my-1" />
 
             {/* 4.1.5+: Users + Trash moved out of the primary nav into
-                the profile menu so the sidebar focuses on projects. */}
-            <Link
-              href="/admin/users"
-              onClick={() => setShowUserMenu(false)}
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-foreground/5 transition-colors"
-              role="menuitem"
-            >
-              <Users className="w-4 h-4" />
-              {t('users')}
-            </Link>
+                the profile menu so the sidebar focuses on projects.
+                4.3.0+: User Management is Owner/Admin only. */}
+            {canManageUsers(user?.role) && (
+              <Link
+                href="/admin/users"
+                onClick={() => setShowUserMenu(false)}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-foreground/5 transition-colors"
+                role="menuitem"
+              >
+                <Users className="w-4 h-4" />
+                {t('users')}
+              </Link>
+            )}
             <Link
               href="/admin/trash"
               onClick={() => setShowUserMenu(false)}

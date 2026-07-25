@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const settingsMessages = messages?.settings || {}
   const notificationsMessages = settingsMessages.notifications || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

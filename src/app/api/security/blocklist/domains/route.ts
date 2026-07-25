@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { invalidateBlocklistCache } from '@/lib/video-access'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const settingsMessages = messages?.settings || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const settingsMessages = messages?.settings || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -129,7 +129,7 @@ export async function DELETE(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const settingsMessages = messages?.settings || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }

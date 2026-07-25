@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   const securityMessages = messages?.security || {}
 
   // Require admin authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -135,7 +135,7 @@ export async function DELETE(request: NextRequest) {
   const securityMessages = messages?.security || {}
 
   // Require admin authentication
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }

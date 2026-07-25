@@ -9,6 +9,13 @@ import { getRedis } from './redis'
 import { isShareSessionRevoked } from './session-invalidation'
 import { logError, logWarn } from './logging'
 import { getAdminSessionTimeoutSeconds } from './settings'
+import {
+  isStaff,
+  canManageSettings,
+  canManageUsers,
+  canDeleteUsers,
+  isOwner,
+} from './permissions'
 
 export interface AuthUser {
   id: string
@@ -372,10 +379,70 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   return user
 }
 
+/**
+ * 4.3.0+: base gate for the admin app. Historically this required role ===
+ * 'ADMIN'; with the new role system it accepts ANY authenticated internal user
+ * (Owner / Admin / Editor / Marketing / Producer). This is the correct gate for
+ * ordinary CONTENT routes (videos, folders, projects, comments, admin share) —
+ * every internal role can use those. Sensitive routes must use the stricter
+ * guards below (requireApiManageSettings / requireApiManageUsers /
+ * requireApiDeleteUsers / requireApiOwner) instead of this one.
+ *
+ * The role is read fresh from the DB on every request (see
+ * getCurrentUserFromRequest), so a demotion takes effect immediately.
+ */
 export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | Response> {
   const user = await getCurrentUserFromRequest(request)
-  if (!user || user.role !== 'ADMIN') {
+  if (!user || !isStaff(user.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return user
+}
+
+/** OWNER + ADMIN only. Gate for App Settings, Storage config, Billing. */
+export async function requireApiManageSettings(request: NextRequest): Promise<AuthUser | Response> {
+  const user = await getCurrentUserFromRequest(request)
+  if (!user || !isStaff(user.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!canManageSettings(user.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return user
+}
+
+/** OWNER + ADMIN only. Gate for adding users and changing roles. */
+export async function requireApiManageUsers(request: NextRequest): Promise<AuthUser | Response> {
+  const user = await getCurrentUserFromRequest(request)
+  if (!user || !isStaff(user.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!canManageUsers(user.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return user
+}
+
+/** OWNER + ADMIN only. Gate for deleting user accounts (per-target rules still apply). */
+export async function requireApiDeleteUsers(request: NextRequest): Promise<AuthUser | Response> {
+  const user = await getCurrentUserFromRequest(request)
+  if (!user || !isStaff(user.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!canDeleteUsers(user.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return user
+}
+
+/** OWNER only. Gate for ownership transfer / reversal / company deletion. */
+export async function requireApiOwner(request: NextRequest): Promise<AuthUser | Response> {
+  const user = await getCurrentUserFromRequest(request)
+  if (!user || !isStaff(user.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!isOwner(user.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   return user
 }
@@ -410,7 +477,9 @@ export async function getAuthContext(request: NextRequest): Promise<{
 }> {
   const user = await getCurrentUserFromRequest(request)
   const shareContext = await getShareContext(request)
-  const isAdmin = user?.role === 'ADMIN'
+  // 4.3.0+: any internal role (Owner/Admin/Editor/Marketing/Producer) is
+  // "admin" for the purposes of content access vs. a public share token.
+  const isAdmin = isStaff(user?.role)
 
   return { user, isAdmin, shareContext }
 }

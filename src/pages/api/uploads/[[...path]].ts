@@ -1,3 +1,4 @@
+import { isStaff } from '@/lib/permissions'
 import { Server } from '@tus/server'
 import { FileStore } from '@tus/file-store'
 import { prisma } from '@/lib/db'
@@ -50,7 +51,7 @@ const tusServer: Server = new Server({
       // Try admin auth first, then fall back to share token auth
       let isAdmin = false
       const adminPayload = await verifyAdminAccessToken(bearer)
-      if (adminPayload && adminPayload.role === 'ADMIN') {
+      if (adminPayload && isStaff(adminPayload.role)) {
         isAdmin = true
       } else {
         // Try share token auth for client uploads

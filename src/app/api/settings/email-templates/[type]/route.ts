@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import {
   getEmailTemplate,
@@ -32,7 +32,7 @@ interface RouteParams {
  * Get a specific email template by type
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
  * Update a specific email template
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -199,7 +199,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
  * Reset a template to its default content
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -271,7 +271,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
  * Enable or disable a specific template override
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult
   }

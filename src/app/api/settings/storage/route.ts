@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { prisma } from '@/lib/db'
 import { encrypt, decrypt } from '@/lib/encryption'
@@ -63,7 +63,7 @@ async function validateLocalPath(p: string): Promise<{ ok: true } | { ok: false;
 
 // GET — current storage settings, secrets redacted to a "configured" boolean.
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   try {
@@ -140,7 +140,7 @@ function buildTestConfig(
 
 // POST — either test a connection ({ action: 'test', backend }) or save.
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(request, {

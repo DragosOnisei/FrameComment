@@ -1,17 +1,30 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
+import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { Users, UserPlus, Edit, Trash2, Mail, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus } from 'lucide-react'
+import { Users, UserPlus, Edit, Trash2, Mail, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus, Crown, RotateCcw } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import { copyToClipboard } from '@/lib/clipboard'
 import { apiDelete, apiFetch, apiPost, apiPatch } from '@/lib/api-client'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
+import {
+  canManageUsers,
+  canDeleteUsers,
+  canActOnUser,
+  canAssignRole,
+  canTransferOwnership,
+  isOwner,
+  ROLE_LABELS,
+  ASSIGNABLE_ROLES,
+  type AppRole,
+} from '@/lib/permissions'
 import { startRegistration } from '@simplewebauthn/browser'
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
 
@@ -31,6 +44,16 @@ interface UserData {
 export default function UsersPage() {
   const t = useTranslations('users')
   const tc = useTranslations('common')
+  const router = useRouter()
+
+  // 4.3.0+: User Management is Owner/Admin only. Lower roles that reach the URL
+  // are bounced to Projects (the API is gated server-side too).
+  const { user: authUser } = useAuth()
+  useEffect(() => {
+    if (authUser && !canManageUsers(authUser.role)) {
+      router.replace('/admin/projects')
+    }
+  }, [authUser, router])
   const [users, setUsers] = useState<UserData[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -81,6 +104,70 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // 4.3.0+: role selection + ownership transfer
+  const [newUserRole, setNewUserRole] = useState<AppRole>('EDITOR')
+  const [editUserRole, setEditUserRole] = useState<AppRole>('EDITOR')
+  const [ownership, setOwnership] = useState<null | {
+    active: boolean
+    transfer?: {
+      fromUserId: string
+      toUserId: string
+      fromName: string
+      toName: string
+      graceEndsAt: string
+      daysRemaining: number
+      viewerIsGraceOwner: boolean
+      viewerIsNewOwner: boolean
+    }
+  }>(null)
+  const [showTransferModal, setShowTransferModal] = useState(false)
+  const [transferTarget, setTransferTarget] = useState<UserData | null>(null)
+  const [transferPassword, setTransferPassword] = useState('')
+  const [showReverseModal, setShowReverseModal] = useState(false)
+  const [reversePassword, setReversePassword] = useState('')
+
+  const myRole = loggedInUser?.role || ''
+
+  const roleBadgeClass = (role: string): string => {
+    switch (role) {
+      case 'OWNER': return 'bg-amber-500/15 text-amber-300 ring-amber-500/30'
+      case 'ADMIN': return 'bg-primary/15 text-primary ring-primary/30'
+      case 'EDITOR': return 'bg-sky-500/15 text-sky-300 ring-sky-500/30'
+      case 'MARKETING': return 'bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/30'
+      case 'PRODUCER': return 'bg-teal-500/15 text-teal-300 ring-teal-500/30'
+      default: return 'bg-white/10 text-white/70 ring-white/20'
+    }
+  }
+  const roleLabel = (role: string): string => (ROLE_LABELS as Record<string, string>)[role] || role
+  // Roles the logged-in user is allowed to assign (Owner is never in here —
+  // ownership only moves via the transfer flow).
+  const assignableRoles = ASSIGNABLE_ROLES.filter((r) => canAssignRole(myRole, r))
+
+  // Per-row action gating.
+  const rowPerms = (user: UserData) => {
+    const isSelf = loggedInUser?.id === user.id
+    const targetIsGraceOwner = !!(
+      ownership?.active && ownership.transfer?.fromUserId === user.id
+    )
+    const actArgs = {
+      actorId: loggedInUser?.id || '',
+      actorRole: myRole,
+      targetId: user.id,
+      targetRole: user.role,
+      targetIsGraceOwner,
+    }
+    const canAct = canActOnUser(actArgs)
+    return {
+      isSelf,
+      canEditRow: isSelf || canAct,
+      canDeleteRow: canDeleteUsers(myRole) && canAct,
+      // Owner-only: transfer ownership to a non-owner user, when no transfer is
+      // already in flight.
+      canTransferToRow:
+        canTransferOwnership(myRole) && !isOwner(user.role) && !isSelf && !ownership?.active,
+    }
+  }
+
   const fetchUsers = useCallback(async () => {
     try {
       const res = await apiFetch('/api/users')
@@ -130,11 +217,21 @@ export default function UsersPage() {
     }
   }, [])
 
+  const fetchOwnership = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/users/ownership')
+      if (res.ok) setOwnership(await res.json())
+    } catch {
+      // Silently fail — the banner just won't show.
+    }
+  }, [])
+
   useEffect(() => {
     fetchUsers()
     fetchLoggedInUser()
     fetchPasskeyStatus()
-  }, [fetchUsers, fetchLoggedInUser, fetchPasskeyStatus])
+    fetchOwnership()
+  }, [fetchUsers, fetchLoggedInUser, fetchPasskeyStatus, fetchOwnership])
 
   // Filter users by search
   const filteredUsers = users.filter(user => {
@@ -214,9 +311,11 @@ export default function UsersPage() {
         username: newUserData.username || undefined,
         name: newUserData.name || undefined,
         password: newUserData.password,
+        role: newUserRole,
       })
       await fetchUsers()
       setNewUserData({ email: '', username: '', name: '', password: '', confirmPassword: '' })
+      setNewUserRole('EDITOR')
       setShowAddUserModal(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('failedToCreateUser'))
@@ -233,6 +332,7 @@ export default function UsersPage() {
       username: user.username || '',
       name: user.name || '',
     })
+    setEditUserRole((user.role as AppRole) || 'EDITOR')
     setError('')
     setShowEditUserModal(true)
   }
@@ -247,15 +347,81 @@ export default function UsersPage() {
     setError('')
 
     try {
-      await apiPatch(`/api/users/${editingUser.id}`, {
+      const payload: Record<string, unknown> = {
         email: editFormData.email,
         username: editFormData.username || null,
         name: editFormData.name || null,
-      })
+      }
+      // Only send a role change when it's allowed and actually different — the
+      // Owner's role is never edited here (it moves via the transfer flow), and
+      // you can't change your own role.
+      const targetIsOwner = isOwner(editingUser.role)
+      const isSelf = loggedInUser?.id === editingUser.id
+      if (
+        !targetIsOwner &&
+        !isSelf &&
+        canManageUsers(myRole) &&
+        editUserRole !== editingUser.role &&
+        canAssignRole(myRole, editUserRole)
+      ) {
+        payload.role = editUserRole
+      }
+      await apiPatch(`/api/users/${editingUser.id}`, payload)
       await fetchUsers()
       setShowEditUserModal(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('failedToUpdateUser'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 4.3.0+: ownership transfer + reverse
+  function openTransferModal(user: UserData) {
+    setTransferTarget(user)
+    setTransferPassword('')
+    setError('')
+    setShowEditUserModal(false)
+    setShowTransferModal(true)
+  }
+
+  async function handleTransferOwnership() {
+    if (!transferTarget) return
+    if (!transferPassword) {
+      setError(t('passwordRequiredToConfirm') || 'Your password is required to confirm.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await apiPost('/api/users/ownership/transfer', {
+        toUserId: transferTarget.id,
+        password: transferPassword,
+      })
+      setShowTransferModal(false)
+      setTransferPassword('')
+      await Promise.all([fetchUsers(), fetchOwnership(), fetchLoggedInUser()])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (t('failedToTransferOwnership') || 'Failed to transfer ownership'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleReverseTransfer() {
+    if (!reversePassword) {
+      setError(t('passwordRequiredToConfirm') || 'Your password is required to confirm.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await apiPost('/api/users/ownership/reverse', { password: reversePassword })
+      setShowReverseModal(false)
+      setReversePassword('')
+      await Promise.all([fetchUsers(), fetchOwnership(), fetchLoggedInUser()])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (t('failedToReverseTransfer') || 'Failed to reverse transfer'))
     } finally {
       setSaving(false)
     }
@@ -396,33 +562,76 @@ export default function UsersPage() {
         </h1>
       </TopbarLeftSlot>
       <TopbarRightSlot>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
-          style={{
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            backdropFilter: 'blur(12px) saturate(140%)',
-            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-          }}
-          onClick={() => {
-            setNewUserData({ email: '', username: '', name: '', password: '', confirmPassword: '' })
-            setShowPassword(false)
-            setShowConfirmPassword(false)
-            setError('')
-            setShowAddUserModal(true)
-          }}
-          aria-label={t('addUser')}
-        >
-          <UserPlus className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">{t('addUser')}</span>
-        </Button>
+        {canManageUsers(myRole) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+            onClick={() => {
+              setNewUserData({ email: '', username: '', name: '', password: '', confirmPassword: '' })
+              setNewUserRole('EDITOR')
+              setShowPassword(false)
+              setShowConfirmPassword(false)
+              setError('')
+              setShowAddUserModal(true)
+            }}
+            aria-label={t('addUser')}
+          >
+            <UserPlus className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">{t('addUser')}</span>
+          </Button>
+        )}
       </TopbarRightSlot>
 
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         {/* 2.5.0+: subtitle stays just under the search since the
             title moved to the topbar. */}
         <p className="text-sm text-white/55 mb-4">{t('description')}</p>
+
+        {/* 4.3.0+: ownership-transfer grace banner. Shows while a transfer is
+            inside its 30-day window. The previous ("grace") owner sees a
+            Reverse action so a fraudulent transfer can always be undone. */}
+        {ownership?.active && ownership.transfer && (
+          <div className="mb-4 p-3 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/30 flex items-start gap-3">
+            <Crown className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0 text-sm">
+              <p className="text-amber-200 font-medium">
+                {t('ownershipTransferInProgress') || 'Ownership transfer in progress'}
+              </p>
+              <p className="text-amber-200/80 mt-0.5">
+                {ownership.transfer.fromName} → {ownership.transfer.toName} ·{' '}
+                {ownership.transfer.daysRemaining}{' '}
+                {t('daysRemaining') || 'days remaining'}
+              </p>
+              {ownership.transfer.viewerIsGraceOwner && (
+                <p className="text-amber-200/70 mt-1 text-xs">
+                  {t('graceOwnerHint') ||
+                    'You remain owner during this window. If you did not start this, reverse it now.'}
+                </p>
+              )}
+            </div>
+            {ownership.transfer.viewerIsGraceOwner && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 bg-amber-500/15 hover:bg-amber-500/25 ring-1 ring-amber-500/40 text-amber-100"
+                onClick={() => {
+                  setReversePassword('')
+                  setError('')
+                  setShowReverseModal(true)
+                }}
+              >
+                <RotateCcw className="w-4 h-4 mr-1.5" />
+                {t('reverseTransfer') || 'Reverse'}
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Search — frosted-glass input matching the projects
             table's design vocabulary. */}
@@ -495,9 +704,15 @@ export default function UsersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-medium truncate text-white">{user.name || user.username || user.email}</p>
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-primary/15 text-primary ring-1 ring-primary/30 flex-shrink-0">
-                        {t('admin')}
+                      <span className={`px-2 py-0.5 text-xs rounded-full ring-1 flex-shrink-0 inline-flex items-center gap-1 ${roleBadgeClass(user.role)}`}>
+                        {user.role === 'OWNER' && <Crown className="w-3 h-3" />}
+                        {roleLabel(user.role)}
                       </span>
+                      {ownership?.active && ownership.transfer?.fromUserId === user.id && (
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30 flex-shrink-0">
+                          {t('graceOwnerBadge') || 'Owner (grace)'}
+                        </span>
+                      )}
                       {loggedInUser?.id === user.id && (
                         <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30 flex-shrink-0">
                           {t('you')}
@@ -516,15 +731,17 @@ export default function UsersPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-0.5 sm:gap-1 ml-2 flex-shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-white/65 hover:text-white hover:bg-white/5"
-                    onClick={() => openEditModal(user)}
-                    title={t('editUser')}
-                  >
-                    <Edit className="w-4 h-4" />
-                  </Button>
+                  {rowPerms(user).canEditRow && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-white/65 hover:text-white hover:bg-white/5"
+                      onClick={() => openEditModal(user)}
+                      title={t('editUser')}
+                    >
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                  )}
                   {loggedInUser?.id === user.id && (
                     <Button
                       variant="ghost"
@@ -547,15 +764,17 @@ export default function UsersPage() {
                       <Fingerprint className="w-4 h-4" />
                     </Button>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => confirmDelete(user)}
-                    className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                    title={t('deleteUser')}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  {rowPerms(user).canDeleteRow && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => confirmDelete(user)}
+                      className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                      title={t('deleteUser')}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -644,6 +863,21 @@ export default function UsersPage() {
                   data-1p-ignore
                 />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="newRole" className="text-xs text-white/80">{t('role') || 'Role'}</Label>
+              <select
+                id="newRole"
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as AppRole)}
+                className="w-full h-9 rounded-md bg-white/[0.04] ring-1 ring-white/10 text-white text-sm px-2 focus-visible:ring-primary/40 focus-visible:outline-none"
+              >
+                {assignableRoles.map((r) => (
+                  <option key={r} value={r} className="bg-neutral-900 text-white">
+                    {roleLabel(r)}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -743,113 +977,183 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit User Modal */}
+      {/* Edit User Modal — 4.3.0: same frosted-glass recipe as Add User. */}
       <Dialog open={showEditUserModal} onOpenChange={setShowEditUserModal}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md max-h-[90vh] flex flex-col bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
+          <DialogHeader className="pb-2">
+            <DialogTitle className="flex items-center gap-2 text-white">
               <Edit className="w-5 h-5 text-primary" />
               {t('editUserTitle')}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-white/55">
               {t('editUserDescription')}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 py-4">
+          <div className="flex-1 overflow-y-auto space-y-3 py-1 px-0.5">
             {error && (
-              <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
+              <div className="p-2.5 bg-destructive/15 ring-1 ring-destructive/30 rounded-md flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
                 <span className="text-sm text-destructive">{error}</span>
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="editEmail">{t('emailRequired')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="editEmail" className="text-xs text-white/80">{t('emailRequired')}</Label>
               <Input
                 id="editEmail"
                 type="email"
                 value={editFormData.email}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, email: e.target.value }))}
+                className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                 autoComplete="off"
                 data-form-type="other"
                 data-lpignore="true"
                 data-1p-ignore
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="editUsername">{t('username')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="editUsername" className="text-xs text-white/80">{t('username')}</Label>
               <Input
                 id="editUsername"
                 value={editFormData.username}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, username: e.target.value }))}
+                className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                 autoComplete="off"
                 data-form-type="other"
                 data-lpignore="true"
                 data-1p-ignore
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="editName">{t('displayName')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="editName" className="text-xs text-white/80">{t('displayName')}</Label>
               <Input
                 id="editName"
                 value={editFormData.name}
                 onChange={(e) => setEditFormData(prev => ({ ...prev, name: e.target.value }))}
+                className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                 autoComplete="off"
                 data-form-type="other"
                 data-lpignore="true"
                 data-1p-ignore
               />
             </div>
+
+            {/* 4.3.0+: role selector — shown for a manageable, non-owner, non-self
+                target. The Owner is never edited here. */}
+            {editingUser && !isOwner(editingUser.role) && loggedInUser?.id !== editingUser.id && canManageUsers(myRole) && (
+              <div className="space-y-1.5">
+                <Label htmlFor="editRole" className="text-xs text-white/80">{t('role') || 'Role'}</Label>
+                <select
+                  id="editRole"
+                  value={editUserRole}
+                  onChange={(e) => setEditUserRole(e.target.value as AppRole)}
+                  className="w-full h-9 rounded-md bg-white/[0.04] ring-1 ring-white/10 text-white text-sm px-2 focus-visible:ring-primary/40 focus-visible:outline-none"
+                >
+                  {assignableRoles.map((r) => (
+                    <option key={r} value={r} className="bg-neutral-900 text-white">
+                      {roleLabel(r)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {editingUser && isOwner(editingUser.role) && (
+              <p className="text-xs text-white/55 flex items-center gap-1.5">
+                <Crown className="w-3.5 h-3.5 text-amber-300" />
+                {t('ownerRoleNote') || 'This user is the Owner. Ownership only changes through a transfer.'}
+              </p>
+            )}
+
+            {/* Owner-only: transfer ownership to this user. */}
+            {editingUser && canTransferOwnership(myRole) && !isOwner(editingUser.role) && loggedInUser?.id !== editingUser.id && !ownership?.active && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full bg-amber-500/10 hover:bg-amber-500/20 ring-1 ring-amber-500/30 text-amber-100"
+                onClick={() => openTransferModal(editingUser)}
+              >
+                <Crown className="w-4 h-4 mr-2" />
+                {t('transferOwnership') || 'Transfer ownership to this user'}
+              </Button>
+            )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="pt-3 gap-2">
             <DialogClose asChild>
-              <Button variant="outline">{tc('cancel')}</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0"
+              >
+                {tc('cancel')}
+              </Button>
             </DialogClose>
-            <Button onClick={handleEditUser} disabled={saving}>
+            <Button
+              size="sm"
+              onClick={handleEditUser}
+              disabled={saving}
+              style={{ color: '#ffffff' }}
+              className="font-semibold"
+            >
               {saving ? tc('saving') : tc('saveChanges')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Change Password Modal */}
+      {/* Change Password Modal — 4.3.0: frosted-glass to match Add/Edit User. */}
       <Dialog open={showPasswordModal} onOpenChange={setShowPasswordModal}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md max-h-[90vh] flex flex-col bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
+          <DialogHeader className="pb-2">
+            <DialogTitle className="flex items-center gap-2 text-white">
               <KeyRound className="w-5 h-5 text-primary" />
               {t('changePasswordTitle')}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-white/55">
               {t('changePasswordDescription')}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 py-4">
+          <div className="flex-1 overflow-y-auto space-y-3 py-1 px-0.5">
             {error && (
-              <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
+              <div className="p-2.5 bg-destructive/15 ring-1 ring-destructive/30 rounded-md flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
                 <span className="text-sm text-destructive">{error}</span>
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="oldPassword">{t('currentPasswordStar')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="oldPassword" className="text-xs text-white/80">{t('currentPasswordStar')}</Label>
               <Input
                 id="oldPassword"
                 type="password"
                 value={passwordData.oldPassword}
                 onChange={(e) => setPasswordData(prev => ({ ...prev, oldPassword: e.target.value }))}
+                className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                 autoComplete="current-password"
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label htmlFor="password">{t('newPasswordStar')}</Label>
+                <Label htmlFor="password" className="text-xs text-white/80">{t('newPasswordStar')}</Label>
                 <div className="flex gap-1">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => generateRandomPassword(false)}
-                    className="h-7 px-2 text-xs"
+                    className="h-7 px-2 text-xs text-white/85 hover:text-white hover:bg-white/[0.08]"
                   >
                     <RefreshCw className="w-3 h-3 mr-1" />
                     {tc('generate')}
@@ -860,7 +1164,7 @@ export default function UsersPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => copyPassword(passwordData.password)}
-                      className="h-7 px-2 text-xs"
+                      className="h-7 px-2 text-xs text-white/85 hover:text-white hover:bg-white/[0.08]"
                     >
                       {copiedPassword ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                     </Button>
@@ -873,75 +1177,88 @@ export default function UsersPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={passwordData.password}
                   onChange={(e) => setPasswordData(prev => ({ ...prev, password: e.target.value }))}
-                  className="pr-10"
+                  className="pr-9 h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                   autoComplete="new-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-white/55 hover:text-white"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">{t('confirmPasswordRequired')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="confirmPassword" className="text-xs text-white/80">{t('confirmPasswordRequired')}</Label>
               <div className="relative">
                 <Input
                   id="confirmPassword"
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={passwordData.confirmPassword}
                   onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                  className="pr-10"
+                  className="pr-9 h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white placeholder:text-white/40 focus-visible:ring-primary/40"
                   autoComplete="new-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-white/55 hover:text-white"
                 >
-                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>
             <PasswordRequirements password={passwordData.password} />
           </div>
-          <DialogFooter>
+          <DialogFooter className="pt-3 gap-2">
             <DialogClose asChild>
-              <Button variant="outline">{tc('cancel')}</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0"
+              >
+                {tc('cancel')}
+              </Button>
             </DialogClose>
-            <Button onClick={handleChangePassword} disabled={saving}>
+            <Button size="sm" onClick={handleChangePassword} disabled={saving} style={{ color: '#ffffff' }} className="font-semibold">
               {saving ? t('changing') : t('changePasswordTitle')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Passkeys Modal */}
+      {/* Passkeys Modal — 4.3.0: frosted-glass to match the other user dialogs. */}
       <Dialog open={showPasskeyModal} onOpenChange={setShowPasskeyModal}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md max-h-[90vh] flex flex-col bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
+          <DialogHeader className="pb-2">
+            <DialogTitle className="flex items-center gap-2 text-white">
               <Fingerprint className="w-5 h-5 text-primary" />
               {t('passkeysTitle')}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-white/55">
               {t('passkeysDescription', { name: editingUser?.name || editingUser?.email || '' })}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 py-4">
+          <div className="flex-1 overflow-y-auto space-y-3 py-1 px-0.5">
             {error && (
-              <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md flex items-center gap-2">
+              <div className="p-2.5 bg-destructive/15 ring-1 ring-destructive/30 rounded-md flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
                 <span className="text-sm text-destructive">{error}</span>
               </div>
             )}
 
             {passkeys.length === 0 ? (
-              <div className="text-center py-6 text-muted-foreground">
+              <div className="text-center py-6 text-white/55">
                 <Fingerprint className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">{t('noPasskeys')}</p>
+                <p className="text-sm text-white/80">{t('noPasskeys')}</p>
                 <p className="text-xs mt-1">{t('noPasskeysHint')}</p>
               </div>
             ) : (
@@ -949,15 +1266,15 @@ export default function UsersPage() {
                 {passkeys.map((passkey) => (
                   <div
                     key={passkey.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border"
+                    className="flex items-center justify-between p-3 rounded-lg bg-white/[0.04] ring-1 ring-white/10"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <Fingerprint className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <Fingerprint className="w-4 h-4 text-white/55 flex-shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">
+                        <p className="text-sm font-medium truncate text-white">
                           {passkey.deviceType || t('unknownDevice')}
                         </p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-white/55">
                           {t('added', { date: formatDate(passkey.createdAt) })}
                         </p>
                       </div>
@@ -966,7 +1283,7 @@ export default function UsersPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => handleDeletePasskey(passkey.id)}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -979,7 +1296,8 @@ export default function UsersPage() {
               <Button
                 onClick={handleRegisterPasskey}
                 disabled={saving}
-                className="w-full"
+                style={{ color: '#ffffff' }}
+                className="w-full font-semibold"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 {saving ? t('registering') : t('addNewPasskey')}
@@ -987,14 +1305,20 @@ export default function UsersPage() {
             )}
 
             {loggedInUser?.id !== editingUser?.id && (
-              <p className="text-xs text-muted-foreground text-center">
+              <p className="text-xs text-white/55 text-center">
                 {t('passkeysOwnAccountOnly')}
               </p>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="pt-3 gap-2">
             <DialogClose asChild>
-              <Button variant="outline">{tc('close')}</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0"
+              >
+                {tc('close')}
+              </Button>
             </DialogClose>
           </DialogFooter>
         </DialogContent>
@@ -1046,6 +1370,118 @@ export default function UsersPage() {
               className="font-semibold"
             >
               {saving ? tc('deleting') : t('deleteUserButton')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 4.3.0+: Transfer Ownership — password-confirmed (interim second factor
+          before email approval exists). */}
+      <Dialog open={showTransferModal} onOpenChange={setShowTransferModal}>
+        <DialogContent
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Crown className="w-5 h-5 text-amber-300" />
+              {t('transferOwnershipTitle') || 'Transfer ownership'}
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              {t('transferOwnershipWarning', {
+                name: transferTarget?.name || transferTarget?.email || '',
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          {error && (
+            <div className="p-3 bg-destructive/10 ring-1 ring-destructive/25 rounded-md flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+              <span className="text-sm text-destructive">{error}</span>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="transferPwd" className="text-xs text-white/80">{t('yourPassword') || 'Your password'}</Label>
+            <Input
+              id="transferPwd"
+              type="password"
+              value={transferPassword}
+              onChange={(e) => setTransferPassword(e.target.value)}
+              className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white"
+              autoComplete="current-password"
+            />
+          </div>
+          <DialogFooter className="pt-3 gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" size="sm" className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0">
+                {tc('cancel')}
+              </Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              onClick={handleTransferOwnership}
+              disabled={saving}
+              className="font-semibold bg-amber-500 hover:bg-amber-500/90 text-black"
+            >
+              {saving ? tc('saving') : (t('confirmTransfer') || 'Transfer ownership')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 4.3.0+: Reverse an in-flight transfer (grace owner only). */}
+      <Dialog open={showReverseModal} onOpenChange={setShowReverseModal}>
+        <DialogContent
+          overlayClassName="bg-transparent"
+          className="sm:max-w-md bg-white/[0.06] text-white ring-1 ring-white/10 border-0 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]"
+          style={{
+            backdropFilter: 'blur(20px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <RotateCcw className="w-5 h-5 text-amber-300" />
+              {t('reverseTransferTitle') || 'Reverse ownership transfer'}
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              {t('reverseTransferWarning') ||
+                'This reclaims ownership and returns the other user to their previous role. Enter your password to confirm.'}
+            </DialogDescription>
+          </DialogHeader>
+          {error && (
+            <div className="p-3 bg-destructive/10 ring-1 ring-destructive/25 rounded-md flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
+              <span className="text-sm text-destructive">{error}</span>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="reversePwd" className="text-xs text-white/80">{t('yourPassword') || 'Your password'}</Label>
+            <Input
+              id="reversePwd"
+              type="password"
+              value={reversePassword}
+              onChange={(e) => setReversePassword(e.target.value)}
+              className="h-9 bg-white/[0.04] border-0 ring-1 ring-white/10 text-white"
+              autoComplete="current-password"
+            />
+          </div>
+          <DialogFooter className="pt-3 gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" size="sm" className="bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white border-0">
+                {tc('cancel')}
+              </Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              onClick={handleReverseTransfer}
+              disabled={saving}
+              className="font-semibold bg-amber-500 hover:bg-amber-500/90 text-black"
+            >
+              {saving ? tc('saving') : (t('reverseTransfer') || 'Reverse')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { testEmailConnection } from '@/lib/email'
 import { emailSchema } from '@/lib/validation'
 import { prisma } from '@/lib/db'
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   try {
     // SECURITY: Require admin authentication
-    const authResult = await requireApiAdmin(request)
+    const authResult = await requireApiManageSettings(request)
     if (authResult instanceof Response) {
       return authResult
     }

@@ -126,7 +126,7 @@ export async function processAdminNotifications() {
 
     // Get all admins
     const admins = await prisma.user.findMany({
-      where: { role: 'ADMIN' },
+      where: {}, /* 4.3.0: all internal roles (User table is staff-only) */
       select: { email: true, name: true }
     })
 

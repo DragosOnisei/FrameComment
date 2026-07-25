@@ -38,13 +38,13 @@ async function ensureSecuritySettings() {
  */
 export async function ensureDefaultAdmin() {
   try {
-    // SECURITY: Check if ANY admin exists (not just the default one)
-    // This prevents recreating default admin after it's been changed/removed
-    const anyAdmin = await prisma.user.findFirst({
-      where: {
-        role: 'ADMIN'
-      }
-    })
+    // SECURITY: Check if ANY internal user exists (not just the default one).
+    // This prevents recreating the default admin after it's been changed/removed.
+    // 4.3.0+: must match ANY role, not just 'ADMIN' — otherwise once the founder
+    // becomes OWNER this check finds nothing and tries to recreate the seed user
+    // every boot (→ "Unique constraint failed on email"). The User table only
+    // ever holds internal staff, so "any user" is the right test.
+    const anyAdmin = await prisma.user.findFirst()
 
     if (anyAdmin) {
       // Initialize security settings even if admin exists
@@ -104,7 +104,10 @@ export async function ensureDefaultAdmin() {
         email: adminEmail,
         password: hashedPassword,
         name: process.env.ADMIN_NAME || 'Admin',
-        role: 'ADMIN',
+        // 4.3.0+: the founding account is the OWNER (top of the role hierarchy)
+        // so a fresh install always has exactly one owner. `as any` because the
+        // generated client may still lag the schema until `prisma generate`.
+        role: 'OWNER' as any,
       },
     })
 
@@ -116,5 +119,68 @@ export async function ensureDefaultAdmin() {
   } catch (error) {
     logError('Error ensuring default admin:', error)
     // Don't throw - app should still start even if this fails
+  }
+}
+
+/**
+ * 4.3.0+: guarantee the account has exactly one founding OWNER.
+ *
+ * Runs on every boot but only ACTS when no OWNER exists yet — so it's the
+ * self-healing safety net for the role migration. When there's no owner, it
+ * promotes the founder: the account whose email matches ADMIN_EMAIL (the
+ * originally-seeded admin — i.e. the first person who set up the app), falling
+ * back to the earliest-created user if that email isn't found. This is what
+ * makes the app actively KNOW the founder is the Owner rather than guessing.
+ *
+ * Uses raw SQL so it works even before `prisma generate` catches up with the
+ * new UserRole enum, and never touches anything once an owner is in place
+ * (including during a 30-day ownership-transfer grace window, where an owner
+ * always exists).
+ */
+export async function ensureFoundingOwner(): Promise<void> {
+  try {
+    const owners = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+      `SELECT "id" FROM "User" WHERE "role" = 'OWNER' LIMIT 1`,
+    )
+    if (owners.length > 0) return // an owner already exists — leave everything alone
+
+    let founder: { id: string; email: string } | undefined
+    const adminEmail = process.env.ADMIN_EMAIL
+    if (adminEmail) {
+      // ADMIN_EMAIL is configured → promote EXACTLY that account, or NOBODY.
+      // We deliberately do NOT fall back to "earliest user" here: on an install
+      // with many admins that guess could crown the wrong person. Promoting only
+      // the known founder (and never touching any other user) is what makes
+      // "only I become Owner, everyone else stays Admin" a guarantee.
+      const byEmail = await prisma.$queryRawUnsafe<Array<{ id: string; email: string }>>(
+        `SELECT "id", "email" FROM "User" WHERE "email" = $1 LIMIT 1`,
+        adminEmail,
+      )
+      founder = byEmail[0]
+      if (!founder) {
+        logError(
+          `[INIT] No OWNER set: ADMIN_EMAIL (${adminEmail}) does not match any user. ` +
+            `Set an owner manually (UPDATE "User" SET role='OWNER' WHERE email='<you>').`,
+        )
+        return
+      }
+    } else {
+      // No ADMIN_EMAIL configured at all → last-resort so the account still has
+      // an owner: the earliest-created user.
+      const earliest = await prisma.$queryRawUnsafe<Array<{ id: string; email: string }>>(
+        `SELECT "id", "email" FROM "User" ORDER BY "createdAt" ASC, "id" ASC LIMIT 1`,
+      )
+      founder = earliest[0]
+    }
+    if (!founder) return // no users at all (fresh, pre-seed) — nothing to promote
+
+    // Promotes exactly ONE row; no other user is ever modified.
+    await prisma.$executeRawUnsafe(
+      `UPDATE "User" SET "role" = 'OWNER', "updatedAt" = NOW() WHERE "id" = $1`,
+      founder.id,
+    )
+    logMessage(`[INIT] Founding owner ensured: ${founder.email}`)
+  } catch (error) {
+    logError('[INIT] ensureFoundingOwner failed (non-fatal):', error)
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import {
   getVideoQueue,
   VIDEO_JOB_PRIORITY,
@@ -41,7 +41,7 @@ const reprocessAllSchema = z.object({
  * — this can enqueue thousands of jobs per call.
  */
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

@@ -113,7 +113,7 @@ export async function sendImmediateNotification(context: NotificationContext, ta
   } else {
     // Send to admins — skip author if they are an admin
     const admins = await prisma.user.findMany({
-      where: { role: 'ADMIN' },
+      where: {}, /* 4.3.0: all internal roles (User table is staff-only) */
       select: { email: true, name: true }
     })
 
@@ -263,7 +263,7 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
 
   // Get all admins
   const admins = await prisma.user.findMany({
-    where: { role: 'ADMIN' },
+    where: {}, /* 4.3.0: all internal roles (User table is staff-only) */
     select: { email: true, name: true }
   })
 
@@ -439,7 +439,7 @@ export async function flushPendingAdminNotifications(): Promise<void> {
     }
 
     const admins = await prisma.user.findMany({
-      where: { role: 'ADMIN' },
+      where: {}, /* 4.3.0: all internal roles (User table is staff-only) */
       select: { email: true, name: true }
     })
 

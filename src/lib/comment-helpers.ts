@@ -1,3 +1,4 @@
+import { isStaff } from './permissions'
 import { prisma } from '@/lib/db'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { isSmtpConfigured } from '@/lib/settings'
@@ -23,7 +24,7 @@ export async function validateCommentPermissions(params: {
 
   // SECURITY: If isInternal flag is set, verify admin session
   if (isInternal) {
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    if (!currentUser || !isStaff(currentUser.role)) {
       return { valid: false, error: 'Unauthorized', errorStatus: 401 }
     }
   }

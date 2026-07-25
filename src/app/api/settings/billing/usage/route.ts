@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { logError } from '@/lib/logging'
 import { computeBillingUsage, computeTotalStorageBytes } from '@/lib/billing'
 import { getActiveBackend, backendLabel } from '@/lib/storage-backends'
@@ -24,7 +24,7 @@ export const runtime = 'nodejs'
  * Auth: admin only.
  */
 export async function GET(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   try {

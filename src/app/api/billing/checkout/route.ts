@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { getStripe } from '@/lib/stripe'
 import { logError } from '@/lib/logging'
 
@@ -19,7 +19,7 @@ export const runtime = 'nodejs'
  * Admin only.
  */
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
   const admin = authResult
 

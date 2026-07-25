@@ -1,3 +1,4 @@
+import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getCurrentUserFromRequest, getShareContext } from '@/lib/auth'
@@ -39,7 +40,7 @@ export async function GET(
     }
 
     const currentUser = await getCurrentUserFromRequest(request)
-    const isAdmin = currentUser?.role === 'ADMIN'
+    const isAdmin = isStaff(currentUser?.role)
     const shareContext = await getShareContext(request)
     let authorized = false
     if (isAdmin) {

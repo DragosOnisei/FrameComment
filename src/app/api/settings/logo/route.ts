@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { initStorage, uploadFile, deleteFile, getFilePath } from '@/lib/storage'
 import { prisma } from '@/lib/db'
 import fs from 'fs/promises'
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const settingsMessages = messages?.settings || {}
 
-  const auth = await requireApiAdmin(request)
+  const auth = await requireApiManageSettings(request)
   if (auth instanceof Response) return auth
 
   const contentType = request.headers.get('content-type') || ''
@@ -138,7 +138,7 @@ export async function DELETE(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const settingsMessages = messages?.settings || {}
 
-  const auth = await requireApiAdmin(request)
+  const auth = await requireApiManageSettings(request)
   if (auth instanceof Response) return auth
 
   try {

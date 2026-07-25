@@ -44,16 +44,26 @@ export function formatErrorForLog(error: unknown): string {
   }
 }
 
-const isServer = typeof process !== 'undefined' && typeof process.stdout?.write === 'function'
+// 4.3.0: resolve `process` through a local alias so the Edge Runtime bundler's
+// STATIC analysis doesn't flag `process.stdout` / `process.stderr`. This file is
+// pulled into the Edge instrumentation bundle (instrumentation.ts → settings.ts
+// → logging.ts); the runtime guard below already prevents any real access off
+// Node, but the analyzer can't see through the guard and turned the literal
+// `process.stdout.write` into a hard "Node.js API not supported in Edge" error
+// that could wedge `next dev` on startup. Indirect access keeps it a no-op on
+// Edge without tripping the analyzer.
+const nodeProcess: any =
+  typeof process !== 'undefined' ? (process as any) : undefined
+const isServer = typeof nodeProcess?.stdout?.write === 'function'
 
 function writeStdout(line: string): void {
   if (!isServer) return
-  process.stdout.write(sanitizeLogValue(line) + '\n')
+  nodeProcess.stdout.write(sanitizeLogValue(line) + '\n')
 }
 
 function writeStderr(line: string): void {
   if (!isServer) return
-  process.stderr.write(sanitizeLogValue(line) + '\n')
+  nodeProcess.stderr.write(sanitizeLogValue(line) + '\n')
 }
 
 export function logMessage(message: string, ...extra: unknown[]): void {

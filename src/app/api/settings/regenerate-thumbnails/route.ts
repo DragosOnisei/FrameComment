@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { getVideoQueue, VIDEO_JOB_PRIORITY, RegenerateThumbnailJob } from '@/lib/queue'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
@@ -20,7 +20,7 @@ export const runtime = 'nodejs'
  * sweep never delays in-flight tier encoding for fresh uploads.
  */
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   // Stricter window than the per-project endpoint: this is a

@@ -1,4 +1,4 @@
-import { ensureDefaultAdmin } from './lib/seed'
+import { ensureDefaultAdmin, ensureFoundingOwner } from './lib/seed'
 import { initializeSecuritySettings } from './lib/settings'
 import { logError, logMessage } from './lib/logging'
 
@@ -21,6 +21,11 @@ export async function register() {
 
     try {
       await ensureDefaultAdmin()
+
+      // 4.3.0+: make sure the account always has a founding OWNER (self-healing
+      // safety net on top of the role migration — promotes the ADMIN_EMAIL
+      // account, else the earliest user, only when no owner exists yet).
+      await ensureFoundingOwner()
 
       // Initialize security settings from environment variables
       await initializeSecuritySettings()

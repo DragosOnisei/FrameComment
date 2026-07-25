@@ -1,3 +1,4 @@
+import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { Readable } from 'stream'
 import archiver from 'archiver'
@@ -80,7 +81,7 @@ export async function GET(
 
     // Auth — mirrors the GET /api/share/folder/[slug] flow exactly.
     const currentUser = await getCurrentUserFromRequest(request)
-    const isAdmin = currentUser?.role === 'ADMIN'
+    const isAdmin = isStaff(currentUser?.role)
     const shareContext = await getShareContext(request)
     let authorized = false
     if (isAdmin) {

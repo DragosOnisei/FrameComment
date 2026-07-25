@@ -19,6 +19,8 @@ import { BlocklistSection } from '@/components/settings/BlocklistSection'
 import { apiPatch, apiPost, apiFetch } from '@/lib/api-client'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
+import { useAuth } from '@/components/AuthProvider'
+import { canManageSettings } from '@/lib/permissions'
 
 interface Settings {
   id: string
@@ -103,6 +105,15 @@ export default function GlobalSettingsPage() {
   const router = useRouter()
   const t = useTranslations('settings')
   const tc = useTranslations('common')
+
+  // 4.3.0+: Settings is Owner/Admin only. Lower roles that reach the URL are
+  // bounced back to Projects (the API is also gated server-side).
+  const { user } = useAuth()
+  useEffect(() => {
+    if (user && !canManageSettings(user.role)) {
+      router.replace('/admin/projects')
+    }
+  }, [user, router])
 
   const [_settings, setSettings] = useState<Settings | null>(null)
   const [_securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null)

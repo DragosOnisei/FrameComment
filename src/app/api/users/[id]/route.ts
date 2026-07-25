@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin, getCurrentUserFromRequest } from '@/lib/auth'
+import { requireApiAdmin, requireApiDeleteUsers, getCurrentUserFromRequest } from '@/lib/auth'
 import { hashPassword, validatePassword, verifyPassword } from '@/lib/encryption'
 import { revokeAllUserTokens } from '@/lib/token-revocation'
 import { invalidateAdminSessions } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
+import { canManageUsers, canAssignRole, canActOnUser, isAppRole } from '@/lib/permissions'
+import { isGraceOwner } from '@/lib/ownership'
 
 export const runtime = 'nodejs'
 
@@ -42,6 +44,14 @@ export async function GET(
 
   try {
     const { id } = await params
+    // 4.3.0+: you can read your OWN record (Profile page) always; reading
+    // anyone else's is user-management data → Owner/Admin only.
+    if (authResult.id !== id && !canManageUsers(authResult.role)) {
+      return NextResponse.json(
+        { error: usersMessages.unauthorized || 'Unauthorized' },
+        { status: 403 }
+      )
+    }
     const user = await prisma.user.findUnique({
       where: { id },
       select: {
@@ -96,12 +106,48 @@ export async function PATCH(
     const body = await request.json()
     const { email, username, name, avatarUrl, password, oldPassword, role } = body
 
+    const isSelf = authResult.id === id
+
+    // Load the target's current role + grace status once — the guards below and
+    // the role-change logic both need them.
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      select: { role: true },
+    })
+    if (!targetUser) {
+      return NextResponse.json(
+        { error: usersMessages.userNotFound || 'User not found' },
+        { status: 404 }
+      )
+    }
+    const targetIsGraceOwner = await isGraceOwner(id)
+
+    // 4.3.0+: editing SOMEONE ELSE requires user-management power and a valid
+    // target — never the Owner and never a grace-period owner (those are hard-
+    // protected so a hijacker can't lock the real owner out). Editing your OWN
+    // profile (name / avatar / email / username / password) stays open to any role.
+    if (!isSelf) {
+      const allowed = canActOnUser({
+        actorId: authResult.id,
+        actorRole: authResult.role,
+        targetId: id,
+        targetRole: targetUser.role,
+        targetIsGraceOwner,
+      })
+      if (!allowed) {
+        return NextResponse.json(
+          { error: usersMessages.unauthorized || 'You are not allowed to modify this user' },
+          { status: 403 }
+        )
+      }
+    }
+
     // Build update data
     const updateData: any = {}
 
     // Track if security-sensitive fields changed
     let roleChanged = false
-    
+
     if (email !== undefined) {
       // Check if email is already taken by another user
       const existingUser = await prisma.user.findFirst({
@@ -168,21 +214,26 @@ export async function PATCH(
     }
 
     if (role !== undefined) {
-      // Validate role
-      if (role !== 'ADMIN' && role !== 'USER') {
+      // 4.3.0+ role-change rules:
+      //  - never on your own account (no self-escalation / self-demotion),
+      //  - must be an assignable role (OWNER is never assignable here —
+      //    ownership only moves through the transfer flow),
+      //  - actor can't grant a role above their own level,
+      //  - target can't be the Owner or a grace-period owner (already enforced
+      //    by the non-self guard above).
+      if (isSelf) {
         return NextResponse.json(
-          { error: usersMessages.invalidRoleAdminOrUser || 'Invalid role. Must be ADMIN or USER' },
-          { status: 400 }
+          { error: usersMessages.cannotChangeOwnRole || 'You cannot change your own role' },
+          { status: 403 }
         )
       }
-
-      // Check if role is actually changing
-      const currentUserData = await prisma.user.findUnique({
-        where: { id },
-        select: { role: true },
-      })
-
-      if (currentUserData && currentUserData.role !== role) {
+      if (!isAppRole(role) || !canAssignRole(authResult.role, role)) {
+        return NextResponse.json(
+          { error: usersMessages.cannotAssignThisRole || 'You are not allowed to assign this role' },
+          { status: 403 }
+        )
+      }
+      if (targetUser.role !== role) {
         updateData.role = role
         roleChanged = true
       }
@@ -321,7 +372,8 @@ export async function DELETE(
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const usersMessages = messages?.users || {}
 
-  const authResult = await requireApiAdmin(request)
+  // 4.3.0+: deleting users is Owner/Admin only.
+  const authResult = await requireApiDeleteUsers(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -348,6 +400,26 @@ export async function DELETE(
       return NextResponse.json(
         { error: usersMessages.userNotFound || 'User not found' },
         { status: 404 }
+      )
+    }
+
+    // 4.3.0+: never delete the Owner or a grace-period owner. Ownership is only
+    // ever removed through the transfer flow (with its 30-day rescue window) —
+    // this is the hard rule that keeps an Admin (or a hijacked session) from
+    // deleting the account owner. Also re-confirms not-self.
+    const targetIsGraceOwner = await isGraceOwner(id)
+    if (
+      !canActOnUser({
+        actorId: currentUser.id,
+        actorRole: currentUser.role,
+        targetId: id,
+        targetRole: (user as any).role,
+        targetIsGraceOwner,
+      })
+    ) {
+      return NextResponse.json(
+        { error: usersMessages.cannotDeleteThisUser || 'You are not allowed to delete this user' },
+        { status: 403 }
       )
     }
 

@@ -1,3 +1,4 @@
+import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { isSmtpConfigured, getRateLimitSettings, getShareTokenTtlSeconds } from '@/lib/settings'
@@ -76,7 +77,7 @@ export async function GET(
     const expiresAt = (projectMeta as any).shareExpiresAt as Date | null
     if (expiresAt && expiresAt.getTime() < Date.now()) {
       const adminUser = await getCurrentUserFromRequest(request)
-      if (adminUser?.role !== 'ADMIN') {
+      if (!isStaff(adminUser?.role)) {
         return NextResponse.json(
           {
             error: 'This share link has expired.',
@@ -97,7 +98,7 @@ export async function GET(
     const bearerToken = parseBearerToken(request)
     if (bearerToken && !shareContext && projectMeta.authMode !== 'NONE') {
       const currentUser = await getCurrentUserFromRequest(request)
-      const isAdmin = currentUser?.role === 'ADMIN'
+      const isAdmin = isStaff(currentUser?.role)
 
       if (!isAdmin) {
         // Token was sent but invalid/revoked - force re-authentication

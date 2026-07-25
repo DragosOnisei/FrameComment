@@ -1,3 +1,4 @@
+import { isStaff } from './permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserFromRequest, getShareContext } from '@/lib/auth'
 import { prisma } from '@/lib/db'
@@ -42,7 +43,7 @@ export async function verifyProjectAccess(
 
   // Check if user is admin (admins bypass password protection)
   const currentUser = await getCurrentUserFromRequest(request)
-  const isAdmin = currentUser?.role === 'ADMIN'
+  const isAdmin = isStaff(currentUser?.role)
   const shareContext = await getShareContext(request)
 
   if (isAdmin) {

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageUsers } from '@/lib/auth'
 import { hashPassword, validatePassword } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest, createUserSchema } from '@/lib/validation'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { canAssignRole, isAppRole, type AppRole } from '@/lib/permissions'
 export const runtime = 'nodejs'
 
 
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const usersMessages = messages?.users || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageUsers(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const usersMessages = messages?.users || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageUsers(request)
   if (authResult instanceof Response) {
     return authResult
   }
@@ -99,6 +100,19 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, username, password, name } = validation.data
+
+    // 4.3.0+: role selection on create. Owner is NEVER assignable here (it only
+    // moves via the transfer flow). A role must be one the actor is allowed to
+    // grant — an Admin can't mint someone above Admin. Default to EDITOR (least
+    // privilege) when none is supplied.
+    const requestedRole: AppRole =
+      typeof body?.role === 'string' && isAppRole(body.role) ? body.role : 'EDITOR'
+    if (!canAssignRole(authResult.role, requestedRole)) {
+      return NextResponse.json(
+        { error: usersMessages.cannotAssignThisRole || 'You are not allowed to assign this role' },
+        { status: 403 }
+      )
+    }
 
     // Validate password strength (additional check beyond Zod format validation)
     const passwordValidation = validatePassword(password)
@@ -138,14 +152,14 @@ export async function POST(request: NextRequest) {
     // Hash password
     const hashedPassword = await hashPassword(password)
 
-    // Create user (always ADMIN role)
+    // Create user with the (validated, non-Owner) requested role.
     const user = await prisma.user.create({
       data: {
         email,
         username: username || null,
         password: hashedPassword,
         name: name || null,
-        role: 'ADMIN',
+        role: requestedRole as any, // enum widened in 4.3.0; client may lag until `prisma generate`
       },
       select: {
         id: true,

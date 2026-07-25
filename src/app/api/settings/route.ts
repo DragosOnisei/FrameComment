@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiAdmin, requireApiManageSettings } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { isSmtpConfigured } from '@/lib/settings'
@@ -110,8 +110,9 @@ export async function PATCH(request: NextRequest) {
   const messages = await loadLocaleMessages(locale).catch(() => null)
   const settingsMessages = messages?.settings || {}
 
-  // Check authentication
-  const authResult = await requireApiAdmin(request)
+  // 4.3.0+: writing global settings is Owner/Admin only (the GET above stays
+  // open to any internal role since the app shell reads general config from it).
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) {
     return authResult // Return 401/403 response
   }

@@ -1,0 +1,15 @@
+-- 4.3.0: (intentionally a no-op).
+--
+-- This migration used to promote the earliest-created user to OWNER by
+-- `createdAt`. That's a GUESS and, on an install with several admins created in
+-- an unknown order, it could promote the wrong person. To make promotion
+-- deterministic and safe, we DO NOT change any roles here — the schema
+-- migration before this only ADDS the new enum values + the OwnershipTransfer
+-- table, so every existing user keeps the exact role they had (all ADMIN).
+--
+-- The founding OWNER is instead chosen at application startup by
+-- `ensureFoundingOwner()` (src/lib/seed.ts), which promotes exactly the account
+-- whose email matches the ADMIN_EMAIL env var (the person who set the app up) —
+-- and touches no other user. This makes "only I become Owner, everyone else
+-- stays Admin" a guarantee rather than a guess.
+SELECT 1;

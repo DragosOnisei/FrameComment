@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const settingsMessages = messages?.settings || {}
   const notificationsMessages = settingsMessages.notifications || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

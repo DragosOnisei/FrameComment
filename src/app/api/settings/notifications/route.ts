@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiAdmin } from '@/lib/auth'
+import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { encrypt } from '@/lib/encryption'
 import { NOTIFICATION_EVENT_TYPES } from '@/lib/external-notifications/constants'
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   const settingsMessages = messages?.settings || {}
   const notificationsMessages = settingsMessages.notifications || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
   const settingsMessages = messages?.settings || {}
   const notificationsMessages = settingsMessages.notifications || {}
 
-  const authResult = await requireApiAdmin(request)
+  const authResult = await requireApiManageSettings(request)
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

@@ -14,6 +14,7 @@ import {
 import { initStorage, refreshLocalStorageRoot } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { purgeExpiredTrash } from '../lib/trash-cleanup'
+import { finalizeExpiredTransfers } from '../lib/ownership'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
 import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
 import { getActiveVideoEncoder, getMaxParallelTranscodes } from '../lib/ffmpeg'
@@ -359,12 +360,27 @@ async function main() {
     }
   }, ONE_DAY_MS)
 
+  // 4.3.0+: finalize expired ownership transfers (previous owner → Admin once
+  // the 30-day grace window elapses). Lazy checks in the API cover most cases;
+  // this guarantees it happens even on an idle instance. Runs at startup + hourly.
+  await finalizeExpiredTransfers().catch((err) =>
+    logError('Initial ownership-transfer finalize failed', err),
+  )
+  const ownershipFinalizeInterval = setInterval(async () => {
+    try {
+      await finalizeExpiredTransfers()
+    } catch (err) {
+      logError('Scheduled ownership-transfer finalize failed', err)
+    }
+  }, 60 * 60 * 1000)
+
   // Handle shutdown gracefully
   process.on('SIGTERM', async () => {
     logMessage('SIGTERM received, closing workers...')
     clearInterval(tusCleanupInterval)
     clearInterval(tempCleanupInterval)
     clearInterval(trashCleanupInterval)
+    clearInterval(ownershipFinalizeInterval)
     await Promise.all([
       worker.close(),
       assetWorker.close(),
@@ -384,6 +400,7 @@ async function main() {
     clearInterval(tusCleanupInterval)
     clearInterval(tempCleanupInterval)
     clearInterval(trashCleanupInterval)
+    clearInterval(ownershipFinalizeInterval)
     await Promise.all([
       worker.close(),
       assetWorker.close(),

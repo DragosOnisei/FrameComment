@@ -1,3 +1,4 @@
+import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import {
@@ -107,7 +108,7 @@ export async function GET(
       (folderMeta as any).shareExpiresAt.getTime() < Date.now()
     ) {
       const probe = await getCurrentUserFromRequest(request)
-      if (probe?.role !== 'ADMIN') {
+      if (!isStaff(probe?.role)) {
         return NextResponse.json(
           {
             error: 'This share link has expired.',
@@ -134,7 +135,7 @@ export async function GET(
     // Admin override: a logged-in studio admin can always view any
     // folder share, no challenge needed.
     const currentUser = await getCurrentUserFromRequest(request)
-    const isAdmin = currentUser?.role === 'ADMIN'
+    const isAdmin = isStaff(currentUser?.role)
     const shareContext = await getShareContext(request)
 
     let authorized = false
