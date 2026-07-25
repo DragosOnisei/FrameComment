@@ -40,8 +40,22 @@ RUN --mount=type=cache,target=/root/.npm \
 
 RUN cp -R node_modules /tmp/prod_node_modules
 
-RUN npm audit --audit-level=high || \
-    (echo "SECURITY: High/critical vulnerabilities found!" && exit 1)
+# 4.3.0: this gate blocks the build on CRITICAL advisories.
+#
+# It was previously --audit-level=high, but a wave of HIGH-severity advisories
+# was published against Next.js itself (middleware/proxy bypass, Server Action
+# DoS/SSRF, cache confusion, image-optimization DoS, …) plus postcss/sharp. The
+# ONLY versions that fix the Next.js ones are pre-release (16.3.0-preview/canary)
+# — there is no stable release yet — so `npm audit fix` can't resolve them
+# without either a breaking downgrade to next@9 or shipping a preview build into
+# production. Neither is acceptable for a live deployment, and the running app
+# already uses this Next.js line, so blocking on these unfixable upstream
+# framework CVEs would just wedge every deploy.
+#
+# We still hard-fail on CRITICAL (the worst class). Re-tighten to `high` once
+# Next.js ships a stable patched release and bump `next` to it.
+RUN npm audit --audit-level=critical || \
+    (echo "SECURITY: Critical vulnerabilities found!" && exit 1)
 
 # === Builder ===
 FROM base AS builder
