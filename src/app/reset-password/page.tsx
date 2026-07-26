@@ -46,7 +46,7 @@ export default function ResetPasswordPage() {
       return
     }
 
-    if (password.length < 12) {
+    if (password.length < 10) {
       setStatus('error')
       setMessage(t('passwordTooShort'))
       return

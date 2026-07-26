@@ -190,9 +190,9 @@ export function validatePassword(password: string): {
 } {
   const errors: string[] = []
   
-  // Length check (increased from 8 to 12)
-  if (password.length < 12) {
-    errors.push('Password must be at least 12 characters long')
+  // Length check (minimum 10 characters)
+  if (password.length < 10) {
+    errors.push('Password must be at least 10 characters long')
   }
   
   // Character requirements
@@ -283,7 +283,7 @@ export function validatePassword(password: string): {
   if (errors.length === 0) {
     if (password.length >= 16 && /[^A-Za-z0-9].*[^A-Za-z0-9]/.test(password)) {
       strength = 'strong' // 16+ chars with multiple special chars
-    } else if (password.length >= 12) {
+    } else if (password.length >= 10) {
       strength = 'medium'
     }
   }

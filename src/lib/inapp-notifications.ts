@@ -165,6 +165,88 @@ export async function publishNotification(
 }
 
 /**
+ * 4.3.x: auto "Send to editor" on the FIRST comment of a review round, plus
+ * Project Manager fan-out.
+ *
+ * Replaces the manual "Send to editor" button (people kept forgetting to press
+ * it). Called from the comment-create route whenever a comment is posted.
+ *
+ * Recipients on the first comment of a round:
+ *   - the video's uploader (the "editor"), and
+ *   - every Project Manager (level 60): PMs are pinged for EVERY video that
+ *     gets a comment, not only the ones they uploaded.
+ * The person who just commented is never pinged about their own comment.
+ *
+ * A reviewer can easily leave 100 comments in one sitting, so to avoid 100 bell
+ * pings we notify ONLY on the FIRST comment of a version, then stay silent no
+ * matter how many more comments arrive — AND even after a recipient has read the
+ * notification (we key off comment COUNT, not read state). The ping re-arms only
+ * when a version's comment count is back at zero, which in practice means the
+ * editor uploaded a NEW version: each stacked version is its own Video row with
+ * its own, initially empty, comment set.
+ *
+ * Safe no-op (never throws): the video is gone, or there is no one left to
+ * notify (no uploader on record and no Project Managers).
+ */
+export async function maybeNotifyEditorForComment(params: {
+  videoId: string
+  actorUserId: string | null
+  actorName: string | null
+}): Promise<void> {
+  try {
+    const video = await prisma.video.findUnique({
+      where: { id: params.videoId },
+      select: {
+        id: true,
+        name: true,
+        projectId: true,
+        folderId: true,
+        createdById: true,
+        deletedAt: true,
+      },
+    })
+    if (!video || video.deletedAt) return
+
+    // This helper runs AFTER the comment is created, so the just-posted comment
+    // is already counted → count === 1 means it's the first of the round.
+    const commentCount = await prisma.comment.count({ where: { videoId: video.id } })
+    if (commentCount > 1) return
+
+    // Build the recipient set: the uploader (if any) plus every Project Manager.
+    // Raw SQL for the PM lookup so it keeps working even before `prisma generate`
+    // knows the PROJECT_MANAGER enum value.
+    const recipientIds = new Set<string>()
+    if (video.createdById) recipientIds.add(video.createdById)
+    try {
+      const projectManagers = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+        `SELECT "id" FROM "User" WHERE "role" = 'PROJECT_MANAGER'`,
+      )
+      for (const pm of projectManagers) recipientIds.add(pm.id)
+    } catch (pmErr) {
+      logError('[maybeNotifyEditorForComment] Project Manager lookup failed (non-fatal):', pmErr)
+    }
+
+    // Never ping the person who just commented about their own comment.
+    if (params.actorUserId) recipientIds.delete(params.actorUserId)
+    if (recipientIds.size === 0) return
+
+    for (const recipientId of recipientIds) {
+      const notification = await createOrBumpNotification({
+        recipientId,
+        projectId: video.projectId,
+        videoId: video.id,
+        videoName: video.name,
+        folderId: video.folderId,
+        actorName: params.actorName,
+      })
+      await publishNotification(recipientId, notification)
+    }
+  } catch (err) {
+    logError('[maybeNotifyEditorForComment] failed (non-fatal):', err)
+  }
+}
+
+/**
  * Pending notifications for a recipient, newest first.
  *
  * The bell is a "pending inbox": only UNREAD rows are returned. Once a

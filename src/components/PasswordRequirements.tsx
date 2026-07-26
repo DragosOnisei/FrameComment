@@ -14,7 +14,7 @@ export function PasswordRequirements({ password, className = '' }: PasswordRequi
   const results = [
     {
       label: t('passwordMinChars'),
-      passed: password.length >= 12,
+      passed: password.length >= 10,
     },
     {
       label: t('passwordUppercase'),

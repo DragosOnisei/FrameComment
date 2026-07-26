@@ -498,6 +498,12 @@ export default function CommentSection({
   // admin review view and the client share view; the server resolves
   // the recipient and gates self-notifications, so this handler just
   // fires and reflects the outcome inline on the button.
+  // 4.3.x: the manual "Send to editor" button is retired — reviewers kept
+  // forgetting to press it, so the editor is now notified automatically on the
+  // FIRST comment of a round (server-side, in /api/comments). We keep the
+  // button's handler + renderer intact behind this flag so it's a one-line flip
+  // to bring it back if ever needed.
+  const SEND_TO_EDITOR_BUTTON_ENABLED = false
   type SendState = 'idle' | 'sending' | 'sent' | 'noeditor' | 'self' | 'error'
   const [sendState, setSendState] = useState<SendState>('idle')
   const sendResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1531,7 +1537,7 @@ export default function CommentSection({
             overlaps the title/filter (which can read "Completed
             comments" etc). */}
         <div className="mt-2 flex justify-center">
-          {renderSendToEditor()}
+          {SEND_TO_EDITOR_BUTTON_ENABLED && renderSendToEditor()}
         </div>
         {/*
           1.2.0+: editable display-name row for guests. Lets a reviewer
@@ -1793,7 +1799,7 @@ export default function CommentSection({
             {/* 3.9.x: Send to editor on its own centered line (mobile
                 mirror) so it never overlaps the filter title. */}
             <div className="flex justify-center">
-              {renderSendToEditor()}
+              {SEND_TO_EDITOR_BUTTON_ENABLED && renderSendToEditor()}
             </div>
           </div>
         )}

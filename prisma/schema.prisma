@@ -101,7 +101,10 @@ model OwnershipTransfer {
 enum UserRole {
   OWNER
   ADMIN
+  PROJECT_MANAGER
   EDITOR
+  SENIOR_VIDEO_EDITOR
+  TEAM_LEADER
   MARKETING
   PRODUCER
 }

@@ -7,6 +7,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { maybeNotifyEditorForComment } from '@/lib/inapp-notifications'
 import {
 
   validateCommentPermissions,
@@ -460,6 +461,25 @@ export async function POST(request: NextRequest) {
       parentId,
       attachmentNames,
     })
+
+    // 4.3.x: auto "send to editor" bell — replaces the manual button. Fires on
+    // the FIRST comment of a review round only (dedup lives in the helper), so a
+    // reviewer leaving 100 comments produces one bell ping, not 100.
+    //
+    // NB: we intentionally DO NOT filter on `isInternal`. In this app
+    // `isInternal` is set to `!!isAdminView` — i.e. it just means "authored by
+    // an internal user (admin/editor) in the review view", NOT "private note".
+    // Those reviewers absolutely should notify the video's uploader (that's the
+    // exact case the old "Send to editor" button covered). Notifying yourself is
+    // already prevented inside the helper (actor === uploader is skipped).
+    if (videoId) {
+      await maybeNotifyEditorForComment({
+        videoId,
+        actorUserId: authContext.user?.id ?? null,
+        actorName:
+          contentValidation.sanitizedAuthorName ?? authContext.user?.name ?? null,
+      })
+    }
 
     // Fetch all comments for the project (to keep UI in sync)
     const allComments = await fetchProjectComments(projectId)

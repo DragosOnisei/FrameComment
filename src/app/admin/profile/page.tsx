@@ -164,8 +164,8 @@ export default function ProfilePage() {
     // Mirror the server's `validatePassword` rules so users get
     // immediate, actionable feedback instead of a generic 400 after
     // a round-trip. Keep these in sync with `src/lib/encryption.ts`.
-    if (newPassword.length < 12) {
-      setPasswordMsg({ kind: 'err', text: 'New password must be at least 12 characters.' })
+    if (newPassword.length < 10) {
+      setPasswordMsg({ kind: 'err', text: 'New password must be at least 10 characters.' })
       return
     }
     if (!/[A-Z]/.test(newPassword)) {
@@ -400,7 +400,7 @@ export default function ProfilePage() {
             </div>
           </div>
           <p className="text-xs text-white/55">
-            Must be at least 12 characters, with an uppercase letter, a
+            Must be at least 10 characters, with an uppercase letter, a
             lowercase letter, a number, and a special character. Changing
             your password signs out every active session — you&apos;ll need
             to sign back in.

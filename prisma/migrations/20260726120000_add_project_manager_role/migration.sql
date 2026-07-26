@@ -1,0 +1,11 @@
+-- 4.x: add the PROJECT_MANAGER role (level 60).
+--
+-- Content-only capabilities, identical to the level-50 roles (no user
+-- management, no Settings / Storage / Billing). The one extra behaviour lives
+-- in the app: Project Managers also receive the "new comments" bell
+-- notification for EVERY video that gets a comment — not just videos they
+-- uploaded themselves.
+--
+-- This migration ONLY adds the enum value; it changes no user rows. Requires
+-- Postgres 12+ (ADD VALUE in a transaction). Idempotent.
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'PROJECT_MANAGER';

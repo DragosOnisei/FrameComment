@@ -21,31 +21,68 @@
  *   - Transfer ownership / delete company . OWNER only
  */
 
-export type AppRole = 'OWNER' | 'ADMIN' | 'EDITOR' | 'MARKETING' | 'PRODUCER'
+export type AppRole =
+  | 'OWNER'
+  | 'ADMIN'
+  | 'PROJECT_MANAGER'
+  | 'EDITOR'
+  | 'SENIOR_VIDEO_EDITOR'
+  | 'TEAM_LEADER'
+  | 'MARKETING'
+  | 'PRODUCER'
 
 export const ROLE_LEVELS: Record<AppRole, number> = {
   OWNER: 100,
   ADMIN: 90,
+  // PROJECT_MANAGER (60): same content-only capabilities as the level-50 roles,
+  // but Project Managers also receive the "new comments" bell for EVERY video
+  // that gets a comment (not just their own uploads) — handled in the
+  // notification layer, not here.
+  PROJECT_MANAGER: 60,
+  // Level 50 — content-only roles. Identical capabilities today; kept as
+  // distinct roles so they can diverge later without a data migration.
   EDITOR: 50,
+  SENIOR_VIDEO_EDITOR: 50,
+  TEAM_LEADER: 50,
   MARKETING: 50,
   PRODUCER: 50,
 }
 
 /** Every valid internal role, highest-privilege first. */
-export const ALL_ROLES: AppRole[] = ['OWNER', 'ADMIN', 'EDITOR', 'MARKETING', 'PRODUCER']
+export const ALL_ROLES: AppRole[] = [
+  'OWNER',
+  'ADMIN',
+  'PROJECT_MANAGER',
+  'EDITOR',
+  'SENIOR_VIDEO_EDITOR',
+  'TEAM_LEADER',
+  'MARKETING',
+  'PRODUCER',
+]
 
 /**
  * Roles that can be handed out through normal role management. OWNER is
  * deliberately absent: ownership only ever moves through the transfer flow
  * (with re-authentication + the 30-day grace window), never a plain role edit.
  */
-export const ASSIGNABLE_ROLES: AppRole[] = ['ADMIN', 'EDITOR', 'MARKETING', 'PRODUCER']
+export const ASSIGNABLE_ROLES: AppRole[] = [
+  'ADMIN',
+  'PROJECT_MANAGER',
+  'EDITOR',
+  'SENIOR_VIDEO_EDITOR',
+  'TEAM_LEADER',
+  'MARKETING',
+  'PRODUCER',
+]
 
 /** Human-facing label for a role. */
 export const ROLE_LABELS: Record<AppRole, string> = {
   OWNER: 'Owner',
   ADMIN: 'Admin',
+  PROJECT_MANAGER: 'Project Manager',
   EDITOR: 'Editor',
+  SENIOR_VIDEO_EDITOR: 'Senior Video Editor',
+  TEAM_LEADER: 'Team Leader',
   MARKETING: 'Marketing',
   PRODUCER: 'Producer',
 }

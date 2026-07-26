@@ -21,6 +21,7 @@ import {
   canAssignRole,
   canTransferOwnership,
   isOwner,
+  roleLevel,
   ROLE_LABELS,
   ASSIGNABLE_ROLES,
   type AppRole,
@@ -132,7 +133,10 @@ export default function UsersPage() {
     switch (role) {
       case 'OWNER': return 'bg-amber-500/15 text-amber-300 ring-amber-500/30'
       case 'ADMIN': return 'bg-primary/15 text-primary ring-primary/30'
+      case 'PROJECT_MANAGER': return 'bg-indigo-500/15 text-indigo-300 ring-indigo-500/30'
       case 'EDITOR': return 'bg-sky-500/15 text-sky-300 ring-sky-500/30'
+      case 'SENIOR_VIDEO_EDITOR': return 'bg-cyan-500/15 text-cyan-300 ring-cyan-500/30'
+      case 'TEAM_LEADER': return 'bg-rose-500/15 text-rose-300 ring-rose-500/30'
       case 'MARKETING': return 'bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/30'
       case 'PRODUCER': return 'bg-teal-500/15 text-teal-300 ring-teal-500/30'
       default: return 'bg-white/10 text-white/70 ring-white/20'
@@ -141,7 +145,12 @@ export default function UsersPage() {
   const roleLabel = (role: string): string => (ROLE_LABELS as Record<string, string>)[role] || role
   // Roles the logged-in user is allowed to assign (Owner is never in here —
   // ownership only moves via the transfer flow).
-  const assignableRoles = ASSIGNABLE_ROLES.filter((r) => canAssignRole(myRole, r))
+  // Sorted strictly by privilege level, highest first (Admin 90 → Project
+  // Manager 60 → the level-50 content roles). Array#sort is stable, so roles
+  // sharing a level keep their ASSIGNABLE_ROLES order.
+  const assignableRoles = ASSIGNABLE_ROLES
+    .filter((r) => canAssignRole(myRole, r))
+    .sort((a, b) => roleLevel(b) - roleLevel(a))
 
   // Per-row action gating.
   const rowPerms = (user: UserData) => {

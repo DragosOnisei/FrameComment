@@ -24,7 +24,7 @@ export const emailSchema = z
 // Password validation (12+ chars, uppercase, lowercase, number, special)
 export const passwordSchema = z
   .string()
-  .min(12, 'Password must be at least 12 characters')
+  .min(10, 'Password must be at least 10 characters')
   .max(128, 'Password must not exceed 128 characters')
   .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
   .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
@@ -190,7 +190,7 @@ export const createUserSchema = z.object({
   name: safeStringSchema(1, 255).optional(),
   // 4.3.0+: accept any role at the FORMAT level; authorization (who may assign
   // what, and that OWNER is never assignable here) is enforced in the route.
-  role: z.enum(['OWNER', 'ADMIN', 'EDITOR', 'MARKETING', 'PRODUCER']).optional()
+  role: z.enum(['OWNER', 'ADMIN', 'PROJECT_MANAGER', 'EDITOR', 'SENIOR_VIDEO_EDITOR', 'TEAM_LEADER', 'MARKETING', 'PRODUCER']).optional()
 })
 
 export const updateUserSchema = z.object({

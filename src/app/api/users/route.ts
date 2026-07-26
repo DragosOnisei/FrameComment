@@ -90,11 +90,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
 
-    // Validate input with Zod schema
+    // Validate input with Zod schema. 4.3.x: surface the SPECIFIC first problem
+    // (e.g. "Password must be at least 10 characters") as the top-level error
+    // instead of the generic "Validation failed" — the UI shows this string, so
+    // the person immediately knows what to fix. `details` cleans off the
+    // "field: " path prefix so the message reads naturally.
     const validation = validateRequest(createUserSchema, body)
     if (!validation.success) {
+      const firstDetail = validation.details?.[0]?.replace(/^[^:]+:\s*/, '')
       return NextResponse.json(
-        { error: validation.error, details: validation.details },
+        { error: firstDetail || validation.error, details: validation.details },
         { status: 400 }
       )
     }
@@ -153,23 +158,41 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await hashPassword(password)
 
     // Create user with the (validated, non-Owner) requested role.
-    const user = await prisma.user.create({
-      data: {
-        email,
-        username: username || null,
-        password: hashedPassword,
-        name: name || null,
-        role: requestedRole as any, // enum widened in 4.3.0; client may lag until `prisma generate`
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        role: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    //
+    // The role is written with raw SQL inside a transaction rather than through
+    // the typed client: a freshly-added enum value like PROJECT_MANAGER isn't
+    // known to a Prisma client generated from the old schema, and the client
+    // rejects it at runtime ("Invalid value for argument `role`. Expected
+    // UserRole.") before it ever reaches Postgres. The raw UPDATE with an
+    // explicit ::"UserRole" cast bypasses that client-side check (the DB enum
+    // value must already exist — guaranteed by `prisma migrate deploy`). We
+    // create with the schema default first, then set the role atomically: if the
+    // role write fails the whole transaction rolls back, so a user is never left
+    // committed with the default role.
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email,
+          username: username || null,
+          password: hashedPassword,
+          name: name || null,
+        },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+      await tx.$executeRawUnsafe(
+        `UPDATE "User" SET "role" = $1::"UserRole" WHERE "id" = $2`,
+        requestedRole,
+        created.id,
+      )
+      return { ...created, role: requestedRole }
     })
 
     return NextResponse.json({ user }, { status: 201 })

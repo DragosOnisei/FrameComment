@@ -234,7 +234,9 @@ export async function PATCH(
         )
       }
       if (targetUser.role !== role) {
-        updateData.role = role
+        // The role itself is written with raw SQL AFTER the main update (see
+        // below), not through `updateData`, so a freshly-added enum value works
+        // even with a stale generated Prisma client.
         roleChanged = true
       }
     }
@@ -316,6 +318,21 @@ export async function PATCH(
         updatedAt: true,
       },
     })
+
+    // Persist the role change with raw SQL + an explicit ::"UserRole" cast so a
+    // freshly-added enum value (e.g. PROJECT_MANAGER) is accepted even when the
+    // generated Prisma client predates it — the typed client validates against
+    // its baked-in enum list and would reject the value before it reaches
+    // Postgres. `role` is already validated + authorized above; the DB enum must
+    // already contain the value (guaranteed by `prisma migrate deploy`).
+    if (roleChanged) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "User" SET "role" = $1::"UserRole", "updatedAt" = NOW() WHERE "id" = $2`,
+        role,
+        id,
+      )
+      ;(user as any).role = role
+    }
 
     // SECURITY: Handle session security for sensitive changes
     const currentUser = await getCurrentUserFromRequest(request)
