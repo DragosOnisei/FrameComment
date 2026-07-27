@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   CreditCard,
   Users,
@@ -46,6 +46,18 @@ interface BillingStatus {
   suspended: boolean
   issueSince: string | null
   graceDaysLeft: number | null
+  /** Exact ISO lockout moment — drives the HH:MM:SS countdown on the last day. */
+  graceEndsAt: string | null
+}
+
+/** Format a millisecond remainder as HH:MM:SS (hours can exceed 24). */
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(h)}:${pad(m)}:${pad(s)}`
 }
 
 /**
@@ -66,6 +78,40 @@ export function BillingSection({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Live clock for the final-day HH:MM:SS grace countdown.
+  const [nowTs, setNowTs] = useState<number>(() => Date.now())
+
+  // On the last grace day, show a precise countdown to the exact lockout
+  // moment instead of "1 business day left".
+  const graceEndsAtMs = billing?.graceEndsAt
+    ? new Date(billing.graceEndsAt).getTime()
+    : null
+  const showGraceCountdown =
+    graceEndsAtMs != null &&
+    (billing?.graceDaysLeft ?? 99) <= 1 &&
+    graceEndsAtMs > nowTs
+  useEffect(() => {
+    if (!showGraceCountdown) return
+    const id = setInterval(() => setNowTs(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [showGraceCountdown])
+
+  // Suffix appended to the grace warnings: a live HH:MM:SS countdown on the
+  // final day, otherwise the "N business days left" text.
+  const graceSuffix: ReactNode =
+    billing?.graceDaysLeft == null
+      ? '.'
+      : showGraceCountdown && graceEndsAtMs != null
+        ? (
+            <>
+              {' — '}
+              <span className="font-mono tabular-nums font-semibold">
+                {formatCountdown(graceEndsAtMs - nowTs)}
+              </span>
+              {' left.'}
+            </>
+          )
+        : ` — ${billing.graceDaysLeft} business day${billing.graceDaysLeft === 1 ? '' : 's'} left.`
 
   const loadStatus = useCallback(async () => {
     try {
@@ -329,18 +375,14 @@ export function BillingSection({
             <div className="flex items-center gap-2 rounded-xl bg-destructive/10 ring-1 ring-destructive/30 px-3 py-2 text-xs text-destructive">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               Last payment failed. Update your card to avoid interruption
-              {billing?.graceDaysLeft != null
-                ? ` (${billing.graceDaysLeft} business day${billing.graceDaysLeft === 1 ? '' : 's'} left).`
-                : '.'}
+              {graceSuffix}
             </div>
           )}
           {needsCard && !suspended && (
             <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 ring-1 ring-amber-400/25 px-3 py-2 text-xs text-amber-300">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               You&apos;re over the free tier. Add a card to keep access
-              {billing?.graceDaysLeft != null
-                ? ` (${billing.graceDaysLeft} business day${billing.graceDaysLeft === 1 ? '' : 's'} left).`
-                : '.'}
+              {graceSuffix}
             </div>
           )}
 

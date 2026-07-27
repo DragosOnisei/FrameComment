@@ -361,8 +361,8 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
             // 2.5.0+: solid `#162533` fill + white text + hairline
             // white/10 ring, matching the FolderCard kebab so the
             // whole admin chrome reads as one design family.
-            style={{ ...menuStyle, backgroundColor: '#162533' }}
-            className="z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
+            style={menuStyle}
+            className="brand-menu-surface z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
           >
             {shareUrl && (
               <button

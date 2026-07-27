@@ -421,6 +421,24 @@ export function businessDaysBetween(from: Date, to: Date): number {
 }
 
 /**
+ * The exact moment suspension kicks in: midnight of the day when
+ * `businessDaysBetween(issueSince, now)` first reaches GRACE_BUSINESS_DAYS.
+ * Mirrors the `businessDaysBetween` logic exactly so the client can show a
+ * precise HH:MM:SS countdown to lockout on the final grace day.
+ */
+export function graceDeadline(issueSince: Date): Date {
+  const d = new Date(issueSince)
+  d.setHours(0, 0, 0, 0)
+  let bdays = 0
+  while (bdays < GRACE_BUSINESS_DAYS) {
+    d.setDate(d.getDate() + 1)
+    const wd = d.getDay()
+    if (wd !== 0 && wd !== 6) bdays++
+  }
+  return d
+}
+
+/**
  * Dunning state machine. An "issue" is either a failed payment
  * (past_due) OR being over the free tier with no card connected. When
  * an issue starts we stamp `billingIssueSince`; once it's unresolved

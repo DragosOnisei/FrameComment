@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
   if (rl) return rl
 
   try {
-    const { notifications, unreadCount } = await listNotifications(auth.id, 30)
+    const { notifications, unreadCount } = await listNotifications(auth.id, 50)
     return NextResponse.json({ notifications, unreadCount })
   } catch (error) {
     logError('[GET /api/notifications] failed:', error)

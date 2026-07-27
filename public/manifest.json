@@ -4,8 +4,8 @@
   "description": "Professional video review and approval platform",
   "start_url": "/admin",
   "display": "standalone",
-  "background_color": "#0a0a0a",
-  "theme_color": "#0a0a0a",
+  "background_color": "#121212",
+  "theme_color": "#121212",
   "orientation": "any",
   "icons": [
     {

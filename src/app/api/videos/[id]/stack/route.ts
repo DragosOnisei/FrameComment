@@ -109,10 +109,15 @@ export async function POST(
     }
 
     // Snapshot the two groups so we can re-version them atomically.
+    //
+    // `deletedAt: null` is CRUCIAL: only LIVE rows may count toward the next
+    // version number. Without it, a soft-deleted version (sitting in Trash for
+    // 30 days) still bumped the counter — delete v3, re-upload + stack, and it
+    // came back as v4 instead of reclaiming v3 (the "ghost of its former self").
     const folderFilter =
       target.folderId === null
-        ? { folderId: null }
-        : { folderId: target.folderId }
+        ? { folderId: null, deletedAt: null }
+        : { folderId: target.folderId, deletedAt: null }
 
     const [targetGroup, sourceGroup] = await Promise.all([
       prisma.video.findMany({

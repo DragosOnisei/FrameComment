@@ -102,8 +102,12 @@ export async function POST(request: NextRequest) {
     // could stall uploads under concurrency, so it was removed.)
     let finalName = videoName
     {
+      // Only LIVE rows can force a " (2)" rename — a trashed video must not
+      // reserve its name (same "ghost" class as the version-number bug).
       const folderFilter =
-        resolvedFolderId === null ? { folderId: null } : { folderId: resolvedFolderId }
+        resolvedFolderId === null
+          ? { folderId: null, deletedAt: null }
+          : { folderId: resolvedFolderId, deletedAt: null }
       const conflicts = await prisma.video.findMany({
         where: {
           projectId,

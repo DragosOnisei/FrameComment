@@ -212,6 +212,13 @@
   /* Smooth scrolling */
   html {
     scroll-behavior: smooth;
+    /* 4.x: paint the root itself with the app background (not the browser's
+       default black). Without this, the phone status-bar strip / overscroll
+       gutter falls back to pure black on scroll instead of the app's dark
+       tone. `overscroll-behavior: none` also stops the rubber-band bounce
+       from revealing a black gap behind the content on phones. */
+    background-color: hsl(var(--background));
+    overscroll-behavior: none;
     /* Hard guard against horizontal scroll bleed on mobile.
        body has overflow-x-hidden already, but Chrome on Android can
        still scroll the html element itself if any descendant breaks
@@ -238,6 +245,22 @@
 }
 
 @layer components {
+  /* 4.x: shared surface for dropdown / context / kebab menus. Replaces the
+     hard-coded navy `#162533` fill (which read BLUE and clashed with a warm
+     accent like orange). Neutral app-background base + an accent-tinted bleed
+     from the top-left so every menu tracks the active brand accent — same
+     recipe as `.spotlight-bg`. Base stays opaque for legibility over any
+     content. Pair with the usual `ring-1 ring-white/10` + shadow classes. */
+  .brand-menu-surface {
+    /* OPAQUE, single accent-tinted colour (no radial with transparent edges —
+       that read as see-through). `color-mix` blends the active accent into the
+       dark base; the plain fallback stays fully opaque on engines without
+       color-mix. */
+    background-color: hsl(var(--background));
+    background-color: color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)));
+    background-image: none;
+  }
+
   /* Button variants */
   .btn-primary {
     @apply bg-primary text-primary-foreground;

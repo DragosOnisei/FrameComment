@@ -312,13 +312,16 @@ export default function ProjectPage() {
       </TopbarLeftSlot>
       <TopbarRightSlot>
         {/* Grid / List view toggle — shares the per-user preference so
-            the choice carries into folders and back. */}
-        <ViewModeToggle value={folderView} onChange={setFolderView} />
+            the choice carries into folders and back.
+            4.x mobile: always grid (toggle hidden), Upload / Download hidden. */}
+        <div className="hidden md:block">
+          <ViewModeToggle value={folderView} onChange={setFolderView} />
+        </div>
         {(!project || project.status !== 'APPROVED') && (
           <Button
             variant="default"
             size="sm"
-            className="w-9 px-0 shrink-0"
+            className="hidden md:inline-flex w-9 px-0 shrink-0"
             onClick={() => videoManagerRef.current?.triggerUpload()}
             aria-label={t('uploadVideos')}
             title={t('uploadVideos')}
@@ -329,7 +332,7 @@ export default function ProjectPage() {
         <Button
           variant="ghost"
           size="sm"
-          className="w-9 px-0 shrink-0 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
+          className="hidden md:inline-flex w-9 px-0 shrink-0 bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/10 hover:ring-white/20 text-white border-0 backdrop-blur-md"
           onClick={() => folderBrowserRef.current?.downloadAll()}
           aria-label="Download All"
           title="Download All"

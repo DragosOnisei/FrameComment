@@ -23,6 +23,13 @@ import { useTranslations } from 'next-intl'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
 import { generateSecurePassword } from '@/lib/password-utils'
 
+// 4.x: the "Template" button in the top bar is HIDDEN — the same "UGC / YT
+// Template" actions now live in the folder-grid right-click / kebab menu, so
+// the top bar no longer needs it. Kept behind a flag (not deleted) so we can
+// flip it back on instantly if we change our minds. The TemplateModal itself
+// stays mounted so the right-click flow keeps working.
+const TOPBAR_TEMPLATE_BUTTON_ENABLED = false
+
 export default function AdminPage() {
   const t = useTranslations('projects')
   const tc = useTranslations('common')
@@ -520,25 +527,31 @@ export default function AdminPage() {
         <TopbarRightSlot>
           {/* Empty state: Template disabled (no project to scaffold
               into), view + sort toggles still rendered so the bar
-              stays visually consistent with the populated state. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(12px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-            }}
-            onClick={() => setShowTemplateModal(true)}
-            disabled
-            title="Create a project first to use templates"
-            aria-label="Create from template"
-          >
-            Template
-          </Button>
-          <ViewModeToggle value={adminView} onChange={setAdminView} />
-          <SortModeToggle value={adminSort} onChange={setAdminSort} />
+              stays visually consistent with the populated state.
+              4.x: Template button hidden (moved to the right-click menu). */}
+          {TOPBAR_TEMPLATE_BUTTON_ENABLED && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                backdropFilter: 'blur(12px) saturate(140%)',
+                WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+              }}
+              onClick={() => setShowTemplateModal(true)}
+              disabled
+              title="Create a project first to use templates"
+              aria-label="Create from template"
+            >
+              Template
+            </Button>
+          )}
+          {/* 4.x mobile: always grid → view toggle hidden on phones. */}
+          <div className="hidden md:block">
+            <ViewModeToggle value={adminView} onChange={setAdminView} />
+          </div>
+          <div className="hidden md:block"><SortModeToggle value={adminSort} onChange={setAdminSort} /></div>
         </TopbarRightSlot>
 
         <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
@@ -573,26 +586,31 @@ export default function AdminPage() {
       <TopbarRightSlot>
         {/* 2.4.2+: Template wizard — opens the split-pane modal
             with YouTube/UGC templates that scaffold a multi-level
-            folder structure into an existing project. The
-            standalone "New Project" button was dropped here in
-            2.5.0+ — the empty New Project tile at the end of the
-            grid already covers that affordance. */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
-          style={{
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            backdropFilter: 'blur(12px) saturate(140%)',
-            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-          }}
-          onClick={() => setShowTemplateModal(true)}
-          aria-label="Create from template"
-        >
-          Template
-        </Button>
-        <ViewModeToggle value={adminView} onChange={setAdminView} />
-        <SortModeToggle value={adminSort} onChange={setAdminSort} />
+            folder structure into an existing project.
+            4.x: hidden from the top bar (the UGC / YT Template actions
+            now live in the folder-grid right-click menu). Flag it back on
+            to restore. */}
+        {TOPBAR_TEMPLATE_BUTTON_ENABLED && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+            onClick={() => setShowTemplateModal(true)}
+            aria-label="Create from template"
+          >
+            Template
+          </Button>
+        )}
+        {/* 4.x mobile: always grid → view toggle hidden on phones. */}
+        <div className="hidden md:block">
+          <ViewModeToggle value={adminView} onChange={setAdminView} />
+        </div>
+        <div className="hidden md:block"><SortModeToggle value={adminSort} onChange={setAdminSort} /></div>
       </TopbarRightSlot>
 
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">

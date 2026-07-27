@@ -1664,9 +1664,14 @@ export default function CommentSection({
             // notched devices.
             className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-white/10 shadow-[0_-4px_12px_rgba(0,0,0,0.25)] pb-[env(safe-area-inset-bottom)]"
             style={{
-              backgroundColor: 'rgba(22, 37, 51, 0.62)',
+              // 4.x: SOLID accent-tinted brown (no gradient) to match the
+              // desktop composer. Neutral app-background base + a FLAT, uniform
+              // accent wash (same colour start→end so there's no visible
+              // gradient direction), so it still tracks the active accent
+              // (warm/brown for orange) but reads as one solid colour.
+              backgroundColor: 'hsl(var(--background) / 0.85)',
               backgroundImage:
-                'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                'linear-gradient(hsl(var(--spotlight-tint) / 0.12), hsl(var(--spotlight-tint) / 0.12))',
               backdropFilter: 'blur(40px) saturate(180%)',
               WebkitBackdropFilter: 'blur(40px) saturate(180%)',
               transform: 'translate3d(0, 0, 0)',
@@ -1675,6 +1680,7 @@ export default function CommentSection({
             }}
           >
             <CommentInput
+              transparentBackground
               newComment={newComment}
               onCommentChange={handleCommentChange}
               onInputFocus={handleCommentInputFocus}
@@ -1793,6 +1799,68 @@ export default function CommentSection({
                 hasClipboard={hasClipboardForProject}
                 onCopy={handleCopyComments}
                 onPaste={handlePasteComments}
+                /* 4.x: on mobile the guest "Name" editor lives INSIDE this
+                   kebab menu instead of taking its own row under the header. */
+                nameSection={
+                  !isAdminView ? (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-white/55">Name</span>
+                      {isEditingName ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={nameDraft}
+                            onChange={(e) => setNameDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                void handleSaveRename()
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault()
+                                handleCancelRename()
+                              }
+                            }}
+                            autoFocus
+                            maxLength={120}
+                            placeholder="Your name"
+                            className="flex-1 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--spotlight-tint)/0.55)]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleSaveRename()}
+                            disabled={savingName || !nameDraft.trim()}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40"
+                            title="Save"
+                            aria-label="Save"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelRename}
+                            disabled={savingName}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-40"
+                            title="Cancel"
+                            aria-label="Cancel"
+                          >
+                            <XIcon className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleStartRename}
+                          className="group flex items-center justify-between gap-2 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-left text-sm text-white hover:bg-white/[0.12] hover:ring-white/20 transition-colors"
+                        >
+                          <span className="font-medium truncate min-w-0">
+                            {guestName || 'Client'}
+                          </span>
+                          <Pencil className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 text-white/60 shrink-0" />
+                        </button>
+                      )}
+                    </div>
+                  ) : null
+                }
               />
             </div>
             </div>
@@ -1803,69 +1871,8 @@ export default function CommentSection({
             </div>
           </div>
         )}
-        {/*
-          1.2.0+: same editable name row for guests on mobile. Sits
-          right under the collapsible header so it's findable without
-          scrolling.
-        */}
-        {mobileCollapsible && !isAdminView && !isMobileCollapsed && (
-          <div className="order-2 lg:hidden px-3 py-2 border-b border-border/50 flex items-center gap-2 text-sm bg-muted/10" data-tutorial="tour-name">
-            <span className="text-muted-foreground shrink-0">Name:</span>
-            {isEditingName ? (
-              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                <input
-                  type="text"
-                  value={nameDraft}
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      void handleSaveRename()
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault()
-                      handleCancelRename()
-                    }
-                  }}
-                  autoFocus
-                  maxLength={120}
-                  placeholder="Your name"
-                  className="flex-1 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--spotlight-tint)/0.55)]"
-                />
-                <button
-                  type="button"
-                  onClick={() => void handleSaveRename()}
-                  disabled={savingName || !nameDraft.trim()}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-md text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-40"
-                  title="Save"
-                  aria-label="Save"
-                >
-                  <Check className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCancelRename}
-                  disabled={savingName}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
-                  title="Cancel"
-                  aria-label="Cancel"
-                >
-                  <XIcon className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleStartRename}
-                className="group flex items-center justify-between gap-2 flex-1 min-w-0 h-8 rounded-md border-0 bg-white/[0.06] ring-1 ring-white/10 px-2.5 py-1 text-left text-sm text-white hover:bg-white/[0.12] hover:ring-white/20 transition-colors"
-              >
-                <span className="font-medium truncate min-w-0">
-                  {guestName || 'Client'}
-                </span>
-                <Pencil className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 text-muted-foreground shrink-0" />
-              </button>
-            )}
-          </div>
-        )}
+        {/* 4.x: the mobile guest "Name" editor moved INTO the comments kebab
+            menu (⋮) above — it no longer takes its own row under the header. */}
 
         {/* Messages Area - Threaded Conversations.
             1.3.2+: on mobile we add bottom padding equal to the

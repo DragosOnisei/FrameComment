@@ -49,9 +49,14 @@ interface NotificationsContextValue {
   /** True while a live SSE stream is connected (vs polling fallback). */
   live: boolean
   refresh: () => Promise<void>
-  /** Mark read AND remove from the list (used when a row is clicked). */
-  dismiss: (id: string) => Promise<void>
+  /** Mark one read — it STAYS in the list, just loses its unread dot. */
+  markRead: (id: string) => Promise<void>
+  /** Mark one unread again. */
+  markUnread: (id: string) => Promise<void>
+  /** Permanently delete one from the list. */
+  remove: (id: string) => Promise<void>
   markAllRead: () => Promise<void>
+  markAllUnread: () => Promise<void>
 }
 
 const NotificationsContext = createContext<NotificationsContextValue>({
@@ -59,8 +64,11 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   unreadCount: 0,
   live: false,
   refresh: async () => {},
-  dismiss: async () => {},
+  markRead: async () => {},
+  markUnread: async () => {},
+  remove: async () => {},
   markAllRead: async () => {},
+  markAllUnread: async () => {},
 })
 
 export function useNotifications() {
@@ -87,7 +95,7 @@ export function NotificationsProvider({
   const ingest = useCallback((incoming: InAppNotification) => {
     setNotifications((prev) => {
       const without = prev.filter((n) => n.id !== incoming.id)
-      const next = [incoming, ...without].slice(0, 30)
+      const next = [incoming, ...without].slice(0, 50)
       setUnreadCount(next.filter((n) => !n.isRead).length)
       return next
     })
@@ -109,39 +117,81 @@ export function NotificationsProvider({
     }
   }, [])
 
-  const dismiss = useCallback(async (id: string) => {
-    // Optimistic — the row vanishes the instant it's clicked. Marking
-    // it read server-side keeps it from coming back on the next poll
-    // (the list only returns unread rows).
+  // Set one row's read state locally (keeping it in the list) and recompute
+  // the unread badge from the merged list.
+  const setReadLocal = useCallback((id: string, isRead: boolean) => {
+    setNotifications((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, isRead } : n))
+      setUnreadCount(next.filter((n) => !n.isRead).length)
+      return next
+    })
+  }, [])
+
+  const postReadState = useCallback(
+    async (payload: Record<string, unknown>, label: string) => {
+      try {
+        await apiFetch('/api/notifications/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch (err) {
+        logError(`[notifications] ${label} failed:`, err)
+      }
+    },
+    [],
+  )
+
+  const markRead = useCallback(
+    async (id: string) => {
+      setReadLocal(id, true)
+      await postReadState({ id, read: true }, 'markRead')
+    },
+    [setReadLocal, postReadState],
+  )
+
+  const markUnread = useCallback(
+    async (id: string) => {
+      setReadLocal(id, false)
+      await postReadState({ id, read: false }, 'markUnread')
+    },
+    [setReadLocal, postReadState],
+  )
+
+  const remove = useCallback(async (id: string) => {
+    // Optimistic — the row vanishes immediately.
     setNotifications((prev) => {
       const next = prev.filter((n) => n.id !== id)
-      setUnreadCount(next.length)
+      setUnreadCount(next.filter((n) => !n.isRead).length)
       return next
     })
     try {
-      await apiFetch('/api/notifications/read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+      await apiFetch(`/api/notifications/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
       })
     } catch (err) {
-      logError('[notifications] dismiss failed:', err)
+      logError('[notifications] remove failed:', err)
     }
   }, [])
 
   const markAllRead = useCallback(async () => {
-    setNotifications([])
+    // Keep the rows visible; just clear their unread state.
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
     setUnreadCount(0)
-    try {
-      await apiFetch('/api/notifications/read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ all: true }),
-      })
-    } catch (err) {
-      logError('[notifications] markAllRead failed:', err)
-    }
-  }, [])
+    await postReadState({ all: true, read: true }, 'markAllRead')
+  }, [postReadState])
+
+  const markAllUnread = useCallback(async () => {
+    setNotifications((prev) => {
+      const next = prev.map((n) => ({ ...n, isRead: false }))
+      setUnreadCount(next.length)
+      return next
+    })
+    await postReadState({ all: true, read: false }, 'markAllUnread')
+    // Reconcile with the authoritative count (there may be rows in the DB
+    // beyond the 50 shown here that were also flipped to unread).
+    void refresh()
+  }, [postReadState, refresh])
 
   // ── Live connection manager ───────────────────────────────────────
   // Refs hold the mutable connection bookkeeping so the effect can run
@@ -280,7 +330,17 @@ export function NotificationsProvider({
 
   return (
     <NotificationsContext.Provider
-      value={{ notifications, unreadCount, live, refresh, dismiss, markAllRead }}
+      value={{
+        notifications,
+        unreadCount,
+        live,
+        refresh,
+        markRead,
+        markUnread,
+        remove,
+        markAllRead,
+        markAllUnread,
+      }}
     >
       {children}
     </NotificationsContext.Provider>

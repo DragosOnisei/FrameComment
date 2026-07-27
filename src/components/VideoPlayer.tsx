@@ -2113,11 +2113,48 @@ export default function VideoPlayer({
         el.webkitRequestFullscreen()
         setIsFullscreen(true)
       } else if (video.webkitEnterFullscreen) {
-        try {
-          video.webkitEnterFullscreen()
-          setIsFullscreen(true)
-        } catch (error) {
-          logError('Failed to enter fullscreen:', error)
+        // iPhone Safari path: no element fullscreen, only the NATIVE <video>
+        // fullscreen. Its catch: it only works once the element has actually
+        // started loading/presenting its media. Before the first play iOS
+        // often keeps readyState low and `webkitEnterFullscreen()` silently
+        // no-ops — that's the "fullscreen does nothing until I hit play" bug.
+        // Fix: if the media isn't presentable yet, kick loading/playback in
+        // THIS tap gesture and enter fullscreen the moment it's ready.
+        const enterNativeFs = () => {
+          try {
+            video.webkitEnterFullscreen()
+            setIsFullscreen(true)
+          } catch (error) {
+            logError('Failed to enter fullscreen:', error)
+          }
+        }
+        // HAVE_CURRENT_DATA (2) or better → present a frame right away.
+        if (video.readyState >= 2) {
+          enterNativeFs()
+        } else {
+          let armed = false
+          const fire = () => {
+            if (armed) return
+            armed = true
+            video.removeEventListener('loadedmetadata', fire)
+            video.removeEventListener('canplay', fire)
+            enterNativeFs()
+          }
+          video.addEventListener('loadedmetadata', fire, { once: true })
+          video.addEventListener('canplay', fire, { once: true })
+          // play() both starts the media pipeline and satisfies iOS's
+          // "user has played it" gate; the listeners above then fire
+          // fullscreen as soon as a frame is available.
+          try {
+            const p = video.play()
+            if (p && typeof p.then === 'function') {
+              p.then(fire).catch(() => {
+                /* gesture/autoplay edge — the media listeners still cover it */
+              })
+            }
+          } catch {
+            /* ignore — listeners cover the ready path */
+          }
         }
       } else if (video.requestFullscreen) {
         Promise.resolve(video.requestFullscreen()).catch(() => {})

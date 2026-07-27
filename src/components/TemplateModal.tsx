@@ -208,10 +208,15 @@ export function TemplateModal({
         // picker reduced to plain text on the left and only the
         // tree preview on the right, the dialog now reads as a
         // tight glance card. Cleaner footprint, less ceremony.
-        className="max-w-md p-0 overflow-hidden gap-0 bg-white/[0.06] border-white/10 text-white shadow-2xl"
+        // 4.x: OPAQUE accent-tinted surface (was translucent
+        // `bg-white/[0.06]` + backdrop blur, which read as a washed-out
+        // see-through card). `bg-background` is the opaque fallback; the inline
+        // color-mix below tints it with the active accent and, being inline,
+        // reliably beats the Dialog primitive's default bg utility.
+        className="max-w-md p-0 overflow-hidden gap-0 border-white/10 text-white shadow-2xl bg-background"
         style={{
-          backdropFilter: 'blur(20px) saturate(140%)',
-          WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          backgroundColor:
+            'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
         }}
       >
         {/* 2.5.0+: title alone in the header — the X close was

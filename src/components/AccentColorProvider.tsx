@@ -3,6 +3,7 @@
 import { useEffect, useCallback } from 'react'
 import { ACCENT_COLORS, AccentColorKey } from '@/components/settings/AppearanceSection'
 import { setPublicShareOrigin } from '@/lib/public-share-origin'
+import { spotlightTopColorFromTriplet } from '@/lib/status-bar-color'
 
 /**
  * 2.5.0+: Convert a #RRGGBB hex string to an HSL triplet formatted the
@@ -38,6 +39,29 @@ function hexToHslTriplet(hex: string): string | null {
   }
   const round = (n: number) => Math.round(n * 10) / 10
   return `${round(h)} ${round(s * 100)}% ${round(l * 100)}%`
+}
+
+/**
+ * 4.x: keep the phone status-bar colour (`<meta name="theme-color">`) in sync
+ * with the app background when the accent changes without a reload. The SSR
+ * head already renders the correct value at load (see layout.tsx) — iOS Safari
+ * only honours that one; this covers live accent switches on other browsers.
+ * The composite (accent tint over the dark base, at the spotlight's peak alpha)
+ * lives in the shared `status-bar-color` helper so server + client agree.
+ */
+function updateThemeColorMeta(spotlightTriplet: string, isDark: boolean) {
+  if (typeof document === 'undefined') return
+  const hex = spotlightTopColorFromTriplet(spotlightTriplet, isDark)
+  if (!hex) return
+  const metas = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')
+  if (metas.length === 0) {
+    const meta = document.createElement('meta')
+    meta.name = 'theme-color'
+    meta.content = hex
+    document.head.appendChild(meta)
+  } else {
+    metas.forEach((m) => m.setAttribute('content', hex))
+  }
 }
 
 /**
@@ -86,6 +110,10 @@ export function applyAccentColor(colorKeyOrHex: AccentColorKey | string) {
   root.style.setProperty('--ring', hslValue)
   root.style.setProperty('--accent-foreground', hslValue)
   root.style.setProperty('--spotlight-tint', hslValue)
+
+  // Match the phone status-bar colour to the spotlight wash's top-left corner
+  // (this accent tint over the dark base) so the OS bar blends into the app.
+  updateThemeColorMeta(hslValue, isDark)
 
   // primary-visible: a tinted-background variant used for the "info"
   // notice cards (HSTS enabled, etc.). Light/dark gets a different

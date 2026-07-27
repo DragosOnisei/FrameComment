@@ -44,6 +44,7 @@ import { SplitVersionsModal, type SplitVersionRow } from './SplitVersionsModal'
 import QuickPreviewOverlay, { type QuickPreviewTarget } from './QuickPreviewOverlay'
 import FolderBrowserTable from './FolderBrowserTable'
 import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
+import { useIsMobile } from '@/lib/use-is-mobile'
 import {
   snapshotDataTransferEntries,
   walkSnapshotEntries,
@@ -314,6 +315,9 @@ function FolderBrowserInner(
   ref: React.Ref<FolderBrowserHandle>,
 ) {
   const router = useRouter()
+  // 4.x: phones always use the grid (the list/table view is desktop-only), so
+  // force grid below `md` regardless of the saved view preference.
+  const isMobile = useIsMobile()
   // Drop zone state — true while the user is dragging OS files over
   // the empty state, used for the highlight ring.
   const [isFileDropHover, setIsFileDropHover] = useState(false)
@@ -1021,13 +1025,15 @@ function FolderBrowserInner(
   // drives both the folder card order (sortedFolders below) and
   // the video group order so the entire grid flips together.
   const [sortMode] = useAdminSortMode()
+  // 4.x: phones always sort A→Z (the order toggle is hidden on mobile).
+  const effectiveSortMode = isMobile ? 'alphabetical' : sortMode
   const sortedFolders = useMemo(() => {
     // Server already returns folders ordered name-asc; we only
     // reverse for Z-A. Cheap operation, no allocation cost on the
     // common A-Z path.
-    if (sortMode !== 'alphabetical-reverse') return folders
+    if (effectiveSortMode !== 'alphabetical-reverse') return folders
     return [...folders].sort((a, b) => b.name.localeCompare(a.name))
-  }, [folders, sortMode])
+  }, [folders, effectiveSortMode])
 
   // ─── video helpers ─────────────────────────────────────────
   // Group videos by name so multiple versions of the same asset
@@ -1092,8 +1098,8 @@ function FolderBrowserInner(
     // videos so the unified grid reads alphabetically. 1.7.8+: the
     // A-Z / Z-A direction comes from the shared admin sort mode.
     const sorted = groups.sort((a, b) => a.name.localeCompare(b.name))
-    return sortMode === 'alphabetical-reverse' ? sorted.reverse() : sorted
-  }, [videos, rootVideos, sortMode])
+    return effectiveSortMode === 'alphabetical-reverse' ? sorted.reverse() : sorted
+  }, [videos, rootVideos, effectiveSortMode])
 
   // 3.9.x: mirror the grouped videos into a ref so async pollers
   // (thumbnail-regenerate completion watcher) can read the freshest
@@ -3183,10 +3189,9 @@ function FolderBrowserInner(
                 {uploadMenuOpen && (
                   <div
                     role="menu"
-                    // 2.5.0+: solid `#162533` glass-style dropdown,
-                    // matches the rest of the v2.5 menus.
-                    style={{ backgroundColor: '#162533' }}
-                    className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
+                    // 4.x: brand-aware menu surface (accent bleed over neutral)
+                    // instead of the old navy `#162533`.
+                    className="brand-menu-surface absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
                   >
                     <button
                       role="menuitem"
@@ -3306,10 +3311,9 @@ function FolderBrowserInner(
               {uploadMenuOpen && (
                 <div
                   role="menu"
-                  // 2.5.0+: solid `#162533` glass-style dropdown,
-                  // matches the rest of the v2.5 menus.
-                  style={{ backgroundColor: '#162533' }}
-                  className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 min-w-[180px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
+                  // 4.x: brand-aware menu surface (accent bleed over neutral)
+                  // instead of the old navy `#162533`.
+                  className="brand-menu-surface absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 min-w-[180px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
                 >
                   <button
                     role="menuitem"
@@ -3501,7 +3505,7 @@ function FolderBrowserInner(
         }}
       />
 
-      {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode === 'table' && (
+      {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode === 'table' && !isMobile && (
         <FolderBrowserTable
           folders={sortedFolders}
           videoGroups={videoGroups}
@@ -3527,7 +3531,7 @@ function FolderBrowserInner(
           }
         />
       )}
-      {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && viewMode !== 'table' && (
+      {!loading && !error && (folders.length > 0 || videoGroups.length > 0) && (viewMode !== 'table' || isMobile) && (
         // 1.3.0+: start at 2 columns on phones (used to be 1) so the
         // cards don't fill the entire screen each. 2 fits a 360-414px
         // viewport comfortably; we step up to 3 → 4 → 5 → 6 on bigger
@@ -4002,11 +4006,10 @@ function FolderBrowserInner(
         <div
           role="menu"
           onMouseDown={(e) => e.stopPropagation()}
-          className="fixed z-[2147483600] min-w-[200px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1 text-sm"
+          className="brand-menu-surface fixed z-[2147483600] min-w-[200px] rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1 text-sm"
           style={{
             top: Math.min(docMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 320),
             left: Math.min(docMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1000) - 220),
-            backgroundColor: '#162533',
           }}
         >
           {(() => {

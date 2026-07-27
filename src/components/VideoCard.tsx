@@ -982,8 +982,14 @@ export default function VideoCard({
               // kebab bounding rect on open) so the menu can float
               // freely over adjacent cards and stay clamped inside the
               // viewport on phones — Frame.io style.
-              style={{ ...menuStyle, backgroundColor: '#162533' }}
-              className="z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.65)] p-1"
+              style={{
+                ...menuStyle,
+                // Inline opaque accent-tint as a guarantee (beats any cached /
+                // layered background so the menu is never see-through).
+                backgroundColor:
+                  'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
+              }}
+              className="brand-menu-surface z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.65)] p-1"
               onClick={(e) => e.stopPropagation()}
             >
               {/* 1.1.0+ menu order:

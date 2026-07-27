@@ -4,7 +4,9 @@ import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import {
   markAllNotificationsRead,
+  markAllNotificationsUnread,
   markNotificationRead,
+  markNotificationUnread,
 } from '@/lib/inapp-notifications'
 
 export const runtime = 'nodejs'
@@ -13,12 +15,15 @@ export const dynamic = 'force-dynamic'
 /**
  * 3.5.0+ POST /api/notifications/read
  *
- * Mark notifications read for the current admin. Body:
- *   { id: "<notificationId>" }  → mark that one read
- *   { all: true }               → mark all this admin's unread read
+ * Toggle read state for the current admin's notifications. Body:
+ *   { id: "<notificationId>" }             → mark that one read
+ *   { id: "<notificationId>", read: false } → mark that one UNread
+ *   { all: true }                          → mark all read
+ *   { all: true, read: false }             → mark all UNread
  *
- * Always scoped to the authenticated recipient so one admin can never
- * touch another's notifications.
+ * `read` defaults to true (mark-read) for backwards compatibility. Always
+ * scoped to the authenticated recipient so one admin can never touch
+ * another's notifications.
  */
 export async function POST(request: NextRequest) {
   const auth = await requireApiAdmin(request)
@@ -37,12 +42,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json().catch(() => ({}))
+    // read defaults to true; only an explicit `read: false` means mark-unread.
+    const markUnread = body?.read === false
     if (body?.all === true) {
-      await markAllNotificationsRead(auth.id)
+      if (markUnread) await markAllNotificationsUnread(auth.id)
+      else await markAllNotificationsRead(auth.id)
       return NextResponse.json({ ok: true })
     }
     if (typeof body?.id === 'string' && body.id) {
-      await markNotificationRead(auth.id, body.id)
+      if (markUnread) await markNotificationUnread(auth.id, body.id)
+      else await markNotificationRead(auth.id, body.id)
       return NextResponse.json({ ok: true })
     }
     return NextResponse.json(

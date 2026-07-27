@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
+import { statusBarColorForAccent } from "@/lib/status-bar-color";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -46,7 +47,10 @@ export const viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: 'cover' as const,
-  themeColor: '#0a0a0a',
+  // NB: no `themeColor` here on purpose. iOS Safari reads the theme-color meta
+  // ONCE at load and ignores later JS edits, so we render the accent-matched
+  // value directly in the SSR <head> below (computed from the saved accent) and
+  // let AccentColorProvider keep it in sync afterwards on other browsers.
 }
 
 // Fetch appearance settings server-side for immediate application
@@ -79,6 +83,10 @@ export default async function RootLayout({
   const headersList = await headers()
   const nonce = headersList.get('x-nonce') || ''
   const storageProvider = (process.env.STORAGE_PROVIDER === 's3' ? 's3' : 'local') as StorageProvider
+  // Phone status-bar colour, matched to the accent-tinted top-left of the app
+  // background. Rendered here in the SSR head because iOS Safari reads
+  // theme-color once at load and ignores later JS edits (app is dark-only).
+  const statusBarColor = statusBarColorForAccent(appearance.accentColor, true)
 
   return (
     <html lang={locale} data-scroll-behavior="smooth" suppressHydrationWarning>
@@ -95,6 +103,12 @@ export default async function RootLayout({
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover"
         />
+        {/* Match the phone status bar to the app's tinted top-left corner so it
+            reads as a continuation of the page, not a black band. Kept in sync
+            client-side by AccentColorProvider when the accent changes.
+            (The apple-mobile-web-app status-bar-style meta is emitted via the
+            `appleWebApp` metadata for the installed-PWA case.) */}
+        <meta name="theme-color" content={statusBarColor} />
         {/* 1.4.x+: switched from a raw `<script>` element to
             `next/script` with strategy="beforeInteractive". Next.js 16
             warns about inline `<script>` tags inside React component

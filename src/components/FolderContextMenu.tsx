@@ -208,12 +208,15 @@ export default function FolderContextMenu({
     <div
       ref={menuRef}
       role="menu"
-      // 2.5.0+: matches the rest of the v2.5 dropdown chrome —
-      // solid `#162533` fill (backdrop-filter glass doesn't
-      // compose in this stacking context), white text + hairline
-      // white/10 ring, soft outward shadow.
-      className="fixed z-50 min-w-[240px] rounded-lg text-white ring-1 ring-white/10 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.65)] p-1 animate-in fade-in-0 slide-in-from-top-1 duration-100"
-      style={{ left, top, backgroundColor: '#162533' }}
+      // 4.x: brand-aware menu surface (neutral base + accent bleed) instead of
+      // the old hard-coded navy `#162533` that read blue under a warm accent.
+      className="brand-menu-surface fixed z-50 min-w-[240px] rounded-lg text-white ring-1 ring-white/10 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.65)] p-1 animate-in fade-in-0 slide-in-from-top-1 duration-100"
+      style={{
+        left,
+        top,
+        backgroundColor:
+          'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
+      }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {hasSelection ? (

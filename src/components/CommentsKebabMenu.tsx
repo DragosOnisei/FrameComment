@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreVertical, ClipboardCopy, ClipboardPaste } from 'lucide-react'
 
@@ -31,6 +31,11 @@ export interface CommentsKebabMenuProps {
   /** True iff the localStorage clipboard has anything to paste. The
    *  host computes this and re-renders us when it changes. */
   hasClipboard: boolean
+  /** 4.x: optional block rendered at the TOP of the menu. Used on mobile to
+   *  house the guest "Name" editor that used to sit inline under the header,
+   *  so the phone header stays compact. Interactive content is fine — clicks
+   *  inside the popover don't close it. */
+  nameSection?: ReactNode
 }
 
 export default function CommentsKebabMenu({
@@ -38,6 +43,7 @@ export default function CommentsKebabMenu({
   onCopy,
   onPaste,
   hasClipboard,
+  nameSection,
 }: CommentsKebabMenuProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -161,6 +167,12 @@ export default function CommentsKebabMenu({
             isolation: 'isolate',
           }}
         >
+          {nameSection && (
+            <div className="px-1 pt-0.5 pb-1">
+              {nameSection}
+              <div className="mt-1.5 h-px bg-white/10" />
+            </div>
+          )}
           <button
             role="menuitem"
             type="button"

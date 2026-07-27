@@ -591,9 +591,10 @@ export default function FolderCard({
               // that matches the rest of the v2.5 chrome.
               style={{
                 ...menuStyle,
-                backgroundColor: '#162533',
+                backgroundColor:
+                  'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
               }}
-              className="z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
+              className="brand-menu-surface z-50 overflow-y-auto rounded-lg text-white ring-1 ring-white/10 shadow-2xl p-1"
               onClick={(e) => e.stopPropagation()}
               ref={popoverRef}
             >

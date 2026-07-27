@@ -8,6 +8,7 @@ import {
   isOverFreeTier,
   evaluateBillingHealth,
   businessDaysBetween,
+  graceDeadline,
   FREE_TIER,
   GRACE_BUSINESS_DAYS,
 } from '@/lib/billing'
@@ -80,6 +81,11 @@ export async function GET(request: NextRequest) {
             businessDaysBetween(new Date(issueSince), new Date()),
         )
       : null
+    // Precise lockout moment so the UI can show a live HH:MM:SS countdown on
+    // the final grace day.
+    const graceEndsAt = issueSince
+      ? graceDeadline(new Date(issueSince)).toISOString()
+      : null
 
     // 4.3.0+: the suspension wall needs the `suspended` flag for EVERY internal
     // role (Editor/Marketing/Producer included — they're locked out too when the
@@ -90,6 +96,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         suspended: !!settings?.billingSuspended,
         graceDaysLeft,
+        graceEndsAt,
       })
     }
 
@@ -117,6 +124,7 @@ export async function GET(request: NextRequest) {
       suspended: !!settings?.billingSuspended,
       issueSince,
       graceDaysLeft,
+      graceEndsAt,
     })
   } catch (err) {
     logError('[billing/status]', err)

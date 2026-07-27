@@ -10,6 +10,7 @@ import { Plus, ArrowUpDown, Lock } from 'lucide-react'
 import { type ViewMode } from '@/components/ViewModeToggle'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
+import { useIsMobile } from '@/lib/use-is-mobile'
 import ProjectCardKebab from '@/components/ProjectCardKebab'
 import { formatDate } from '@/lib/utils'
 import { projectGradient, formatBytes, formatRelativeTime } from '@/lib/project-gradient'
@@ -58,18 +59,19 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
   const router = useRouter()
 
   /**
-   * 2.5.1+: Frame.io-style enter-on-double-click for project tiles.
-   * Mirrors the FolderCard / VideoCard behaviour the rest of the
-   * admin uses — a single click on a tile is now a no-op (room to
-   * grow into multi-select later), only a double-click drills into
-   * the project. Cmd/Ctrl-click and middle-click still open the
-   * project in a new tab, same affordance the old `<Link>` gave.
+   * 4.x: a SINGLE click / tap enters the project. The dashboard has no
+   * multi-select, so there's nothing to reserve a single click for — and on
+   * a phone a double-tap to open felt broken. Cmd/Ctrl-click and middle-click
+   * still open the project in a new tab (same affordance the old `<Link>`
+   * gave); double-click still works too (it just fires the same navigation).
    */
   const handleProjectClick = (e: React.MouseEvent, projectId: string) => {
     if (e.metaKey || e.ctrlKey || e.button === 1) {
       window.open(`/admin/projects/${projectId}`, '_blank', 'noopener')
+      return
     }
-    // Otherwise: do nothing. Double-click handles the actual nav.
+    // Plain left click / tap → drill into the project.
+    router.push(`/admin/projects/${projectId}`)
   }
   const handleProjectAuxClick = (e: React.MouseEvent, projectId: string) => {
     // Middle-click on a non-anchor element doesn't trigger `click`
@@ -96,6 +98,8 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
   // shared key, and existing users will set their preference once
   // from the header on first interaction.
   const [viewMode] = useAdminViewMode()
+  // 4.x: phones always render the grid (list view is desktop-only).
+  const isMobile = useIsMobile()
   // No-op setter kept for the legacy local toggle which we've
   // removed from the JSX below.
   const _setViewMode = (_: ViewMode) => {}
@@ -121,12 +125,14 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
   }
 
   // Show every project — no status filter applied (1.0.6+).
+  // 4.x: phones always sort A→Z (the order toggle is hidden on mobile).
+  const effectiveSort = isMobile ? 'alphabetical' : sortMode
   const sortedProjects = [...projects].sort((a, b) => {
-    if (sortMode === 'alphabetical') {
+    if (effectiveSort === 'alphabetical') {
       return a.title.localeCompare(b.title)
-    } else if (sortMode === 'alphabetical-reverse') {
+    } else if (effectiveSort === 'alphabetical-reverse') {
       return b.title.localeCompare(a.title)
-    } else if (sortMode === 'dueDate') {
+    } else if (effectiveSort === 'dueDate') {
       // Projects with due dates first, sorted earliest first
       if (!a.dueDate && !b.dueDate) return a.title.localeCompare(b.title)
       if (!a.dueDate) return 1
@@ -167,7 +173,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
             )}
           </CardContent>
         </Card>
-      ) : viewMode === 'grid' ? (
+      ) : viewMode === 'grid' || isMobile ? (
         // Frame.io-style tile grid (1.0.6+). Each project is a square
         // gradient cover with the project name + folder count + total
         // size below; kebab lives in the footer next to the

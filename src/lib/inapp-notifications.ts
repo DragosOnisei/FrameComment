@@ -247,21 +247,23 @@ export async function maybeNotifyEditorForComment(params: {
 }
 
 /**
- * Pending notifications for a recipient, newest first.
+ * Recent notifications for a recipient, newest first.
  *
- * The bell is a "pending inbox": only UNREAD rows are returned. Once a
- * notification is clicked (marked read) it drops out of this list and
- * won't come back on the next poll/refresh — so a handled item simply
- * disappears, which is the behaviour users expect.
+ * 4.x: the bell is now an inbox, not a "pending" queue — we return BOTH
+ * read and unread rows (capped at `limit`) so a notification stays visible
+ * after it's been read (it just loses its unread dot) and can be filtered
+ * client-side into All / Unread / Read tabs. A row leaves the list only when
+ * it's explicitly deleted. `unreadCount` is the authoritative badge number
+ * (all unread rows, not just the ones in this page).
  */
 export async function listNotifications(
   recipientId: string,
-  limit = 30,
+  limit = 50,
 ): Promise<{ notifications: InAppNotification[]; unreadCount: number }> {
   const delegate = notificationDelegate()
   const [rows, unreadCount] = await Promise.all([
     delegate.findMany({
-      where: { recipientId, isRead: false },
+      where: { recipientId },
       orderBy: { createdAt: 'desc' },
       take: limit,
     }),
@@ -285,6 +287,27 @@ export async function markNotificationRead(
   })
 }
 
+/** Mark a single notification UNread again (scoped to the owner). */
+export async function markNotificationUnread(
+  recipientId: string,
+  id: string,
+): Promise<void> {
+  const delegate = notificationDelegate()
+  await delegate.updateMany({
+    where: { id, recipientId, isRead: true },
+    data: { isRead: false, readAt: null },
+  })
+}
+
+/** Permanently remove a single notification (scoped to the owner). */
+export async function deleteNotification(
+  recipientId: string,
+  id: string,
+): Promise<void> {
+  const delegate = notificationDelegate()
+  await delegate.deleteMany({ where: { id, recipientId } })
+}
+
 /** Mark every unread notification for a recipient as read. */
 export async function markAllNotificationsRead(
   recipientId: string,
@@ -293,5 +316,16 @@ export async function markAllNotificationsRead(
   await delegate.updateMany({
     where: { recipientId, isRead: false },
     data: { isRead: true, readAt: new Date() },
+  })
+}
+
+/** Mark every notification for a recipient as UNread. */
+export async function markAllNotificationsUnread(
+  recipientId: string,
+): Promise<void> {
+  const delegate = notificationDelegate()
+  await delegate.updateMany({
+    where: { recipientId, isRead: true },
+    data: { isRead: false, readAt: null },
   })
 }

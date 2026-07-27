@@ -55,13 +55,28 @@ function useSlotTarget(slotId: string) {
 }
 
 export function TopbarLeftSlot({ children }: { children: ReactNode }) {
+  // 4.x: the page's left-slot content (Back button / title) sits in the top
+  // bar's left column on every breakpoint — including phones, where the Back
+  // icon needs to be reachable in the bar itself.
   const target = useSlotTarget('topbar-left-slot')
   if (!target) return null
   return createPortal(children, target)
 }
 
 export function TopbarRightSlot({ children }: { children: ReactNode }) {
-  const target = useSlotTarget('topbar-right-slot')
-  if (!target) return null
-  return createPortal(children, target)
+  // 4.x: like the left slot, the page's primary actions render into TWO
+  // targets, one shown per breakpoint:
+  //   - desktop → inside the top bar's right column (#topbar-right-slot)
+  //   - phone   → the band BELOW the bar (#topbar-right-slot-mobile), so the
+  //               bar itself stays a clean search · logo · bell · avatar row.
+  // Action content is buttons/toggles reading shared state or refs, so a hidden
+  // duplicate is harmless.
+  const desktopTarget = useSlotTarget('topbar-right-slot')
+  const mobileTarget = useSlotTarget('topbar-right-slot-mobile')
+  return (
+    <>
+      {desktopTarget ? createPortal(children, desktopTarget) : null}
+      {mobileTarget ? createPortal(children, mobileTarget) : null}
+    </>
+  )
 }

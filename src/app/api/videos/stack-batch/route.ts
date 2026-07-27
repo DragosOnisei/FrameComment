@@ -88,10 +88,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Target video not found' }, { status: 404 })
     }
 
+    // `deletedAt: null` is CRUCIAL: only LIVE rows may count toward the next
+    // version number. Without it, a soft-deleted version (in Trash) still bumped
+    // the counter — delete the last version, re-upload + stack, and it came back
+    // one number too high (the "ghost of its former self") instead of reclaiming
+    // the freed number.
     const folderFilter =
       target.folderId === null
-        ? { folderId: null }
-        : { folderId: target.folderId }
+        ? { folderId: null, deletedAt: null }
+        : { folderId: target.folderId, deletedAt: null }
 
     // Resolve each source representative to its group name.
     const sources = await prisma.video.findMany({

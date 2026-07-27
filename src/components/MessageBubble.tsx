@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
 import {
@@ -129,16 +130,62 @@ export default function MessageBubble({
   const [isSavingReply, setIsSavingReply] = useState(false)
 
   // 1.2.0+: kebab dropdown open state + click-outside to close.
+  // 4.x: the dropdown is now PORTALLED to <body> with fixed coords so it can
+  // never be clipped / covered by the mobile "Leave your comment" bar (which
+  // is a fixed z-40 layer) — the old `absolute top-full z-30` menu on the last
+  // comment rendered underneath it. Coords are measured from the trigger and
+  // the menu flips ABOVE the button when there isn't room below.
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const menuPopoverRef = useRef<HTMLDivElement | null>(null)
+  const [menuCoords, setMenuCoords] = useState<
+    { top?: number; bottom?: number; right: number } | null
+  >(null)
   useEffect(() => {
     if (!menuOpen) return
-    const onDocClick = (e: MouseEvent) => {
-      if (!menuRef.current) return
-      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    const compute = () => {
+      const el = menuTriggerRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const right = Math.max(8, window.innerWidth - rect.right)
+      const MENU_EST_HEIGHT = 108 // ~2 items + padding
+      const spaceBelow = window.innerHeight - rect.bottom
+      if (spaceBelow < MENU_EST_HEIGHT + 16) {
+        // Not enough room below (last comment sits near the input bar) → open
+        // upward, anchored just above the trigger.
+        setMenuCoords({ bottom: window.innerHeight - rect.top + 4, right })
+      } else {
+        setMenuCoords({ top: rect.bottom + 4, right })
+      }
+    }
+    compute()
+    window.addEventListener('scroll', compute, true)
+    window.addEventListener('resize', compute)
+    return () => {
+      window.removeEventListener('scroll', compute, true)
+      window.removeEventListener('resize', compute)
+    }
+  }, [menuOpen])
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node
+      if (menuRef.current?.contains(target)) return
+      if (menuPopoverRef.current?.contains(target)) return
+      setMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
+    document.addEventListener('touchstart', onDocClick, { passive: true })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('touchstart', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [menuOpen])
 
   // 1.2.0+: optimistic guard so rapid clicks don't double-toggle.
@@ -554,6 +601,7 @@ export default function MessageBubble({
                   {(canEdit || onDelete) && (
                     <div ref={menuRef} className="relative">
                       <button
+                        ref={menuTriggerRef}
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation()
@@ -567,16 +615,22 @@ export default function MessageBubble({
                       >
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
-                      {menuOpen && (
+                      {menuOpen && menuCoords && typeof document !== 'undefined' && createPortal(
                         <div
+                          ref={menuPopoverRef}
                           role="menu"
-                          className="absolute right-0 top-full mt-1 z-30 min-w-[160px] rounded-lg ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1 text-white animate-in fade-in-0 slide-in-from-top-1 duration-150 overflow-hidden"
+                          className="fixed z-[120] min-w-[160px] rounded-lg ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1 text-white animate-in fade-in-0 duration-150 overflow-hidden"
                           // True glass surface: lighter navy base + accent
                           // radial bleed in the top-left so the dropdown
                           // reads as a translucent panel sitting on top of
                           // the comments sidebar, not the same flat slab
-                          // as the comment card behind it.
+                          // as the comment card behind it. Portalled to <body>
+                          // + z-[120] so the fixed mobile input bar (z-40) can
+                          // never cover it.
                           style={{
+                            top: menuCoords.top,
+                            bottom: menuCoords.bottom,
+                            right: menuCoords.right,
                             backgroundColor: 'rgba(28, 44, 64, 0.92)',
                             backgroundImage:
                               'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
@@ -613,7 +667,8 @@ export default function MessageBubble({
                               <span className="flex-1">{t('deleteComment') || 'Delete'}</span>
                             </button>
                           )}
-                        </div>
+                        </div>,
+                        document.body
                       )}
                     </div>
                   )}

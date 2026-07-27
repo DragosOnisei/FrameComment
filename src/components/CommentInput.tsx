@@ -56,6 +56,11 @@ interface CommentInputProps {
   currentVideoRestricted: boolean
   restrictionMessage?: string
   commentsDisabled: boolean
+  /** 4.x: when the composer sits inside an already-frosted wrapper (the mobile
+   *  fixed-bottom glass bar), keep the composer's own root TRANSPARENT so the
+   *  wrapper's glass shows through instead of an opaque `bg-background` slab
+   *  (which read as an ugly black box on phones). */
+  transparentBackground?: boolean
 
   // Attachments
   allowClientAssetUpload?: boolean
@@ -121,6 +126,7 @@ export default function CommentInput({
   onClearAnnotation,
   showShortcutsButton = false,
   onShowShortcuts,
+  transparentBackground = false,
 }: CommentInputProps) {
   const t = useTranslations('comments')
   // Optional — provider may not be present in every host page (e.g. preview
@@ -500,7 +506,7 @@ export default function CommentInput({
     // making the placeholder illegible. Give the composer an opaque
     // backing on mobile so it always reads clearly; keep it transparent
     // on lg+ where the panel is tall and the glass bleed looks good.
-    <div className="border-t border-white/10 p-3 sm:p-4 flex-shrink-0 min-w-0 bg-background lg:bg-transparent">
+    <div className={`border-t border-white/10 p-3 sm:p-4 flex-shrink-0 min-w-0 ${transparentBackground ? 'bg-transparent' : 'bg-background lg:bg-transparent'}`}>
       {/* Restriction Warning */}
       {currentVideoRestricted && restrictionMessage && (
         <div className="mb-3 p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
