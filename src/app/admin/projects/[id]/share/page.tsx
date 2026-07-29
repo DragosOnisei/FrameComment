@@ -91,6 +91,12 @@ function AdminSharePageInner() {
   // this the reload would land at currentTime=t but paused.
   const urlAutoplay = searchParams?.get('autoplay') === '1'
   const urlVideoName = searchParams?.get('video') || null
+  // 4.x: stable video-id deep-link (e.g. from a bell notification). The name
+  // param can go stale after a rename / version-stack (the group's display name
+  // changes), which left the old `?video=<name>` link unable to find the video
+  // and dumped the user on the "Select a video" grid. When an id is present we
+  // resolve the CURRENT group name from it — robust to renames.
+  const urlVideoId = searchParams?.get('videoId') || null
   const urlVersion = searchParams?.get('version') ? parseInt(searchParams.get('version')!, 10) : null
   const urlFocusCommentId = searchParams?.get('comment') || null
   // 3.9.x: the folder the video was opened from (FolderBrowser appends
@@ -665,12 +671,30 @@ function AdminSharePageInner() {
       const videoNames = Object.keys(project.videosByName)
       if (videoNames.length === 0) return
 
-      if (!activeVideoName) {
+      // Re-resolve if there's no active video YET, OR the current one isn't a
+      // real group (e.g. a stale `?video=<name>` seeded from a notification
+      // whose video was since renamed) — otherwise we'd stay stuck on a
+      // non-existent name and fall through to the grid.
+      if (!activeVideoName || !project.videosByName[activeVideoName]) {
         let videoNameToUse: string | null = null
 
-        if (urlVideoName && project.videosByName[urlVideoName]) {
+        // 4.x: prefer the stable video id — find the group that CURRENTLY
+        // contains this exact video, regardless of its display name.
+        if (urlVideoId) {
+          for (const [name, group] of Object.entries(project.videosByName)) {
+            if (
+              Array.isArray(group) &&
+              (group as any[]).some((v) => v?.id === urlVideoId)
+            ) {
+              videoNameToUse = name
+              break
+            }
+          }
+        }
+
+        if (!videoNameToUse && urlVideoName && project.videosByName[urlVideoName]) {
           videoNameToUse = urlVideoName
-        } else {
+        } else if (!videoNameToUse) {
           const savedVideoName = sessionStorage.getItem('approvedVideoName')
           if (savedVideoName) {
             sessionStorage.removeItem('approvedVideoName')

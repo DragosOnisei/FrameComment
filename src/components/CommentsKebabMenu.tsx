@@ -57,6 +57,18 @@ export default function CommentsKebabMenu({
   useEffect(() => {
     if (!open) return
     const compute = () => {
+      // Don't reposition while the user is typing INSIDE the menu (e.g. editing
+      // their name). On phones the soft keyboard fires scroll/resize + scrolls
+      // the page to reveal the input; following the trigger would yank the menu
+      // — and the focused input — off-screen. The menu is `fixed`, so freezing
+      // its coords keeps it (and the input) put and visible above the keyboard.
+      if (
+        popoverRef.current &&
+        document.activeElement &&
+        popoverRef.current.contains(document.activeElement)
+      ) {
+        return
+      }
       const el = triggerRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()

@@ -62,7 +62,11 @@ function dateGroupLabel(iso: string): string {
 }
 
 function deepLink(n: InAppNotification): string {
+  // Include the STABLE video id so the review page can resolve the video even
+  // if its display name changed (rename / version-stack) since the notification
+  // was created — `video` (name) stays as a fallback for older links.
   const params = new URLSearchParams({ video: n.videoName })
+  if (n.videoId) params.set('videoId', n.videoId)
   if (n.folderId) params.set('folderId', n.folderId)
   return `/admin/projects/${n.projectId}/share?${params.toString()}`
 }
