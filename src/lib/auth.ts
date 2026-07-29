@@ -379,6 +379,76 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   return user
 }
 
+// ---------------------------------------------------------------------------
+// 4.7.x: SERVER-SIDE billing suspension gate.
+//
+// The client-side <BillingWall> overlay is UX only — a user can delete the
+// overlay node in devtools and keep using the admin app until they refresh.
+// This gate enforces suspension on the SERVER so tampering with the DOM
+// achieves nothing: while the instance is billing-suspended, every admin
+// CONTENT route (everything going through requireApiAdmin) returns 402
+// BILLING_SUSPENDED. A short allow-list stays open so the admin can still
+// authenticate, poll billing status, load the Settings page and add a card to
+// fix billing. Public client share routes never pass through here, so client
+// share links are unaffected.
+//
+// The suspended flag is cached for a few seconds so we don't add a DB read to
+// every single content request; resolution (card added) lifts the gate within
+// that window.
+let billingSuspendedCache: { value: boolean; at: number } | null = null
+const BILLING_SUSPENDED_CACHE_MS = 5000
+
+async function isInstanceBillingSuspended(): Promise<boolean> {
+  const now = Date.now()
+  if (billingSuspendedCache && now - billingSuspendedCache.at < BILLING_SUSPENDED_CACHE_MS) {
+    return billingSuspendedCache.value
+  }
+  try {
+    const settings = (await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { billingSuspended: true } as any,
+    })) as any
+    const value = !!settings?.billingSuspended
+    billingSuspendedCache = { value, at: now }
+    return value
+  } catch {
+    // Never lock the whole app out on a transient DB error.
+    return false
+  }
+}
+
+// Prefixes that MUST stay reachable while suspended: authenticate, read
+// billing status (so the wall + Billing pane work), load Settings, manage
+// Users, and fix billing. Users is intentionally open so an admin who went
+// over the free tier by adding too many people can delete users to drop back
+// under the tier and lift the suspension. Everything else is content and gets
+// blocked.
+const BILLING_GATE_ALLOW_PREFIXES = [
+  '/api/billing',
+  '/api/auth',
+  '/api/session',
+  '/api/settings',
+  '/api/profile',
+  '/api/users',
+]
+
+/**
+ * Returns a 402 Response when the instance is billing-suspended AND the request
+ * targets a non-allow-listed (content) route; otherwise null. Call this from
+ * the admin content gate after authentication succeeds.
+ */
+export async function billingSuspensionGate(request: NextRequest): Promise<Response | null> {
+  const path = request.nextUrl?.pathname || ''
+  if (BILLING_GATE_ALLOW_PREFIXES.some((p) => path.startsWith(p))) return null
+  if (await isInstanceBillingSuspended()) {
+    return NextResponse.json(
+      { error: 'Billing suspended', code: 'BILLING_SUSPENDED' },
+      { status: 402 },
+    )
+  }
+  return null
+}
+
 /**
  * 4.3.0+: base gate for the admin app. Historically this required role ===
  * 'ADMIN'; with the new role system it accepts ANY authenticated internal user
@@ -390,12 +460,17 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
  *
  * The role is read fresh from the DB on every request (see
  * getCurrentUserFromRequest), so a demotion takes effect immediately.
+ *
+ * 4.7.x: also enforces the billing suspension gate — when the instance is
+ * suspended, content routes 402 so DOM-tampering can't bypass the wall.
  */
 export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | Response> {
   const user = await getCurrentUserFromRequest(request)
   if (!user || !isStaff(user.role)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const gate = await billingSuspensionGate(request)
+  if (gate) return gate
   return user
 }
 

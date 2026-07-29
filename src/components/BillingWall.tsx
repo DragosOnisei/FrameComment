@@ -22,6 +22,10 @@ import { apiFetch } from '@/lib/api-client'
 export default function BillingWall() {
   const pathname = usePathname()
   const [suspended, setSuspended] = useState(false)
+  // Bumped every time we (re)assert the wall. Used as the overlay's React
+  // `key` so that if the node is deleted in devtools, the next assertion
+  // forces React to remount a fresh overlay — tampering can't make it stick.
+  const [bump, setBump] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -30,25 +34,47 @@ export default function BillingWall() {
         const res = await apiFetch('/api/billing/status')
         if (!res.ok) return
         const data = await res.json()
-        if (alive) setSuspended(!!data.suspended)
+        if (alive) {
+          setSuspended(!!data.suspended)
+          if (data.suspended) setBump((b) => b + 1)
+        }
       } catch {
         /* ignore — never lock someone out on a transient fetch error */
       }
     }
     check()
     const id = setInterval(check, 60_000)
+
+    // 4.7.x: the API client fires this whenever a content route replies
+    // 402 BILLING_SUSPENDED. Re-raise the wall instantly and bump the key
+    // so a manually-deleted overlay is recreated on the spot.
+    const onSuspendedEvent = () => {
+      if (!alive) return
+      setSuspended(true)
+      setBump((b) => b + 1)
+    }
+    window.addEventListener('framecomment:billing-suspended', onSuspendedEvent)
+
     return () => {
       alive = false
       clearInterval(id)
+      window.removeEventListener('framecomment:billing-suspended', onSuspendedEvent)
     }
   }, [pathname])
 
-  // Never block the Settings page — that's where billing gets fixed.
-  const onSettings = pathname?.startsWith('/admin/settings') ?? false
-  if (!suspended || onSettings) return null
+  // Never block the pages where a suspension gets fixed: Settings (add a
+  // card) and Users (delete users to drop back under the free tier).
+  const onFixablePage =
+    (pathname?.startsWith('/admin/settings') ||
+      pathname?.startsWith('/admin/users')) ??
+    false
+  if (!suspended || onFixablePage) return null
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/70 backdrop-blur-sm">
+    <div
+      key={bump}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/70 backdrop-blur-sm"
+    >
       <div
         className="max-w-md w-full rounded-2xl bg-white/[0.06] ring-1 ring-white/15 p-6 text-white text-center shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)]"
         style={{ backdropFilter: 'blur(24px) saturate(160%)' }}
@@ -63,7 +89,7 @@ export default function BillingWall() {
           unaffected.
         </p>
         <Link
-          href="/admin/settings"
+          href="/admin/settings?section=billing"
           className="inline-block mt-5 px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-white shadow-[0_2px_8px_-2px_hsl(var(--primary)/0.55)] hover:brightness-110 transition"
         >
           Go to Billing settings

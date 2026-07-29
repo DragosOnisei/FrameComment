@@ -80,6 +80,21 @@ export async function apiFetch(
       }
     }
 
+    // 4.7.x: the server enforces billing suspension by 402'ing content
+    // routes. Whenever we see that code, re-raise the billing wall
+    // immediately — this is what makes deleting the overlay in devtools
+    // pointless: the very next request forces it back on screen.
+    if (response.status === 402 && typeof window !== 'undefined') {
+      try {
+        const data = await response.clone().json().catch(() => null)
+        if (data && data.code === 'BILLING_SUSPENDED') {
+          window.dispatchEvent(new Event('framecomment:billing-suspended'))
+        }
+      } catch {
+        /* ignore — body inspection is best-effort */
+      }
+    }
+
     return response
   } catch (error) {
     logError('[API] Request failed:', error)

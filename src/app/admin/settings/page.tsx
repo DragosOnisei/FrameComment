@@ -115,6 +115,10 @@ export default function GlobalSettingsPage() {
     }
   }, [user, router])
 
+  // Desktop sidebar navigation. Declared here (before the deep-link effect
+  // below) so ?section=… can target it on first paint.
+  const [activeSection, setActiveSection] = useState('appearance')
+
   const [_settings, setSettings] = useState<Settings | null>(null)
   const [_securitySettings, setSecuritySettings] = useState<SecuritySettings | null>(null)
   const [loading, setLoading] = useState(true)
@@ -236,8 +240,30 @@ export default function GlobalSettingsPage() {
   const [showBlocklist, setShowBlocklist] = useState(false)
   const [showStorage, setShowStorage] = useState(false)
 
-  // Desktop sidebar navigation
-  const [activeSection, setActiveSection] = useState('appearance')
+  // 4.7.x: deep-link to a section via ?section=… (used by the billing wall's
+  // "Go to Billing settings" CTA → ?section=billing). Selects the desktop
+  // sidebar tab AND opens the matching mobile collapsible on first mount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const section = new URLSearchParams(window.location.search).get('section')
+    const valid = [
+      'appearance', 'branding', 'privacy', 'video-processing',
+      'security', 'blocklist', 'storage', 'billing',
+    ]
+    if (!section || !valid.includes(section)) return
+    setActiveSection(section)
+    const openers: Record<string, (v: boolean) => void> = {
+      appearance: setShowAppearance,
+      branding: setShowBranding,
+      privacy: setShowPrivacy,
+      'video-processing': setShowVideoProcessing,
+      security: setShowSecuritySettings,
+      blocklist: setShowBlocklist,
+      storage: setShowStorage,
+      billing: setShowBilling,
+    }
+    openers[section]?.(true)
+  }, [])
 
   const applySettingsToForm = useCallback((data: Settings) => {
     setLanguage(data.language || 'en')

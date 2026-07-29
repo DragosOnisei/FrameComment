@@ -1496,7 +1496,7 @@ function FolderBrowserInner(
           saving: 'Saving to folder…',
         }
 
-        const ATTEMPTS = 60 // ~2.5 min; transcription runs at low priority
+        const ATTEMPTS = 300 // ~12.5 min; long clips split into several chunks
         for (let i = 0; i < ATTEMPTS; i++) {
           await new Promise((r) => setTimeout(r, 2500))
 
@@ -3046,6 +3046,67 @@ function FolderBrowserInner(
 
   const hasItems = folders.length > 0 || videoGroups.length > 0
 
+  // 4.x: build a Quick Look preview target from a video group. Shared by the
+  // Space-to-open handler and the ←/→ navigation so both produce identical
+  // targets. The overlay keys its <video> on `id`, so swapping the target
+  // remounts + auto-plays the new clip.
+  const buildVideoTarget = useCallback(
+    (group: any): QuickPreviewTarget => {
+      const found = (videos as any[])
+        .concat(rootVideos as any[])
+        .find((v: any) => v.id === group.id)
+      return {
+        kind: 'video',
+        id: group.id,
+        name: group.name,
+        duration: group.duration ?? null,
+        width: found?.width ?? null,
+        height: found?.height ?? null,
+        mediaType: group.mediaType,
+        thumbnailUrl: group.thumbnailUrl ?? null,
+        previewUrl: group.previewUrl ?? null,
+        versionLabel: group.versionLabel ?? null,
+        uploaderName: group.uploaderName ?? null,
+        createdAt: group.createdAt ?? null,
+      }
+    },
+    [videos, rootVideos],
+  )
+
+  // 4.x: while the Quick Look preview shows a VIDEO, step to the previous /
+  // next video in the folder (in the current sort order) — the same feel as
+  // Finder's Quick Look. ←/↑ = previous, →/↓ = next, so it works in BOTH the
+  // grid (horizontal, ←/→) and the list/table view (vertical, ↑/↓). Capture
+  // phase + preventDefault so the arrows navigate instead of seeking the
+  // focused <video> or scrolling the list. The overlay auto-plays the new clip
+  // (its <video> is keyed on the id). Clamped at both ends.
+  useEffect(() => {
+    if (!quickPreview || quickPreview.kind !== 'video') return
+    const onArrow = (e: KeyboardEvent) => {
+      let dir = 0
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') dir = 1
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') dir = -1
+      else return
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      const idx = videoGroups.findIndex(
+        (g) => g.id === (quickPreview as { id: string }).id,
+      )
+      if (idx === -1) return
+      const nextIdx = idx + dir
+      if (nextIdx < 0 || nextIdx >= videoGroups.length) return
+      e.preventDefault()
+      e.stopPropagation()
+      const nextGroup = videoGroups[nextIdx]
+      setQuickPreview(buildVideoTarget(nextGroup))
+      // Move the grid selection to follow the previewed video, so the tile
+      // highlighted underneath always matches what's playing.
+      setSelectedVideoIds(new Set([nextGroup.id]))
+      setSelectedFolderIds(new Set())
+    }
+    document.addEventListener('keydown', onArrow, true)
+    return () => document.removeEventListener('keydown', onArrow, true)
+  }, [quickPreview, videoGroups, buildVideoTarget])
+
   // 1.7.0+: Space opens a macOS Quick Look-style preview for the
   // single currently-selected item. Mirrors the system shortcut
   // users already know from Finder.
@@ -3093,23 +3154,7 @@ function FolderBrowserInner(
         const id = Array.from(selectedVideoIds)[0]
         const group = videoGroups.find((g) => g.id === id)
         if (!group) return
-        const found = (videos as any[])
-          .concat(rootVideos as any[])
-          .find((v: any) => v.id === group.id)
-        setQuickPreview({
-          kind: 'video',
-          id: group.id,
-          name: group.name,
-          duration: group.duration ?? null,
-          width: found?.width ?? null,
-          height: found?.height ?? null,
-          mediaType: group.mediaType,
-          thumbnailUrl: group.thumbnailUrl ?? null,
-          previewUrl: group.previewUrl ?? null,
-          versionLabel: group.versionLabel ?? null,
-          uploaderName: group.uploaderName ?? null,
-          createdAt: group.createdAt ?? null,
-        })
+        setQuickPreview(buildVideoTarget(group))
       } else if (selectedFolderIds.size === 1) {
         const id = Array.from(selectedFolderIds)[0]
         const folder = folders.find((f) => f.id === id)

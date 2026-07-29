@@ -8,15 +8,66 @@ import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
 import { downloadFile, getLocalSourcePath, uploadFile } from '../lib/storage'
 import { getVideoBackend } from '../lib/storage-backends'
-import { extractAudioForTranscription } from '../lib/ffmpeg'
+import {
+  extractAudioForTranscription,
+  sliceAudioForTranscription,
+  probeMediaDurationSeconds,
+} from '../lib/ffmpeg'
 import { getOpenAiApiKey } from '../lib/settings'
 import { TEMP_DIR } from './cleanup'
 
 // OpenAI hard-limits a transcription request to 25 MB. We downmix to
-// mono 16 kHz MP3 (~0.5 MB/min) so this only trips on very long clips.
+// mono 16 kHz MP3 (~0.5 MB/min), so a single request covers roughly the
+// first ~50 min. Longer clips are split into sub-limit chunks and
+// stitched back together (see the chunked path below).
 const MAX_AUDIO_BYTES = 24 * 1024 * 1024
+// Target size per chunk when we have to split. Kept well under the hard
+// limit so MP3 frame overhead / VBR wobble can never push a chunk over.
+const CHUNK_TARGET_BYTES = 20 * 1024 * 1024
 
 type WhisperSegment = { start: number; end: number; text: string }
+
+/**
+ * POST one audio buffer to OpenAI whisper-1 (verbose_json for per-segment
+ * timecodes) and return the parsed segments + full text. Timecodes are
+ * relative to the START of THIS buffer — the caller offsets them when the
+ * buffer is a chunk of a longer clip.
+ */
+async function transcribeAudioBuffer(
+  audioBuffer: Buffer,
+  apiKey: string,
+): Promise<{ segments: WhisperSegment[]; fullText: string }> {
+  const form = new FormData()
+  form.append(
+    'file',
+    new Blob([new Uint8Array(audioBuffer)], { type: 'audio/mpeg' }),
+    'audio.mp3',
+  )
+  form.append('model', 'whisper-1')
+  form.append('response_format', 'verbose_json')
+
+  const resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  })
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '')
+    throw new Error(`OpenAI transcription failed (${resp.status}): ${body.slice(0, 300)}`)
+  }
+  const data: any = await resp.json()
+  const segments: WhisperSegment[] = Array.isArray(data?.segments)
+    ? data.segments
+        .filter((s: any) => typeof s?.text === 'string')
+        .map((s: any) => ({
+          start: Number(s.start) || 0,
+          end: Number(s.end) || 0,
+          text: String(s.text).trim(),
+        }))
+    : []
+  const fullText: string = typeof data?.text === 'string' ? data.text.trim() : ''
+  return { segments, fullText }
+}
 
 /** Seconds → `MM:SS` (or `HH:MM:SS` past the hour). */
 function fmtTimecode(seconds: number): string {
@@ -45,6 +96,8 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
   // Temp files we create and must clean up (audio; the source original
   // is left for the temp sweeper / other jobs, same as regenerate-thumb).
   const audioPath = path.join(TEMP_DIR, `${videoId}-transcript-audio.mp3`)
+  // Any per-chunk audio slices we create for long clips (cleaned up below).
+  const chunkPaths: string[] = []
 
   try {
     const video = await prisma.video.findUnique({
@@ -116,57 +169,60 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     await job.updateProgress({ stage: 'audio' }).catch(() => {})
     await extractAudioForTranscription(sourcePath, audioPath)
     const audioBuffer = await fs.promises.readFile(audioPath)
-    if (audioBuffer.length > MAX_AUDIO_BYTES) {
-      throw new Error(
-        `Audio is too large for a single transcription request (${(audioBuffer.length / 1024 / 1024).toFixed(1)} MB, limit 24 MB). This clip is likely very long.`,
+
+    // 2) Transcribe. OpenAI rejects a single request over ~25 MB, which a
+    //    mono 16 kHz 64 kbps stream hits at roughly ~50 min. For anything
+    //    over the limit we split the audio into sub-limit chunks, transcribe
+    //    each, offset its timecodes by the chunk's start time, and stitch
+    //    the segments + text back together. Short clips take the
+    //    single-request fast path unchanged.
+    let segments: WhisperSegment[] = []
+    let fullText = ''
+
+    if (audioBuffer.length <= MAX_AUDIO_BYTES) {
+      // Fast path — one request. Two banner steps: "Sending" (the small
+      // upload) then "Waiting for OpenAI" (the transcription itself).
+      await job.updateProgress({ stage: 'sending' }).catch(() => {})
+      const waitingTimer = setTimeout(() => {
+        void job.updateProgress({ stage: 'waiting' }).catch(() => {})
+      }, 2000)
+      try {
+        const r = await transcribeAudioBuffer(audioBuffer, apiKey)
+        segments = r.segments
+        fullText = r.fullText
+      } finally {
+        clearTimeout(waitingTimer)
+      }
+    } else {
+      // Chunked path. Split by duration into N pieces whose encoded size
+      // lands comfortably under the limit, then transcribe each.
+      const totalDuration = await probeMediaDurationSeconds(audioPath)
+      const chunkCount = Math.ceil(audioBuffer.length / CHUNK_TARGET_BYTES)
+      const chunkDuration = Math.ceil(totalDuration / chunkCount)
+      logMessage(
+        `[WORKER] create-transcript ${videoId}: audio ${(audioBuffer.length / 1024 / 1024).toFixed(1)} MB over ${(MAX_AUDIO_BYTES / 1024 / 1024).toFixed(0)} MB limit → splitting into ${chunkCount} chunks of ~${chunkDuration}s`,
       )
+      const textParts: string[] = []
+      for (let i = 0; i < chunkCount; i++) {
+        const startSec = i * chunkDuration
+        if (startSec >= totalDuration) break
+        const chunkPath = path.join(TEMP_DIR, `${videoId}-transcript-audio-${i}.mp3`)
+        chunkPaths.push(chunkPath)
+        await sliceAudioForTranscription(audioPath, chunkPath, startSec, chunkDuration)
+        const chunkBuffer = await fs.promises.readFile(chunkPath)
+        // Reflect chunk progress in the banner: "Waiting for OpenAI…" is
+        // the honest label for the bulk of each chunk's time.
+        await job
+          .updateProgress({ stage: 'waiting', chunk: i + 1, chunks: chunkCount })
+          .catch(() => {})
+        const r = await transcribeAudioBuffer(chunkBuffer, apiKey)
+        for (const s of r.segments) {
+          segments.push({ start: s.start + startSec, end: s.end + startSec, text: s.text })
+        }
+        if (r.fullText) textParts.push(r.fullText)
+      }
+      fullText = textParts.join(' ').trim()
     }
-
-    // 2) Send to OpenAI whisper-1. verbose_json returns per-segment
-    //    timecodes (start/end in seconds) which we render as [MM:SS].
-    const form = new FormData()
-    form.append(
-      'file',
-      new Blob([new Uint8Array(audioBuffer)], { type: 'audio/mpeg' }),
-      'audio.mp3',
-    )
-    form.append('model', 'whisper-1')
-    form.append('response_format', 'verbose_json')
-
-    // Two distinct steps for the banner: "Sending" (the small audio
-    // upload — a second or two) then "Waiting for OpenAI" (the bulk of
-    // the time, while whisper transcribes). fetch() is a single await, so
-    // we flip to the "waiting" stage on a short timer once the request is
-    // on the wire.
-    await job.updateProgress({ stage: 'sending' }).catch(() => {})
-    const waitingTimer = setTimeout(() => {
-      void job.updateProgress({ stage: 'waiting' }).catch(() => {})
-    }, 2000)
-    let resp: Response
-    try {
-      resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-      })
-    } finally {
-      clearTimeout(waitingTimer)
-    }
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => '')
-      throw new Error(`OpenAI transcription failed (${resp.status}): ${body.slice(0, 300)}`)
-    }
-    const data: any = await resp.json()
-    const segments: WhisperSegment[] = Array.isArray(data?.segments)
-      ? data.segments
-          .filter((s: any) => typeof s?.text === 'string')
-          .map((s: any) => ({
-            start: Number(s.start) || 0,
-            end: Number(s.end) || 0,
-            text: String(s.text).trim(),
-          }))
-      : []
-    const fullText: string = typeof data?.text === 'string' ? data.text.trim() : ''
 
     if (segments.length === 0 && !fullText) {
       throw new Error('Transcription returned no text (silent or undecodable audio).')
@@ -216,11 +272,19 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
     logError(`[WORKER] create-transcript for ${videoId} failed:`, err)
     throw err
   } finally {
-    // Drop the temp audio; leave the cached original for the sweeper.
+    // Drop the temp audio + any chunk slices; leave the cached original
+    // for the sweeper.
     try {
       if (fs.existsSync(audioPath)) await fs.promises.unlink(audioPath)
     } catch {
       /* ignore */
+    }
+    for (const p of chunkPaths) {
+      try {
+        if (fs.existsSync(p)) await fs.promises.unlink(p)
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

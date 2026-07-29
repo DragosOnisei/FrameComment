@@ -59,6 +59,104 @@ export function extractAudioForTranscription(
 }
 
 /**
+ * 4.7.x: cut a time-bounded slice of an already-extracted transcription
+ * MP3, re-encoded with the SAME mono/16 kHz/64 kbps settings so each
+ * chunk is a valid standalone MP3 the Whisper API accepts. Used to keep
+ * long clips (e.g. 55 min → ~26 MB, over OpenAI's 25 MB request cap)
+ * transcribable: we split the audio into a handful of sub-25 MB chunks,
+ * transcribe each, and stitch the timecoded segments back together in
+ * the worker (offsetting each chunk's timecodes by `startSec`).
+ *
+ * We re-encode (rather than `-c copy`) because MP3 stream-copy slices on
+ * arbitrary boundaries can carry a broken first frame / imprecise start;
+ * re-encoding a tiny mono 16 kHz stream is cheap and gives accurate,
+ * self-contained chunks.
+ */
+export function sliceAudioForTranscription(
+  inputPath: string,
+  outputPath: string,
+  startSec: number,
+  durationSec: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-y',
+      // Accurate output-seek: place -ss/-t AFTER -i so the cut lands on
+      // the exact requested window (input-seek on a re-encode can drift).
+      '-i', inputPath,
+      '-ss', String(Math.max(0, startSec)),
+      '-t', String(Math.max(1, durationSec)),
+      '-vn',
+      '-ac', '1',
+      '-ar', '16000',
+      '-b:a', '64k',
+      '-f', 'mp3',
+      outputPath,
+    ]
+    const proc = spawn(ffmpegPath, args)
+    let stderr = ''
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString()
+    })
+    proc.on('error', (err) =>
+      reject(new Error(`Failed to spawn ffmpeg for audio slice: ${err.message}`)),
+    )
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(
+          new Error(
+            `ffmpeg audio slice failed (exit ${code}): ${stderr.slice(-400)}`,
+          ),
+        )
+      }
+    })
+  })
+}
+
+/**
+ * 4.7.x: probe the duration (in seconds) of a media file via ffprobe's
+ * container `format` block. Unlike `getVideoMetadata` this works on an
+ * audio-only file (no video stream), which is what we need to compute
+ * how to split a long extracted MP3 into chunks.
+ */
+export function probeMediaDurationSeconds(inputPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      inputPath,
+    ]
+    const proc = spawn(ffprobePath, args)
+    let stdout = ''
+    let stderr = ''
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString()
+    })
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString()
+    })
+    proc.on('error', (err) =>
+      reject(new Error(`Failed to spawn ffprobe for duration: ${err.message}`)),
+    )
+    proc.on('close', (code) => {
+      const dur = parseFloat(stdout.trim())
+      if (code === 0 && Number.isFinite(dur) && dur > 0) {
+        resolve(dur)
+      } else {
+        reject(
+          new Error(
+            `ffprobe duration probe failed (exit ${code}): ${stderr.slice(-200)}`,
+          ),
+        )
+      }
+    })
+  })
+}
+
+/**
  * 1.9.4+ Phase A: hardware video encoder detection.
  *
  * Probes FFmpeg at module load to find the fastest available
