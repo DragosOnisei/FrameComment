@@ -764,7 +764,7 @@ function AdminSharePageInner() {
         }
       }
     }
-  }, [project, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos, scopeGroupToFolder])
+  }, [project, activeVideoName, urlVideoName, urlVideoId, urlVersion, urlTimestamp, fingerprintRawVideos, scopeGroupToFolder])
 
   // 2.2.0+: A tokenized video is "useful" when at least one playable
   // surface is available (any tier stream URL, an HLS master, a
@@ -1017,17 +1017,32 @@ function AdminSharePageInner() {
     }
   }, [project?.videosByName, id, fetchAdminVideoTokenWithRetry, urlVideoName])
 
-  // Determine initial view state based on URL params (same behavior as public share)
+  // 4.x: the name-group this URL targets, resolved from the STABLE video id
+  // first (a bell-notification deep-link carries `?videoId=`) and only then
+  // from `?video=<name>`. The name can go stale after a rename / version-stack,
+  // which is exactly what dumped notification clicks onto the "Select a video"
+  // grid — the id survives those changes, so resolving by it lands the player.
+  const urlTargetVideoName = useMemo<string | null>(() => {
+    const byName = project?.videosByName as Record<string, any[]> | undefined
+    if (!byName) return null
+    if (urlVideoId) {
+      for (const [name, group] of Object.entries(byName)) {
+        if (Array.isArray(group) && group.some((v: any) => v?.id === urlVideoId)) {
+          return name
+        }
+      }
+    }
+    if (urlVideoName && byName[urlVideoName]) return urlVideoName
+    return null
+  }, [project?.videosByName, urlVideoId, urlVideoName])
+
+  // Determine initial view state based on URL params (same behavior as public
+  // share). Uses the id-or-name resolution above so a stale name still opens
+  // the player instead of falling through to the grid.
   useEffect(() => {
     if (!project?.videosByName) return
-
-    if (urlVideoName && project.videosByName[urlVideoName]) {
-      setViewState('player')
-      return
-    }
-
-    setViewState('grid')
-  }, [project?.videosByName, urlVideoName])
+    setViewState(urlTargetVideoName ? 'player' : 'grid')
+  }, [project?.videosByName, urlTargetVideoName])
 
   // 1.0.9+: track HOW the player was reached. `true` only when the
   // user picked a video from the in-page "Select a video" grid;
@@ -1036,6 +1051,42 @@ function AdminSharePageInner() {
   // when you click a video card. The "Back" button reads this to
   // decide where to go (see `handleBackToGrid`).
   const enteredViaGridRef = useRef(false)
+
+  // 4.x: heal a stale stored `duration`. Some source containers report a wrong
+  // duration (the value the folder card shows) while the actual media the
+  // player decodes is the truth. When the player reports a real duration that
+  // differs from the stored one by more than a second, PATCH the correction
+  // once per video and mirror it in memory so the version reel / labels update
+  // without a reload. Admin-only (this page holds an admin token); the public
+  // client player never passes this callback.
+  const correctedDurationsRef = useRef<Set<string>>(new Set())
+  const handleRealDuration = useCallback(
+    (videoId: string, realDuration: number) => {
+      if (!videoId || !Number.isFinite(realDuration) || realDuration <= 0) return
+      if (correctedDurationsRef.current.has(videoId)) return
+      const stored =
+        activeVideosRaw.find((v: any) => v?.id === videoId)?.duration ??
+        activeVideos.find((v: any) => v?.id === videoId)?.duration ??
+        null
+      // Only correct a clearly-wrong value (>1s off) or a missing one.
+      if (stored != null && Math.abs(Number(stored) - realDuration) <= 1) return
+      correctedDurationsRef.current.add(videoId)
+      const rounded = Math.round(realDuration * 100) / 100
+      apiFetch(`/api/videos/${videoId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration: rounded }),
+      }).catch(() => {
+        // best-effort — allow a retry on a later load
+        correctedDurationsRef.current.delete(videoId)
+      })
+      const patch = (arr: any[]) =>
+        arr.map((v: any) => (v?.id === videoId ? { ...v, duration: rounded } : v))
+      setActiveVideos((prev) => patch(prev))
+      setActiveVideosRaw((prev) => patch(prev))
+    },
+    [activeVideos, activeVideosRaw],
+  )
 
   // Handle video selection
   const handleVideoSelect = useCallback((videoName: string) => {
@@ -1225,9 +1276,7 @@ function AdminSharePageInner() {
   // ENTIRE project's grid (every video name + version count) for
   // one frame before the player chrome takes over. The reviewer
   // sees a flash of confidential metadata in screen-recordings.
-  const targetingSpecificVideo = !!(
-    urlVideoName && project.videosByName?.[urlVideoName]
-  )
+  const targetingSpecificVideo = !!urlTargetVideoName
   const effectiveViewState: 'grid' | 'player' = targetingSpecificVideo
     ? 'player'
     : viewState
@@ -1511,6 +1560,7 @@ function AdminSharePageInner() {
                   // version dropdown (ThumbnailReel) can highlight the row.
                   setActiveVideoId(state.selectedVideo?.id)
                 }}
+                onRealDurationDetected={handleRealDuration}
               />
             </div>
 

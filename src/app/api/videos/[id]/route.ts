@@ -68,6 +68,61 @@ export async function GET(
   }
 }
 
+// PATCH /api/videos/[id] — small, targeted field updates.
+//
+// 4.x: currently only `duration`. The player reports the TRUE media duration
+// once it loads (loadedmetadata); some source containers store a wrong
+// duration that the folder card would otherwise show. The admin share page
+// calls this to reconcile the stored value with reality so the card matches
+// the player. Admin-gated; validated + clamped to a sane range.
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authResult = await requireApiAdmin(request)
+  if (authResult instanceof Response) {
+    return authResult
+  }
+
+  try {
+    const { id } = await params
+    const body = await request.json().catch(() => ({}))
+
+    const data: Record<string, unknown> = {}
+
+    if ('duration' in body) {
+      const d = Number((body as any).duration)
+      // Reject non-finite / negative / absurd values (> 24h). 0 is allowed
+      // (images / audio-less stills legitimately have no duration).
+      if (!Number.isFinite(d) || d < 0 || d > 24 * 60 * 60) {
+        return NextResponse.json({ error: 'Invalid duration' }, { status: 400 })
+      }
+      data.duration = d
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: 'No supported fields to update' }, { status: 400 })
+    }
+
+    try {
+      const updated = await prisma.video.update({
+        where: { id },
+        data: data as any,
+        select: { id: true, duration: true },
+      })
+      return NextResponse.json(updated)
+    } catch (err: any) {
+      if (err?.code === 'P2025') {
+        return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+      }
+      throw err
+    }
+  } catch (error) {
+    logError('Error updating video:', error)
+    return NextResponse.json({ error: 'Failed to update video' }, { status: 500 })
+  }
+}
+
 // Helper: Check if all videos have at least one approved version
 async function checkAllVideosApproved(projectId: string): Promise<boolean> {
   const allVideos = await prisma.video.findMany({

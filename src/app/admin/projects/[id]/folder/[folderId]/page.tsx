@@ -83,9 +83,12 @@ export default function ProjectFolderPage() {
       // Don't flash the full-screen "Loading…" view on background
       // polls — only on the first ever fetch / explicit refresh.
       if (!opts?.silent) setLoading(true)
+      // 4.x: force fresh reads — without `no-store` the browser can serve a
+      // cached response, so a video's comment-count badge stays stale (e.g.
+      // shows 0 after you added comments in the player and navigated back).
       const [folderRes, projectRes] = await Promise.all([
-        apiFetch(`/api/folders/${folderId}`),
-        apiFetch(`/api/projects/${projectId}`),
+        apiFetch(`/api/folders/${folderId}`, { cache: 'no-store' }),
+        apiFetch(`/api/projects/${projectId}`, { cache: 'no-store' }),
       ])
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
       if (folderRes.status === 404) {

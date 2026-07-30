@@ -90,7 +90,10 @@ export default function ProjectPage() {
     const seq = ++fetchSeqRef.current
     let transientFailure = false
     try {
-      const response = await apiFetch(`/api/projects/${id}`)
+      // 4.x: force a fresh read — without `no-store` the browser can serve a
+      // cached response, leaving per-video comment-count badges stale (e.g.
+      // showing 0 after comments were added in the player).
+      const response = await apiFetch(`/api/projects/${id}`, { cache: 'no-store' })
       // A newer fetch (or a route change that unmounted us) has
       // already started — drop this result on the floor.
       if (seq !== fetchSeqRef.current || !aliveRef.current) return

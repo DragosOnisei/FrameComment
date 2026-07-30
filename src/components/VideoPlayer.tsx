@@ -81,6 +81,11 @@ interface VideoPlayerProps {
   }) => void // Callback to expose video state for mobile layout
   usePreviewForApprovedPlayback?: boolean // Use preview for approved playback instead of original
   fillContainer?: boolean // Fill parent container height (for full-viewport layouts)
+  // 4.x: fired once the real media duration is known (loadedmetadata). The
+  // parent uses it to heal a stale stored `duration` — some source containers
+  // report a wrong duration that the folder card then shows, while the player
+  // (the actual decoded/encoded media) is the source of truth.
+  onRealDurationDetected?: (videoId: string, realDuration: number) => void
 }
 
 /**
@@ -206,6 +211,7 @@ export default function VideoPlayer({
   fillContainer = false, // Default to false (standard aspect ratio)
   authenticatedEmail = null,
   authenticatedName = null,
+  onRealDurationDetected, // 4.x: report true media duration to heal a stale stored value
 }: VideoPlayerProps) {
   const t = useTranslations('videos')
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
@@ -1975,9 +1981,17 @@ export default function VideoPlayer({
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      setVideoDuration(videoRef.current.duration)
+      const dur = videoRef.current.duration
+      setVideoDuration(dur)
       setVolume(videoRef.current.volume)
       setIsMuted(videoRef.current.muted)
+      // 4.x: surface the true media duration so the parent can correct a
+      // stale stored `duration` (the card's value). Guarded to a real,
+      // finite, positive number so a not-yet-ready element never reports 0/∞.
+      const vid = selectedVideoIdRef.current
+      if (onRealDurationDetected && vid && Number.isFinite(dur) && dur > 0) {
+        onRealDurationDetected(vid, dur)
+      }
     }
   }
 

@@ -163,8 +163,13 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     setIsPublicHost(!isLocal)
   }, [])
 
-  // Maximum length for video names (fits comfortably in modal)
-  const MAX_VIDEO_NAME_LENGTH = 50
+  // Maximum length for a video name. Kept generous (200) so long,
+  // fully-descriptive filenames like
+  // "VDA_H1_SympleLendingRiff1_Need a Loan_Leslie_Monica_916_V4" survive
+  // intact instead of being clipped to ~50 chars (which also caused spurious
+  // " (2)" suffixes when several long names collapsed to the same prefix).
+  // The DB column is unbounded (Postgres text); this is just a sane safety cap.
+  const MAX_VIDEO_NAME_LENGTH = 200
   // Maximum display length for file names before truncation
   const MAX_FILENAME_DISPLAY_LENGTH = 38
 
