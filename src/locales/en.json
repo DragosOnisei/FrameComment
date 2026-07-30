@@ -825,6 +825,8 @@
     "seekToTimecode": "Seek to This Timecode",
     "reply": "Reply",
     "editComment": "Edit",
+    "copyComment": "Copy",
+    "copiedComment": "Copied",
     "save": "Save",
     "cancel": "Cancel",
     "saving": "Saving...",

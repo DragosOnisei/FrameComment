@@ -9,6 +9,7 @@ import {
   Brush,
   Pencil,
   Check,
+  Copy,
   X,
   MoreHorizontal,
 } from 'lucide-react'
@@ -136,6 +137,8 @@ export default function MessageBubble({
   // comment rendered underneath it. Coords are measured from the trigger and
   // the menu flips ABOVE the button when there isn't room below.
   const [menuOpen, setMenuOpen] = useState(false)
+  // Brief "Copied" confirmation state for the menu's Copy action.
+  const [copied, setCopied] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
   const menuPopoverRef = useRef<HTMLDivElement | null>(null)
@@ -203,6 +206,36 @@ export default function MessageBubble({
     const tmp = document.createElement('div')
     tmp.innerHTML = html
     return (tmp.textContent || tmp.innerText || '').trim()
+  }
+
+  // Copy the comment's plain text to the clipboard. Uses the async
+  // Clipboard API when available (HTTPS / localhost) and falls back to a
+  // hidden-textarea execCommand copy for insecure-origin / older browsers.
+  const handleCopy = async () => {
+    const text = htmlToPlainText(comment.content)
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+      setCopied(true)
+      // Show the "Copied" confirmation briefly, then close the menu.
+      window.setTimeout(() => {
+        setCopied(false)
+        setMenuOpen(false)
+      }, 900)
+    } catch {
+      // Copy failed (permissions / no clipboard) — just close the menu.
+      setMenuOpen(false)
+    }
   }
 
   const handleStartEdit = () => {
@@ -639,6 +672,25 @@ export default function MessageBubble({
                           }}
                           onClick={(e) => e.stopPropagation()}
                         >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleCopy()
+                            }}
+                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-white hover:bg-white/[0.10] transition-colors text-left"
+                            role="menuitem"
+                          >
+                            {copied ? (
+                              <Check className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 shrink-0" />
+                            )}
+                            <span className="flex-1">
+                              {copied
+                                ? t('copiedComment') || 'Copied'
+                                : t('copyComment') || 'Copy'}
+                            </span>
+                          </button>
                           {canEdit && onEdit && (
                             <button
                               type="button"
