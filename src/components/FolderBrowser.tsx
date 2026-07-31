@@ -207,6 +207,9 @@ interface FolderRow {
    *  API). Rendered as "· X GB" in the FolderCard subtitle when
    *  greater than zero. */
   totalSize?: string | null
+  /** 4.7.x: folder creation time — drives the "Upload date" sort so
+   *  folders reorder alongside videos. */
+  createdAt?: string | Date | null
 }
 
 /** A single video row exactly as returned by /api/folders/[id]. */
@@ -1033,7 +1036,7 @@ function FolderBrowserInner(
   // 4.x: phones always sort A→Z (the order toggle is hidden on mobile).
   const effectiveSortMode = isMobile ? 'alphabetical' : sortMode
   const sortedFolders = useMemo(() => {
-    const timeOf = (x?: string | Date) => {
+    const timeOf = (x?: string | Date | null) => {
       if (!x) return 0
       const t = new Date(x).getTime()
       return Number.isFinite(t) ? t : 0
