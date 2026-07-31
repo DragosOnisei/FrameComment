@@ -14,7 +14,25 @@ import { useCallback, useEffect, useState } from 'react'
  * event broadcast for cross-component + cross-tab sync.
  */
 
-export type AdminSortMode = 'alphabetical' | 'alphabetical-reverse'
+// 4.7.x: extended from just A-Z / Z-A to also cover upload-date order, driven
+// by the new Sort menu in the admin topbar. Kept as string literals so the
+// per-user localStorage value stays human-readable.
+export type AdminSortMode =
+  | 'alphabetical'
+  | 'alphabetical-reverse'
+  | 'date-newest'
+  | 'date-oldest'
+
+const VALID_MODES: AdminSortMode[] = [
+  'alphabetical',
+  'alphabetical-reverse',
+  'date-newest',
+  'date-oldest',
+]
+
+function isValidMode(v: unknown): v is AdminSortMode {
+  return typeof v === 'string' && (VALID_MODES as string[]).includes(v)
+}
 
 const EVENT_NAME = 'admin-sort-mode-changed'
 
@@ -30,7 +48,7 @@ function readSync(): AdminSortMode {
     const key = storageKey(cachedId)
     if (!key) return 'alphabetical'
     const raw = window.localStorage.getItem(key)
-    if (raw === 'alphabetical' || raw === 'alphabetical-reverse') return raw
+    if (isValidMode(raw)) return raw
   } catch {
     /* localStorage disabled */
   }
@@ -43,13 +61,13 @@ export function useAdminSortMode(): [AdminSortMode, (next: AdminSortMode) => voi
   useEffect(() => {
     const onCustom = (e: Event) => {
       const detail = (e as CustomEvent<AdminSortMode>).detail
-      if (detail === 'alphabetical' || detail === 'alphabetical-reverse') {
+      if (isValidMode(detail)) {
         setModeLocal(detail)
       }
     }
     const onStorage = (e: StorageEvent) => {
       if (!e.key || !e.key.startsWith('admin_sort_mode:')) return
-      if (e.newValue === 'alphabetical' || e.newValue === 'alphabetical-reverse') {
+      if (isValidMode(e.newValue)) {
         setModeLocal(e.newValue)
       }
     }

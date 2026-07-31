@@ -17,6 +17,7 @@ import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 import ViewModeToggle from '@/components/ViewModeToggle'
+import SortModeMenu from '@/components/SortModeMenu'
 import {
   createFolderHierarchy,
   uniqueDirectoryPaths,
@@ -314,6 +315,11 @@ export default function ProjectPage() {
         </Link>
       </TopbarLeftSlot>
       <TopbarRightSlot>
+        {/* Sort menu (name / upload date) — desktop only, sits just before
+            the view toggle. Shares the per-user sort preference. */}
+        <div className="hidden md:block">
+          <SortModeMenu />
+        </div>
         {/* Grid / List view toggle — shares the per-user preference so
             the choice carries into folders and back.
             4.x mobile: always grid (toggle hidden), Upload / Download hidden. */}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowUpFromLine,
@@ -897,15 +897,20 @@ export default function VideoCard({
           {titleTip && typeof document !== 'undefined' &&
             createPortal(
               <div
-                className="fixed z-[2147483600] max-w-[360px] rounded-md bg-[#162533] text-white text-xs px-2.5 py-1.5 ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] pointer-events-none"
+                className="fixed z-[2147483600] max-w-[240px] rounded-md bg-[#162533] text-white text-xs px-2.5 py-1.5 ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] pointer-events-none"
                 style={{
                   left: Math.min(
                     titleTip.x,
-                    (typeof window !== 'undefined' ? window.innerWidth : 1200) - 372,
+                    (typeof window !== 'undefined' ? window.innerWidth : 1200) - 252,
                   ),
                   top: titleTip.y,
                   whiteSpace: 'normal',
                   wordBreak: 'break-word',
+                  // 4.7.x: tighter box + balanced line lengths so a name that
+                  // wraps to 2+ lines doesn't leave a big empty gap on the
+                  // right (the box hugs the wrapped text instead of stretching).
+                  // Double-cast: `textWrap` may be absent from older csstype defs.
+                  ...({ textWrap: 'balance' } as unknown as CSSProperties),
                 }}
               >
                 {name}

@@ -931,10 +931,37 @@ function AdminSharePageInner() {
       // the bulk thumbnail fetch in player view also makes the page
       // visibly faster — the version reel (ThumbnailReel) only needs
       // thumbnails for one video group anyway.
-      const inPlayerView = !!urlVideoName
+      // 4.7.x CRITICAL: a bell-notification deep-link targets a video by its
+      // STABLE id (?videoId=), and the name (?video=) can be stale/empty. The
+      // old `inPlayerView = !!urlVideoName` gate therefore MISSED the player
+      // case whenever the name didn't resolve — so the effect fell into the
+      // "grid" branch and fanned out a thumbnail-token request for EVERY video
+      // in the project (thousands on big projects). That exhausted the
+      // browser's socket pool (tab crash → "This page couldn't load") AND
+      // hammered the server minting thousands of signed tokens. We now treat
+      // ANY targeting signal (name OR id) as player view, resolve the target
+      // group name from `activeVideoName` when the raw name is stale, and only
+      // ever fetch that ONE thumbnail. If the target can't be resolved yet we
+      // fetch NOTHING (never fan out) — the effect re-runs once
+      // `activeVideoName` settles.
+      const inPlayerView = !!(urlVideoName || urlVideoId)
+      const targetName =
+        urlVideoName && nameToVideoWithThumb.has(urlVideoName)
+          ? urlVideoName
+          : activeVideoName && nameToVideoWithThumb.has(activeVideoName)
+            ? activeVideoName
+            : null
+      // Safety net for the genuine full-project grid ("Select a video"):
+      // never eagerly mint more than this many thumbnail tokens at once. On a
+      // multi-thousand-video project fetching them all would strain the server
+      // even at low concurrency; tiles past the cap just render without a
+      // thumbnail rather than taking the instance down.
+      const GRID_THUMBNAIL_CAP = 120
       const targetEntries = inPlayerView
-        ? Array.from(nameToVideoWithThumb.entries()).filter(([name]) => name === urlVideoName)
-        : Array.from(nameToVideoWithThumb.entries())
+        ? targetName
+          ? Array.from(nameToVideoWithThumb.entries()).filter(([name]) => name === targetName)
+          : []
+        : Array.from(nameToVideoWithThumb.entries()).slice(0, GRID_THUMBNAIL_CAP)
 
       // 3.2.2+: when we DO need bulk thumbnails (grid view), run them
       // through a small concurrency-limited worker pool instead of
@@ -1015,7 +1042,7 @@ function AdminSharePageInner() {
     return () => {
       isMounted = false
     }
-  }, [project?.videosByName, id, fetchAdminVideoTokenWithRetry, urlVideoName])
+  }, [project?.videosByName, id, fetchAdminVideoTokenWithRetry, urlVideoName, urlVideoId, activeVideoName])
 
   // 4.x: the name-group this URL targets, resolved from the STABLE video id
   // first (a bell-notification deep-link carries `?videoId=`) and only then

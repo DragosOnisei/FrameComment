@@ -600,6 +600,10 @@ export default function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const videoWrapperRef = useRef<HTMLDivElement>(null)
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // 4.7.x: mirror `isFullscreen` in a ref so the (stable-identity)
+  // resetControlsTimeout can read the CURRENT value without re-creating the
+  // callback / re-binding the mouse-move listener on every fullscreen toggle.
+  const isFullscreenRef = useRef(false)
   const hasInitiallySeenRef = useRef(false) // Track if initial seek already happened
   const lastTimeUpdateRef = useRef(0) // Throttle time updates
   const previousVideoNameRef = useRef<string | null>(null)
@@ -2056,9 +2060,17 @@ export default function VideoPlayer({
   // first or not. Critical guard: never trigger when the focus is
   // in an editable element — the comment input is right next to
   // the player and stealing Space mid-sentence would be terrible.
+  //
+  // 4.7.x: plain K / J / L shortcuts (same guards):
+  //   K (or Space) — play / pause
+  //   J            — slower (playback rate −0.25×, floor 0.25×)
+  //   L            — faster (playback rate +0.25×, ceil 2×)
+  // Uses `e.code` so it's layout- and case-independent (Shift/CapsLock
+  // don't matter). Speed changes go through `setPlaybackSpeed`, which the
+  // existing effect applies to the <video> and the on-screen speed control.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Compare overlay is open → it owns Space (play/pause both clips).
+      // Compare overlay is open → it owns the player shortcuts.
       if (showComparisonRef.current) return
       // Ignore when the user is typing somewhere: <input>,
       // <textarea>, <select>, or any element with contentEditable.
@@ -2068,19 +2080,39 @@ export default function VideoPlayer({
         (target instanceof HTMLElement &&
           ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
       if (isEditable) return
-      // Ignore when a modifier is held — we don't want to hijack
-      // the browser's Ctrl/Cmd-Space shortcuts.
+      // Ignore when a modifier is held — we don't want to hijack the
+      // browser's Ctrl/Cmd shortcuts (and the Ctrl+J/L frame-step combos
+      // are handled by the other keyboard effect).
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.code !== 'Space' && e.key !== ' ') return
-      e.preventDefault()
+
       const video = videoRef.current
       if (!video) return
-      if (video.paused) {
-        void video.play()
-        setIsPlaying(true)
-      } else {
-        video.pause()
-        setIsPlaying(false)
+
+      // K or Space → play / pause
+      if (e.code === 'Space' || e.key === ' ' || e.code === 'KeyK') {
+        e.preventDefault()
+        if (video.paused) {
+          void video.play()
+          setIsPlaying(true)
+        } else {
+          video.pause()
+          setIsPlaying(false)
+        }
+        return
+      }
+
+      // J → slower
+      if (e.code === 'KeyJ') {
+        e.preventDefault()
+        setPlaybackSpeed((prev) => Math.max(0.25, Math.round((prev - 0.25) * 100) / 100))
+        return
+      }
+
+      // L → faster
+      if (e.code === 'KeyL') {
+        e.preventDefault()
+        setPlaybackSpeed((prev) => Math.min(2.0, Math.round((prev + 0.25) * 100) / 100))
+        return
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -2247,16 +2279,30 @@ export default function VideoPlayer({
     }))
   }
 
-  // Auto-hide controls when not in use (2 seconds is standard for most video players)
+  // Keep the fullscreen ref in sync so the callback below reads it live.
+  // Entering fullscreen mid-playback re-arms the fast (0.5s) auto-hide;
+  // leaving it brings the bar back immediately.
+  useEffect(() => {
+    isFullscreenRef.current = isFullscreen
+    if (isPlaying) resetControlsTimeout()
+    else setShowControls(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFullscreen])
+
+  // Auto-hide controls while playing. 4.7.x: in FULLSCREEN they float over the
+  // video and fade out fast (0.5s) for a clean, distraction-free view — like
+  // Frame.io. Windowed keeps the standard 2s (there it only toggles the cursor;
+  // the bar stays in layout).
   const resetControlsTimeout = useCallback(() => {
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current)
     }
     setShowControls(true)
     if (isPlaying) {
+      const delay = isFullscreenRef.current ? 500 : 2000
       controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false)
-      }, 2000)
+      }, delay)
     }
   }, [isPlaying])
 
@@ -2299,7 +2345,14 @@ export default function VideoPlayer({
     }
   }, [resetControlsTimeout])
 
-  // Fullscreen change event (handles both desktop and mobile)
+  // Fullscreen change events (desktop). 4.7.x FIX: these DOCUMENT-level
+  // listeners must ALWAYS be attached — the old code gated them behind
+  // `if (videoRef.current)` inside a `[]`-deps effect, so on a first render
+  // where the <video> hadn't mounted yet (URL still loading) they never
+  // registered. Entering fullscreen still worked (handleToggleFullscreen sets
+  // the flag manually), but EXITING via Escape had nothing listening, so
+  // `isFullscreen` stayed stuck `true` — leaving the controls auto-hidden and
+  // the comments / yellow ball hidden even after leaving fullscreen.
   useEffect(() => {
     const handleFullscreenChange = () => {
       const isCurrentlyFullscreen = !!(
@@ -2310,32 +2363,34 @@ export default function VideoPlayer({
       )
       setIsFullscreen(isCurrentlyFullscreen)
     }
-
-    const video = videoRef.current
-    if (video) {
-      // iOS Safari fullscreen events
-      const handleWebkitBegin = () => setIsFullscreen(true)
-      const handleWebkitEnd = () => setIsFullscreen(false)
-      
-      video.addEventListener('webkitbeginfullscreen', handleWebkitBegin)
-      video.addEventListener('webkitendfullscreen', handleWebkitEnd)
-      
-      // Standard fullscreen events
-      document.addEventListener('fullscreenchange', handleFullscreenChange)
-      document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
-      document.addEventListener('mozfullscreenchange', handleFullscreenChange)
-      document.addEventListener('MSFullscreenChange', handleFullscreenChange)
-      
-      return () => {
-        video.removeEventListener('webkitbeginfullscreen', handleWebkitBegin)
-        video.removeEventListener('webkitendfullscreen', handleWebkitEnd)
-        document.removeEventListener('fullscreenchange', handleFullscreenChange)
-        document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
-        document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
-        document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
-      }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange)
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
     }
   }, [])
+
+  // iOS Safari native <video> fullscreen events. Re-bound whenever the video
+  // element (re)mounts so it's never missed when the source arrives late.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const handleWebkitBegin = () => setIsFullscreen(true)
+    const handleWebkitEnd = () => setIsFullscreen(false)
+    video.addEventListener('webkitbeginfullscreen', handleWebkitBegin)
+    video.addEventListener('webkitendfullscreen', handleWebkitEnd)
+    return () => {
+      video.removeEventListener('webkitbeginfullscreen', handleWebkitBegin)
+      video.removeEventListener('webkitendfullscreen', handleWebkitEnd)
+    }
+    // `videoUrl` is included so this re-runs (and binds) when the <video>
+    // element finally mounts after a late-arriving source URL.
+  }, [selectedVideo?.id, videoUrl])
 
   // Show controls on mouse move and touch (only within video player)
   useEffect(() => {
@@ -2461,7 +2516,7 @@ export default function VideoPlayer({
               shrinks the video proportionally; the control bar
               stays at its natural size and never gets clipped.
             */}
-            <div className="rounded-xl overflow-hidden bg-black flex flex-col w-full h-full min-h-0">
+            <div className="relative rounded-xl overflow-hidden bg-black flex flex-col w-full h-full min-h-0">
               <div
                 ref={videoWrapperRef}
                 className={`fc-video-stage relative group w-full bg-black flex items-center justify-center overflow-hidden
@@ -2632,14 +2687,26 @@ export default function VideoPlayer({
                 )}
               </div>
 
-              {/* Frame.io-style control bar — rendered below the video,
-                  not as an overlay. flex-shrink-0 means it keeps its
-                  natural size as the viewport shrinks; the video on
-                  top absorbs the difference via object-contain.
-                  1.0.9+: hidden entirely for image assets — there's
-                  no playback to control, no timeline to scrub. */}
+              {/* Frame.io-style control bar.
+                  Windowed: rendered BELOW the video (flex-shrink-0), keeps its
+                  natural size; the video absorbs the difference via
+                  object-contain.
+                  4.7.x FULLSCREEN: the bar FLOATS over the bottom of the video
+                  as an absolute overlay with a soft gradient scrim, and fades
+                  out 0.5s after playback starts (reappears on mouse move / on
+                  pause). Being absolute, hiding it never reflows the video, so
+                  the aspect ratio is untouched — exactly like Frame.io.
+                  1.0.9+: hidden entirely for image assets. */}
               {(selectedVideo as any)?.mediaType !== 'IMAGE' && (
-              <div className="bg-black border-t border-white/10 flex-shrink-0">
+              <div
+                className={
+                  isFullscreen
+                    ? `absolute bottom-0 left-0 right-0 z-40 pt-16 bg-gradient-to-t from-black/80 via-black/40 to-transparent transition-opacity duration-300 ${
+                        showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                      }`
+                    : 'bg-black border-t border-white/10 flex-shrink-0'
+                }
+              >
                 <CustomVideoControls
                   videoRef={videoRef as React.RefObject<HTMLVideoElement>}
                   videoDuration={videoDuration}

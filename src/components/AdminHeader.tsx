@@ -10,11 +10,10 @@ import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import GlobalSearchOverlay from '@/components/GlobalSearchOverlay'
 import ViewModeToggle from '@/components/ViewModeToggle'
-import SortModeToggle from '@/components/SortModeToggle'
+import SortModeMenu from '@/components/SortModeMenu'
 import WordMark from '@/components/WordMark'
 import LogoMark from '@/components/LogoMark'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
-import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 
 export default function AdminHeader() {
   const { user, logout } = useAuth()
@@ -36,7 +35,6 @@ export default function AdminHeader() {
   // pages); on Settings / Users / Trash etc. the toggle would be
   // meaningless so we hide it.
   const [adminView, setAdminView] = useAdminViewMode()
-  const [adminSort, setAdminSort] = useAdminSortMode()
   const showViewToggle =
     !!pathname &&
     (pathname === '/admin/projects' ||
@@ -261,9 +259,7 @@ export default function AdminHeader() {
                 toggle and visually identical (segmented pill).
                 Limited to the dashboard route where ordering
                 actually matters. */}
-            {showSortToggle && (
-              <SortModeToggle value={adminSort} onChange={setAdminSort} />
-            )}
+            {showSortToggle && <SortModeMenu />}
           </div>
 
           <div className="flex items-center justify-end gap-2 sm:gap-3">

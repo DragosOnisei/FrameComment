@@ -132,6 +132,11 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
       return a.title.localeCompare(b.title)
     } else if (effectiveSort === 'alphabetical-reverse') {
       return b.title.localeCompare(a.title)
+    } else if (effectiveSort === 'date-newest') {
+      // 4.7.x: shared "Upload date" order — newest project first.
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    } else if (effectiveSort === 'date-oldest') {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     } else if (effectiveSort === 'dueDate') {
       // Projects with due dates first, sorted earliest first
       if (!a.dueDate && !b.dueDate) return a.title.localeCompare(b.title)

@@ -513,6 +513,9 @@ function FolderBrowserInner(
             // raw string from the API — FolderCard converts via
             // `formatBytes()` which accepts string/number/BigInt.
             totalSize: f.totalSize ?? null,
+            // 4.7.x: carry the folder's createdAt so the Sort menu's
+            // "Upload date" order works for folders too (not just videos).
+            createdAt: f.createdAt ?? null,
           })),
         )
         // Root-level videos (1.0.7+) — videos parked at the project
@@ -538,6 +541,8 @@ function FolderBrowserInner(
             // 1.6.0: same totalSize pass-through for nested-folder
             // views as for the project root above.
             totalSize: f.totalSize ?? null,
+            // 4.7.x: carry createdAt so date sort works for folders.
+            createdAt: f.createdAt ?? null,
           })),
         )
       } else {
@@ -1028,11 +1033,26 @@ function FolderBrowserInner(
   // 4.x: phones always sort A→Z (the order toggle is hidden on mobile).
   const effectiveSortMode = isMobile ? 'alphabetical' : sortMode
   const sortedFolders = useMemo(() => {
-    // Server already returns folders ordered name-asc; we only
-    // reverse for Z-A. Cheap operation, no allocation cost on the
-    // common A-Z path.
-    if (effectiveSortMode !== 'alphabetical-reverse') return folders
-    return [...folders].sort((a, b) => b.name.localeCompare(a.name))
+    const timeOf = (x?: string | Date) => {
+      if (!x) return 0
+      const t = new Date(x).getTime()
+      return Number.isFinite(t) ? t : 0
+    }
+    const list = [...folders]
+    list.sort((a, b) => {
+      switch (effectiveSortMode) {
+        case 'alphabetical-reverse':
+          return b.name.localeCompare(a.name)
+        case 'date-newest':
+          return timeOf(b.createdAt) - timeOf(a.createdAt)
+        case 'date-oldest':
+          return timeOf(a.createdAt) - timeOf(b.createdAt)
+        case 'alphabetical':
+        default:
+          return a.name.localeCompare(b.name)
+      }
+    })
+    return list
   }, [folders, effectiveSortMode])
 
   // ─── video helpers ─────────────────────────────────────────
@@ -1094,11 +1114,27 @@ function FolderBrowserInner(
         storageLocations: (latest as any).storageLocations ?? null,
       })
     }
-    // Folders are ordered by name asc on the server; mirror that for
-    // videos so the unified grid reads alphabetically. 1.7.8+: the
-    // A-Z / Z-A direction comes from the shared admin sort mode.
-    const sorted = groups.sort((a, b) => a.name.localeCompare(b.name))
-    return effectiveSortMode === 'alphabetical-reverse' ? sorted.reverse() : sorted
+    // Order the unified grid by the shared admin sort mode: name A→Z / Z→A,
+    // or upload date (the group's latest version createdAt) newest / oldest.
+    const timeOf = (x?: string | Date) => {
+      if (!x) return 0
+      const t = new Date(x).getTime()
+      return Number.isFinite(t) ? t : 0
+    }
+    groups.sort((a, b) => {
+      switch (effectiveSortMode) {
+        case 'alphabetical-reverse':
+          return b.name.localeCompare(a.name)
+        case 'date-newest':
+          return timeOf(b.createdAt) - timeOf(a.createdAt)
+        case 'date-oldest':
+          return timeOf(a.createdAt) - timeOf(b.createdAt)
+        case 'alphabetical':
+        default:
+          return a.name.localeCompare(b.name)
+      }
+    })
+    return groups
   }, [videos, rootVideos, effectiveSortMode])
 
   // 3.9.x: mirror the grouped videos into a ref so async pollers

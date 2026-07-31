@@ -20,6 +20,7 @@ import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
 import ViewModeToggle from '@/components/ViewModeToggle'
+import SortModeMenu from '@/components/SortModeMenu'
 import {
   createFolderHierarchy,
   uniqueDirectoryPaths,
@@ -272,6 +273,9 @@ export default function ProjectFolderPage() {
       <TopbarRightSlot>
         {/* 4.x mobile: always grid (no view toggle), and Upload / Download are
             hidden — mobile is for browsing / review. All `hidden md:*`. */}
+        <div className="hidden md:block">
+          <SortModeMenu />
+        </div>
         <div className="hidden md:block">
           <ViewModeToggle value={folderView} onChange={setFolderView} />
         </div>

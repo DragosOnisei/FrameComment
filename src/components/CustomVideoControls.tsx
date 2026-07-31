@@ -1472,7 +1472,10 @@ export default function CustomVideoControls({
                 comment with annotations; on submit it'll be stored
                 with that range and re-displayed whenever the
                 playhead crosses into [IN, OUT]. */}
-          {videoDuration > 0 && (() => {
+          {/* 4.7.x: in fullscreen we hide the whole comment-selection UI
+              (yellow OUT ball + range fill) for a clean, distraction-free
+              review — the timeline keeps only the playhead + scrub. */}
+          {videoDuration > 0 && !isFullscreen && (() => {
             const inPctActive2 = inPctActive
             const outPctActive2 = outPctActive
             // Yellow handle's actual displayed position (drag > saved
@@ -1704,7 +1707,8 @@ export default function CustomVideoControls({
           positioned at the same horizontal % as its dot above. Click +
           hover behave like the old in-track chip — seek, scroll to
           comment, and surface the tooltip. */}
-      {groupedMarkers.length > 0 && (
+      {/* 4.7.x: comment avatars are hidden in fullscreen (distraction-free). */}
+      {!isFullscreen && groupedMarkers.length > 0 && (
         // 1.3.2+: pull the avatar row UP with a negative margin so the
         // avatar sits the same distance BELOW the white playhead as
         // the yellow OUT handle sits ABOVE it (~18 px on mobile,

@@ -13,9 +13,8 @@ import ProjectsList from '@/components/ProjectsList'
 import { TemplateModal } from '@/components/TemplateModal'
 import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import ViewModeToggle from '@/components/ViewModeToggle'
-import SortModeToggle from '@/components/SortModeToggle'
+import SortModeMenu from '@/components/SortModeMenu'
 import { useAdminViewMode } from '@/lib/use-admin-view-mode'
-import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import { apiFetch } from '@/lib/api-client'
 import { copyToClipboard } from '@/lib/clipboard'
 import { logError } from '@/lib/logging'
@@ -46,7 +45,6 @@ export default function AdminPage() {
   // localStorage so navigating away and back keeps the user's
   // last choice.
   const [adminView, setAdminView] = useAdminViewMode()
-  const [adminSort, setAdminSort] = useAdminSortMode()
 
   // New Project Modal state
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
@@ -551,7 +549,7 @@ export default function AdminPage() {
           <div className="hidden md:block">
             <ViewModeToggle value={adminView} onChange={setAdminView} />
           </div>
-          <div className="hidden md:block"><SortModeToggle value={adminSort} onChange={setAdminSort} /></div>
+          <div className="hidden md:block"><SortModeMenu /></div>
         </TopbarRightSlot>
 
         <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
@@ -610,7 +608,7 @@ export default function AdminPage() {
         <div className="hidden md:block">
           <ViewModeToggle value={adminView} onChange={setAdminView} />
         </div>
-        <div className="hidden md:block"><SortModeToggle value={adminSort} onChange={setAdminSort} /></div>
+        <div className="hidden md:block"><SortModeMenu /></div>
       </TopbarRightSlot>
 
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">

@@ -933,9 +933,15 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       // public share endpoint had the exact same fan-out the admin page
       // did before 3.2.2.
       const inPlayerView = !!urlVideoName
+      // 4.7.x safety net: never eagerly mint more than this many thumbnail
+      // tokens for a full-project grid. A client opening a project-wide share
+      // of a multi-thousand-video project would otherwise fan out one signed
+      // token request per clip and strain the instance; tiles past the cap
+      // render without a thumbnail rather than taking the server down.
+      const GRID_THUMBNAIL_CAP = 120
       const targetEntries = inPlayerView
         ? Array.from(nameToVideoWithThumb.entries()).filter(([name]) => name === urlVideoName)
-        : Array.from(nameToVideoWithThumb.entries())
+        : Array.from(nameToVideoWithThumb.entries()).slice(0, GRID_THUMBNAIL_CAP)
 
       // 3.2.3+: run bulk thumbnails (grid view) through a small
       // concurrency-limited worker pool instead of `Promise.all` so we
