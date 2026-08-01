@@ -89,6 +89,9 @@ export interface VideoCardProps {
    *  keep-source transfer). */
   storageBackend?: string | null
   storageLocations?: string | null
+  /** 4.9.x: short type chip shown under the uploader line — e.g.
+   *  "Video 9:16", "Video 4:5", or "Image". */
+  typeLabel?: string | null
   /** Multi-select state — when true the top-left checkbox is filled
    *  and the card gets a primary ring. */
   isSelected?: boolean
@@ -312,6 +315,7 @@ export default function VideoCard({
   createdAt,
   storageBackend,
   storageLocations,
+  typeLabel = null,
   isSelected = false,
   onToggleSelect,
   selectionMode = false,
@@ -925,19 +929,26 @@ export default function VideoCard({
               {subtext}
             </div>
           )}
-          {/* 4.2.0+: storage backend tag(s) — one chip per backend the file
-              lives on (e.g. "Local storage", or both after a keep transfer).
-              Shown for every video (NULL/legacy resolves to the default). */}
-          {!isImage && (
+          {/* 4.9.x: type chip ("Video 9:16" / "Video 4:5" / "Image") followed
+              by the storage backend tag(s). The type chip shows for EVERY card
+              (images included); storage chips stay video-only (NULL/legacy
+              resolves to the default backend). */}
+          {(typeLabel || !isImage) && (
             <div className="flex flex-wrap gap-1 mt-1.5">
-              {storageLocationLabels(storageBackend, storageLocations).map((lbl, i) => (
-                <span
-                  key={i}
-                  className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10"
-                >
-                  {lbl}
+              {typeLabel && (
+                <span className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
+                  {typeLabel}
                 </span>
-              ))}
+              )}
+              {!isImage &&
+                storageLocationLabels(storageBackend, storageLocations).map((lbl, i) => (
+                  <span
+                    key={i}
+                    className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10"
+                  >
+                    {lbl}
+                  </span>
+                ))}
             </div>
           )}
         </div>

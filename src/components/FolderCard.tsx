@@ -548,6 +548,12 @@ export default function FolderCard({
               <> · {formatBytes(totalSize)}</>
             )}
           </div>
+          {/* 4.9.x: type chip, matching the video/image cards. */}
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            <span className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
+              Folder
+            </span>
+          </div>
         </div>
         {/* Kebab — only renders when the card has at least one
             action wired. On the public client share we omit every

@@ -184,6 +184,55 @@ export interface FolderBrowserHandle {
   downloadAll: () => void
 }
 
+// 4.9.x: card "type" chips (e.g. "Video 9:16", "Video 4:5", "Image").
+// Reduce W×H to a readable aspect-ratio label, snapping to a common social
+// preset when close and falling back to the exact reduced fraction otherwise.
+function reduceRatio(w: number, h: number): string {
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
+  const g = gcd(w, h) || 1
+  return `${Math.round(w / g)}:${Math.round(h / g)}`
+}
+
+function aspectRatioLabel(w?: number | null, h?: number | null): string | null {
+  if (!w || !h || w <= 0 || h <= 0) return null
+  const r = w / h
+  const presets: Array<[string, number]> = [
+    ['9:16', 9 / 16],
+    ['4:5', 4 / 5],
+    ['2:3', 2 / 3],
+    ['3:4', 3 / 4],
+    ['1:1', 1],
+    ['5:4', 5 / 4],
+    ['4:3', 4 / 3],
+    ['3:2', 3 / 2],
+    ['16:9', 16 / 9],
+    ['2:1', 2],
+    ['21:9', 21 / 9],
+  ]
+  let best = presets[0]
+  let bestDiff = Infinity
+  for (const p of presets) {
+    const d = Math.abs(r - p[1])
+    if (d < bestDiff) {
+      bestDiff = d
+      best = p
+    }
+  }
+  if (bestDiff / best[1] <= 0.045) return best[0]
+  return reduceRatio(Math.round(w), Math.round(h))
+}
+
+/** Short "type" label for a video/image card chip. */
+function mediaTypeLabel(
+  mediaType: 'VIDEO' | 'IMAGE' | undefined,
+  width?: number | null,
+  height?: number | null,
+): string {
+  if (mediaType === 'IMAGE') return 'Image'
+  const ar = aspectRatioLabel(width, height)
+  return ar ? `Video ${ar}` : 'Video'
+}
+
 interface FolderRow {
   id: string
   slug: string
@@ -293,6 +342,8 @@ interface VideoGroup {
   /** 4.2.0+: storage backend(s) of the latest version — rendered as tags. */
   storageBackend?: string | null
   storageLocations?: string | null
+  /** 4.9.x: short type chip — "Video 9:16" / "Video 4:5" / "Image". */
+  typeLabel?: string | null
 }
 
 function FolderBrowserInner(
@@ -1112,6 +1163,11 @@ function FolderBrowserInner(
         uploaderName,
         createdAt: latest.createdAt,
         mediaType: latest.mediaType,
+        typeLabel: mediaTypeLabel(
+          latest.mediaType,
+          (latest as any).width,
+          (latest as any).height,
+        ),
         originalFileSize: latest.originalFileSize ?? null,
         storageBackend: (latest as any).storageBackend ?? null,
         storageLocations: (latest as any).storageLocations ?? null,
@@ -3712,7 +3768,13 @@ function FolderBrowserInner(
                     {doc.name}
                   </div>
                   <div className="text-xs text-white/55 mt-1">
-                    Transcript · PDF
+                    Transcript
+                  </div>
+                  {/* 4.9.x: type chip, matching the video / image / folder cards. */}
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
+                      PDF
+                    </span>
                   </div>
                 </div>
                 <Download className="w-4 h-4 text-white/40 group-hover:text-white/70 shrink-0 mt-1" />
@@ -3805,6 +3867,7 @@ function FolderBrowserInner(
               createdAt={v.createdAt}
               storageBackend={(v as any).storageBackend ?? null}
               storageLocations={(v as any).storageLocations ?? null}
+              typeLabel={v.typeLabel ?? null}
               isSelected={selectedVideoIds.has(v.id)}
               onToggleSelect={handleToggleVideoSelect}
               selectionMode={totalSelected > 0}
