@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { NextRequest } from 'next/server'
-import { prisma, orgSettingsWhere } from './db'
+import { prisma, prismaPrivileged, orgSettingsWhere } from './db'
+import { enterOrgContext } from './org-context'
 import { logError, logMessage } from './logging'
 import { getClientIpAddress } from './utils'
 import { getClientSessionTimeoutSeconds } from './settings'
@@ -44,6 +45,11 @@ interface VideoAccessToken {
   ipAddress: string
   createdAt: number
   isAdmin: boolean
+  // 5.0 multi-tenant: the owning org, resolved once at mint time. Verification
+  // arms the request org context from it so the content route's video/project
+  // lookups stay inside the owning company (RLS backstop post-flip). Absent on
+  // legacy Redis tokens → resolved lazily at verify.
+  organizationId?: string | null
 }
 
 /**
@@ -79,6 +85,20 @@ export async function generateVideoAccessToken(
   const token = crypto.randomBytes(16).toString('base64url')
   const ipAddress = getClientIpAddress(request)
 
+  // 5.0 multi-tenant: resolve the owning org once per mint (mints are
+  // session-cached above, so this is not on the hot serving path). Privileged
+  // client: minting can happen before any org context exists.
+  let organizationId: string | null = null
+  try {
+    const project = (await prismaPrivileged.project.findUnique({
+      where: { id: projectId },
+      select: { organizationId: true } as any,
+    })) as any
+    organizationId = project?.organizationId ?? null
+  } catch {
+    /* best-effort pre-flip */
+  }
+
   const tokenData: VideoAccessToken = {
     videoId,
     projectId,
@@ -87,6 +107,7 @@ export async function generateVideoAccessToken(
     ipAddress,
     createdAt: Date.now(),
     isAdmin: sessionId.startsWith('admin:'),
+    organizationId,
   }
 
   const ttlSeconds = await getClientSessionTimeoutSeconds()
@@ -125,6 +146,11 @@ export async function verifyVideoAccessToken(
 
   if (cached) {
     if (cached.expiresAt > now && cached.version === revVersion) {
+      // 5.0 multi-tenant: arm the org context on cache hits too — the
+      // content route's lookups must always run inside the owning company.
+      if (cached.value.organizationId) {
+        enterOrgContext(cached.value.organizationId)
+      }
       return cached.value
     }
     tokenVerificationCache.delete(cacheKey)
@@ -166,6 +192,23 @@ export async function verifyVideoAccessToken(
 
       return null
     }
+  }
+
+  // 5.0 multi-tenant: legacy Redis tokens predate the organizationId field —
+  // resolve it once via the privileged client (result is cached below).
+  if (!tokenData.organizationId) {
+    try {
+      const project = (await prismaPrivileged.project.findUnique({
+        where: { id: tokenData.projectId },
+        select: { organizationId: true } as any,
+      })) as any
+      tokenData.organizationId = project?.organizationId ?? null
+    } catch {
+      /* best-effort pre-flip */
+    }
+  }
+  if (tokenData.organizationId) {
+    enterOrgContext(tokenData.organizationId)
   }
 
   tokenVerificationCache.set(cacheKey, {

@@ -413,6 +413,7 @@ export async function GET(
         sessionId,
         authMode: projectMeta.authMode,
         ttlSeconds: shareTtlSeconds,
+        organizationId: (project as any).organizationId ?? null,
       })
       responseBody.shareToken = shareToken
       // Expose the per-client session id so the share UI can compare it

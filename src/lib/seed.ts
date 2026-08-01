@@ -1,4 +1,4 @@
-import { prisma, orgSettingsWhere, orgSettingsCreateBase } from './db'
+import { orgSettingsWhere, orgSettingsCreateBase, prismaPrivileged } from './db'
 import { hashPassword } from './encryption'
 import { logError, logMessage } from './logging'
 
@@ -7,7 +7,7 @@ import { logError, logMessage } from './logging'
  */
 async function ensureSecuritySettings() {
   try {
-    await prisma.securitySettings.upsert({
+    await prismaPrivileged.securitySettings.upsert({
       where: orgSettingsWhere(),
       create: { ...orgSettingsCreateBase(),
         hotlinkProtection: 'LOG_ONLY',
@@ -43,7 +43,7 @@ export async function ensureDefaultAdmin() {
     // becomes OWNER this check finds nothing and tries to recreate the seed user
     // every boot (→ "Unique constraint failed on email"). The User table only
     // ever holds internal staff, so "any user" is the right test.
-    const anyAdmin = await prisma.user.findFirst()
+    const anyAdmin = await prismaPrivileged.user.findFirst()
 
     if (anyAdmin) {
       // Initialize security settings even if admin exists
@@ -97,7 +97,7 @@ export async function ensureDefaultAdmin() {
     const adminUsername = process.env.ADMIN_USERNAME || adminEmail.split('@')[0]
     const hashedPassword = await hashPassword(adminPassword)
 
-    await prisma.user.create({
+    await prismaPrivileged.user.create({
       data: {
         username: adminUsername,
         email: adminEmail,
@@ -138,7 +138,7 @@ export async function ensureDefaultAdmin() {
  */
 export async function ensureFoundingOwner(): Promise<void> {
   try {
-    const owners = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    const owners = await prismaPrivileged.$queryRawUnsafe<Array<{ id: string }>>(
       `SELECT "id" FROM "User" WHERE "role" = 'OWNER' LIMIT 1`,
     )
     if (owners.length > 0) return // an owner already exists — leave everything alone
@@ -151,7 +151,7 @@ export async function ensureFoundingOwner(): Promise<void> {
       // with many admins that guess could crown the wrong person. Promoting only
       // the known founder (and never touching any other user) is what makes
       // "only I become Owner, everyone else stays Admin" a guarantee.
-      const byEmail = await prisma.$queryRawUnsafe<Array<{ id: string; email: string }>>(
+      const byEmail = await prismaPrivileged.$queryRawUnsafe<Array<{ id: string; email: string }>>(
         `SELECT "id", "email" FROM "User" WHERE "email" = $1 LIMIT 1`,
         adminEmail,
       )
@@ -166,7 +166,7 @@ export async function ensureFoundingOwner(): Promise<void> {
     } else {
       // No ADMIN_EMAIL configured at all → last-resort so the account still has
       // an owner: the earliest-created user.
-      const earliest = await prisma.$queryRawUnsafe<Array<{ id: string; email: string }>>(
+      const earliest = await prismaPrivileged.$queryRawUnsafe<Array<{ id: string; email: string }>>(
         `SELECT "id", "email" FROM "User" ORDER BY "createdAt" ASC, "id" ASC LIMIT 1`,
       )
       founder = earliest[0]
@@ -174,7 +174,7 @@ export async function ensureFoundingOwner(): Promise<void> {
     if (!founder) return // no users at all (fresh, pre-seed) — nothing to promote
 
     // Promotes exactly ONE row; no other user is ever modified.
-    await prisma.$executeRawUnsafe(
+    await prismaPrivileged.$executeRawUnsafe(
       `UPDATE "User" SET "role" = 'OWNER', "updatedAt" = NOW() WHERE "id" = $1`,
       founder.id,
     )

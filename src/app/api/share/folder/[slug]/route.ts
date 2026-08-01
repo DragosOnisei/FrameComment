@@ -386,6 +386,7 @@ export async function GET(
         sessionId,
         authMode: folderMeta.authMode,
         ttlSeconds: ttl,
+        organizationId: (folderMeta as any).organizationId ?? null,
       })
     }
 

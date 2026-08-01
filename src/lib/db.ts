@@ -12,6 +12,28 @@ const globalForPrisma = globalThis as unknown as {
  *  org-wrapped (login lookup, share-slug resolution, worker). */
 export const prismaBase = globalForPrisma.prismaBase ?? new PrismaClient()
 
+/**
+ * 5.0 multi-tenant: the PRIVILEGED client for the handful of lookups that
+ * must legitimately work WITHOUT an org context (they establish it):
+ *   - auth: token → user row (the org comes FROM this row),
+ *   - login / passkey: email or credential → user across orgs,
+ *   - share/short-link resolution: public slug/token → owning project/org,
+ *   - boot seed.
+ *
+ * Pre-flip this is the same connection as everything else. POST-FLIP the
+ * operator points DATABASE_URL at the restricted `framecomment_app` role and
+ * sets DATABASE_URL_PRIVILEGED to the admin/BYPASSRLS role — so RLS binds the
+ * whole app EXCEPT these audited resolver paths. Never use this client in
+ * route handlers directly; resolve → `enterOrgContext(...)` → use `prisma`.
+ */
+export const prismaPrivileged: PrismaClient =
+  (globalForPrisma as any).prismaPrivileged ??
+  (process.env.DATABASE_URL_PRIVILEGED
+    ? new PrismaClient({
+        datasources: { db: { url: process.env.DATABASE_URL_PRIVILEGED } },
+      })
+    : prismaBase)
+
 // ─── 5.0 multi-tenant: automatic RLS org context on every model operation ───
 //
 // Official Prisma RLS pattern (prisma-client-extensions/row-level-security):
@@ -64,6 +86,7 @@ export const prisma = globalForPrisma.prisma ?? withRlsOrgContext(prismaBase)
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma
   globalForPrisma.prismaBase = prismaBase
+  ;(globalForPrisma as any).prismaPrivileged = prismaPrivileged
 }
 
 /**

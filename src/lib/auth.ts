@@ -2,7 +2,7 @@ import { headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
-import { prisma, setDatabaseUserContext, setDatabaseOrgContext, orgSettingsWhere } from './db'
+import { prisma, prismaPrivileged, setDatabaseUserContext, setDatabaseOrgContext, orgSettingsWhere } from './db'
 import { enterOrgContext } from './org-context'
 import { verifyPassword } from './encryption'
 import { revokeToken, isTokenRevoked, isUserTokensRevoked } from './token-revocation'
@@ -75,6 +75,11 @@ interface SharePayload extends jwt.JwtPayload {
   // Absent (undefined) means a project-wide share token, same as
   // before.
   folderId?: string
+  // 5.0 multi-tenant: the organization that owns the shared project. Minted
+  // into every new share token; verifyShareToken arms the request org
+  // context from it (resolving via the privileged client for older tokens),
+  // so a share link can never read outside its own company.
+  organizationId?: string | null
 }
 
 function safeParseInt(value: string | undefined, fallback: number): number {
@@ -142,6 +147,8 @@ export function signShareToken(params: {
   /** When set, scopes the token to a folder subtree inside the
    *  project (1.0.6+ folder shares). Omit for a project-wide token. */
   folderId?: string
+  /** 5.0 multi-tenant: owning org of the shared project. */
+  organizationId?: string | null
 }): string {
   if (!SHARE_TOKEN_SECRET) throw new Error('SHARE_TOKEN_SECRET missing')
   const sessionId = params.sessionId || crypto.randomBytes(16).toString('base64url')
@@ -156,6 +163,7 @@ export function signShareToken(params: {
     authMode: params.authMode,
     adminOverride: params.adminOverride,
     folderId: params.folderId,
+    organizationId: params.organizationId ?? null,
   }
   return jwt.sign(payload, SHARE_TOKEN_SECRET, {
     expiresIn: params.ttlSeconds || SHARE_TOKEN_DURATION,
@@ -217,6 +225,28 @@ export async function verifyShareToken(token: string): Promise<SharePayload | nu
       return null
     }
 
+    // 5.0 multi-tenant: arm the request's org context from the token so every
+    // subsequent query in the share route is scoped to the OWNING company —
+    // a share link can never resolve another org's data, even with swapped
+    // ids in the URL. New tokens carry the claim; for older tokens (≤45 min
+    // TTL) we resolve the project's org once via the privileged client.
+    let organizationId = decoded.organizationId ?? null
+    if (!organizationId && decoded.projectId) {
+      try {
+        const project = (await prismaPrivileged.project.findUnique({
+          where: { id: decoded.projectId },
+          select: { organizationId: true } as any,
+        })) as any
+        organizationId = project?.organizationId ?? null
+      } catch {
+        /* resolution is best-effort pre-flip */
+      }
+    }
+    if (organizationId) {
+      enterOrgContext(organizationId)
+      decoded.organizationId = organizationId
+    }
+
     return decoded
   } catch {
     return null
@@ -268,7 +298,7 @@ export async function refreshAdminTokens(params: {
     }
   }
 
-  const user = (await prisma.user.findUnique({
+  const user = (await prismaPrivileged.user.findUnique({
     where: { id: payload.userId },
     select: {
       id: true,
@@ -322,7 +352,7 @@ export async function revokePresentedTokens(tokens: { accessToken?: string | nul
 
 export async function verifyCredentials(usernameOrEmail: string, password: string): Promise<AuthUser | null> {
   try {
-    const user = (await prisma.user.findFirst({
+    const user = (await prismaPrivileged.user.findFirst({
       where: {
         OR: [{ email: usernameOrEmail }, { username: usernameOrEmail }],
       },
@@ -368,7 +398,7 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
   // 5.0 multi-tenant: `organizationId` joins the select. The `as any` cast
   // keeps this compiling against a pre-5.x generated Prisma client (the
   // sandbox can't regenerate); the Docker build's fresh client types it fully.
-  const user = (await prisma.user.findUnique({
+  const user = (await prismaPrivileged.user.findUnique({
     where: { id: payload.userId },
     // 2.5.1+: include `avatarUrl` so the session payload carries it
     // back to the client without an extra round-trip.
@@ -405,7 +435,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   const payload = await verifyAdminAccessToken(token)
   if (!payload) return null
 
-  const user = (await prisma.user.findUnique({
+  const user = (await prismaPrivileged.user.findUnique({
     where: { id: payload.userId },
     select: {
       id: true,
@@ -612,7 +642,7 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
   if (!adminHeader) return null
   const payload = await verifyAdminAccessToken(adminHeader)
   if (!payload) return null
-  const user = (await prisma.user.findUnique({
+  const user = (await prismaPrivileged.user.findUnique({
     where: { id: payload.userId },
     select: {
       id: true,

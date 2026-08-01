@@ -282,6 +282,7 @@ export async function POST(
       guest: false,
       recipientId: recipient?.id,
       ttlSeconds: shareTokenTtl,
+      organizationId: (project as any).organizationId ?? null,
     })
 
     // Log security event for successful OTP verification

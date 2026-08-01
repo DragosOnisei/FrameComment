@@ -198,6 +198,7 @@ export async function POST(
       guest: false,
       authMode: folder.authMode,
       ttlSeconds: ttl,
+      organizationId: (folder as any).organizationId ?? null,
     })
 
     await logSecurityEvent({

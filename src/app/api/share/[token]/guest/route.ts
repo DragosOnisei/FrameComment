@@ -63,6 +63,7 @@ export async function POST(
       guest: true,
       sessionId: crypto.randomBytes(16).toString('base64url'),
       ttlSeconds,
+      organizationId: (project as any).organizationId ?? null,
     })
 
     await logSecurityEvent({

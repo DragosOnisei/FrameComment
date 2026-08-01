@@ -273,6 +273,7 @@ export async function POST(
       permissions: ['view', 'comment', 'download'],
       guest: false,
       ttlSeconds: shareTokenTtl,
+      organizationId: (project as any).organizationId ?? null,
     })
 
     // Log successful password-based access
