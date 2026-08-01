@@ -234,7 +234,20 @@ if [ "$1" = "npm" ] && [ "$2" = "start" ]; then
     # - On first run: Creates all tables from scratch (initial_schema migration)
     # - On updates: Applies only new migrations (e.g., when upgrading to v1.1, v1.2, etc.)
     # - Idempotent: Safe to run multiple times, only applies pending migrations
-    if npx prisma migrate deploy; then
+    #
+    # 5.5 multi-tenant: migrations run with DATABASE_URL_PRIVILEGED when set.
+    # After the RLS "flip" (see FLIP_RUNBOOK.md), DATABASE_URL points at the
+    # restricted framecomment_app role which cannot ALTER tables or manage
+    # policies — schema changes need the admin role. Before the flip the
+    # variable is unset and this is a no-op (same URL as always).
+    if [ -n "$DATABASE_URL_PRIVILEGED" ]; then
+        echo "      (using privileged database role for migrations)"
+        MIGRATE_URL="$DATABASE_URL_PRIVILEGED"
+    else
+        MIGRATE_URL="$DATABASE_URL"
+    fi
+
+    if DATABASE_URL="$MIGRATE_URL" npx prisma migrate deploy; then
         echo "[OK] Database migrations completed"
     else
         echo "[ERROR] Database migration failed"

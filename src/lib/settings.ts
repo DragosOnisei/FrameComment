@@ -1,20 +1,37 @@
-import { prisma, orgSettingsWhere, orgSettingsCreateBase } from './db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase, settingsReadClient, currentOrgId } from './db'
 import { getRedis } from './redis'
 import { logError, logMessage } from '@/lib/logging'
 import { decrypt } from '@/lib/encryption'
 
-// Simple in-memory cache for frequently read settings to avoid repeated DB hits
+// Simple in-memory cache for frequently read settings to avoid repeated DB hits.
+// 5.5 multi-tenant: keyed PER ORGANIZATION — a single global slot would serve
+// company A's limits/timeouts to company B for up to a full TTL window.
 const SETTINGS_CACHE_TTL_MS = 60_000
 type CachedValue<T> = { value: T; expiresAt: number }
-const cachedRateLimits: CachedValue<{
+
+/** Per-org cache slot (creates an expired slot with defaults on first use).
+ *  Functions below alias the slot to the pre-5.5 variable names so their
+ *  bodies read exactly as before — only the storage became org-aware. */
+function orgSlot<T>(map: Map<string, CachedValue<T>>, def: T): CachedValue<T> {
+  const key = currentOrgId()
+  let slot = map.get(key)
+  if (!slot) {
+    slot = { value: def, expiresAt: 0 }
+    map.set(key, slot)
+  }
+  return slot
+}
+
+type RateLimitsValue = {
   ipRateLimit: number
   sessionRateLimit: number
   shareSessionRateLimit?: number
   shareTokenTtlSeconds?: number
-}> = { value: { ipRateLimit: 1000, sessionRateLimit: 600 }, expiresAt: 0 }
-const cachedSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0 }
-const cachedAdminSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0 }
-const cachedSmtpConfigured: CachedValue<boolean> = { value: false, expiresAt: 0 }
+}
+const rateLimitsCache = new Map<string, CachedValue<RateLimitsValue>>()
+const sessionTimeoutCache = new Map<string, CachedValue<number>>()
+const adminSessionTimeoutCache = new Map<string, CachedValue<number>>()
+const smtpConfiguredCache = new Map<string, CachedValue<boolean>>()
 
 function getHttpsEnvironmentOverride(): boolean | null {
   const envValue = process.env.HTTPS_ENABLED
@@ -23,9 +40,10 @@ function getHttpsEnvironmentOverride(): boolean | null {
 }
 
 export async function invalidateSecuritySettingsCache(): Promise<void> {
-  cachedRateLimits.expiresAt = 0
-  cachedSessionTimeout.expiresAt = 0
-  cachedAdminSessionTimeout.expiresAt = 0
+  // Cheap and safe: drop every org's slots (settings edits are rare).
+  rateLimitsCache.clear()
+  sessionTimeoutCache.clear()
+  adminSessionTimeoutCache.clear()
 
   const redis = getRedis()
   await redis.del('app:security_settings')
@@ -78,6 +96,7 @@ export async function getSettings() {
  * Check if SMTP is configured
  */
 export async function isSmtpConfigured(): Promise<boolean> {
+  const cachedSmtpConfigured = orgSlot(smtpConfiguredCache, false)
   const now = Date.now()
   if (cachedSmtpConfigured.expiresAt > now) {
     return cachedSmtpConfigured.value
@@ -162,13 +181,15 @@ export async function getAutoApproveProject(): Promise<boolean> {
  * Note: Admin dashboard inactivity logout is configured separately via admin session timeout settings.
  */
 export async function getClientSessionTimeoutSeconds(): Promise<number> {
+  const cachedSessionTimeout = orgSlot(sessionTimeoutCache, 15 * 60)
   const now = Date.now()
   if (cachedSessionTimeout.expiresAt > now) {
     return cachedSessionTimeout.value
   }
 
   try {
-    const settings = await prisma.securitySettings.findUnique({
+    // settingsReadClient: this runs on pre-auth/share paths too (token TTLs).
+    const settings = await settingsReadClient().securitySettings.findUnique({
       where: orgSettingsWhere(),
       select: {
         sessionTimeoutValue: true,
@@ -225,13 +246,15 @@ export async function getAdminSessionTimeoutSeconds(): Promise<number> {
     if (Number.isFinite(parsed) && parsed > 0) return parsed
   }
 
+  const cachedAdminSessionTimeout = orgSlot(adminSessionTimeoutCache, 12 * 60 * 60)
   const now = Date.now()
   if (cachedAdminSessionTimeout.expiresAt > now) {
     return cachedAdminSessionTimeout.value
   }
 
   try {
-    const settings = await prisma.securitySettings.findUnique({
+    // settingsReadClient: login/refresh sign tokens before any org context.
+    const settings = await settingsReadClient().securitySettings.findUnique({
       where: orgSettingsWhere(),
       select: {
         adminSessionTimeoutValue: true,
@@ -318,7 +341,8 @@ export async function initializeSecuritySettings() {
 
 export async function getMaxAuthAttempts(): Promise<number> {
   try {
-    const securitySettings = await prisma.securitySettings.findUnique({
+    // settingsReadClient: consulted during login, before any org context.
+    const securitySettings = await settingsReadClient().securitySettings.findUnique({
       where: orgSettingsWhere(),
       select: { passwordAttempts: true }
     })
@@ -335,7 +359,8 @@ export async function isHttpsEnabled(): Promise<boolean> {
   }
 
   try {
-    const settings = await prisma.securitySettings.findUnique({
+    // settingsReadClient: read on public/login paths (cookie flags, passkey).
+    const settings = await settingsReadClient().securitySettings.findUnique({
       where: orgSettingsWhere(),
       select: { httpsEnabled: true },
     })
@@ -355,13 +380,18 @@ export async function getRateLimitSettings(): Promise<{
   shareSessionRateLimit?: number
   shareTokenTtlSeconds?: number
 }> {
+  const cachedRateLimits = orgSlot<RateLimitsValue>(rateLimitsCache, {
+    ipRateLimit: 1000,
+    sessionRateLimit: 600,
+  })
   const now = Date.now()
   if (cachedRateLimits.expiresAt > now) {
     return cachedRateLimits.value
   }
 
   try {
-    const settings = await prisma.securitySettings.findUnique({
+    // settingsReadClient: rate limits guard public/login routes pre-context.
+    const settings = await settingsReadClient().securitySettings.findUnique({
       where: orgSettingsWhere(),
       select: {
         ipRateLimit: true,
@@ -415,7 +445,9 @@ export async function getWebAuthnConfig(): Promise<{
   origins: string[]
 }> {
   try {
-    const settings = await prisma.settings.findUnique({
+    // settingsReadClient: WebAuthn config is needed on the LOGIN page,
+    // before any user/org is known (single-domain install: rpID is global).
+    const settings = await settingsReadClient().settings.findUnique({
       where: orgSettingsWhere(),
       select: {
         appDomain: true,

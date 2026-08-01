@@ -1,6 +1,7 @@
 import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import { isSmtpConfigured, getRateLimitSettings, getShareTokenTtlSeconds } from '@/lib/settings'
 import { getCurrentUserFromRequest, getShareContext, signShareToken, parseBearerToken } from '@/lib/auth'
 import { getPrimaryRecipient, getProjectRecipients } from '@/lib/recipients'
@@ -24,6 +25,9 @@ export async function GET(
 ) {
   try {
     const { token } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForProjectSlug(token)
     const locale = await getConfiguredLocale().catch(() => 'en')
     const messages = await loadLocaleMessages(locale).catch(() => null)
     const shareMessages = messages?.share

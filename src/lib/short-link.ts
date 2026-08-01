@@ -20,7 +20,7 @@
  */
 
 import { randomInt } from 'node:crypto'
-import { prisma } from './db'
+import { prisma, prismaPrivileged } from './db'
 import { logError } from './logging'
 
 // 51 chars, no 0/O/o/1/I/l — those four are the standard "looks
@@ -98,7 +98,12 @@ export async function createShortLink(
 export async function resolveShortLink(
   slug: string,
 ): Promise<{ targetUrl: string; expired: boolean } | null> {
-  const row = await prisma.shortLink.findUnique({
+  // 5.5 multi-tenant: PUBLIC pre-context resolution (the /s/<slug> redirect
+  // is the first thing a client hits). Privileged client, because post-flip
+  // the un-armed default client would be denied by RLS and every short link
+  // would 404. Read-only, returns only the redirect target — the target URL
+  // then goes through the share route's own org arming + auth.
+  const row = await prismaPrivileged.shortLink.findUnique({
     where: { slug },
     select: { targetUrl: true, expiresAt: true },
   })

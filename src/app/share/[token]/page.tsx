@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import SharePageClient from './SharePageClient'
 
 interface SharePageProps {
@@ -8,6 +9,9 @@ interface SharePageProps {
 
 export default async function SharePage({ params }: SharePageProps) {
   const { token } = await params
+  // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+  // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+  await armOrgForProjectSlug(token)
 
   // Server-side validation: check if slug exists and is not archived.
   // 2.2.6+: also filter `deletedAt: null` so soft-deleted (trashed)

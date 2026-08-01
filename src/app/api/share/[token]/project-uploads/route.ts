@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { getShareContext } from '@/lib/auth'
@@ -30,6 +31,9 @@ export async function POST(
 
   try {
     const { token: shareToken } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForProjectSlug(shareToken)
 
     const project = await prisma.project.findUnique({
       where: { slug: shareToken },
@@ -172,6 +176,9 @@ export async function DELETE(
 
   try {
     const { token: shareToken } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForProjectSlug(shareToken)
     const { searchParams } = new URL(request.url)
     const uploadId = searchParams.get('uploadId') ?? ''
 

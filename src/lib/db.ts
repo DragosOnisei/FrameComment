@@ -202,6 +202,20 @@ export function orgSettingsCreateBase(): any {
   return { id: 'default', organizationId: 'org-1' }
 }
 
+/**
+ * 5.5 multi-tenant: client for INSTANCE-LEVEL settings reads that can run
+ * before any auth/org context exists (login page: rate limits, WebAuthn
+ * config, HTTPS flag, locale). With a context armed they behave exactly like
+ * `prisma` (per-org, RLS-wrapped). WITHOUT one, `orgSettingsWhere()` falls
+ * back to org-1 — the platform tenant — which post-flip the restricted role
+ * couldn't read (RLS deny) and logins would lose their configuration. The
+ * privileged client keeps those reads working; they're read-only and scoped
+ * to the two settings singletons, never tenant content.
+ */
+export function settingsReadClient(): PrismaClient {
+  return getOrgContext() ? prisma : prismaPrivileged
+}
+
 /** Prisma transaction client shape accepted by setOrgContextOn. */
 type PrismaLike = Pick<PrismaClient, '$executeRaw'>
 

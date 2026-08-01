@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import crypto from 'crypto'
 import { rateLimit } from '@/lib/rate-limit'
 import { signShareToken } from '@/lib/auth'
@@ -36,6 +37,9 @@ export async function POST(
 
   try {
     const { token } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForProjectSlug(token)
 
     // Find project by slug
     const project = await prisma.project.findUnique({

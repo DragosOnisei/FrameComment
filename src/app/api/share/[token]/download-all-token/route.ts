@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
@@ -23,6 +24,9 @@ export async function POST(
   const shareMessages = messages?.share || {}
 
   const { token: slug } = await params
+  // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+  // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+  await armOrgForProjectSlug(slug)
 
   // Rate limit
   const rateLimitResult = await rateLimit(request, {

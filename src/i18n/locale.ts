@@ -1,4 +1,4 @@
-import { prisma, orgSettingsWhere } from '@/lib/db'
+import { orgSettingsWhere, settingsReadClient, currentOrgId } from '@/lib/db'
 
 export const SUPPORTED_LOCALES = ['en'] as const
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
@@ -14,19 +14,24 @@ export const LOCALE_NAMES: Record<string, string> = {
 // a needless query on the hottest path. The language setting changes
 // almost never, so a short TTL is plenty — a change propagates within
 // CACHE_TTL_MS across the process.
-let localeCache: { value: string; expiresAt: number } | null = null
+// 5.5 multi-tenant: keyed per organization — a global slot would serve one
+// company's language to another for up to the TTL window.
+const localeCache = new Map<string, { value: string; expiresAt: number }>()
 const LOCALE_CACHE_TTL_MS = 60_000
 
 export async function getConfiguredLocale(): Promise<string> {
   const now = Date.now()
-  if (localeCache && localeCache.expiresAt > now) return localeCache.value
+  const key = currentOrgId()
+  const cached = localeCache.get(key)
+  if (cached && cached.expiresAt > now) return cached.value
   try {
-    const settings = await prisma.settings.findUnique({
+    // settingsReadClient: called on public/pre-auth paths too (login, share).
+    const settings = await settingsReadClient().settings.findUnique({
       where: orgSettingsWhere(),
       select: { language: true },
     })
     const value = settings?.language || 'en'
-    localeCache = { value, expiresAt: now + LOCALE_CACHE_TTL_MS }
+    localeCache.set(key, { value, expiresAt: now + LOCALE_CACHE_TTL_MS })
     return value
   } catch {
     return 'en'

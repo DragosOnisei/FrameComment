@@ -35,7 +35,8 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/server'
 import { isoBase64URL } from '@simplewebauthn/server/helpers'
-import { prisma } from './db'
+import { prisma, prismaPrivileged } from './db'
+import { enterOrgContext } from './org-context'
 import { getRedis } from './redis'
 import { getWebAuthnConfig } from './settings'
 import { logSecurityEvent } from './video-access'
@@ -298,23 +299,30 @@ export async function generatePasskeyAuthenticationOptions(
 
   if (email) {
     // Standard authentication (with email)
-    user = await prisma.user.findUnique({
+    // 5.5 multi-tenant: PRE-AUTH lookup — the email decides the org, so this
+    // must run on the privileged client (post-flip, RLS would hide every
+    // user from the un-armed default client). We then arm the org context
+    // so the rest of the flow reads the right tenant's config.
+    user = (await prismaPrivileged.user.findUnique({
       where: { email },
       select: {
         id: true,
+        organizationId: true,
         passkeys: {
           select: {
             credentialID: true,
             transports: true,
           },
         },
-      },
-    })
+      } as any,
+    })) as any
 
     if (!user || user.passkeys.length === 0) {
       // SECURITY: Generic error prevents user/email enumeration
       throw new Error('PassKey authentication is not available')
     }
+
+    if (user.organizationId) enterOrgContext(user.organizationId)
 
     challengeKey = user.id
   } else {
@@ -331,7 +339,7 @@ export async function generatePasskeyAuthenticationOptions(
     // For usernameless auth, allow any credential
     // For standard auth, specify user's credentials
     allowCredentials: user
-      ? user.passkeys.map((passkey) => ({
+      ? user.passkeys.map((passkey: any) => ({
           id: isoBase64URL.fromBuffer(passkey.credentialID),
           type: 'public-key' as const,
           transports: passkey.transports as AuthenticatorTransport[],
@@ -375,7 +383,9 @@ export async function verifyPasskeyAuthentication(
     // Find credential by ID
     // response.id is base64url-encoded credential ID from browser
     const credentialID = Buffer.from(response.id, 'base64url')
-    const credential = await prisma.passkeyCredential.findUnique({
+    // 5.5 multi-tenant: PRE-AUTH lookup — the credential decides the org
+    // (usernameless flow has no email at all). Privileged client + arm.
+    const credential = (await prismaPrivileged.passkeyCredential.findUnique({
       where: { credentialID },
       include: {
         user: {
@@ -384,10 +394,11 @@ export async function verifyPasskeyAuthentication(
             email: true,
             name: true,
             role: true,
-          },
+            organizationId: true,
+          } as any,
         },
       },
-    })
+    })) as any
 
     if (!credential) {
       return {
@@ -395,6 +406,10 @@ export async function verifyPasskeyAuthentication(
         error: 'PassKey not found.',
       }
     }
+
+    const credentialOrg =
+      credential.organizationId ?? credential.user?.organizationId ?? null
+    if (credentialOrg) enterOrgContext(credentialOrg)
 
     // Retrieve and delete challenge
     // For usernameless: use sessionId, for standard: use user ID
@@ -460,7 +475,9 @@ export async function verifyPasskeyAuthentication(
         email: credential.user.email,
         name: credential.user.name,
         role: credential.user.role,
-      },
+        // 5.5 multi-tenant: carried into the signed tokens' org claim.
+        organizationId: credential.user.organizationId ?? null,
+      } as AuthUser,
     }
   } catch (error) {
     logError('[PASSKEY] Authentication verification error:', error)

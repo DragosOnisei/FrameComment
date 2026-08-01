@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForFolderSlug } from '@/lib/share-org'
 import { decrypt } from '@/lib/encryption'
 import crypto from 'crypto'
 import { logSecurityEvent } from '@/lib/video-access'
@@ -56,6 +57,9 @@ export async function POST(
 ) {
   try {
     const { slug } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForFolderSlug(slug)
     const redis = getRedis()
     const key = rateLimitKey(request, slug)
     const MAX_FAILED = await getMaxAuthAttempts()

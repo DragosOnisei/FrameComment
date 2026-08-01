@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { getRateLimitSettings } from '@/lib/settings'
@@ -24,6 +25,9 @@ export async function GET(
 ) {
   try {
     const { token } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForProjectSlug(token)
     const { ipRateLimit } = await getRateLimitSettings()
     const rl = await rateLimit(
       request,

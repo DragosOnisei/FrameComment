@@ -1,6 +1,7 @@
 import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForFolderSlug } from '@/lib/share-org'
 import {
   getCurrentUserFromRequest,
   getShareContext,
@@ -44,6 +45,9 @@ export async function GET(
 ) {
   try {
     const { slug } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForFolderSlug(slug)
     // 1.4.x+: optional `?root=<slug>` query param. The client passes
     // this when navigating into a subfolder of the originally shared
     // folder so we can return the in-scope breadcrumb (root → ... →

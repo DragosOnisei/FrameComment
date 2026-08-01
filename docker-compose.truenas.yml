@@ -61,7 +61,16 @@ services:
     environment:
       NODE_ENV: production
       TZ: ${TZ:-UTC}
-      DATABASE_URL: postgresql://framecomment:${POSTGRES_PASSWORD}@framecomment-postgres:5432/framecomment?schema=public
+      # 5.5 multi-tenant RLS "flip" (see FLIP_RUNBOOK.md). Defaults keep
+      # TODAY'S behavior — nothing to change until you deliberately flip:
+      #  - APP_DATABASE_URL: unset = superuser as always. Post-flip, set it in
+      #    .env to the restricted framecomment_app role URL so Row-Level
+      #    Security actively isolates every company at the database layer.
+      #  - DATABASE_URL_PRIVILEGED: unset = same connection. Post-flip, set to
+      #    the admin (framecomment) URL — used ONLY for migrations at boot and
+      #    the audited resolver lookups (login, share-slug -> org).
+      DATABASE_URL: ${APP_DATABASE_URL:-postgresql://framecomment:${POSTGRES_PASSWORD}@framecomment-postgres:5432/framecomment?schema=public}
+      DATABASE_URL_PRIVILEGED: ${DATABASE_URL_PRIVILEGED:-}
       REDIS_HOST: framecomment-redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -117,6 +126,8 @@ services:
       NODE_ENV: production
       TZ: ${TZ:-UTC}
       # DEBUG_WORKER: "true"  # Uncomment for verbose FFmpeg and worker debug logs
+      # 5.5: the WORKER stays on the admin role even after the RLS flip — it
+      # processes jobs across companies and passes organizationId explicitly.
       DATABASE_URL: postgresql://framecomment:${POSTGRES_PASSWORD}@framecomment-postgres:5432/framecomment?schema=public
       REDIS_HOST: framecomment-redis
       REDIS_PORT: 6379

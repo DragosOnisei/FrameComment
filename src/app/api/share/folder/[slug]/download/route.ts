@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Readable } from 'stream'
 import archiver from 'archiver'
 import { prisma } from '@/lib/db'
+import { armOrgForFolderSlug } from '@/lib/share-org'
 import {
   getCurrentUserFromRequest,
   getShareContext,
@@ -41,6 +42,9 @@ export async function GET(
 ) {
   try {
     const { slug } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForFolderSlug(slug)
 
     // Tight rate limit — folder downloads can be large, easy to abuse.
     const rl = await rateLimit(

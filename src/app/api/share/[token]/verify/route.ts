@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import { decrypt } from '@/lib/encryption'
 import crypto from 'crypto'
 import { logSecurityEvent } from '@/lib/video-access'
@@ -66,6 +67,9 @@ export async function POST(
 ) {
   try {
     const { token } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForProjectSlug(token)
     const locale = await getConfiguredLocale().catch(() => 'en')
     const messages = await loadLocaleMessages(locale).catch(() => null)
     const shareMessages = messages?.share

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectSlug } from '@/lib/share-org'
 import { verifyOTP, verifyRecipientEmail } from '@/lib/otp'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logSecurityEvent } from '@/lib/video-access'
@@ -50,6 +51,9 @@ export async function POST(
   const notificationsText = messages?.notificationsText || {}
 
     const { token } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForProjectSlug(token)
     const parsed = await safeParseBody(request)
     if (!parsed.success) return parsed.response
     const { email, code } = parsed.data

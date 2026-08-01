@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, orgSettingsWhere } from '@/lib/db'
+import { prisma, prismaPrivileged, orgSettingsWhere } from '@/lib/db'
+import { enterOrgContext } from '@/lib/org-context'
 import { rateLimit } from '@/lib/rate-limit'
 import { generateICalFeed } from '@/lib/ical'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -25,13 +26,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: calendarMessages.notFound || 'Not found' }, { status: 404 })
     }
 
-    const calendarToken = await prisma.calendarToken.findUnique({
+    // 5.5 multi-tenant: the calendar token is a PUBLIC capability URL (pasted
+    // into Apple/Google Calendar — no auth headers). Resolve it via the
+    // privileged client and arm the owning org so the settings + projects
+    // reads below are scoped to that company.
+    const calendarToken = (await prismaPrivileged.calendarToken.findUnique({
       where: { token },
-    })
+      select: { id: true, organizationId: true } as any,
+    })) as any
 
     if (!calendarToken) {
       return NextResponse.json({ error: calendarMessages.notFound || 'Not found' }, { status: 404 })
     }
+
+    if (calendarToken.organizationId) enterOrgContext(calendarToken.organizationId)
 
     const settings = await prisma.settings.findUnique({
       where: orgSettingsWhere(),

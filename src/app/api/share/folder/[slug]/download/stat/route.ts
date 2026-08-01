@@ -1,6 +1,7 @@
 import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForFolderSlug } from '@/lib/share-org'
 import { getCurrentUserFromRequest, getShareContext } from '@/lib/auth'
 import { logError } from '@/lib/logging'
 
@@ -22,6 +23,9 @@ export async function GET(
 ) {
   try {
     const { slug } = await params
+    // 5.5 multi-tenant: arm the owning org FIRST (privileged slug->org resolve;
+    // post-flip every query below, incl. settings/rate-limit reads, is RLS-scoped).
+    await armOrgForFolderSlug(slug)
 
     const folderMeta = await prisma.folder.findUnique({
       where: { slug },
