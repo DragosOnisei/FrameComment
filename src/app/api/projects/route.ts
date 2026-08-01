@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, orgSettingsWhere } from '@/lib/db'
+import { prisma, orgSettingsWhere, setOrgContextOn, currentOrgId } from '@/lib/db'
 import { generateUniqueSlug } from '@/lib/utils'
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt } from '@/lib/encryption'
@@ -274,6 +274,9 @@ export async function POST(request: NextRequest) {
 
     // Use transaction to ensure atomicity: if recipient creation fails, project creation is rolled back
     const project = await prisma.$transaction(async (tx) => {
+      // 5.0 multi-tenant: interactive transactions bypass the client extension,
+      // so arm the org context manually (org-scoped defaults + RLS WITH CHECK).
+      await setOrgContextOn(tx as any, currentOrgId())
       const newProject = await tx.project.create({
         data: {
           title,

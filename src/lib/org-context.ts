@@ -33,9 +33,17 @@ interface OrgStore {
 // `async_hooks` to an empty module for browser builds, so AsyncLocalStorage
 // is undefined there — guard instantiation; the functions below then no-op
 // client-side (they're only meaningful on the server anyway).
+//
+// SINGLETON ON globalThis: bundlers (Turbopack dev especially) can duplicate
+// this module across server chunks — auth.ts would then write into one ALS
+// instance while db.ts reads another, silently losing the context (surfaced
+// as a create running unwrapped → FK violation on the org default). Pinning
+// the instance on globalThis guarantees ONE store per process regardless of
+// how many module copies the bundler produces.
+const g = globalThis as unknown as { __fcOrgAls?: AsyncLocalStorage<OrgStore> }
 const als: AsyncLocalStorage<OrgStore> | null =
   typeof window === 'undefined' && typeof AsyncLocalStorage === 'function'
-    ? new AsyncLocalStorage<OrgStore>()
+    ? (g.__fcOrgAls ??= new AsyncLocalStorage<OrgStore>())
     : null
 
 /** Bind the org to the CURRENT async execution context (guards call this). */

@@ -196,7 +196,10 @@ export function orgSettingsCreateBase(): any {
   if (org && org !== 'org-1') {
     return { id: org, organizationId: org }
   }
-  return { id: 'default' }
+  // organizationId EXPLICIT (not left to the DB default): once the column
+  // defaults move to current_setting(...), a boot-path create without a
+  // context would otherwise store NULL and orphan the row.
+  return { id: 'default', organizationId: 'org-1' }
 }
 
 /** Prisma transaction client shape accepted by setOrgContextOn. */

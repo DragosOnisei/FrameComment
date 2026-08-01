@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, setOrgContextOn, currentOrgId } from '@/lib/db'
 import { requireApiManageUsers } from '@/lib/auth'
 import { hashPassword, validatePassword } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
@@ -170,6 +170,8 @@ export async function POST(request: NextRequest) {
     // role write fails the whole transaction rolls back, so a user is never left
     // committed with the default role.
     const user = await prisma.$transaction(async (tx) => {
+      // 5.0 multi-tenant: arm the org context inside the transaction.
+      await setOrgContextOn(tx as any, currentOrgId())
       const created = await tx.user.create({
         data: {
           email,

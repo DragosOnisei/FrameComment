@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, setOrgContextOn, currentOrgId } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { generateUniqueFolderSlug } from '@/lib/folder-helpers'
@@ -191,6 +191,8 @@ export async function POST(request: NextRequest) {
     )
 
     const result = await prisma.$transaction(async (tx) => {
+      // 5.0 multi-tenant: arm the org context inside the transaction.
+      await setOrgContextOn(tx as any, currentOrgId())
       const root = await createFolder(tx, {
         projectId: data.projectId,
         parentFolderId: null,

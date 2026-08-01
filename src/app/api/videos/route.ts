@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, currentOrgId } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import {
   isImageExtension,
@@ -144,6 +144,9 @@ export async function POST(request: NextRequest) {
       width: 0,
       height: 0,
       mediaType: isImage ? 'IMAGE' : 'VIDEO',
+      // 5.4: explicit org — belt to the current_setting(...) column default.
+      // The uploader's org is DB-fresh on the AuthUser; never trust the client.
+      organizationId: (admin as any).organizationId ?? currentOrgId(),
     } as any
 
     let video

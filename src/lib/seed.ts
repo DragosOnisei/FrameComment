@@ -107,7 +107,10 @@ export async function ensureDefaultAdmin() {
         // so a fresh install always has exactly one owner. `as any` because the
         // generated client may still lag the schema until `prisma generate`.
         role: 'OWNER' as any,
-      },
+        // 5.0 multi-tenant: explicit — boot runs without an org context, and
+        // the column default becomes current_setting(...) (NULL at boot).
+        organizationId: 'org-1',
+      } as any,
     })
 
     logMessage('Admin user created successfully!')

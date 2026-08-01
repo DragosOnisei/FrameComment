@@ -17,7 +17,7 @@
  *               target is the sole OWNER.
  */
 import { randomUUID } from 'crypto'
-import { prisma } from './db'
+import { prisma, setOrgContextOn, currentOrgId } from './db'
 import { logError, logMessage } from './logging'
 import { revokeAllUserTokens } from './token-revocation'
 
@@ -137,6 +137,7 @@ export async function initiateTransfer(fromUserId: string, toUserId: string): Pr
   const graceEndsAt = new Date(Date.now() + OWNERSHIP_GRACE_DAYS * 24 * 60 * 60 * 1000)
   try {
     await prisma.$transaction(async (tx) => {
+      await setOrgContextOn(tx as any, currentOrgId())
       // Recipient becomes the active owner NOW.
       await (tx as any).$executeRawUnsafe(
         `UPDATE "User" SET "role" = 'OWNER', "updatedAt" = NOW() WHERE "id" = $1`,
@@ -176,6 +177,7 @@ export async function reverseTransfer(actorId: string): Promise<OwnershipResult>
   }
   try {
     await prisma.$transaction(async (tx) => {
+      await setOrgContextOn(tx as any, currentOrgId())
       // Restore the recipient to exactly what they were before.
       await (tx as any).$executeRawUnsafe(
         `UPDATE "User" SET "role" = $1::"UserRole", "updatedAt" = NOW() WHERE "id" = $2`,

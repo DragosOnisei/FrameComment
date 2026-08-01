@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, setOrgContextOn, currentOrgId } from '@/lib/db'
 import { deleteFile } from '@/lib/storage'
 import { allFileLocations } from '@/lib/storage-backends'
 import { requireApiAdmin } from '@/lib/auth'
@@ -256,6 +256,8 @@ export async function PATCH(
       name !== undefined && name.trim() !== video.name ? name.trim() : null
 
     await prisma.$transaction(async (tx) => {
+      // 5.0 multi-tenant: arm the org context inside the transaction.
+      await setOrgContextOn(tx as any, currentOrgId())
       if (newName !== null) {
         await tx.video.updateMany({
           where: {

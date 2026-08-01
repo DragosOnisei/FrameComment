@@ -24,7 +24,7 @@ model User {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String   @id @default(cuid())
   email     String   @unique
   username  String?  @unique
@@ -80,7 +80,7 @@ model OwnershipTransfer {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id             String                  @id @default(cuid())
   fromUserId     String
   toUserId       String
@@ -133,7 +133,7 @@ model Project {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id              String  @id @default(cuid())
   title           String
   slug            String  @unique
@@ -251,7 +251,7 @@ model Folder {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id             String   @id @default(cuid())
   projectId      String
   parentFolderId String?
@@ -304,7 +304,7 @@ model FolderDocument {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   projectId   String
   folderId    String? // null = project root
@@ -352,7 +352,7 @@ model ProjectRecipient {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id                   String   @id @default(cuid())
   projectId            String
   project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -372,7 +372,7 @@ model Video {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id           String @id @default(cuid())
   projectId    String
   // Optional folder the video lives inside. Null means the video sits
@@ -519,7 +519,7 @@ model VideoAsset {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id      String @id @default(cuid())
   videoId String
   video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
@@ -561,7 +561,7 @@ model ProjectUpload {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String  @id @default(cuid())
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -613,7 +613,7 @@ model Comment {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id           String   @id @default(cuid())
   projectId    String
   videoId      String // All comments must be video-specific
@@ -689,7 +689,7 @@ model Marker {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id           String   @id @default(cuid())
   projectId    String
   videoId      String
@@ -731,7 +731,7 @@ model CommentReaction {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id         String   @id @default(cuid())
   commentId  String
   emoji      String // The emoji character itself (UTF-8). Keep raw so the
@@ -755,7 +755,7 @@ model NotificationQueue {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String @id @default(cuid())
   projectId String
   type      String // CLIENT_COMMENT, ADMIN_REPLY
@@ -810,7 +810,7 @@ model Notification {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id   String @id @default(cuid())
   // The admin who receives this (the video's uploader / "editor").
   recipientId String
@@ -852,7 +852,7 @@ model Settings {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @unique @default("org-1")
+  organizationId String? @unique @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id String @id @default("default")
 
   // Language / i18n
@@ -1020,7 +1020,7 @@ model BillingSnapshot {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id           String   @id @default(cuid())
   day          DateTime @unique // midnight UTC of the snapshot day
   userCount    Int
@@ -1034,7 +1034,7 @@ model NotificationDestination {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id String @id @default(cuid())
 
   name     String
@@ -1064,7 +1064,7 @@ model NotificationSubscription {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id String @id @default(cuid())
 
   destinationId String
@@ -1086,7 +1086,7 @@ model NotificationDeliveryLog {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id String @id @default(cuid())
 
   destinationId String
@@ -1110,7 +1110,7 @@ model SecuritySettings {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @unique @default("org-1")
+  organizationId String? @unique @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id String @id @default("default")
 
   // Hotlink Protection: DISABLED, LOG_ONLY, BLOCK_STRICT
@@ -1154,7 +1154,7 @@ model SecurityEvent {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id       String @id @default(cuid())
   type     String // HOTLINK_DETECTED, HOTLINK_BLOCKED, RATE_LIMIT_HIT, TOKEN_SESSION_MISMATCH, SUSPICIOUS_ACTIVITY, BLOCKED_IP_ATTEMPT
   severity String @default("INFO") // INFO, WARNING, CRITICAL
@@ -1186,7 +1186,7 @@ model BlockedIP {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String   @id @default(cuid())
   ipAddress String   @unique
   reason    String?
@@ -1202,7 +1202,7 @@ model BlockedDomain {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String   @id @default(cuid())
   domain    String   @unique
   reason    String?
@@ -1218,7 +1218,7 @@ model VideoAnalytics {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id String @id @default(cuid())
 
   videoId String
@@ -1250,7 +1250,7 @@ model SharePageAccess {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id String @id @default(cuid())
 
   projectId String
@@ -1282,7 +1282,7 @@ model PasskeyCredential {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id     String @id @default(cuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1315,7 +1315,7 @@ model PushSubscription {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id       String @id @default(cuid())
   userId   String
   user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1344,7 +1344,7 @@ model EmailTemplate {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id          String  @id @default(cuid())
   type        String  @unique // NEW_VERSION, PROJECT_APPROVED, COMMENT_NOTIFICATION, etc.
   name        String // Human-readable name for the template
@@ -1371,7 +1371,7 @@ model ClientCompany {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String   @id @default(cuid())
   name      String   @unique
   createdAt DateTime @default(now())
@@ -1388,7 +1388,7 @@ model CalendarToken {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String   @id @default(cuid())
   userId    String   @unique
   token     String   @unique
@@ -1419,7 +1419,7 @@ model ShortLink {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String    @id @default(cuid())
   slug      String    @unique
   targetUrl String    @db.Text
@@ -1437,7 +1437,7 @@ model ClientContact {
   // 5.0 multi-tenant: owning organization. Nullable + DB default
   // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
   // tightened to NOT NULL once every create passes it explicitly.
-  organizationId String? @default("org-1")
+  organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id        String   @id @default(cuid())
   companyId String
   company   ClientCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
