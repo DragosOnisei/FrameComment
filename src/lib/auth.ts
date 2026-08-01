@@ -2,7 +2,7 @@ import { headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
-import { prisma, setDatabaseUserContext } from './db'
+import { prisma, setDatabaseUserContext, setDatabaseOrgContext } from './db'
 import { verifyPassword } from './encryption'
 import { revokeToken, isTokenRevoked, isUserTokensRevoked } from './token-revocation'
 import { getRedis } from './redis'
@@ -27,6 +27,11 @@ export interface AuthUser {
   // has no avatar yet, in which case the UI falls back to initials.
   avatarUrl?: string | null
   role: string
+  // 5.0 multi-tenant: the user's organization. Read FRESH from the DB on
+  // every request (never trusted from the token), so moving a user between
+  // orgs or deleting an org takes effect immediately. Nullable only for
+  // legacy rows mid-migration; effectively 'org-1' for all existing users.
+  organizationId?: string | null
 }
 
 interface AdminAccessPayload extends jwt.JwtPayload {
@@ -35,6 +40,10 @@ interface AdminAccessPayload extends jwt.JwtPayload {
   email: string
   role: string
   sessionId: string
+  // 5.0 multi-tenant: informational claim only — org resolution always goes
+  // through the DB user row. Absent on pre-5.x tokens (legacy sessions keep
+  // working; the DB read supplies the org).
+  organizationId?: string | null
 }
 
 interface AdminRefreshPayload extends jwt.JwtPayload {
@@ -44,6 +53,7 @@ interface AdminRefreshPayload extends jwt.JwtPayload {
   role: string
   sessionId: string
   rotationId: string
+  organizationId?: string | null
 }
 
 interface SharePayload extends jwt.JwtPayload {
@@ -98,6 +108,7 @@ function signAdminAccess(user: AuthUser, sessionId: string, ttlSeconds?: number)
     email: user.email,
     role: user.role,
     sessionId,
+    organizationId: user.organizationId ?? null,
     type: 'admin_access',
   }
   return jwt.sign(payload, ADMIN_ACCESS_SECRET, { expiresIn: ttlSeconds || ACCESS_TOKEN_DURATION, algorithm: 'HS256' })
@@ -111,6 +122,7 @@ function signAdminRefresh(user: AuthUser, sessionId: string, rotationId: string)
     role: user.role,
     sessionId,
     rotationId,
+    organizationId: user.organizationId ?? null,
     type: 'admin_refresh',
   }
   return jwt.sign(payload, ADMIN_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_DURATION, algorithm: 'HS256' })
@@ -255,10 +267,16 @@ export async function refreshAdminTokens(params: {
     }
   }
 
-  const user = await prisma.user.findUnique({
+  const user = (await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
-  })
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      organizationId: true,
+    } as any,
+  })) as AuthUser | null
   if (!user) {
     await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
     return null
@@ -303,7 +321,7 @@ export async function revokePresentedTokens(tokens: { accessToken?: string | nul
 
 export async function verifyCredentials(usernameOrEmail: string, password: string): Promise<AuthUser | null> {
   try {
-    const user = await prisma.user.findFirst({
+    const user = (await prisma.user.findFirst({
       where: {
         OR: [{ email: usernameOrEmail }, { username: usernameOrEmail }],
       },
@@ -313,8 +331,9 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
         name: true,
         role: true,
         password: true,
-      },
-    })
+        organizationId: true,
+      } as any,
+    })) as (AuthUser & { password: string }) | null
 
     if (!user) {
       await verifyPassword(password, DUMMY_BCRYPT_HASH)
@@ -331,6 +350,7 @@ export async function verifyCredentials(usernameOrEmail: string, password: strin
       email: user.email,
       name: user.name,
       role: user.role,
+      organizationId: user.organizationId ?? null,
     }
   } catch (error) {
     logError('Error verifying credentials:', error)
@@ -344,15 +364,30 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
   const payload = await verifyAdminAccessToken(bearer)
   if (!payload) return null
 
-  const user = await prisma.user.findUnique({
+  // 5.0 multi-tenant: `organizationId` joins the select. The `as any` cast
+  // keeps this compiling against a pre-5.x generated Prisma client (the
+  // sandbox can't regenerate); the Docker build's fresh client types it fully.
+  const user = (await prisma.user.findUnique({
     where: { id: payload.userId },
     // 2.5.1+: include `avatarUrl` so the session payload carries it
     // back to the client without an extra round-trip.
-    select: { id: true, email: true, name: true, avatarUrl: true, role: true },
-  })
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      avatarUrl: true,
+      role: true,
+      organizationId: true,
+    } as any,
+  })) as AuthUser | null
 
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
+    // Arm the RLS org context (dormant until the app moves off the
+    // superuser DB role — see MULTI_TENANT_MIGRATION.md).
+    if (user.organizationId) {
+      await setDatabaseOrgContext(user.organizationId)
+    }
   }
 
   return user
@@ -367,13 +402,22 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   const payload = await verifyAdminAccessToken(token)
   if (!payload) return null
 
-  const user = await prisma.user.findUnique({
+  const user = (await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
-  })
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      organizationId: true,
+    } as any,
+  })) as AuthUser | null
 
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
+    if (user.organizationId) {
+      await setDatabaseOrgContext(user.organizationId)
+    }
   }
 
   return user
@@ -564,12 +608,21 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
   if (!adminHeader) return null
   const payload = await verifyAdminAccessToken(adminHeader)
   if (!payload) return null
-  const user = await prisma.user.findUnique({
+  const user = (await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, name: true, role: true },
-  })
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      organizationId: true,
+    } as any,
+  })) as AuthUser | null
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
+    if (user.organizationId) {
+      await setDatabaseOrgContext(user.organizationId)
+    }
   }
   return user
 }

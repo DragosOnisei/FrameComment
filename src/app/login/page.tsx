@@ -356,6 +356,17 @@ function LoginForm() {
                 <Fingerprint className="w-4 h-4 mr-2" />
                 {passkeyLoading ? t('authenticating') : t('usePassKey')}
               </Button>
+
+              {/* 5.0 multi-tenant: public company registration (private beta). */}
+              <p className="text-center text-sm text-muted-foreground pt-2">
+                New here?{' '}
+                <Link
+                  href="/register"
+                  className="text-foreground underline underline-offset-4 hover:text-primary transition-colors"
+                >
+                  Create your company
+                </Link>
+              </p>
             </form>
           </CardContent>
         </Card>

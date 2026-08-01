@@ -183,6 +183,17 @@ export const updateNotificationDestinationSchema = z.discriminatedUnion('provide
 // USER SCHEMAS
 // ============================================================================
 
+// 5.0 multi-tenant: public company registration (private beta — the route
+// also requires the REGISTER_INVITE_CODE env to match). The first user of a
+// new organization always becomes its OWNER; role is never client-supplied.
+export const registerSchema = z.object({
+  companyName: safeStringSchema(2, 120),
+  name: safeStringSchema(1, 255),
+  email: emailSchema,
+  password: passwordSchema,
+  inviteCode: z.string().min(1).max(200),
+})
+
 export const createUserSchema = z.object({
   email: emailSchema,
   username: usernameSchema.optional(),

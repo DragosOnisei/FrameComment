@@ -74,6 +74,10 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       SHARE_TOKEN_SECRET: ${SHARE_TOKEN_SECRET:?SHARE_TOKEN_SECRET is required}
       HTTPS_ENABLED: ${HTTPS_ENABLED:-false}
+      # 5.0 multi-tenant: public company registration (private beta). UNSET =
+      # registration completely disabled. Set a code to allow invited
+      # companies to register at /register.
+      REGISTER_INVITE_CODE: ${REGISTER_INVITE_CODE:-}
       # S3-compatible storage (optional, default: local)
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
