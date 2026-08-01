@@ -597,6 +597,10 @@ export function useCommentManagement({
       isResolved: false,
       resolvedAt: null,
       resolvedBy: null,
+      // 5.0 multi-tenant: required (nullable) on the generated Comment type.
+      // The server assigns the real org (DB default during the staged
+      // migration); the optimistic row is replaced by the server response.
+      organizationId: null,
       replies: [],
     } as CommentWithReplies
 

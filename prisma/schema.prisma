@@ -21,6 +21,10 @@ datasource db {
 }
 
 model User {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String   @id @default(cuid())
   email     String   @unique
   username  String?  @unique
@@ -53,6 +57,8 @@ model User {
   // 4.3.0+: ownership transfers this user initiated / received.
   ownershipTransfersFrom OwnershipTransfer[] @relation("TransferFrom")
   ownershipTransfersTo   OwnershipTransfer[] @relation("TransferTo")
+
+  @@index([organizationId])
 }
 
 // 4.3.0+: single-owner model WITH a 30-day anti-hijack safety net.
@@ -71,6 +77,10 @@ model User {
 // Only one transfer can be in GRACE at a time. `toPreviousRole` records what the
 // recipient was before, so a REVERSE restores it exactly.
 model OwnershipTransfer {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id             String                  @id @default(cuid())
   fromUserId     String
   toUserId       String
@@ -86,6 +96,8 @@ model OwnershipTransfer {
 
   @@index([status])
   @@index([graceEndsAt])
+
+  @@index([organizationId])
 }
 
 // 4.3.0+: account roles (mIRC-style level hierarchy).
@@ -118,6 +130,10 @@ enum OwnershipTransferStatus {
 }
 
 model Project {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id              String  @id @default(cuid())
   title           String
   slug            String  @unique
@@ -217,6 +233,8 @@ model Project {
   projectUploads    ProjectUpload[] // Client-submitted files via reverse share
 
   @@index([clientCompanyId])
+
+  @@index([organizationId])
 }
 
 /// Frame.io-style folder inside a project. Folders can be nested
@@ -230,6 +248,10 @@ model Project {
 /// subfolders are cascaded; videos inside have their folderId set to
 /// null (preserved at project root) — that's safer than data loss.
 model Folder {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id             String   @id @default(cuid())
   projectId      String
   parentFolderId String?
@@ -269,6 +291,8 @@ model Folder {
   @@index([projectId])
   @@index([parentFolderId])
   @@index([deletedAt])
+
+  @@index([organizationId])
 }
 
 // 3.9.x: a non-video FILE that lives inside a folder (or the project
@@ -277,6 +301,10 @@ model Folder {
 // model is generic enough for any future document/file item. This is
 // what lets a folder hold something OTHER than videos + subfolders.
 model FolderDocument {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id          String @id @default(cuid())
   projectId   String
   folderId    String? // null = project root
@@ -309,6 +337,8 @@ model FolderDocument {
   @@index([folderId])
   @@index([sourceVideoId])
   @@index([deletedAt])
+
+  @@index([organizationId])
 }
 
 enum ProjectStatus {
@@ -319,6 +349,10 @@ enum ProjectStatus {
 }
 
 model ProjectRecipient {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id                   String   @id @default(cuid())
   projectId            String
   project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -330,9 +364,15 @@ model ProjectRecipient {
 
   @@index([projectId])
   @@index([projectId, email])
+
+  @@index([organizationId])
 }
 
 model Video {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id           String @id @default(cuid())
   projectId    String
   // Optional folder the video lives inside. Null means the video sits
@@ -471,9 +511,15 @@ model Video {
   @@index([folderId])
   @@index([createdById])
   @@index([deletedAt])
+
+  @@index([organizationId])
 }
 
 model VideoAsset {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id      String @id @default(cuid())
   videoId String
   video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
@@ -506,10 +552,16 @@ model VideoAsset {
   @@index([videoId, uploadCompletedAt])
   @@index([videoId, uploadedBySessionId])
   @@index([commentId])
+
+  @@index([organizationId])
 }
 
 // Client-submitted files via the reverse share feature (project-level, not attached to a video)
 model ProjectUpload {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String  @id @default(cuid())
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -535,6 +587,8 @@ model ProjectUpload {
   @@index([projectId, createdAt])
   @@index([projectId, uploadCompletedAt])
   @@index([uploadedBySessionId])
+
+  @@index([organizationId])
 }
 
 enum VideoStatus {
@@ -556,6 +610,10 @@ enum MediaType {
 }
 
 model Comment {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id           String   @id @default(cuid())
   projectId    String
   videoId      String // All comments must be video-specific
@@ -617,6 +675,8 @@ model Comment {
   @@index([parentId])
   @@index([userId])
   @@index([isResolved])
+
+  @@index([organizationId])
 }
 
 // 4.1.0+: Premiere-style timeline markers. A coloured flag pinned to a
@@ -626,6 +686,10 @@ model Comment {
 // than threaded feedback. Scoped to a video version so a marker left on
 // v2 doesn't leak onto v3 (same rule as annotations/comments).
 model Marker {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id           String   @id @default(cuid())
   projectId    String
   videoId      String
@@ -655,6 +719,8 @@ model Marker {
   @@index([projectId])
   @@index([videoId])
   @@index([userId])
+
+  @@index([organizationId])
 }
 
 // 1.2.0+: Quick emoji reactions on a comment. Frame.io-style — anyone
@@ -662,6 +728,10 @@ model Marker {
 // onto a comment, and reactions are grouped by emoji in the UI.
 // One reaction per (comment, session, emoji) so toggling is idempotent.
 model CommentReaction {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id         String   @id @default(cuid())
   commentId  String
   emoji      String // The emoji character itself (UTF-8). Keep raw so the
@@ -677,9 +747,15 @@ model CommentReaction {
   @@unique([commentId, sessionId, emoji])
   @@index([commentId])
   @@index([sessionId])
+
+  @@index([organizationId])
 }
 
 model NotificationQueue {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String @id @default(cuid())
   projectId String
   type      String // CLIENT_COMMENT, ADMIN_REPLY
@@ -706,6 +782,8 @@ model NotificationQueue {
   @@index([projectId, sentToAdmins])
   @@index([sentToAdmins, createdAt])
   @@index([clientFailed, adminFailed])
+
+  @@index([organizationId])
 }
 
 // 3.5.0+: In-app "internal" notifications shown in the admin bell.
@@ -729,6 +807,10 @@ model NotificationQueue {
 //   - No "count" column by design — the notification is a signal
 //     ("New comments on X"), per the product decision.
 model Notification {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id   String @id @default(cuid())
   // The admin who receives this (the video's uploader / "editor").
   recipientId String
@@ -762,9 +844,15 @@ model Notification {
   @@index([recipientId, isRead, createdAt])
   // Supports the find-or-create dedupe on (recipient, video).
   @@index([recipientId, videoId])
+
+  @@index([organizationId])
 }
 
 model Settings {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @unique @default("org-1")
   id String @id @default("default")
 
   // Language / i18n
@@ -929,14 +1017,24 @@ model Settings {
  * ~1/30; a user removed the day before still pays for the days used).
  */
 model BillingSnapshot {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id           String   @id @default(cuid())
   day          DateTime @unique // midnight UTC of the snapshot day
   userCount    Int
   storageBytes BigInt
   createdAt    DateTime @default(now())
+
+  @@index([organizationId])
 }
 
 model NotificationDestination {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id String @id @default(cuid())
 
   name     String
@@ -958,9 +1056,15 @@ model NotificationDestination {
   @@index([provider])
   @@index([enabled])
   @@index([createdAt])
+
+  @@index([organizationId])
 }
 
 model NotificationSubscription {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id String @id @default(cuid())
 
   destinationId String
@@ -974,9 +1078,15 @@ model NotificationSubscription {
 
   @@unique([destinationId, eventType])
   @@index([eventType, enabled])
+
+  @@index([organizationId])
 }
 
 model NotificationDeliveryLog {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id String @id @default(cuid())
 
   destinationId String
@@ -992,9 +1102,15 @@ model NotificationDeliveryLog {
   @@index([destinationId, sentAt])
   @@index([eventType, sentAt])
   @@index([success, sentAt])
+
+  @@index([organizationId])
 }
 
 model SecuritySettings {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @unique @default("org-1")
   id String @id @default("default")
 
   // Hotlink Protection: DISABLED, LOG_ONLY, BLOCK_STRICT
@@ -1035,6 +1151,10 @@ model SecuritySettings {
 }
 
 model SecurityEvent {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id       String @id @default(cuid())
   type     String // HOTLINK_DETECTED, HOTLINK_BLOCKED, RATE_LIMIT_HIT, TOKEN_SESSION_MISMATCH, SUSPICIOUS_ACTIVITY, BLOCKED_IP_ATTEMPT
   severity String @default("INFO") // INFO, WARNING, CRITICAL
@@ -1058,9 +1178,15 @@ model SecurityEvent {
   @@index([projectId, createdAt])
   @@index([type, createdAt])
   @@index([severity])
+
+  @@index([organizationId])
 }
 
 model BlockedIP {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String   @id @default(cuid())
   ipAddress String   @unique
   reason    String?
@@ -1068,9 +1194,15 @@ model BlockedIP {
   createdBy String? // Admin user ID who blocked this IP
 
   @@index([ipAddress])
+
+  @@index([organizationId])
 }
 
 model BlockedDomain {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String   @id @default(cuid())
   domain    String   @unique
   reason    String?
@@ -1078,9 +1210,15 @@ model BlockedDomain {
   createdBy String? // Admin user ID who blocked this domain
 
   @@index([domain])
+
+  @@index([organizationId])
 }
 
 model VideoAnalytics {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id String @id @default(cuid())
 
   videoId String
@@ -1104,9 +1242,15 @@ model VideoAnalytics {
   @@index([videoId, createdAt])
   @@index([eventType])
   @@index([assetId])
+
+  @@index([organizationId])
 }
 
 model SharePageAccess {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id String @id @default(cuid())
 
   projectId String
@@ -1130,9 +1274,15 @@ model SharePageAccess {
   @@index([projectId, createdAt])
   @@index([projectId, accessMethod])
   @@index([sessionId])
+
+  @@index([organizationId])
 }
 
 model PasskeyCredential {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id     String @id @default(cuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1157,9 +1307,15 @@ model PasskeyCredential {
 
   @@index([userId])
   @@index([userId, lastUsedAt])
+
+  @@index([organizationId])
 }
 
 model PushSubscription {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id       String @id @default(cuid())
   userId   String
   user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1180,9 +1336,15 @@ model PushSubscription {
   lastUsedAt DateTime @default(now())
 
   @@index([userId])
+
+  @@index([organizationId])
 }
 
 model EmailTemplate {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id          String  @id @default(cuid())
   type        String  @unique // NEW_VERSION, PROJECT_APPROVED, COMMENT_NOTIFICATION, etc.
   name        String // Human-readable name for the template
@@ -1200,10 +1362,16 @@ model EmailTemplate {
   updatedAt DateTime @updatedAt
 
   @@index([type, enabled])
+
+  @@index([organizationId])
 }
 
 // Client Directory - Companies/Organizations
 model ClientCompany {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String   @id @default(cuid())
   name      String   @unique
   createdAt DateTime @default(now())
@@ -1211,16 +1379,24 @@ model ClientCompany {
 
   contacts ClientContact[]
   projects Project[]
+
+  @@index([organizationId])
 }
 
 // Calendar Token - Per-user iCal feed authentication
 model CalendarToken {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String   @id @default(cuid())
   userId    String   @unique
   token     String   @unique
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 /// 2.4.0+: Frame.io-style URL shortener.
@@ -1240,6 +1416,10 @@ model CalendarToken {
 /// we can add a `clicks` counter + last-access columns later without
 /// breaking anything.
 model ShortLink {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String    @id @default(cuid())
   slug      String    @unique
   targetUrl String    @db.Text
@@ -1248,10 +1428,16 @@ model ShortLink {
 
   @@index([slug])
   @@index([expiresAt])
+
+  @@index([organizationId])
 }
 
 // Client Directory - Individual Contacts
 model ClientContact {
+  // 5.0 multi-tenant: owning organization. Nullable + DB default
+  // 'org-1' during the staged migration (MULTI_TENANT_MIGRATION.md §11);
+  // tightened to NOT NULL once every create passes it explicitly.
+  organizationId String? @default("org-1")
   id        String   @id @default(cuid())
   companyId String
   company   ClientCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1263,4 +1449,23 @@ model ClientContact {
 
   @@index([companyId])
   @@index([email])
+
+  @@index([organizationId])
+}
+
+// 5.0 multi-tenant: one row per company (tenant). Every tenant-owned table
+// carries an organizationId; isolation is enforced in the app AND by Postgres
+// Row-Level Security policies (see MULTI_TENANT_MIGRATION.md). Named
+// "Organization" because "ClientCompany" is already the client directory.
+model Organization {
+  id        String   @id @default(cuid())
+  name      String // company/brand name shown in the UI (asked at register)
+  slug      String   @unique // stable public handle, auto-generated
+  // ACTIVE | SUSPENDED (billing) | DELETED (soft). Plain string to avoid an
+  // enum migration dance while statuses are still evolving.
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
 }

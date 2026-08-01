@@ -56,3 +56,54 @@ export async function clearDatabaseUserContext(): Promise<void> {
   }
 }
 
+// ─── 5.0 multi-tenant: organization context for RLS ──────────────────────────
+//
+// The RLS policies (migration 20260801130000_multi_tenant_rls) compare each
+// row's organizationId with `current_setting('app.current_organization_id')`.
+// This helper arms that setting.
+//
+// IMPORTANT SCOPING CAVEAT (applies to setDatabaseUserContext above too):
+// `set_config(..., true)` is TRANSACTION-scoped. A standalone $executeRaw runs
+// in its own implicit transaction, so the setting evaporates before the next
+// query on a pooled connection. That is intentional-safe (never leaks context
+// across requests sharing a connection) but means RLS is only truly armed for
+// queries that run INSIDE the same transaction as the set_config call:
+//
+//   await prisma.$transaction(async (tx) => {
+//     await setOrgContextOn(tx, organizationId)
+//     …tenant queries via tx…
+//   })
+//
+// Phase 2 wires this per request. Until the app switches to the non-superuser
+// `framecomment_app` DB role, policies are dormant anyway (superusers bypass
+// RLS), so calling or not calling this has no behavioral effect today.
+
+/** Prisma transaction client shape accepted by setOrgContextOn. */
+type PrismaLike = Pick<PrismaClient, '$executeRaw'>
+
+const ORG_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/
+
+/**
+ * Arm the RLS organization context on a specific client/transaction. Use the
+ * transaction form (see caveat above) for it to cover subsequent queries.
+ */
+export async function setOrgContextOn(
+  client: PrismaLike,
+  organizationId: string,
+): Promise<void> {
+  if (!ORG_ID_RE.test(organizationId)) {
+    throw new Error('Invalid organizationId format')
+  }
+  await client.$executeRaw`SELECT set_config('app.current_organization_id', ${organizationId}, true)`
+}
+
+/** Convenience: default-client variant (transaction caveat applies). */
+export async function setDatabaseOrgContext(organizationId: string): Promise<void> {
+  try {
+    await setOrgContextOn(prisma, organizationId)
+  } catch {
+    // Dormant until the app moves off the superuser role — never break a
+    // request over context plumbing.
+  }
+}
+
