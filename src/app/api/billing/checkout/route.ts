@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { requireApiManageSettings } from '@/lib/auth'
 import { getStripe } from '@/lib/stripe'
 import { logError } from '@/lib/logging'
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const settings = (await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })) as any
 
     // Base URL for the redirect back into Settings. Prefer the admin's
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       })
       customerId = customer.id
       await prisma.settings.update({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         data: {
           stripeCustomerId: customerId,
           billingEmail: email ?? null,

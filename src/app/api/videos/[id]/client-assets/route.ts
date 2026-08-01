@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile, sanitizeFilename, isSuspiciousFilename } from '@/lib/file-validation'
@@ -81,7 +81,7 @@ export async function POST(
 
     // Enforce global maxUploadSizeGB limit
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { maxUploadSizeGB: true },
     })
     // 1.5.x+: fallback default lifted 1 GB → 1000 GB (= 1 TB).

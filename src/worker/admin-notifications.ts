@@ -1,4 +1,4 @@
-import { prisma } from '../lib/db'
+import { prisma, orgSettingsWhere } from '../lib/db'
 import { getEmailSettings, sendEmail } from '../lib/email'
 import { generateAdminSummaryEmail } from '../lib/email-templates'
 import { generateShareUrl } from '../lib/url'
@@ -17,7 +17,7 @@ export async function processAdminNotifications() {
 
     // Get admin notification settings
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: {
         adminNotificationSchedule: true,
         adminNotificationTime: true,
@@ -185,7 +185,7 @@ export async function processAdminNotifications() {
     // Update settings last sent timestamp on success
     if (result.success) {
       await prisma.settings.update({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         data: { lastAdminNotificationSent: now }
       })
       logMessage(`[ADMIN] Summary sent (${pendingNotifications.length} notifications to ${admins.length} admins)`)

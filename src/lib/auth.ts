@@ -2,7 +2,8 @@ import { headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
-import { prisma, setDatabaseUserContext, setDatabaseOrgContext } from './db'
+import { prisma, setDatabaseUserContext, setDatabaseOrgContext, orgSettingsWhere } from './db'
+import { enterOrgContext } from './org-context'
 import { verifyPassword } from './encryption'
 import { revokeToken, isTokenRevoked, isUserTokensRevoked } from './token-revocation'
 import { getRedis } from './redis'
@@ -383,9 +384,11 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
 
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
-    // Arm the RLS org context (dormant until the app moves off the
-    // superuser DB role — see MULTI_TENANT_MIGRATION.md).
+    // Arm the RLS org context for the REST OF THIS REQUEST: the ALS entry
+    // makes the db.ts extension wrap every subsequent model operation in a
+    // [set_config(org), op] batch transaction (see org-context.ts).
     if (user.organizationId) {
+      enterOrgContext(user.organizationId)
       await setDatabaseOrgContext(user.organizationId)
     }
   }
@@ -416,6 +419,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
     if (user.organizationId) {
+      enterOrgContext(user.organizationId)
       await setDatabaseOrgContext(user.organizationId)
     }
   }
@@ -449,7 +453,7 @@ async function isInstanceBillingSuspended(): Promise<boolean> {
   }
   try {
     const settings = (await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { billingSuspended: true } as any,
     })) as any
     const value = !!settings?.billingSuspended
@@ -621,6 +625,7 @@ export async function getAdminOverrideFromRequest(request: NextRequest): Promise
   if (user) {
     await setDatabaseUserContext(user.id, user.role)
     if (user.organizationId) {
+      enterOrgContext(user.organizationId)
       await setDatabaseOrgContext(user.organizationId)
     }
   }

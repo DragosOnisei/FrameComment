@@ -1,5 +1,5 @@
 import type Stripe from 'stripe'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere, currentOrgId } from '@/lib/db'
 import { getStripe } from '@/lib/stripe'
 import { logError, logMessage } from '@/lib/logging'
 import { legacyBackend } from '@/lib/storage-backends'
@@ -182,6 +182,10 @@ export async function recordDailySnapshotIfNeeded(): Promise<void> {
         day,
         userCount: usage.userCount,
         storageBytes: BigInt(Math.round(usage.storageBytes)),
+        // 5.0 multi-tenant: the daily worker sweep is still instance-wide
+        // (= org-1, the legacy tenant). Phase 5 makes billing iterate orgs
+        // and moves `day` uniqueness to (organizationId, day).
+        organizationId: currentOrgId(),
       },
     })
     .catch(() => {}) // ignore unique-violation race
@@ -254,7 +258,7 @@ export async function chargeInstance(): Promise<ChargeResult> {
   if (!stripe) return { ok: false, message: 'Stripe is not configured.' }
 
   const settings = (await prisma.settings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
   })) as any
   const customerId: string | null = settings?.stripeCustomerId ?? null
   if (!customerId) {
@@ -336,7 +340,7 @@ export async function chargeInstance(): Promise<ChargeResult> {
     const wasPaid = invoiceObj.status === 'paid'
 
     await prisma.settings.update({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       data: {
         lastInvoiceId: invoiceId,
         lastInvoiceAmount: totalCents,
@@ -361,7 +365,7 @@ export async function chargeInstance(): Promise<ChargeResult> {
     logError('[billing] charge failed:', err)
     await prisma.settings
       .update({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         data: { billingStatus: 'past_due' } as any,
       })
       .catch(() => {})
@@ -383,7 +387,7 @@ export async function runBillingCycleIfDue(): Promise<string> {
   if (!stripe) return 'skip: stripe not configured'
 
   const settings = (await prisma.settings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
   })) as any
   if (!settings) return 'skip: no settings'
 
@@ -397,7 +401,7 @@ export async function runBillingCycleIfDue(): Promise<string> {
 
   // Advance the anchor first (idempotency against per-minute retries).
   await prisma.settings.update({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
     data: { nextBillingAt: addOneMonth(new Date(nextAt)) } as any,
   })
 
@@ -449,7 +453,7 @@ export function graceDeadline(issueSince: Date): Date {
  */
 export async function evaluateBillingHealth(): Promise<void> {
   const settings = (await prisma.settings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
   })) as any
   if (!settings) return
 
@@ -466,7 +470,7 @@ export async function evaluateBillingHealth(): Promise<void> {
     // Resolved — clear the clock + lift any suspension.
     if (issueSince || suspended) {
       await prisma.settings.update({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         data: { billingIssueSince: null, billingSuspended: false } as any,
       })
     }
@@ -476,7 +480,7 @@ export async function evaluateBillingHealth(): Promise<void> {
   if (!issueSince) {
     // Start the grace clock.
     await prisma.settings.update({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       data: { billingIssueSince: new Date() } as any,
     })
     return
@@ -487,7 +491,7 @@ export async function evaluateBillingHealth(): Promise<void> {
     businessDaysBetween(new Date(issueSince), new Date()) >= GRACE_BUSINESS_DAYS
   ) {
     await prisma.settings.update({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       data: { billingSuspended: true } as any,
     })
     logMessage(

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiManageSettings } from '@/lib/auth'
 import { initStorage, uploadFile, deleteFile, getFilePath } from '@/lib/storage'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase } from '@/lib/db'
 import fs from 'fs/promises'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
@@ -111,10 +111,9 @@ export async function POST(request: NextRequest) {
 
     try {
       await prisma.settings.upsert({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         update: { brandingLogoPath: '/api/branding/logo' },
-        create: {
-          id: 'default',
+        create: { ...orgSettingsCreateBase(),
           brandingLogoPath: '/api/branding/logo',
         },
       })
@@ -149,7 +148,7 @@ export async function DELETE(request: NextRequest) {
     await clearAllLogoPngCaches()
     
     await prisma.settings.update({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       data: { brandingLogoPath: null },
     })
     return new NextResponse(null, { status: 204 })

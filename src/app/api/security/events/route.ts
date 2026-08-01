@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
   try {
     // Check if security events viewing is enabled
     const settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { viewSecurityEvents: true }
     })
 

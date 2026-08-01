@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase } from '@/lib/db'
 import { requireApiManageSettings } from '@/lib/auth'
 import { invalidateAllShareSessions, clearAllRateLimits } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
@@ -88,13 +88,12 @@ export async function GET(request: NextRequest) {
 
   try {
     let settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })
 
     if (!settings) {
       settings = await prisma.securitySettings.create({
-        data: {
-          id: 'default',
+        data: { ...orgSettingsCreateBase(),
         },
       })
     }
@@ -238,7 +237,7 @@ export async function PATCH(request: NextRequest) {
 
     // Get current settings to detect changes and validate merged values
     const currentSettings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })
 
     if (adminSessionTimeoutValue !== undefined || adminSessionTimeoutUnit !== undefined) {
@@ -275,7 +274,7 @@ export async function PATCH(request: NextRequest) {
       : (httpsEnabled ?? false)
 
     const settings = await prisma.securitySettings.upsert({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       update: {
         httpsEnabled: effectiveHttpsEnabled,
         hotlinkProtection: hotlinkProtection ?? 'LOG_ONLY',
@@ -292,8 +291,7 @@ export async function PATCH(request: NextRequest) {
         trackSecurityLogs: trackSecurityLogs ?? true,
         viewSecurityEvents: viewSecurityEvents ?? false,
       },
-      create: {
-        id: 'default',
+      create: { ...orgSettingsCreateBase(),
         httpsEnabled: effectiveHttpsEnabled,
         hotlinkProtection: hotlinkProtection ?? 'LOG_ONLY',
         ipRateLimit: ipRateLimit ? parseInt(ipRateLimit, 10) : 1000,

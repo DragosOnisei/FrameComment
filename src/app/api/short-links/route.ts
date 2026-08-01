@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { buildShortUrl, createShortLink } from '@/lib/short-link'
 import { logError } from '@/lib/logging'
 
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     // history doesn't break, BUT we return the long-domain
     // equivalent (`<appDomain>/s/<slug>`) as a usable fallback.
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { shortLinkDomain: true, appDomain: true },
     })
 

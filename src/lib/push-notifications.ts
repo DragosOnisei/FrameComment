@@ -1,5 +1,5 @@
 import webpush from 'web-push'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase } from '@/lib/db'
 import { encrypt, decrypt } from '@/lib/encryption'
 import type { NotificationEventType } from '@/lib/external-notifications/constants'
 import { loadLocaleMessages } from '@/i18n/locale'
@@ -7,7 +7,7 @@ import { logError, logMessage } from '@/lib/logging'
 
 async function getPushLocaleText() {
   const settings = await prisma.settings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
     select: { language: true },
   })
 
@@ -29,7 +29,7 @@ async function getPushLocaleText() {
 async function getVapidSubject(): Promise<string> {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { appDomain: true },
     })
 
@@ -73,7 +73,7 @@ function generateVapidKeys(): VapidKeys {
 export async function getOrCreateVapidKeys(): Promise<VapidKeys> {
   // Try to get existing keys from settings
   const settings = await prisma.settings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
     select: { vapidPublicKey: true, vapidPrivateKey: true },
   })
 
@@ -91,9 +91,8 @@ export async function getOrCreateVapidKeys(): Promise<VapidKeys> {
 
   // Store keys (encrypt the private key)
   await prisma.settings.upsert({
-    where: { id: 'default' },
-    create: {
-      id: 'default',
+    where: orgSettingsWhere(),
+    create: { ...orgSettingsCreateBase(),
       vapidPublicKey: keys.publicKey,
       vapidPrivateKey: encrypt(keys.privateKey),
     },

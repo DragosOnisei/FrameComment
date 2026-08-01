@@ -1,4 +1,4 @@
-import { prisma } from './db'
+import { prisma, orgSettingsWhere } from './db'
 import { NextRequest } from 'next/server'
 import { headers } from 'next/headers'
 
@@ -27,7 +27,7 @@ export async function getAppUrl(request?: NextRequest): Promise<string> {
   // the local UI.
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { appDomain: true },
     })
 
@@ -75,7 +75,7 @@ export async function getAppUrl(request?: NextRequest): Promise<string> {
 export async function getAppDomain(): Promise<string> {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { appDomain: true },
     })
 

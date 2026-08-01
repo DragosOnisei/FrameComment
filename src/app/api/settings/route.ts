@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase } from '@/lib/db'
 import { requireApiAdmin, requireApiManageSettings } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
@@ -40,28 +40,26 @@ export async function GET(request: NextRequest) {
   try {
     // Get or create the default settings
     let settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })
 
     if (!settings) {
       // Create default settings if they don't exist
       settings = await prisma.settings.create({
-        data: {
-          id: 'default',
+        data: { ...orgSettingsCreateBase(),
         },
       })
     }
 
     // Get security settings
     let securitySettings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })
 
     if (!securitySettings) {
       // Create default security settings if they don't exist
       securitySettings = await prisma.securitySettings.create({
-        data: {
-          id: 'default',
+        data: { ...orgSettingsCreateBase(),
         },
       })
     }
@@ -435,7 +433,7 @@ export async function PATCH(request: NextRequest) {
     if (smtpPassword !== undefined && smtpPassword !== '••••••••') {
       // Get current settings to compare password
       const currentSettings = await prisma.settings.findUnique({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         select: { smtpPassword: true },
       })
 
@@ -553,7 +551,7 @@ export async function PATCH(request: NextRequest) {
     let previousAdminSchedule: string | null = null
     if (adminNotificationSchedule !== undefined) {
       const current = await prisma.settings.findUnique({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         select: { adminNotificationSchedule: true }
       })
       previousAdminSchedule = current?.adminNotificationSchedule || null
@@ -561,10 +559,9 @@ export async function PATCH(request: NextRequest) {
 
     // Update or create the settings
     const settings = await prisma.settings.upsert({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       update: updateData,
-      create: {
-        id: 'default',
+      create: { ...orgSettingsCreateBase(),
         defaultTheme: defaultTheme || 'auto',
         accentColor: accentColor || 'blue',
         companyName,

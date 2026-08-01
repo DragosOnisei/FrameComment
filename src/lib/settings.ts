@@ -1,4 +1,4 @@
-import { prisma } from './db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase } from './db'
 import { getRedis } from './redis'
 import { logError, logMessage } from '@/lib/logging'
 import { decrypt } from '@/lib/encryption'
@@ -38,7 +38,7 @@ export async function invalidateSecuritySettingsCache(): Promise<void> {
 export async function getCompanyName(): Promise<string> {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { companyName: true },
     })
 
@@ -55,14 +55,13 @@ export async function getCompanyName(): Promise<string> {
 export async function getSettings() {
   try {
     let settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })
 
     if (!settings) {
       // Create default settings if they don't exist
       settings = await prisma.settings.create({
-        data: {
-          id: 'default',
+        data: { ...orgSettingsCreateBase(),
           companyName: 'Studio',
         },
       })
@@ -86,7 +85,7 @@ export async function isSmtpConfigured(): Promise<boolean> {
 
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: {
         smtpServer: true,
         smtpPort: true,
@@ -116,7 +115,7 @@ export async function isSmtpConfigured(): Promise<boolean> {
 export async function getOpenAiApiKey(): Promise<string | null> {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { openaiApiKey: true } as any,
     })
     const stored = (settings as any)?.openaiApiKey as string | null | undefined
@@ -142,7 +141,7 @@ export async function getOpenAiApiKey(): Promise<string | null> {
 export async function getAutoApproveProject(): Promise<boolean> {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { autoApproveProject: true },
     })
 
@@ -170,7 +169,7 @@ export async function getClientSessionTimeoutSeconds(): Promise<number> {
 
   try {
     const settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: {
         sessionTimeoutValue: true,
         sessionTimeoutUnit: true,
@@ -233,7 +232,7 @@ export async function getAdminSessionTimeoutSeconds(): Promise<number> {
 
   try {
     const settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: {
         adminSessionTimeoutValue: true,
         adminSessionTimeoutUnit: true,
@@ -305,9 +304,9 @@ export async function initializeSecuritySettings() {
 
       // Update database with environment variable value
       await prisma.securitySettings.upsert({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         update: { httpsEnabled },
-        create: { id: 'default', httpsEnabled },
+        create: { ...orgSettingsCreateBase(), httpsEnabled },
       })
 
       logMessage(`[INIT] HTTPS_ENABLED environment variable detected. Set database value to: ${httpsEnabled}`)
@@ -320,7 +319,7 @@ export async function initializeSecuritySettings() {
 export async function getMaxAuthAttempts(): Promise<number> {
   try {
     const securitySettings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { passwordAttempts: true }
     })
     return securitySettings?.passwordAttempts || 5
@@ -337,7 +336,7 @@ export async function isHttpsEnabled(): Promise<boolean> {
 
   try {
     const settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { httpsEnabled: true },
     })
 
@@ -363,7 +362,7 @@ export async function getRateLimitSettings(): Promise<{
 
   try {
     const settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: {
         ipRateLimit: true,
         sessionRateLimit: true,
@@ -417,7 +416,7 @@ export async function getWebAuthnConfig(): Promise<{
 }> {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: {
         appDomain: true,
         companyName: true,

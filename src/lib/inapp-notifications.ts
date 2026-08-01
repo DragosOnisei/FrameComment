@@ -95,6 +95,9 @@ export async function createOrBumpNotification(params: {
   folderId?: string | null
   actorName?: string | null
   type?: string
+  /** 5.0 multi-tenant: explicit owning org (worker paths run outside a
+   *  request context). Defaults to 'org-1' when omitted. */
+  organizationId?: string | null
 }): Promise<InAppNotification> {
   const {
     recipientId,
@@ -104,6 +107,7 @@ export async function createOrBumpNotification(params: {
     folderId = null,
     actorName = null,
     type = 'NEW_COMMENTS',
+    organizationId = null,
   } = params
 
   const delegate = notificationDelegate()
@@ -137,6 +141,7 @@ export async function createOrBumpNotification(params: {
         folderId,
         actorName,
         type,
+        organizationId: organizationId ?? 'org-1',
       },
     })
   }
@@ -194,7 +199,7 @@ export async function maybeNotifyEditorForComment(params: {
   actorName: string | null
 }): Promise<void> {
   try {
-    const video = await prisma.video.findUnique({
+    const video = (await prisma.video.findUnique({
       where: { id: params.videoId },
       select: {
         id: true,
@@ -203,8 +208,10 @@ export async function maybeNotifyEditorForComment(params: {
         folderId: true,
         createdById: true,
         deletedAt: true,
-      },
-    })
+        // 5.0 multi-tenant: notifications follow the video's org.
+        organizationId: true,
+      } as any,
+    })) as any
     if (!video || video.deletedAt) return
 
     // This helper runs AFTER the comment is created, so the just-posted comment
@@ -238,6 +245,7 @@ export async function maybeNotifyEditorForComment(params: {
         videoName: video.name,
         folderId: video.folderId,
         actorName: params.actorName,
+        organizationId: (video as any).organizationId ?? null,
       })
       await publishNotification(recipientId, notification)
     }

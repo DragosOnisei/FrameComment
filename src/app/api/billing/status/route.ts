@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { canManageSettings } from '@/lib/permissions'
 import { getStripe, isStripeConfigured, isStripeTestMode } from '@/lib/stripe'
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
   try {
     const stripe = getStripe()
     let settings = (await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })) as any
 
     // Reset local billing state if the stored customer doesn't exist in
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
       } catch {
         await prisma.settings
           .update({
-            where: { id: 'default' },
+            where: orgSettingsWhere(),
             data: {
               stripeCustomerId: null,
               paymentMethodBrand: null,
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
     // Refresh dunning + re-read.
     await evaluateBillingHealth().catch(() => {})
     settings = (await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
     })) as any
 
     const usage = await computeBillingUsage()

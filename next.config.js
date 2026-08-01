@@ -45,6 +45,23 @@ const nextConfig = {
     }
   },
 
+  // 5.0 multi-tenant: `src/lib/org-context.ts` uses Node's `async_hooks`
+  // (AsyncLocalStorage) and is pulled — via db.ts — into a few CLIENT bundles
+  // through long import chains (e.g. i18n/locale.ts). Prisma ships a browser
+  // stub for those chains; `async_hooks` doesn't, so the client compilation
+  // fails to RESOLVE it. Standard fix: stub the builtin to an empty module in
+  // browser builds. The code paths never execute client-side (org-context
+  // also guards instantiation on `typeof window`).
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        async_hooks: false,
+      }
+    }
+    return config
+  },
+
   // Security headers are set in src/proxy.ts (nonce-based CSP)
   // Static asset headers below cover paths that bypass proxy
   async headers() {

@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { NextRequest } from 'next/server'
-import { prisma } from './db'
+import { prisma, orgSettingsWhere } from './db'
 import { logError, logMessage } from './logging'
 import { getClientIpAddress } from './utils'
 import { getClientSessionTimeoutSeconds } from './settings'
@@ -387,7 +387,7 @@ export async function getSecuritySettings() {
 
   // Fetch from database (slowest, only when both caches miss)
   const settings = await prisma.securitySettings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
     select: {
       hotlinkProtection: true,
       ipRateLimit: true,

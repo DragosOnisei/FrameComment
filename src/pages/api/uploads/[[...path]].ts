@@ -1,7 +1,7 @@
 import { isStaff } from '@/lib/permissions'
 import { Server } from '@tus/server'
 import { FileStore } from '@tus/file-store'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
 import { uploadFile, moveFile, initStorage, getTusUploadDir, isS3Mode, getFilePath } from '@/lib/storage'
@@ -161,7 +161,7 @@ const tusServer: Server = new Server({
 
       // Enforce configurable max upload size from Global Settings
       const appSettings = await prisma.settings.findUnique({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         select: { maxUploadSizeGB: true },
       })
       // 1.5.x+: fallback default lifted from 1 GB → 1000 GB (= 1 TB).

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe'
 import { addOneMonth } from '@/lib/billing'
 import { logError, logMessage } from '@/lib/logging'
@@ -73,10 +73,10 @@ export async function POST(request: NextRequest) {
         const pm = await stripe.paymentMethods.retrieve(pmId)
 
         const existing = (await prisma.settings.findUnique({
-          where: { id: 'default' },
+          where: orgSettingsWhere(),
         })) as any
         await prisma.settings.update({
-          where: { id: 'default' },
+          where: orgSettingsWhere(),
           data: {
             stripeCustomerId: customerId,
             paymentMethodBrand: pm.card?.brand ?? null,
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
         const inv = event.data.object as Stripe.Invoice
         await prisma.settings
           .update({
-            where: { id: 'default' },
+            where: orgSettingsWhere(),
             data: {
               lastInvoiceId: inv.id,
               lastInvoiceAmount: inv.amount_paid,
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
         const inv = event.data.object as Stripe.Invoice
         await prisma.settings
           .update({
-            where: { id: 'default' },
+            where: orgSettingsWhere(),
             data: {
               lastInvoiceId: inv.id,
               lastInvoiceStatus: 'failed',

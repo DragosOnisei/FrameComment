@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { prisma } from '@/lib/db'
+import { prisma, setOrgContextOn } from '@/lib/db'
+import { enterOrgContext } from '@/lib/org-context'
 import { issueAdminTokens, type AuthUser } from '@/lib/auth'
 import { hashPassword } from '@/lib/encryption'
 import { registerSchema } from '@/lib/validation'
@@ -117,8 +118,15 @@ export async function POST(request: NextRequest) {
     // operator's local `prisma generate`) type these fully.
     const orgId = `org_${crypto.randomBytes(12).toString('hex')}`
 
+    // Bind the new org to this request's async context AND arm the RLS
+    // setting as the transaction's first statement — required post-flip so
+    // the WITH CHECK policies accept these self-creating inserts.
+    enterOrgContext(orgId)
+
     const user = await prisma.$transaction(async (txRaw) => {
       const tx = txRaw as any
+
+      await setOrgContextOn(tx, orgId)
 
       await tx.organization.create({
         data: {

@@ -1,4 +1,4 @@
-import { prisma } from './db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase } from './db'
 import { hashPassword } from './encryption'
 import { logError, logMessage } from './logging'
 
@@ -8,9 +8,8 @@ import { logError, logMessage } from './logging'
 async function ensureSecuritySettings() {
   try {
     await prisma.securitySettings.upsert({
-      where: { id: 'default' },
-      create: {
-        id: 'default',
+      where: orgSettingsWhere(),
+      create: { ...orgSettingsCreateBase(),
         hotlinkProtection: 'LOG_ONLY',
         ipRateLimit: 1000, // High limit for video streaming with HTTP Range requests
         sessionRateLimit: 600, // 10 req/sec average for video buffering/seeking

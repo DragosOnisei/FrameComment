@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { generateUniqueSlug } from '@/lib/utils'
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt } from '@/lib/encryption'
@@ -246,7 +246,7 @@ export async function POST(request: NextRequest) {
 
     // Fetch default settings for watermark and preview resolution
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: {
         defaultPreviewResolution: true,
         defaultSkipTranscoding: true,

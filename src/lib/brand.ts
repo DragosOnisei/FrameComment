@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 
 type AccentKey =
   | 'blue'
@@ -28,7 +28,7 @@ const accentPalette: Record<AccentKey, string> = {
 export async function getAccentColor(): Promise<string> {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { accentColor: true },
     })
     const accentKey = (settings?.accentColor as AccentKey | undefined) || 'blue'

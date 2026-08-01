@@ -238,7 +238,10 @@ export async function processExternalNotificationJob(data: ExternalNotificationJ
           eventType: data.eventType,
           success,
           error,
-        },
+          // 5.0 multi-tenant: log rows follow the destination's org (the
+          // worker runs outside any request org context).
+          organizationId: (dest as any).organizationId ?? 'org-1',
+        } as any,
       })
       .catch(() => {
         // Avoid failing the job on log errors.

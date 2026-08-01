@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { getAuthContext } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest, createCommentSchema, safeParseBody } from '@/lib/validation'
@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
     // Enforce configurable max comment attachments
     if (assetIds && assetIds.length > 0) {
       const globalSettings = await prisma.settings.findUnique({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         select: { maxCommentAttachments: true },
       })
       const maxAttachments = globalSettings?.maxCommentAttachments ?? 10

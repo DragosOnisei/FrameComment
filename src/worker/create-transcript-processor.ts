@@ -116,7 +116,11 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
         preview720Path: true,
         preview1080Path: true,
         preview2160Path: true,
-      },
+        // 5.0 multi-tenant: carried onto the FolderDocument below so the
+        // transcript lands in the video's own organization (the worker runs
+        // outside any request org context).
+        organizationId: true,
+      } as any,
     })
     if (!video) {
       logMessage(`[WORKER] create-transcript ${videoId}: row gone, skipping`)
@@ -261,6 +265,7 @@ export async function processCreateTranscript(job: Job<CreateTranscriptJob>) {
         kind: 'transcript',
         sourceVideoId: videoId,
         storageBackend: backend,
+        organizationId: (video as any).organizationId ?? 'org-1',
       },
     })
 

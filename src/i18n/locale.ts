@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 
 export const SUPPORTED_LOCALES = ['en'] as const
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
@@ -22,7 +22,7 @@ export async function getConfiguredLocale(): Promise<string> {
   if (localeCache && localeCache.expiresAt > now) return localeCache.value
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { language: true },
     })
     const value = settings?.language || 'en'

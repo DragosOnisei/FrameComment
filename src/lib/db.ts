@@ -1,13 +1,70 @@
 import { PrismaClient } from '@prisma/client'
 import { ALL_ROLES } from './permissions'
+import { getOrgContext } from './org-context'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
+  prismaBase: PrismaClient | undefined
 }
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient()
+/** The raw client — used internally by the RLS extension for the batch
+ *  transaction, and available for privileged paths that must NOT be
+ *  org-wrapped (login lookup, share-slug resolution, worker). */
+export const prismaBase = globalForPrisma.prismaBase ?? new PrismaClient()
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+// ─── 5.0 multi-tenant: automatic RLS org context on every model operation ───
+//
+// Official Prisma RLS pattern (prisma-client-extensions/row-level-security):
+// when a request has an org context (set by the auth guards via
+// AsyncLocalStorage — see org-context.ts), each model operation is executed
+// as a BATCH TRANSACTION of [set_config(org), operation]. Both statements run
+// on the same pooled connection inside one transaction, so the
+// transaction-scoped setting is armed for exactly that operation — the RLS
+// policies see it, and it can never leak to another request sharing the
+// connection.
+//
+// Skips (return the bare operation):
+//  - no org context (worker, unauthenticated paths) — post-flip, RLS then
+//    denies by default for the app role; the worker's privileged role is
+//    unaffected;
+//  - operations already inside an interactive transaction (`__internalParams
+//    .transaction` set) — wrapping would escape the caller's transaction.
+//    Interactive-transaction call sites arm the context themselves via
+//    `setOrgContextOn(tx, orgId)` as their first statement.
+//
+// While the app still connects as the Postgres superuser (pre-flip), the
+// policies don't filter anything — but the DEFAULT-expression column values
+// and WITH CHECK behavior are already exercised, so the flip is a pure
+// config change.
+function withRlsOrgContext(base: PrismaClient): PrismaClient {
+  const extended = (base as any).$extends({
+    query: {
+      $allModels: {
+        async $allOperations(params: any) {
+          const { args, query } = params
+          const organizationId = getOrgContext()
+          const inInteractiveTx = !!(params as any).__internalParams?.transaction
+          if (!organizationId || inInteractiveTx) {
+            return query(args)
+          }
+          const [, result] = await (base as any).$transaction([
+            (base as any).$executeRaw`SELECT set_config('app.current_organization_id', ${organizationId}, TRUE)`,
+            query(args),
+          ])
+          return result
+        },
+      },
+    },
+  })
+  return extended as PrismaClient
+}
+
+export const prisma = globalForPrisma.prisma ?? withRlsOrgContext(prismaBase)
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma
+  globalForPrisma.prismaBase = prismaBase
+}
 
 /**
  * Set the database user context for Row Level Security (RLS)
@@ -77,6 +134,47 @@ export async function clearDatabaseUserContext(): Promise<void> {
 // Phase 2 wires this per request. Until the app switches to the non-superuser
 // `framecomment_app` DB role, policies are dormant anyway (superusers bypass
 // RLS), so calling or not calling this has no behavioral effect today.
+
+/**
+ * 5.0 multi-tenant: the org-aware `where` for the per-org singletons
+ * (Settings / SecuritySettings — organizationId is @unique on both).
+ *
+ * Replaces the legacy id-'default' singleton `where` at every call site:
+ *  - App requests: resolves the caller's org from the AsyncLocalStorage
+ *    context the auth guards enter → each company reads/writes ITS row.
+ *  - No context (worker, boot paths): falls back to 'org-1' — the migrated
+ *    legacy singleton — preserving today's behavior until those paths are
+ *    explicitly wired (worker gets explicit org plumbing separately).
+ *
+ * Returns `any` so call sites type-check against BOTH the fresh generated
+ * client (organizationId is a unique where key) and the sandbox's stale one.
+ */
+export function orgSettingsWhere(): any {
+  return { organizationId: getOrgContext() ?? 'org-1' }
+}
+
+/**
+ * The effective org for the current async context — request org when armed,
+ * 'org-1' (the legacy tenant) otherwise. Used to make CREATEs explicit on
+ * paths that can also run outside a request (worker, boot).
+ */
+export function currentOrgId(): string {
+  return getOrgContext() ?? 'org-1'
+}
+
+/**
+ * Companion for the CREATE branches of settings upserts. Preserves the exact
+ * legacy shape for org-1 / no-context (id 'default', organizationId via the
+ * DB default), and gives other orgs their own row keyed by the org id —
+ * matching what /api/auth/register creates.
+ */
+export function orgSettingsCreateBase(): any {
+  const org = getOrgContext()
+  if (org && org !== 'org-1') {
+    return { id: org, organizationId: org }
+  }
+  return { id: 'default' }
+}
 
 /** Prisma transaction client shape accepted by setOrgContextOn. */
 type PrismaLike = Pick<PrismaClient, '$executeRaw'>

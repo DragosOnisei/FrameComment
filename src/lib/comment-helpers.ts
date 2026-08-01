@@ -1,5 +1,5 @@
 import { isStaff } from './permissions'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { isSmtpConfigured } from '@/lib/settings'
 import { getRedis } from '@/lib/redis'
@@ -286,7 +286,7 @@ export async function handleCommentNotifications(params: {
 
     // Get settings for admin schedule
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { adminNotificationSchedule: true }
     })
 

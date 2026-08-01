@@ -4,7 +4,7 @@ export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from 'next/server'
 import { generateDeviceCode, storeDeviceCode } from '@/lib/device-code'
 import { rateLimit } from '@/lib/rate-limit'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { safeParseBody } from '@/lib/validation'
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     // Get appDomain from settings for verification URI
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { appDomain: true },
     })
 

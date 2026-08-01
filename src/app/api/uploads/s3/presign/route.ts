@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { isS3Mode } from '@/lib/storage'
 import {
   s3InitiateMultipartUpload,
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
 
     // ── Enforce per-project max upload size ────────────────────────────────────
     const appSettings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { maxUploadSizeGB: true },
     })
     // 1.5.x+: fallback default lifted 1 GB → 1000 GB (= 1 TB).

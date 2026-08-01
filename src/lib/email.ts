@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer'
-import { prisma } from './db'
+import { prisma, orgSettingsWhere } from './db'
 import { decrypt } from './encryption'
 import { formatTimecodeDisplay, timecodeToSeekSeconds } from './timecode'
 import {
@@ -632,7 +632,7 @@ export async function getEmailSettings(forceRefresh = false): Promise<EmailSetti
 
   // Fetch fresh settings
   const settings = await prisma.settings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
   })
 
   // Decrypt the password if it exists

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase } from '@/lib/db'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { s3FileExists } from '@/lib/s3-storage'
 import { refreshLocalStorageRoot } from '@/lib/storage'
@@ -186,8 +186,8 @@ export async function POST(request: NextRequest) {
   // updatedAt are handled), then raw-UPDATE the storage columns so a stale
   // generated client still works.
   await prisma.settings.upsert({
-    where: { id: 'default' },
-    create: { id: 'default' },
+    where: orgSettingsWhere(),
+    create: { ...orgSettingsCreateBase() },
     update: {},
   })
 

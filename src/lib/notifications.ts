@@ -1,5 +1,5 @@
 import { Comment } from '@prisma/client'
-import { prisma } from './db'
+import { prisma, orgSettingsWhere, currentOrgId } from './db'
 import { sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendProjectApprovedEmail, sendAdminProjectApprovedEmail, getEmailSettings, sendEmail, getRecipientLocale } from './email'
 import { generateNotificationSummaryEmail, generateAdminSummaryEmail } from './email-templates'
 import { getProjectRecipients } from './recipients'
@@ -195,6 +195,10 @@ export async function queueNotification(
     data: {
       projectId: comment.projectId,
       type,
+      // 5.0 multi-tenant: queue rows follow the request's org (comment
+      // creation always runs inside an armed request context; the 'org-1'
+      // fallback covers legacy/boot paths).
+      organizationId: currentOrgId(),
       // Pre-mark sides that were already sent immediately
       sentToAdmins: alreadySentTo?.admins || false,
       adminSentAt: alreadySentTo?.admins ? now : undefined,
@@ -481,7 +485,7 @@ export async function flushPendingAdminNotifications(): Promise<void> {
     })
 
     await prisma.settings.update({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       data: { lastAdminNotificationSent: now }
     })
 

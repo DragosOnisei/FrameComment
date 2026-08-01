@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { prisma } from './db'
+import { prisma, orgSettingsWhere } from './db'
 import { renderUnsubscribeSection, sendEmail, getEmailSettings, renderEmailShell, getEmailBrand, processTemplateContent } from './email'
 import { getRedis } from './redis'
 import { loadLocaleMessages } from '@/i18n/locale'
@@ -20,7 +20,7 @@ const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000 // 15 minutes
  */
 async function getMaxPasswordAttempts(): Promise<number> {
   const securitySettings = await prisma.securitySettings.findUnique({
-    where: { id: 'default' },
+    where: orgSettingsWhere(),
     select: { passwordAttempts: true },
   })
   return securitySettings?.passwordAttempts || 5 // Default to 5 if not set

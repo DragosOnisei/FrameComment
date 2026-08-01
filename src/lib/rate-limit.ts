@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { prisma } from './db'
+import { prisma, orgSettingsWhere } from './db'
 import { getClientIpAddress } from './utils'
 import { getRedis } from './redis'
 import { logError, logWarn } from '@/lib/logging'
@@ -219,7 +219,7 @@ export async function incrementRateLimit(
 
     // Get maxAttempts from SecuritySettings
     const settings = await prisma.securitySettings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { passwordAttempts: true }
     })
     const maxAttempts = settings?.passwordAttempts || 5

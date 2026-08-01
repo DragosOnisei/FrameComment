@@ -1,6 +1,6 @@
 import { isStaff } from '@/lib/permissions'
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { isSmtpConfigured, getRateLimitSettings, getShareTokenTtlSeconds } from '@/lib/settings'
 import { getCurrentUserFromRequest, getShareContext, signShareToken, parseBearerToken } from '@/lib/auth'
 import { getPrimaryRecipient, getProjectRecipients } from '@/lib/recipients'
@@ -265,7 +265,7 @@ export async function GET(
     const [smtpConfigured, globalSettings, primaryRecipient] = await Promise.all([
       isSmtpConfigured(),
       prisma.settings.findUnique({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         select: {
           companyName: true,
           defaultPreviewResolution: true,

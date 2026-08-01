@@ -11,6 +11,7 @@ import { getLocale, getMessages } from "next-intl/server";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
 import { statusBarColorForAccent } from "@/lib/status-bar-color";
+import { orgSettingsWhere } from '@/lib/db'
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -57,7 +58,7 @@ export const viewport = {
 async function getAppearanceSettings() {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { defaultTheme: true, accentColor: true },
     })
     return {

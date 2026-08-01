@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getFilePath } from '@/lib/storage'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import fs from 'fs/promises'
 import sharp from 'sharp'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -102,7 +102,7 @@ export async function GET() {
 
     // No custom logo - generate default logo with accent color
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { accentColor: true },
     })
     const accentKey = settings?.accentColor || 'blue'

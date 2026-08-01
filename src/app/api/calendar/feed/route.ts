@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { generateICalFeed } from '@/lib/ical'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     }
 
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { appDomain: true },
     })
 

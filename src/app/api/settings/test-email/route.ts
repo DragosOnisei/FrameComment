@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiManageSettings } from '@/lib/auth'
 import { testEmailConnection } from '@/lib/email'
 import { emailSchema } from '@/lib/validation'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { decrypt } from '@/lib/encryption'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 export const runtime = 'nodejs'
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     // SECURITY: If smtpPassword is the masked placeholder, replace with stored password
     if (smtpConfig?.smtpPassword === '••••••••') {
       const stored = await prisma.settings.findUnique({
-        where: { id: 'default' },
+        where: orgSettingsWhere(),
         select: { smtpPassword: true },
       })
       smtpConfig.smtpPassword = stored?.smtpPassword ? decrypt(stored.smtpPassword) : null

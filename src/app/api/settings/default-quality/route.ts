@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, orgSettingsWhere } from '@/lib/db'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { id: 'default' },
+      where: orgSettingsWhere(),
       select: { 
         defaultPreviewResolution: true 
       },
