@@ -216,6 +216,10 @@ export default function AdminPage() {
       const project = await res.json()
       setCoverImageFile(null)
       setShowNewProjectModal(false)
+      // 5.9.1: the AdminSidebar listens for this and re-fetches its project
+      // list — without it, a freshly created project only appeared in the
+      // sidebar after a full page refresh.
+      window.dispatchEvent(new Event('projects:changed'))
       router.push(`/admin/projects/${project.id}`)
     } catch (error) {
       if (error instanceof Error) {

@@ -1,4 +1,4 @@
-import { prisma, orgSettingsWhere, orgSettingsCreateBase, settingsReadClient, currentOrgId } from './db'
+import { prisma, prismaPrivileged, orgSettingsWhere, orgSettingsCreateBase, settingsReadClient, currentOrgId } from './db'
 import { getRedis } from './redis'
 import { logError, logMessage } from '@/lib/logging'
 import { decrypt } from '@/lib/encryption'
@@ -133,8 +133,12 @@ export async function isSmtpConfigured(): Promise<boolean> {
  */
 export async function getOpenAiApiKey(): Promise<string | null> {
   try {
-    const settings = await prisma.settings.findUnique({
-      where: orgSettingsWhere(),
+    // 5.9.1: PLATFORM-level — transcripts are part of the product offering,
+    // powered by the operator's key (Settings id='default', the platform
+    // row) for EVERY company. Privileged read: runs from worker/tenant
+    // contexts where RLS would hide the platform row.
+    const settings = await (prismaPrivileged as any).settings.findUnique({
+      where: { id: 'default' },
       select: { openaiApiKey: true } as any,
     })
     const stored = (settings as any)?.openaiApiKey as string | null | undefined

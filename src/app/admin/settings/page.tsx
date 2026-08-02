@@ -863,7 +863,11 @@ export default function GlobalSettingsPage() {
     defaultWatermarkOpacity, setDefaultWatermarkOpacity,
     defaultWatermarkFontSize, setDefaultWatermarkFontSize,
     defaultApplyPreviewLut, setDefaultApplyPreviewLut,
-    openaiApiKey, setOpenaiApiKey,
+    // 5.9.1: the OpenAI key is platform-level — tenants get transcripts
+    // powered by the platform's key and never see the field (the section
+    // renders it only when the setter is provided).
+    openaiApiKey: isPlatformOrg ? openaiApiKey : undefined,
+    setOpenaiApiKey: isPlatformOrg ? setOpenaiApiKey : undefined,
     // 2.2.4+: opt-in maintenance handlers (rendered as the
     // "Maintenance" card inside the section component).
     onReprocessAllVideos: () => setShowGlobalReprocessConfirm(true),

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, orgSettingsWhere, orgSettingsCreateBase, currentOrgId } from '@/lib/db'
+import { prisma, prismaPrivileged, orgSettingsWhere, orgSettingsCreateBase, currentOrgId } from '@/lib/db'
 import { requireApiAdmin, requireApiManageSettings } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
-import { isSmtpConfigured } from '@/lib/settings'
+import { isSmtpConfigured, getOpenAiApiKey } from '@/lib/settings'
 import { getFilePath } from '@/lib/storage'
 import { flushPendingAdminNotifications } from '@/lib/notifications'
 import { invalidateEmailSettingsCache } from '@/lib/email'
@@ -65,16 +65,13 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // 3.9.x: read the OpenAI key status via raw SQL so a stale generated
-    // client (dev box that hasn't run `prisma generate`) still reports it.
+    // 5.9.1: transcripts run on the PLATFORM key for every company — the
+    // helper reads it (privileged) + falls back to OPENAI_API_KEY env.
     let openaiConfigured = false
     try {
-      const rows = await prisma.$queryRawUnsafe<
-        Array<{ openaiApiKey: string | null }>
-      >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default')
-      openaiConfigured = !!rows?.[0]?.openaiApiKey
+      openaiConfigured = !!(await getOpenAiApiKey())
     } catch {
-      /* column may not exist yet */
+      /* key not readable — report unconfigured */
     }
 
     // SECURITY: Never send secrets in cleartext — return masked placeholders.
@@ -637,13 +634,16 @@ export async function PATCH(request: NextRequest) {
     // is decoupled from the Prisma client's schema knowledge — it works as
     // long as the `openaiApiKey` DB column exists (added by the migration).
     // Best-effort: a failure here must not fail the whole settings save.
-    if (openaiKeyUpdate !== undefined) {
+    // 5.9.1: the OpenAI key is PLATFORM-level (powers transcripts for every
+    // company) — only the platform org may change it, and the write targets
+    // the platform row explicitly. (The old raw UPDATE also stopped working
+    // post-flip: raw SQL is never wrapped by the org-context extension.)
+    if (openaiKeyUpdate !== undefined && currentOrgId() === 'org-1') {
       try {
-        await prisma.$executeRawUnsafe(
-          'UPDATE "Settings" SET "openaiApiKey" = $1 WHERE id = $2',
-          openaiKeyUpdate,
-          'default',
-        )
+        await (prismaPrivileged as any).settings.update({
+          where: { id: 'default' },
+          data: { openaiApiKey: openaiKeyUpdate } as any,
+        })
       } catch (err) {
         logError('[SETTINGS] Failed to persist openaiApiKey (has the migration run?):', err)
       }
