@@ -201,6 +201,41 @@ export function BillingSection({
     }
   }, [])
 
+  // 5.7.1: retry a failed payment. Pays the EXISTING open invoice; when the
+  // bank demands authentication (3DS), Stripe's hosted invoice page opens in
+  // a new tab so the admin can complete the challenge — the webhook then
+  // flips us back to active.
+  const [retryMsg, setRetryMsg] = useState<string | null>(null)
+  const handleRetry = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    setRetryMsg(null)
+    try {
+      const res = await apiFetch('/api/billing/retry', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.ok) {
+        setRetryMsg(data.message || 'Payment succeeded.')
+        loadStatus()
+        return
+      }
+      if (data.requiresAction && data.hostedInvoiceUrl) {
+        window.open(data.hostedInvoiceUrl as string, '_blank', 'noopener')
+        setRetryMsg(
+          'Your bank requires confirmation — finish the payment in the Stripe tab, then this page will update.',
+        )
+        // Poll a few times: the invoice.paid webhook lands shortly after
+        // the hosted payment completes.
+        ;[5000, 15000, 30000].forEach((ms) => setTimeout(loadStatus, ms))
+        return
+      }
+      setError(data.error || 'Payment retry failed.')
+    } catch {
+      setError('Payment retry failed.')
+    } finally {
+      setBusy(false)
+    }
+  }, [loadStatus])
+
   const bytesPerGiB = 1024 ** 3
   const usedGiB = usage ? usage.storageBytes / bytesPerGiB : 0
   const freeUsers = billing?.freeTier.users ?? 1
@@ -374,8 +409,22 @@ export function BillingSection({
           {pastDue && !suspended && (
             <div className="flex items-center gap-2 rounded-xl bg-destructive/10 ring-1 ring-destructive/30 px-3 py-2 text-xs text-destructive">
               <AlertTriangle className="w-4 h-4 shrink-0" />
-              Last payment failed. Update your card to avoid interruption
-              {graceSuffix}
+              <span className="flex-1 min-w-0">
+                Last payment failed. Update your card to avoid interruption
+                {graceSuffix}
+              </span>
+              <button
+                onClick={handleRetry}
+                disabled={busy}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-destructive/20 hover:bg-destructive/30 ring-1 ring-destructive/40 text-destructive transition-colors disabled:opacity-60"
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Retry payment'}
+              </button>
+            </div>
+          )}
+          {retryMsg && (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 ring-1 ring-emerald-400/25 px-3 py-2 text-xs text-emerald-300">
+              {retryMsg}
             </div>
           )}
           {needsCard && !suspended && (
