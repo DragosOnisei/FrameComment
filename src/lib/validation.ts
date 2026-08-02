@@ -194,6 +194,14 @@ export const registerSchema = z.object({
   inviteCode: z.string().min(1).max(200),
 })
 
+// 5.6 Phase 4: accepting a team-invite link. Role/org are NOT accepted from
+// the client — they come from the stored invite row in the route.
+export const acceptInviteSchema = z.object({
+  name: safeStringSchema(1, 255),
+  email: emailSchema,
+  password: passwordSchema,
+})
+
 export const createUserSchema = z.object({
   email: emailSchema,
   username: usernameSchema.optional(),

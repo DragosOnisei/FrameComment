@@ -1469,3 +1469,28 @@ model Organization {
 
   @@index([status])
 }
+
+// 5.6 multi-tenant Phase 4: team-member invite links.
+//
+// An Owner/Admin generates a link carrying a random token; ONLY the sha256
+// hash is stored, so a DB read can never be turned into a working invite URL.
+// Open-link model (user decision): whoever opens the link creates an account
+// with any email — the link itself is the secret. Single-use (acceptedAt set
+// in the same transaction that creates the user), 7-day expiry, revocable
+// (delete). Tenant table: same RLS treatment as the core 32 (see migration).
+model TeamInvite {
+  organizationId String?   @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
+  id             String    @id @default(cuid())
+  tokenHash      String    @unique
+  role           UserRole  @default(EDITOR)
+  // Denormalized creator info for the pending-invites list (no FK on purpose:
+  // deleting the inviting user must not delete or block the invite).
+  invitedById    String?
+  invitedByName  String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  acceptedById   String?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId])
+}

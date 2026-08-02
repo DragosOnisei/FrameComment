@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { Users, UserPlus, Edit, Trash2, Mail, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus, Crown, RotateCcw } from 'lucide-react'
+import { Users, UserPlus, Edit, Trash2, Mail, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus, Crown, RotateCcw, Link2 } from 'lucide-react'
+import InviteLinkModal from '@/components/InviteLinkModal'
 import { formatDate } from '@/lib/utils'
 import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -62,6 +63,8 @@ export default function UsersPage() {
 
   // Modal states
   const [showAddUserModal, setShowAddUserModal] = useState(false)
+  // 5.6 Phase 4: team-invite links modal
+  const [showInviteModal, setShowInviteModal] = useState(false)
   const [showEditUserModal, setShowEditUserModal] = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [showPasskeyModal, setShowPasskeyModal] = useState(false)
@@ -571,6 +574,24 @@ export default function UsersPage() {
         </h1>
       </TopbarLeftSlot>
       <TopbarRightSlot>
+        {/* 5.6 Phase 4: invite-with-link (Owner/Admin — same gate as Add user) */}
+        {canManageUsers(myRole) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+            onClick={() => setShowInviteModal(true)}
+            aria-label="Invite with link"
+          >
+            <Link2 className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Invite</span>
+          </Button>
+        )}
         {canManageUsers(myRole) && (
           <Button
             variant="ghost"
@@ -596,6 +617,14 @@ export default function UsersPage() {
           </Button>
         )}
       </TopbarRightSlot>
+
+      {canManageUsers(myRole) && (
+        <InviteLinkModal
+          open={showInviteModal}
+          onOpenChange={setShowInviteModal}
+          myRole={myRole}
+        />
+      )}
 
       <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         {/* 2.5.0+: subtitle stays just under the search since the
