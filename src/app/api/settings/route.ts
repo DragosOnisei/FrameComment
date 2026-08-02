@@ -7,6 +7,7 @@ import { isSmtpConfigured } from '@/lib/settings'
 import { getFilePath } from '@/lib/storage'
 import { flushPendingAdminNotifications } from '@/lib/notifications'
 import { invalidateEmailSettingsCache } from '@/lib/email'
+import { getStripe } from '@/lib/stripe'
 import { getConfiguredLocale, loadLocaleMessages, SUPPORTED_LOCALES } from '@/i18n/locale'
 import fs from 'fs/promises'
 import { logError, logMessage } from '@/lib/logging'
@@ -605,6 +606,19 @@ export async function PATCH(request: NextRequest) {
         })
       } catch (err) {
         logError('[SETTINGS] Organization.name sync failed (non-fatal):', err)
+      }
+      // 5.7.4: same mirror onto the STRIPE CUSTOMER, so invoices and the
+      // Stripe dashboard show the real company name (the customer was
+      // created with whatever Branding said at connect time — live it froze
+      // as "Studio"). Best-effort, never blocks the save.
+      try {
+        const stripe = getStripe()
+        const customerId = (settings as any)?.stripeCustomerId
+        if (stripe && customerId) {
+          await stripe.customers.update(customerId, { name: companyName.trim() })
+        }
+      } catch (err) {
+        logError('[SETTINGS] Stripe customer name sync failed (non-fatal):', err)
       }
     }
 

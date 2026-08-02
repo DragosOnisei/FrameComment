@@ -4,12 +4,6 @@ import { getStripe } from '@/lib/stripe'
 import { logError, logMessage } from '@/lib/logging'
 import { legacyBackend } from '@/lib/storage-backends'
 
-// Stripe types `unit_amount_decimal` / `quantity_decimal` as a branded
-// `Decimal`, but the API accepts a plain numeric string ("2500" cents,
-// "1.53" quantity). Small helper to satisfy the type without casts.
-const decimal = (value: number) =>
-  String(value) as unknown as Stripe.Decimal
-
 /**
  * 3.7.0+: usage-based billing.
  *
@@ -137,22 +131,19 @@ export interface BillableBreakdown {
 }
 
 /** Apply the free-tier allowance to (averaged) usage and price it. Only
- *  users/GB ABOVE the free tier are billed. Quantities can be fractional
- *  (a period average), which the invoice renders via `quantity_decimal`
- *  — e.g. "1.53 × $25.00". */
+ *  users/GB ABOVE the free tier are billed. 5.7.6: billable quantities are
+ *  ROUNDED TO WHOLE NUMBERS (user request) — the invoice reads "12 × $25.00"
+ *  instead of "12.142857 × $25.00", and quantity × unit price equals the
+ *  line amount exactly. */
 export function computeBillable(
   avgUsers: number,
   avgStorageBytes: number,
 ): BillableBreakdown {
   const avgGiB = avgStorageBytes / BYTES_PER_GIB
-  const billableUsers = Math.max(0, avgUsers - FREE_TIER.users)
-  const billableGiB = Math.max(0, avgGiB - FREE_TIER.gib)
-  const userCents = Math.round(
-    billableUsers * BILLING_PRICING.perUserPerMonthCents,
-  )
-  const storageCents = Math.round(
-    billableGiB * BILLING_PRICING.perGibPerMonthCents,
-  )
+  const billableUsers = Math.round(Math.max(0, avgUsers - FREE_TIER.users))
+  const billableGiB = Math.round(Math.max(0, avgGiB - FREE_TIER.gib))
+  const userCents = billableUsers * BILLING_PRICING.perUserPerMonthCents
+  const storageCents = billableGiB * BILLING_PRICING.perGibPerMonthCents
   return {
     avgUsers,
     avgGiB,
@@ -298,11 +289,21 @@ export async function chargeInstance(): Promise<ChargeResult> {
     // "pending invoice items auto-attach on invoice creation" produced
     // $0 invoices on this account's API version — the items weren't
     // pulled in. Attaching to the specific invoice id is reliable.
+    // 5.7.5: the invoice identifies the PRODUCT everywhere it legally can —
+    // memo (description), a custom header field, the footer, and the card
+    // statement descriptor — while the CUSTOMER stays the buying company.
+    const periodLabel = `${periodStart.toISOString().slice(0, 10)} — ${new Date()
+      .toISOString()
+      .slice(0, 10)}`
     const invoice = await stripe.invoices.create({
       customer: customerId,
       collection_method: 'charge_automatically',
       auto_advance: false,
-      description: 'FrameComment usage',
+      description: `FrameComment App — monthly usage (${periodLabel})`,
+      custom_fields: [{ name: 'Product', value: 'FrameComment App' }],
+      footer: 'FrameComment App — usage-based subscription (users + storage).',
+      // What shows on the card/bank statement (max 22 chars).
+      statement_descriptor: 'FRAMECOMMENT',
       // 5.7.3: EXPLICIT currency. Without it, a customer that has never been
       // invoiced inherits the Stripe ACCOUNT's default currency (RON on a
       // Romanian account) — and attaching our USD line items then fails with
@@ -316,16 +317,18 @@ export async function chargeInstance(): Promise<ChargeResult> {
     const invoiceId = invoice.id as string
     createdInvoiceId = invoiceId
 
-    // Users above the free tier. `quantity_decimal` carries the
-    // fractional period-average → invoice shows e.g. "1.53 × $25.00".
+    // Users above the free tier — WHOLE quantities (5.7.6), so the invoice
+    // reads "12 × $25.00" and multiplies out exactly.
     if (bill.billableUsers > 0) {
       await stripe.invoiceItems.create({
         customer: customerId,
         invoice: invoiceId,
-        quantity_decimal: decimal(Number(bill.billableUsers.toFixed(6))),
-        unit_amount_decimal: decimal(BILLING_PRICING.perUserPerMonthCents),
+        quantity: bill.billableUsers,
+        // The SDK only types the decimal variant; an integer cent string is
+        // valid ("2500" → $25.00) and renders as a clean unit price.
+        unit_amount_decimal: String(BILLING_PRICING.perUserPerMonthCents) as any,
         currency: BILLING_PRICING.currency,
-        description: `Users over free tier (${FREE_TIER.users} free)`,
+        description: `FrameComment App — users over free tier (${FREE_TIER.users} free)`,
       })
     }
     // Storage GB above the free tier × $0.10.
@@ -333,10 +336,10 @@ export async function chargeInstance(): Promise<ChargeResult> {
       await stripe.invoiceItems.create({
         customer: customerId,
         invoice: invoiceId,
-        quantity_decimal: decimal(Number(bill.billableGiB.toFixed(4))),
-        unit_amount_decimal: decimal(BILLING_PRICING.perGibPerMonthCents),
+        quantity: bill.billableGiB,
+        unit_amount_decimal: String(BILLING_PRICING.perGibPerMonthCents) as any,
         currency: BILLING_PRICING.currency,
-        description: `Storage GB over free tier (${FREE_TIER.gib} GB free)`,
+        description: `FrameComment App — storage GB over free tier (${FREE_TIER.gib} GB free)`,
       })
     }
     // Finalizing a `charge_automatically` invoice that has a default
