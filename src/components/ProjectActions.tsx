@@ -280,6 +280,8 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
         if (!data?.wasEmpty) {
           window.dispatchEvent(new CustomEvent('trash:changed'))
         }
+        // 5.10.1: keep the sidebar project list in sync.
+        window.dispatchEvent(new Event('projects:changed'))
         // Redirect to admin page after successful deletion
         router.push('/admin/projects')
         router.refresh()

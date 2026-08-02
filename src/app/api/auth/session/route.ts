@@ -54,6 +54,9 @@ export async function GET(request: NextRequest) {
         // circle + the Profile page can render without extra fetches.
         avatarUrl: user.avatarUrl ?? null,
         role: user.role,
+        // 5.10.1: lets the UI adapt platform-vs-tenant copy (e.g. the
+        // project-deletion safety notes only apply to tenant companies).
+        isPlatformOrg: ((user as any).organizationId ?? 'org-1') === 'org-1',
       },
     })
     

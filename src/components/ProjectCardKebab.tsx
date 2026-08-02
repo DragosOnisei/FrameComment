@@ -15,6 +15,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
+import { useAuth } from '@/components/AuthProvider'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { computePopoverStyle } from '@/lib/popover-position'
@@ -62,6 +63,11 @@ export default function ProjectCardKebab({
   projectVideoCount,
   onMutated,
 }: ProjectCardKebabProps) {
+  // 5.10.1: tenant companies get the deletion-safety note in the dialog
+  // (the 1-per-24h throttle doesn't apply to the platform org).
+  const { user: authUser } = useAuth()
+  const isPlatformUser = (authUser as any)?.isPlatformOrg !== false
+
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -274,6 +280,9 @@ export default function ProjectCardKebab({
       if (!data.wasEmpty) {
         window.dispatchEvent(new CustomEvent('trash:changed'))
       }
+      // 5.10.1: keep the sidebar project list in sync (same event the
+      // create flow dispatches).
+      window.dispatchEvent(new Event('projects:changed'))
       onMutated?.()
       router.refresh()
     } catch (err) {
@@ -427,7 +436,17 @@ export default function ProjectCardKebab({
         description={
           <>
             The project, its folders, videos, and comments stay recoverable
-            from Trash for 30 days. After that they're permanently deleted.
+            from Trash for 30 days. After that they&apos;re permanently deleted.
+            {!isPlatformUser && (
+              <>
+                {' '}
+                <span className="text-amber-400">
+                  For your company&apos;s safety, only one project can be
+                  deleted per 24 hours, and it must stay in Trash for 24
+                  hours before it can be permanently removed.
+                </span>
+              </>
+            )}
           </>
         }
         confirmLabel="Move to Trash"

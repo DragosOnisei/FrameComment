@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
+import { useAuth } from '@/components/AuthProvider'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { logError } from '@/lib/logging'
 import { useDownloadManager } from '@/contexts/DownloadManager'
@@ -62,6 +63,11 @@ interface TrashItem {
 }
 
 export default function TrashPage() {
+  // 5.10.1: tenant companies see the 24h purge-window note (the throttle
+  // doesn't apply to the platform org).
+  const { user: authUser } = useAuth()
+  const isPlatformUser = (authUser as any)?.isPlatformOrg !== false
+
   // 3.3.x: bottom-right progress banner (shared download/task manager,
   // mounted in the admin layout) so emptying Trash runs in the
   // background with a "Deleting … / N items" bar instead of freezing
@@ -158,6 +164,15 @@ export default function TrashPage() {
           <>
             <span className="font-medium text-foreground">{item.name}</span>{' '}
             will be deleted right now. This action cannot be undone.
+            {item.kind === 'project' && !isPlatformUser && (
+              <>
+                {' '}
+                <span className="text-amber-400">
+                  For safety, a project must stay in Trash for 24 hours
+                  before it can be permanently deleted.
+                </span>
+              </>
+            )}
           </>
         ),
         confirmLabel: 'Delete permanently',
