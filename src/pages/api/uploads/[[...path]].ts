@@ -1,7 +1,8 @@
 import { isStaff } from '@/lib/permissions'
 import { Server } from '@tus/server'
 import { FileStore } from '@tus/file-store'
-import { prisma, orgSettingsWhere } from '@/lib/db'
+import { prisma, prismaPrivileged, orgSettingsWhere } from '@/lib/db'
+import { enterOrgContext } from '@/lib/org-context'
 import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
 import { uploadFile, moveFile, initStorage, getTusUploadDir, isS3Mode, getFilePath } from '@/lib/storage'
@@ -25,6 +26,28 @@ const ABSOLUTE_MAX_UPLOAD_SIZE_BYTES = 1000 * 1024 * 1024 * 1024 // 1000 GB hard
 
 if (!fs.existsSync(TUS_UPLOAD_DIR)) {
   fs.mkdirSync(TUS_UPLOAD_DIR, { recursive: true })
+}
+
+/**
+ * 5.8 post-flip fix: ARM the org context in the TUS route. This is a
+ * pages/api route that never calls the app-router auth guards, so nothing
+ * armed the org — after the RLS flip every `prisma` lookup here was denied
+ * ("Video record not found" → the client's "Upload endpoint not found").
+ *
+ * Admin path: resolve the org DB-fresh from the token's userId (never trust
+ * a claim). Share path: verifyShareToken already arms centrally (5.3.0).
+ * Finish/progress handlers arm from the uploaded entity's own org.
+ */
+async function armOrgForUserId(userId: string): Promise<void> {
+  try {
+    const user = (await prismaPrivileged.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true } as any,
+    })) as any
+    if (user?.organizationId) enterOrgContext(user.organizationId)
+  } catch (err) {
+    logError('[UPLOAD] org arming failed (non-fatal):', err)
+  }
 }
 
 const tusServer: Server = new Server({
@@ -53,6 +76,8 @@ const tusServer: Server = new Server({
       const adminPayload = await verifyAdminAccessToken(bearer)
       if (adminPayload && isStaff(adminPayload.role)) {
         isAdmin = true
+        // 5.8: RLS — scope everything below to the admin's company.
+        await armOrgForUserId(adminPayload.userId)
       } else {
         // Try share token auth for client uploads
         const sharePayload = await verifyShareToken(bearer)
@@ -326,7 +351,9 @@ const UPLOAD_PROGRESS_THROTTLE_MS = 1500
     lastProgressWriteAt.set(videoId, now)
 
     const pct = Math.min(99, Math.max(0, Math.round((offset / size) * 100)))
-    await prisma.video
+    // 5.8: privileged — a scalar progress write on a row by unique id,
+    // running in PATCH requests where no org context is armed.
+    await prismaPrivileged.video
       .update({
         where: { id: videoId },
         data: { uploadProgress: pct },
@@ -367,15 +394,18 @@ async function writeFinalizedUpload(
 }
 
 async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId: string, tusServer: any) {
-  const video = await prisma.video.findUnique({
+  // 5.8: privileged lookup + arm — the finish hook runs on the final PATCH
+  // request, where no auth guard has armed the org context.
+  const video = (await prismaPrivileged.video.findUnique({
     where: { id: videoId }
-  })
+  })) as any
 
   if (!video) {
     logMessage(`[UPLOAD] Video not found: ${videoId}`)
     await cleanupTUSFile(tusFilePath)
     return {}
   }
+  if (video.organizationId) enterOrgContext(video.organizationId)
 
   const fileSize = await verifyUploadedFile(tusFilePath, upload.size)
 
@@ -498,15 +528,17 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
 }
 
 async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId: string, tusServer: any) {
-  const asset = await prisma.videoAsset.findUnique({
+  // 5.8: privileged lookup + arm (see handleVideoUploadFinish).
+  const asset = (await prismaPrivileged.videoAsset.findUnique({
     where: { id: assetId }
-  })
+  })) as any
 
   if (!asset) {
     logMessage(`[UPLOAD] Asset not found: ${assetId}`)
     await cleanupTUSFile(tusFilePath)
     throw new Error(`Asset record not found for upload completion: ${assetId}`)
   }
+  if (asset.organizationId) enterOrgContext(asset.organizationId)
 
   const fileSize = await verifyUploadedFile(tusFilePath, upload.size)
 
@@ -548,15 +580,17 @@ async function handleAssetUploadFinish(tusFilePath: string, upload: any, assetId
 }
 
 async function handleProjectUploadFinish(tusFilePath: string, upload: any, projectUploadId: string, tusServer: any) {
-  const projectUpload = await prisma.projectUpload.findUnique({
+  // 5.8: privileged lookup + arm (see handleVideoUploadFinish).
+  const projectUpload = (await prismaPrivileged.projectUpload.findUnique({
     where: { id: projectUploadId }
-  })
+  })) as any
 
   if (!projectUpload) {
     logMessage(`[UPLOAD] ProjectUpload not found: ${projectUploadId}`)
     await cleanupTUSFile(tusFilePath)
     throw new Error(`Upload record not found: ${projectUploadId}`)
   }
+  if (projectUpload.organizationId) enterOrgContext(projectUpload.organizationId)
 
   const fileSize = await verifyUploadedFile(tusFilePath, upload.size)
 
@@ -775,7 +809,8 @@ async function cleanupTUSFile(tusFilePath: string) {
 
 async function markVideoAsError(videoId: string, error: any) {
   try {
-    await prisma.video.update({
+    // 5.8: privileged — the error path can run before any org was armed.
+    await prismaPrivileged.video.update({
       where: { id: videoId },
       data: {
         status: 'ERROR',
