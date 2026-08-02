@@ -66,8 +66,16 @@ export async function GET(
       return NextResponse.json({ error: 'Invite not found.' }, { status: 404 })
     }
 
+    // Prefer the Branding company name (Settings.companyName — what the
+    // operator actually edits) over Organization.name: installs seeded
+    // before branding was set had the two drift ("Join Studio" bug).
+    const settingsRow = (await (prismaPrivileged as any).settings.findFirst({
+      where: { organizationId: invite.organizationId },
+      select: { companyName: true },
+    })) as any
+
     return NextResponse.json({
-      companyName: org.name,
+      companyName: settingsRow?.companyName?.trim() || org.name,
       role: invite.role,
       expiresAt: invite.expiresAt,
     })

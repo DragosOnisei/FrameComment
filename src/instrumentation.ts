@@ -17,6 +17,25 @@ export const runtime = 'nodejs'
 export async function register() {
   // Only run on Node.js runtime (not Edge runtime)
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    // 5.6.1 multi-tenant: bind a fresh, MUTABLE org-context store at the
+    // ROOT of every incoming HTTP request. The subscriber runs synchronously
+    // when Node's http server receives a request, so everything downstream
+    // (Next routing, our route handlers, Prisma extension) inherits the same
+    // store object — and the auth guards can mutate it from inside awaited
+    // helpers. See lib/org-context.ts for the full why.
+    const g = globalThis as unknown as { __fcOrgDcSubscribed?: boolean }
+    if (!g.__fcOrgDcSubscribed) {
+      g.__fcOrgDcSubscribed = true
+      const [{ subscribe }, { initRequestOrgStore }] = await Promise.all([
+        import('node:diagnostics_channel'),
+        import('./lib/org-context'),
+      ])
+      subscribe('http.server.request.start', () => {
+        initRequestOrgStore()
+      })
+      logMessage('[INIT] Per-request org-context store armed (diagnostics_channel)')
+    }
+
     logMessage('[INIT] Running server initialization...')
 
     try {

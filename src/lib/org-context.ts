@@ -24,8 +24,11 @@
 
 import { AsyncLocalStorage } from 'async_hooks'
 
+// MUTABLE on purpose — see initRequestOrgStore(): a fresh store object is
+// bound at the HTTP-request root, and the auth guards then MUTATE it. That
+// is what makes the org visible to the route handler's continuation.
 interface OrgStore {
-  organizationId: string
+  organizationId: string | null
 }
 
 // Browser-safety: this module can be PULLED into client bundles through long
@@ -46,9 +49,40 @@ const als: AsyncLocalStorage<OrgStore> | null =
     ? (g.__fcOrgAls ??= new AsyncLocalStorage<OrgStore>())
     : null
 
-/** Bind the org to the CURRENT async execution context (guards call this). */
+/**
+ * 5.6.1 CRITICAL FIX — bind an EMPTY, MUTABLE store at the HTTP-request root.
+ *
+ * Why: `enterWith` only mutates the CURRENT async resource. The auth guards
+ * call `enterOrgContext` deep inside `await`ed helpers — and an `await`
+ * continuation resumes in the context captured BEFORE the call, so the store
+ * set inside the guard was INVISIBLE to the rest of the route handler.
+ * Every `getOrgContext()` in handlers silently returned null and fell back
+ * to org-1 (masked in production, where org-1 is the only tenant — surfaced
+ * locally when a Branding save from the test company renamed org-1).
+ *
+ * The classic APM pattern fixes this: instrumentation.ts subscribes to the
+ * Node `http.server.request.start` diagnostics channel, whose subscriber
+ * runs SYNCHRONOUSLY at the very root of each request — `enterWith` there
+ * binds a fresh `{ organizationId: null }` object that every descendant of
+ * the request inherits. `enterOrgContext` then MUTATES that shared object,
+ * which IS visible across await boundaries. Fresh object per request ⇒ no
+ * cross-request leakage.
+ */
+export function initRequestOrgStore(): void {
+  als?.enterWith({ organizationId: null })
+}
+
+/** Bind the org to the current request (guards call this). Mutates the
+ *  request-root store when present; falls back to `enterWith` for flows
+ *  without one (tests, direct calls in a handler's own sync context). */
 export function enterOrgContext(organizationId: string): void {
-  als?.enterWith({ organizationId })
+  if (!als) return
+  const store = als.getStore()
+  if (store) {
+    store.organizationId = organizationId
+  } else {
+    als.enterWith({ organizationId })
+  }
 }
 
 /** Classic callback-scoped variant, for explicit scoping (worker jobs etc.). */

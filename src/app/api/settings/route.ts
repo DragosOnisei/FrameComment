@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, orgSettingsWhere, orgSettingsCreateBase } from '@/lib/db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase, currentOrgId } from '@/lib/db'
 import { requireApiAdmin, requireApiManageSettings } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
@@ -591,6 +591,22 @@ export async function PATCH(request: NextRequest) {
         adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
       },
     })
+
+    // 5.6.1: mirror the Branding company name onto Organization.name — the
+    // register/invite surfaces read the ORGANIZATION row, and the two copies
+    // used to drift (org-1 was seeded with the pre-branding default, so
+    // invites said "Join Studio" while Branding said the real name).
+    // Best-effort: never fail a settings save over the mirror.
+    if (typeof companyName === 'string' && companyName.trim()) {
+      try {
+        await (prisma as any).organization.update({
+          where: { id: currentOrgId() },
+          data: { name: companyName.trim() },
+        })
+      } catch (err) {
+        logError('[SETTINGS] Organization.name sync failed (non-fatal):', err)
+      }
+    }
 
     // 3.9.x: persist the OpenAI key via raw SQL (see the note above). This
     // is decoupled from the Prisma client's schema knowledge — it works as

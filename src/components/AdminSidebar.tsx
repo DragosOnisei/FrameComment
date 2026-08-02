@@ -38,6 +38,33 @@ export default function AdminSidebar() {
   const t = useTranslations('nav')
   const ta = useTranslations('auth')
 
+  // 5.6.1: the brand lockup shows THIS company's name next to the icon
+  // (same font/size as the FrameComment wordmark). Cached in localStorage
+  // for instant paint; refreshed from the org-aware theme endpoint — the
+  // bearer token on apiFetch is what scopes it to the caller's company.
+  const [companyName, setCompanyName] = useState<string | null>(null)
+  useEffect(() => {
+    const cached = typeof window !== 'undefined' ? localStorage.getItem('brandCompanyName') : null
+    if (cached) setCompanyName(cached)
+    let alive = true
+    apiFetch('/api/settings/theme')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!alive || !data) return
+        const name =
+          typeof data.companyName === 'string' && data.companyName.trim()
+            ? data.companyName.trim()
+            : null
+        setCompanyName(name)
+        if (name) localStorage.setItem('brandCompanyName', name)
+        else localStorage.removeItem('brandCompanyName')
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const [trashCount, setTrashCount] = useState<number | null>(null)
   const [projects, setProjects] = useState<
     Array<{ id: string; title: string; hasCover: boolean }>
@@ -141,7 +168,13 @@ export default function AdminSidebar() {
         className="flex items-center px-2 py-3 hover:opacity-90 transition-opacity"
         aria-label="FrameComment home"
       >
-        <WordMark variant="horizontal" iconSize={28} ariaHidden noBackground />
+        <WordMark
+          variant="horizontal"
+          iconSize={28}
+          ariaHidden
+          noBackground
+          text={companyName || undefined}
+        />
       </Link>
 
       {/* Projects section: a title (also a link to the dashboard) + the

@@ -20,6 +20,14 @@ type WordMarkProps = {
    * height. Default 28 (works for AdminHeader).
    */
   iconSize?: number
+  /**
+   * 5.6.1: override the wordmark TEXT (e.g. the company name in the
+   * AdminSidebar). Same font, weight and icon-derived sizing as the
+   * FrameComment lockup — but rendered entirely in currentColor (the
+   * two-tone Frame/Comment split is brand-specific). Falls back to the
+   * FrameComment brand when absent.
+   */
+  text?: string
   className?: string
   ariaHidden?: boolean
   /**
@@ -51,6 +59,7 @@ type WordMarkProps = {
 export function WordMark({
   variant = 'horizontal',
   iconSize = 28,
+  text: customText,
   className,
   ariaHidden = false,
   noBackground = false,
@@ -62,8 +71,20 @@ export function WordMark({
   const gapPx = Math.round(iconSize * 0.32)
 
   const accent = 'hsl(var(--primary, 211 100% 50%))'
+  const label = customText?.trim() || 'FrameComment'
 
-  const text = (
+  const text = customText?.trim() ? (
+    // Custom label (company name): same typography, single color so any
+    // name reads cleanly. Truncates instead of blowing out narrow parents
+    // (long company names in the sidebar).
+    <span
+      className="font-bold tracking-tight leading-none whitespace-nowrap truncate min-w-0"
+      style={{ fontSize: `${textPx}px`, letterSpacing: '-0.01em', color: 'currentColor' }}
+      title={label}
+    >
+      {label}
+    </span>
+  ) : (
     <span
       className="font-bold tracking-tight leading-none whitespace-nowrap"
       style={{ fontSize: `${textPx}px`, letterSpacing: '-0.01em' }}
@@ -79,7 +100,7 @@ export function WordMark({
         className={cn('inline-flex items-center', className)}
         aria-hidden={ariaHidden}
         role={ariaHidden ? 'presentation' : 'img'}
-        aria-label={ariaHidden ? undefined : 'FrameComment'}
+        aria-label={ariaHidden ? undefined : label}
       >
         {text}
       </div>
@@ -93,7 +114,7 @@ export function WordMark({
         className={cn('inline-flex flex-col items-center gap-3', className)}
         aria-hidden={ariaHidden}
         role={ariaHidden ? 'presentation' : 'img'}
-        aria-label={ariaHidden ? undefined : 'FrameComment'}
+        aria-label={ariaHidden ? undefined : label}
       >
         <LogoMark size={iconSize} ariaHidden noBackground={noBackground} />
         {text}
@@ -108,7 +129,7 @@ export function WordMark({
       style={{ gap: `${gapPx}px` }}
       aria-hidden={ariaHidden}
       role={ariaHidden ? 'presentation' : 'img'}
-      aria-label={ariaHidden ? undefined : 'FrameComment'}
+      aria-label={ariaHidden ? undefined : label}
     >
       <LogoMark size={iconSize} ariaHidden noBackground={noBackground} />
       {text}
