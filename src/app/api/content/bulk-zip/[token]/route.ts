@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectId } from '@/lib/share-org'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { resolveFileBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
@@ -81,6 +82,8 @@ export async function GET(
       return NextResponse.json({ error: shareMessages.accessDenied || 'Access denied' }, { status: 403 })
     }
 
+    // 5.8.1 post-flip: arm the owning org (token-authorized download).
+    await armOrgForProjectId(projectId)
     // Fetch approved videos
     const videos = await prisma.video.findMany({
       where: {

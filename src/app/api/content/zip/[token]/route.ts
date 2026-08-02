@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForVideoId } from '@/lib/share-org'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { resolveFileBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
@@ -82,6 +83,9 @@ export async function GET(
       return NextResponse.json({ error: shareMessages.accessDenied || 'Access denied' }, { status: 403 })
     }
 
+    // 5.8.1 post-flip: the Redis token authorizes this download; arm the
+    // owning org so the RLS-wrapped lookups below can see the rows.
+    await armOrgForVideoId(videoId)
     // Get video with project
     const video = await prisma.video.findUnique({
       where: { id: videoId },

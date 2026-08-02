@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { prismaPrivileged } from '@/lib/db'
+import { enterOrgContext } from '@/lib/org-context'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyPasswordResetTokenWithReason } from '@/lib/password-reset'
 import { hashPassword, validatePassword } from '@/lib/encryption'
@@ -126,14 +128,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Find user
-    const user = await prisma.user.findUnique({
+    // 5.8.1 post-flip: privileged pre-auth lookup + org arming (RLS).
+    const user = (await prismaPrivileged.user.findUnique({
       where: { id: payload.userId },
       select: {
         id: true,
         email: true,
         name: true,
-      },
-    })
+        organizationId: true,
+      } as any,
+    })) as any
+    if (user?.organizationId) enterOrgContext(user.organizationId)
 
     if (!user) {
       return NextResponse.json(

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prismaPrivileged } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyRecipientUnsubscribeToken } from '@/lib/unsubscribe'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -27,7 +27,9 @@ export async function POST(request: NextRequest) {
 
     const payload = token ? verifyRecipientUnsubscribeToken(token) : null
     if (payload) {
-      await prisma.projectRecipient.updateMany({
+      // 5.8.1 post-flip: privileged — the signed token IS the authorization,
+      // and this public route has no org context to arm.
+      await prismaPrivileged.projectRecipient.updateMany({
         where: {
           id: payload.recipientId,
           projectId: payload.projectId,

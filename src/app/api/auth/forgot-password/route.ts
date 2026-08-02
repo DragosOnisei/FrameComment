@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { prismaPrivileged } from '@/lib/db'
+import { enterOrgContext } from '@/lib/org-context'
 import { rateLimit } from '@/lib/rate-limit'
 import { generatePasswordResetToken, buildPasswordResetUrl } from '@/lib/password-reset'
 import { sendPasswordResetEmail } from '@/lib/email'
@@ -64,7 +66,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Find user by email or username
-    const user = await prisma.user.findFirst({
+    // 5.8.1 post-flip: privileged pre-auth lookup + org arming (RLS).
+    const user = (await prismaPrivileged.user.findFirst({
       where: {
         OR: [
           { email: { equals: email, mode: 'insensitive' } },
@@ -75,8 +78,9 @@ export async function POST(request: NextRequest) {
         id: true,
         email: true,
         name: true,
-      },
-    })
+        organizationId: true,
+      } as any,
+    })) as any
 
     if (!user) {
       // Log failed attempt (potential attack)
@@ -90,6 +94,8 @@ export async function POST(request: NextRequest) {
       })
       return successResponse
     }
+
+    if (user.organizationId) enterOrgContext(user.organizationId)
 
     // Check SMTP configuration (silently fail if not configured)
     const settings = await prisma.settings.findFirst()

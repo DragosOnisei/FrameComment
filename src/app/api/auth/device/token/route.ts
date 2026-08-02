@@ -5,6 +5,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getDeviceCodeStatus, consumeDeviceCode, checkPollRate } from '@/lib/device-code'
 import { issueAdminTokens } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { prismaPrivileged } from '@/lib/db'
+import { enterOrgContext } from '@/lib/org-context'
 import { rateLimit } from '@/lib/rate-limit'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
@@ -126,10 +128,12 @@ export async function POST(request: NextRequest) {
         }
 
         // Look up user
-        const user = await prisma.user.findUnique({
+        // 5.8.1 post-flip: privileged pre-auth lookup + org arming (RLS).
+        const user = (await prismaPrivileged.user.findUnique({
           where: { id: result.userId },
-          select: { id: true, email: true, name: true, role: true },
-        })
+          select: { id: true, email: true, name: true, role: true, organizationId: true } as any,
+        })) as any
+        if (user?.organizationId) enterOrgContext(user.organizationId)
 
         if (!user) {
           return NextResponse.json(

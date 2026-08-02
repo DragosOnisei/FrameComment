@@ -7,6 +7,7 @@ import { getClientIpAddress } from '@/lib/utils'
 import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
 import { getAppUrl } from '@/lib/url'
 import { prisma } from '@/lib/db'
+import { prismaPrivileged } from '@/lib/db'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
@@ -174,7 +175,8 @@ export async function POST(request: NextRequest) {
 
     // SECURITY ENHANCEMENT: Check if user has passkeys configured
     // If passkeys are registered, require their use instead of password
-    const passkeyCount = await prisma.passkeyCredential.count({
+    // 5.8.1 post-flip: pre-auth check — privileged (no org context yet).
+    const passkeyCount = await prismaPrivileged.passkeyCredential.count({
       where: { userId: user.id },
     })
 

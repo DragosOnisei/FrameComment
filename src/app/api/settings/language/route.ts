@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere } from '@/lib/db'
+import { settingsReadClient } from '@/lib/db'
 import { SUPPORTED_LOCALES, LOCALE_NAMES } from '@/i18n/locale'
 
 export const runtime = 'nodejs'
@@ -11,7 +12,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET() {
   try {
-    const settings = await prisma.settings.findUnique({
+    const settings = await settingsReadClient().settings.findUnique({
       where: orgSettingsWhere(),
       select: { language: true },
     })

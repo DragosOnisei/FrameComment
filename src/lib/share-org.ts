@@ -125,3 +125,17 @@ export async function armOrgForVideoAssetId(id: string): Promise<void> {
     logError('[share-org] video asset id arming failed:', err)
   }
 }
+
+export async function armOrgForProjectUploadId(id: string): Promise<void> {
+  if (!id || typeof id !== 'string') return
+  try {
+    await armFromRow(
+      await prismaPrivileged.projectUpload.findUnique({
+        where: { id },
+        select: { organizationId: true } as any,
+      }),
+    )
+  } catch (err) {
+    logError('[share-org] project upload id arming failed:', err)
+  }
+}

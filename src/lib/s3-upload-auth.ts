@@ -2,6 +2,11 @@ import { isStaff } from './permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { parseBearerToken, verifyAdminAccessToken, verifyShareToken } from '@/lib/auth'
+import {
+  armOrgForVideoId,
+  armOrgForVideoAssetId,
+  armOrgForProjectUploadId,
+} from '@/lib/share-org'
 
 /**
  * Shared authentication and authorization for S3 multipart upload routes
@@ -63,6 +68,14 @@ export async function verifyS3UploadAccess(
       ),
     }
   }
+
+  // 5.8.1 post-flip: arm the owning org from the TARGET entity — this helper
+  // runs before any auth guard, so the RLS-wrapped ownership lookups below
+  // would otherwise be blanked by the policies (same class as the TUS fix).
+  // Authorization is still decided by the token checks that follow.
+  if (videoId) await armOrgForVideoId(videoId)
+  else if (assetId) await armOrgForVideoAssetId(assetId)
+  else if (projectUploadId) await armOrgForProjectUploadId(projectUploadId)
 
   // ── Parse and verify bearer token ──────────────────────────────────────────
   const bearer = parseBearerToken(request)
