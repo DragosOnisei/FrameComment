@@ -1022,11 +1022,14 @@ model BillingSnapshot {
   // tightened to NOT NULL once every create passes it explicitly.
   organizationId String? @default(dbgenerated("NULLIF(current_setting('app.current_organization_id'::text, true), ''::text)"))
   id           String   @id @default(cuid())
-  day          DateTime @unique // midnight UTC of the snapshot day
+  day          DateTime // midnight UTC of the snapshot day
   userCount    Int
   storageBytes BigInt
   createdAt    DateTime @default(now())
 
+  // 5.7 Phase 5: one snapshot per day PER COMPANY (was globally unique on
+  // day back when the instance had a single tenant).
+  @@unique([organizationId, day])
   @@index([organizationId])
 }
 

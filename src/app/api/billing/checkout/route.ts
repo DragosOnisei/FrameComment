@@ -50,7 +50,12 @@ export async function POST(request: NextRequest) {
       const customer = await stripe.customers.create({
         email,
         name: settings?.companyName || 'FrameComment',
-        metadata: { app: 'framecomment' },
+        // 5.7 Phase 5: tag the customer with its organization so events and
+        // the Stripe dashboard are always attributable to the right company.
+        metadata: {
+          app: 'framecomment',
+          organizationId: (admin as any).organizationId ?? 'org-1',
+        },
       })
       customerId = customer.id
       await prisma.settings.update({

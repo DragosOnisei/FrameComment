@@ -81,10 +81,14 @@ export function fcStorageWhere(): any {
  * storageBackend/storageLocations fields) still accepts the where filter.
  */
 export async function computeBillingUsage(): Promise<BillingUsage> {
-  const where = fcStorageWhere()
+  // 5.7 Phase 5: PER-ORGANIZATION usage. The org comes from the request
+  // context (armed by the auth guards) or from the worker's explicit
+  // runWithOrgContext wrapper — each company is metered on ITS users/bytes.
+  const organizationId = currentOrgId()
+  const where = { AND: [fcStorageWhere(), { organizationId }] }
   const [userCount, videoSum, videoAssetSum, projectUploadSum] =
     await Promise.all([
-      prisma.user.count(),
+      (prisma as any).user.count({ where: { organizationId } }),
       (prisma as any).video.aggregate({ _sum: { originalFileSize: true }, where }),
       (prisma as any).videoAsset.aggregate({ _sum: { fileSize: true }, where }),
       (prisma as any).projectUpload.aggregate({ _sum: { fileSize: true }, where }),
@@ -109,10 +113,12 @@ export async function computeBillingUsage(): Promise<BillingUsage> {
 /** Total storage across ALL backends (display context in the Billing pane —
  *  what the customer holds vs. what is actually billed per-GB). */
 export async function computeTotalStorageBytes(): Promise<number> {
+  // 5.7 Phase 5: per-organization, same sourcing rule as computeBillingUsage.
+  const where = { organizationId: currentOrgId() } as any
   const [videoSum, videoAssetSum, projectUploadSum] = await Promise.all([
-    prisma.video.aggregate({ _sum: { originalFileSize: true } }),
-    prisma.videoAsset.aggregate({ _sum: { fileSize: true } }),
-    prisma.projectUpload.aggregate({ _sum: { fileSize: true } }),
+    (prisma as any).video.aggregate({ _sum: { originalFileSize: true }, where }),
+    (prisma as any).videoAsset.aggregate({ _sum: { fileSize: true }, where }),
+    (prisma as any).projectUpload.aggregate({ _sum: { fileSize: true }, where }),
   ])
   const master = videoSum._sum.originalFileSize ? Number(videoSum._sum.originalFileSize) : 0
   const asset = videoAssetSum._sum.fileSize ? Number(videoAssetSum._sum.fileSize) : 0
@@ -166,13 +172,15 @@ export function isOverFreeTier(usage: BillingUsage): boolean {
   )
 }
 
-/** Record today's usage snapshot once per calendar day (idempotent —
- *  the unique(day) index + create-if-missing guards double inserts). */
+/** Record today's usage snapshot once per calendar day PER ORGANIZATION
+ *  (idempotent — the unique(organizationId, day) index + create-if-missing
+ *  guards double inserts). */
 export async function recordDailySnapshotIfNeeded(): Promise<void> {
+  const organizationId = currentOrgId()
   const day = new Date()
   day.setUTCHours(0, 0, 0, 0)
   const existing = await (prisma as any).billingSnapshot
-    .findUnique({ where: { day } })
+    .findFirst({ where: { day, organizationId }, select: { id: true } })
     .catch(() => null)
   if (existing) return
   const usage = await computeBillingUsage()
@@ -182,10 +190,7 @@ export async function recordDailySnapshotIfNeeded(): Promise<void> {
         day,
         userCount: usage.userCount,
         storageBytes: BigInt(Math.round(usage.storageBytes)),
-        // 5.0 multi-tenant: the daily worker sweep is still instance-wide
-        // (= org-1, the legacy tenant). Phase 5 makes billing iterate orgs
-        // and moves `day` uniqueness to (organizationId, day).
-        organizationId: currentOrgId(),
+        organizationId,
       },
     })
     .catch(() => {}) // ignore unique-violation race
@@ -200,7 +205,7 @@ export async function computeAveragedUsage(
   sinceDay.setUTCHours(0, 0, 0, 0)
   const snaps: Array<{ userCount: number; storageBytes: bigint }> =
     await (prisma as any).billingSnapshot
-      .findMany({ where: { day: { gte: sinceDay } } })
+      .findMany({ where: { day: { gte: sinceDay }, organizationId: currentOrgId() } })
       .catch(() => [])
   if (!snaps.length) {
     const usage = await computeBillingUsage()

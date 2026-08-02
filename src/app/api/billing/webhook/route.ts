@@ -1,9 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
-import { prisma, orgSettingsWhere } from '@/lib/db'
+import { prisma, prismaPrivileged, orgSettingsWhere } from '@/lib/db'
+import { enterOrgContext } from '@/lib/org-context'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe'
 import { addOneMonth } from '@/lib/billing'
 import { logError, logMessage } from '@/lib/logging'
+
+/**
+ * 5.7 Phase 5: webhooks are UNAUTHENTICATED (signature-verified instead),
+ * so the org can't come from a session — it comes from the Stripe CUSTOMER.
+ * The checkout route saves stripeCustomerId onto the org's Settings row
+ * BEFORE Stripe ever calls us, so this lookup always resolves for events
+ * we care about. Arms the org context; returns false when unknown (event
+ * for a customer we've never seen — safely ignored).
+ */
+async function armOrgForStripeCustomer(
+  customerId: string | null | undefined,
+): Promise<boolean> {
+  if (!customerId) return false
+  try {
+    const row = (await (prismaPrivileged as any).settings.findFirst({
+      where: { stripeCustomerId: customerId },
+      select: { organizationId: true },
+    })) as any
+    if (!row?.organizationId) return false
+    enterOrgContext(row.organizationId)
+    return true
+  } catch (err) {
+    logError('[billing/webhook] customer -> org resolution failed:', err)
+    return false
+  }
+}
+
+function eventCustomerId(obj: { customer?: string | { id: string } | null }): string | null {
+  return typeof obj.customer === 'string' ? obj.customer : obj.customer?.id ?? null
+}
 
 export const runtime = 'nodejs'
 // Stripe needs the raw, unparsed body to verify the signature.
@@ -59,6 +90,12 @@ export async function POST(request: NextRequest) {
             : session.setup_intent?.id
         if (!customerId || !setupIntentId) break
 
+        // 5.7: scope everything below to the customer's ORGANIZATION.
+        if (!(await armOrgForStripeCustomer(customerId))) {
+          logMessage(`[billing/webhook] unknown customer ${customerId} — ignored`)
+          break
+        }
+
         const si = await stripe.setupIntents.retrieve(setupIntentId)
         const pmId =
           typeof si.payment_method === 'string'
@@ -93,6 +130,7 @@ export async function POST(request: NextRequest) {
 
       case 'invoice.paid': {
         const inv = event.data.object as Stripe.Invoice
+        if (!(await armOrgForStripeCustomer(eventCustomerId(inv)))) break
         await prisma.settings
           .update({
             where: orgSettingsWhere(),
@@ -110,6 +148,7 @@ export async function POST(request: NextRequest) {
 
       case 'invoice.payment_failed': {
         const inv = event.data.object as Stripe.Invoice
+        if (!(await armOrgForStripeCustomer(eventCustomerId(inv)))) break
         await prisma.settings
           .update({
             where: orgSettingsWhere(),
