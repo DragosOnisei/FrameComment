@@ -270,6 +270,10 @@ export async function chargeInstance(): Promise<ChargeResult> {
     return { ok: false, message: 'No card connected yet.' }
   }
 
+  // 5.7.2: tracked for the failure-path cleanup (delete dangling drafts).
+  let createdInvoiceId: string | null = null
+  let finalizedInvoice = false
+
   try {
     // Prorate: average usage over the period since the last charge,
     // then subtract the free tier — only the excess is billed.
@@ -299,8 +303,13 @@ export async function chargeInstance(): Promise<ChargeResult> {
       collection_method: 'charge_automatically',
       auto_advance: false,
       description: 'FrameComment usage',
+      // 5.7.2: tag OUR invoices — the webhook only acts on events carrying
+      // this metadata, so other products billed from the same Stripe account
+      // can never overwrite FrameComment's billing state.
+      metadata: { app: 'framecomment', organizationId: currentOrgId() },
     })
     const invoiceId = invoice.id as string
+    createdInvoiceId = invoiceId
 
     // Users above the free tier. `quantity_decimal` carries the
     // fractional period-average → invoice shows e.g. "1.53 × $25.00".
@@ -332,6 +341,7 @@ export async function chargeInstance(): Promise<ChargeResult> {
     // success it is (previously this surfaced a bogus "Invoice is
     // already paid" error even though the charge went through).
     const finalized = await stripe.invoices.finalizeInvoice(invoiceId)
+    finalizedInvoice = true
     let invoiceObj = finalized
     if (finalized.status !== 'paid') {
       try {
@@ -368,6 +378,12 @@ export async function chargeInstance(): Promise<ChargeResult> {
   } catch (err) {
     // Payment/charge failed — mark past_due. Webhooks also reconcile.
     logError('[billing] charge failed:', err)
+    // 5.7.2: never leave an EMPTY draft invoice behind (seen live: item
+    // attachment failed → a dangling "0.00 DRAFT" in the dashboard).
+    // Drafts are deletable; a finalized invoice is left alone.
+    if (createdInvoiceId && !finalizedInvoice) {
+      await stripe.invoices.del(createdInvoiceId).catch(() => {})
+    }
     await prisma.settings
       .update({
         where: orgSettingsWhere(),

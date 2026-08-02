@@ -130,6 +130,12 @@ export async function POST(request: NextRequest) {
 
       case 'invoice.paid': {
         const inv = event.data.object as Stripe.Invoice
+        // 5.7.2: only OUR invoices (metadata app=framecomment). The same
+        // Stripe account can bill other products — their paid invoices used
+        // to overwrite lastInvoiceId/billingStatus here (seen live: a
+        // foreign paid invoice masked a genuinely failed FrameComment
+        // charge, so Retry reported "already paid").
+        if (inv.metadata?.app !== 'framecomment') break
         if (!(await armOrgForStripeCustomer(eventCustomerId(inv)))) break
         await prisma.settings
           .update({
@@ -148,6 +154,8 @@ export async function POST(request: NextRequest) {
 
       case 'invoice.payment_failed': {
         const inv = event.data.object as Stripe.Invoice
+        // 5.7.2: only OUR invoices — see invoice.paid above.
+        if (inv.metadata?.app !== 'framecomment') break
         if (!(await armOrgForStripeCustomer(eventCustomerId(inv)))) break
         await prisma.settings
           .update({

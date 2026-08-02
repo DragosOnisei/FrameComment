@@ -106,8 +106,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Already settled meanwhile (webhook raced us)?
-    if (invoice && invoice.status === 'paid') {
+    // Already settled meanwhile (webhook raced us)? Only trust a paid
+    // lastInvoice when billing is NOT past_due — a shared Stripe account
+    // could have parked a FOREIGN paid invoice id in lastInvoiceId (pre-
+    // 5.7.2 webhook), which must not short-circuit a real retry.
+    if (
+      invoice &&
+      invoice.status === 'paid' &&
+      settings?.billingStatus !== 'past_due' &&
+      invoice.metadata?.app === 'framecomment'
+    ) {
       await evaluateBillingHealth().catch(() => {})
       return NextResponse.json({ ok: true, message: 'Invoice is already paid.' })
     }
