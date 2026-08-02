@@ -1470,7 +1470,22 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ── 5.10 Danger Zone ────────────────────────────────────────────────────
+  // Company deletion is a SERVER-side 30-day countdown: set when the Owner
+  // confirms (password + exact company name), cleared on cancel; the worker
+  // wipes the org (row delete → FK cascade) only once NOW passes this
+  // timestamp — a client can never force it forward. Deletion can only be
+  // REQUESTED when the org has zero projects, and while it's pending,
+  // project creation is blocked.
+  deletionScheduledAt   DateTime?
+  deletionRequestedById String?
+  // Anti-mass-wipe throttle (tenants only): trashing a project stamps this;
+  // the next project can only be trashed 24h later, and a trashed project
+  // can only be purged 24h after it entered the Trash.
+  lastProjectTrashedAt  DateTime?
+
   @@index([status])
+  @@index([deletionScheduledAt])
 }
 
 // 5.6 multi-tenant Phase 4: team-member invite links.

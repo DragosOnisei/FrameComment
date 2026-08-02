@@ -11,6 +11,7 @@ import { ProcessingStatusProvider } from '@/contexts/ProcessingStatusContext'
 import { ProcessingStatusBanners } from '@/components/ProcessingStatusBanners'
 import { GlobalDropOverlay } from '@/components/GlobalDropOverlay'
 import BillingWall from '@/components/BillingWall'
+import OrgDeletionBanner from '@/components/OrgDeletionBanner'
 import { usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 
@@ -112,6 +113,9 @@ export default function AdminLayout({
               when the account is suspended for unpaid/over-tier billing.
               Client share routes are separate and unaffected. */}
           <BillingWall />
+          {/* 5.10 Danger Zone: red countdown banner while a company
+              deletion is pending (self-hides otherwise). */}
+          <OrgDeletionBanner />
           {hidesChrome ? (
             // Share-player preview: no sidebar, no topbar — render
             // children straight onto the background. Preserves the

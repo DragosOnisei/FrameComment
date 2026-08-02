@@ -11,7 +11,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { logError } from '@/lib/logging'
+import { logError, logMessage } from '@/lib/logging'
+import { projectPurgeAllowed } from '@/lib/danger-zone'
 import { hardDeleteVideoById, hardDeleteFolderById, hardDeleteProjectById, hardDeleteFolderDocumentById } from '@/lib/trash-cleanup'
 
 export const runtime = 'nodejs'
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
       }),
       prisma.project.findMany({
         where: { deletedAt: { not: null } } as any,
-        select: { id: true } as any,
+        select: { id: true, deletedAt: true } as any,
       }),
       (prisma as any).folderDocument.findMany({
         where: { deletedAt: { not: null } },
@@ -52,11 +53,24 @@ export async function POST(request: NextRequest) {
     ])
 
     let removed = 0
+    // 5.10 Danger Zone (tenants): a project may only be PURGED after 24h in
+    // Trash — Empty Trash silently skips the ones still in their safety
+    // window (they stay visible on the Trash page).
+    const purgeableProjects = (projects as any[]).filter((p) =>
+      projectPurgeAllowed(p.deletedAt),
+    )
+    const skippedProjects = (projects as any[]).length - purgeableProjects.length
+    if (skippedProjects > 0) {
+      logMessage(
+        `[trash/empty] ${skippedProjects} project(s) kept — still inside the 24h safety window`,
+      )
+    }
+
     // Process projects first — purging a project also drops its
     // videos/folders by cascade, so we skip duplicate work below.
     const skipVideoIds = new Set<string>()
     const skipFolderIds = new Set<string>()
-    for (const p of projects as any[]) {
+    for (const p of purgeableProjects) {
       try {
         // Track child rows so the later loops don't try to hard-delete
         // something the cascade just removed.

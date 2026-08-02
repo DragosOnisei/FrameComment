@@ -33,6 +33,7 @@ import { createCleanPreviewWorker } from './clean-preview-processor'
 import { createStorageTransferWorker } from './storage-transfer-processor'
 import { processDueDateReminders } from './due-date-reminders'
 import { processBillingCycle } from './billing-cycle'
+import { processOrgDeletions } from './org-deletion'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { logError, logMessage } from '../lib/logging'
 
@@ -242,6 +243,9 @@ async function main() {
         // today is the billing day — then it invoices + charges via
         // Stripe.
         processBillingCycle(),
+        // 5.10 Danger Zone: wipes orgs whose 30-day deletion countdown has
+        // elapsed (server-side clock; re-verifies zero projects first).
+        processOrgDeletions(),
       ])
 
       logMessage('Notification check completed')

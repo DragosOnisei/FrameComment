@@ -168,7 +168,9 @@ export default function InviteLinkModal({ open, onOpenChange, myRole }: InviteLi
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 overflow-y-auto min-h-0">
+        {/* px-1 -mx-1: the ring-1 outlines are box-shadows that the scroll
+            container would otherwise clip at the left/right edges. */}
+        <div className="space-y-4 overflow-y-auto min-h-0 px-1 -mx-1">
           {error && (
             <div className="p-3 rounded-lg bg-red-500/10 ring-1 ring-red-500/30">
               <p className="text-sm text-red-300">{error}</p>

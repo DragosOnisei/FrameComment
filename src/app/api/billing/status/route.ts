@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere } from '@/lib/db'
+import { getOrgDangerState } from '@/lib/danger-zone'
 import { requireApiAdmin } from '@/lib/auth'
 import { canManageSettings } from '@/lib/permissions'
 import { getStripe, isStripeConfigured, isStripeTestMode } from '@/lib/stripe'
@@ -92,11 +93,16 @@ export async function GET(request: NextRequest) {
     // account is suspended). But the financial details (card, invoices, billing
     // email, next charge) are Owner/Admin only. Non-managers get just the wall
     // essentials so nothing sensitive leaks.
+    // 5.10 Danger Zone: every internal user sees the deletion banner.
+    const danger = await getOrgDangerState()
+    const deletionScheduledAt = danger?.deletionScheduledAt ?? null
+
     if (!canManageSettings(authResult.role)) {
       return NextResponse.json({
         suspended: !!settings?.billingSuspended,
         graceDaysLeft,
         graceEndsAt,
+        deletionScheduledAt,
       })
     }
 
@@ -125,6 +131,7 @@ export async function GET(request: NextRequest) {
       issueSince,
       graceDaysLeft,
       graceEndsAt,
+      deletionScheduledAt,
     })
   } catch (err) {
     logError('[billing/status]', err)

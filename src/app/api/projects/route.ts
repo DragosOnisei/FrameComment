@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere, setOrgContextOn, currentOrgId } from '@/lib/db'
+import { getOrgDangerState } from '@/lib/danger-zone'
 import { generateUniqueSlug } from '@/lib/utils'
 import { requireApiAdmin } from '@/lib/auth'
 import { encrypt } from '@/lib/encryption'
@@ -144,6 +145,20 @@ export async function POST(request: NextRequest) {
     return authResult
   }
   const admin = authResult
+
+  // 5.10 Danger Zone: while a company deletion countdown is pending, no new
+  // projects can be created (the wipe requires the zero-project invariant).
+  const danger = await getOrgDangerState()
+  if (danger?.deletionScheduledAt) {
+    return NextResponse.json(
+      {
+        error:
+          'This company is scheduled for deletion. Cancel the deletion from ' +
+          'the red banner to keep working.',
+      },
+      { status: 403 },
+    )
+  }
 
   // Rate limiting: Max 20 projects per hour
   const rateLimitResult = await rateLimit(request, {

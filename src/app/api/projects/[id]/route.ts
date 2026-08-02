@@ -18,6 +18,14 @@ import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitizat
 import { updateProjectSchema } from '@/lib/validation'
 import { syncCompanyToDirectory } from '@/lib/client-directory-sync'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import {
+  isPlatformOrgContext,
+  projectPurgeAllowed,
+  checkProjectTrashAllowed,
+  markProjectTrashed,
+  humanUntil,
+  PROJECT_TRASH_LOCK_MS,
+} from '@/lib/danger-zone'
 import { logError, logMessage } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -598,7 +606,33 @@ export async function DELETE(
 
     // 1.2.1+: Trash UI's permanent delete path. Same teardown as the
     // empty-project short-circuit and the cleanup cron.
+    // 5.10 Danger Zone (tenants): permanent deletion only for projects that
+    // already served 24h in Trash — skip-trash wipes are exactly what a
+    // compromised account would use.
     if (permanent) {
+      if (!isPlatformOrgContext()) {
+        const deletedAt = (project as any).deletedAt as Date | null
+        if (!deletedAt) {
+          return NextResponse.json(
+            {
+              error:
+                'For safety, projects must first be moved to Trash and stay ' +
+                'there for 24 hours before they can be permanently deleted.',
+            },
+            { status: 403 },
+          )
+        }
+        if (!projectPurgeAllowed(deletedAt)) {
+          const readyAt = new Date(new Date(deletedAt).getTime() + PROJECT_TRASH_LOCK_MS)
+          return NextResponse.json(
+            {
+              error: `Safety window: this project can be permanently deleted in ${humanUntil(readyAt)}.`,
+              retryAt: readyAt,
+            },
+            { status: 403 },
+          )
+        }
+      }
       await hardDeleteProjectById(id)
       return NextResponse.json({
         success: true,
@@ -625,10 +659,27 @@ export async function DELETE(
       })
     }
 
+    // 5.10 Danger Zone (tenants): at most ONE non-empty project may be
+    // trashed per 24h — a compromised account cannot rapidly destroy a
+    // company's work. Server-side clock; empty projects above are exempt.
+    const trashGate = await checkProjectTrashAllowed()
+    if (!trashGate.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            `Safety limit: only one project can be deleted per 24 hours. ` +
+            `You can delete the next project in ${humanUntil(trashGate.retryAt)}.`,
+          retryAt: trashGate.retryAt,
+        },
+        { status: 429 },
+      )
+    }
+
     await prisma.project.update({
       where: { id },
       data: { deletedAt: new Date() } as any,
     })
+    await markProjectTrashed()
 
     return NextResponse.json({
       success: true,

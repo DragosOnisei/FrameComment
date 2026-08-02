@@ -10,6 +10,8 @@ import { AppearanceSection } from '@/components/settings/AppearanceSection'
 import { BrandingSection } from '@/components/settings/BrandingSection'
 import { PrivacySection } from '@/components/settings/PrivacySection'
 import { BillingSection } from '@/components/settings/BillingSection'
+import { DangerZoneSection } from '@/components/settings/DangerZoneSection'
+import { isOwner } from '@/lib/permissions'
 import { StorageSection } from '@/components/settings/StorageSection'
 import { NotificationsSection } from '@/components/settings/NotificationsSection'
 import { VideoProcessingSettingsSection } from '@/components/settings/VideoProcessingSettingsSection'
@@ -986,6 +988,10 @@ export default function GlobalSettingsPage() {
           <BlocklistSection {...blocklistProps} show={showBlocklist} setShow={setShowBlocklist} />
           <StorageSection show={showStorage} setShow={setShowStorage} />
           <BillingSection show={showBilling} setShow={setShowBilling} />
+          {/* 5.10 Danger Zone — tenant companies only, Owner only. */}
+          {!isPlatformOrg && (
+            <DangerZoneSection companyName={companyName} isOwner={isOwner(user?.role)} />
+          )}
         </div>
 
         {/* Desktop: sidebar nav + content panel with INDEPENDENT
@@ -1052,7 +1058,15 @@ export default function GlobalSettingsPage() {
               <StorageSection show={true} setShow={() => {}} collapsible={false} />
             )}
             {activeSection === 'billing' && (
-              <BillingSection show={true} setShow={() => {}} collapsible={false} />
+              <>
+                <BillingSection show={true} setShow={() => {}} collapsible={false} />
+                {/* 5.10 Danger Zone — tenant companies only, Owner only. */}
+                {!isPlatformOrg && (
+                  <div className="mt-4">
+                    <DangerZoneSection companyName={companyName} isOwner={isOwner(user?.role)} />
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
