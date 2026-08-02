@@ -13,6 +13,7 @@ import {
   Pencil,
   ImageIcon,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react'
 import { apiFetch, apiPatch, apiDelete } from '@/lib/api-client'
 import { useAuth } from '@/components/AuthProvider'
@@ -81,6 +82,10 @@ export default function ProjectCardKebab({
   // toggle so they can't fight each other.
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState(false)
+  // 5.10.2: themed alert for server-side safety blocks (e.g. the
+  // tenant 1-project-per-24h trash limit) — replaces the browser's
+  // native alert() so the message renders in the app's own dialog.
+  const [deleteBlocked, setDeleteBlocked] = useState<string | null>(null)
   // 1.7.9+: themed rename dialog (replaces window.prompt).
   const [renameOpen, setRenameOpen] = useState(false)
   // 1.7.10+: spinner state for "Change Logo" while the OS file
@@ -286,7 +291,10 @@ export default function ProjectCardKebab({
       onMutated?.()
       router.refresh()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete project')
+      // 5.10.2: themed dialog instead of the native alert() — mostly
+      // hit by tenant users tripping the 1-project-per-24h safety
+      // limit, so the message deserves proper presentation.
+      setDeleteBlocked(err instanceof Error ? err.message : 'Failed to delete project')
     } finally {
       setBusy(false)
     }
@@ -438,20 +446,37 @@ export default function ProjectCardKebab({
             The project, its folders, videos, and comments stay recoverable
             from Trash for 30 days. After that they&apos;re permanently deleted.
             {!isPlatformUser && (
-              <>
-                {' '}
+              // 5.10.2: the safety note reads as its own section — hairline
+              // divider, then an exclamation icon + the amber message.
+              // (span-only markup: DialogDescription renders as a <p>.)
+              <span className="mt-3 pt-3 border-t border-white/10 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
                 <span className="text-amber-400">
                   For your company&apos;s safety, only one project can be
                   deleted per 24 hours, and it must stay in Trash for 24
                   hours before it can be permanently removed.
                 </span>
-              </>
+              </span>
             )}
           </>
         }
         confirmLabel="Move to Trash"
         cancelLabel="Cancel"
         onConfirm={runDelete}
+      />
+      {/* 5.10.2: themed alert for a refused delete (tenant safety
+          limits). Single OK button — informational only. */}
+      <ConfirmDialog
+        open={deleteBlocked !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeleteBlocked(null)
+        }}
+        variant="destructive"
+        title="Project not deleted"
+        description={deleteBlocked ?? ''}
+        confirmLabel="OK"
+        hideCancel
+        onConfirm={() => setDeleteBlocked(null)}
       />
       {/* 1.7.9+: themed rename dialog. Opens via the Rename
           menu item and submits the new title back to the project

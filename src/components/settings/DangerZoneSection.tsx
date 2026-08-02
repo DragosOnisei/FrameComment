@@ -61,7 +61,11 @@ export function DangerZoneSection({ companyName, isOwner }: DangerZoneSectionPro
   }
 
   return (
-    <div className="rounded-xl ring-1 ring-red-500/40 bg-red-500/[0.06] p-4 space-y-3">
+    // 5.10.2: border instead of ring — rings are box-shadows drawn
+    // OUTSIDE the box and get clipped by the settings pane's scroll
+    // container (the left edge was cut off). A border renders inside
+    // the border-box, so it survives any ancestor overflow.
+    <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4 space-y-3">
       <div className="flex items-center gap-2 text-red-300">
         <AlertTriangle className="w-5 h-5" />
         <h3 className="font-semibold text-red-200">Danger Zone</h3>

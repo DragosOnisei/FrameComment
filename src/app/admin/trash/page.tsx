@@ -22,12 +22,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   Film as FilmIcon,
   Folder as FolderIcon,
   FileText,
   Loader2,
+  Lock,
   Trash2,
   Undo2,
   X,
@@ -67,6 +69,29 @@ export default function TrashPage() {
   // doesn't apply to the platform org).
   const { user: authUser } = useAuth()
   const isPlatformUser = (authUser as any)?.isPlatformOrg !== false
+
+  // 5.10.2: live clock for the per-project purge countdown (tenant
+  // 24h Trash window). 30s tick keeps the "Xh Ym" label honest
+  // without meaningful render cost.
+  const [nowTs, setNowTs] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNowTs(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
+  // 5.10.2: tenant safety window — a trashed PROJECT can only be
+  // purged 24h after it entered Trash (mirrors the server gate in
+  // src/lib/danger-zone.ts; the platform org is exempt). Returns the
+  // remaining lock in ms, or 0 when purge is available. Defined
+  // before the handlers below that list it as a dependency.
+  const purgeLockMs = useCallback(
+    (item: TrashItem) => {
+      if (isPlatformUser || item.kind !== 'project') return 0
+      const readyAt = new Date(item.deletedAt).getTime() + 24 * 60 * 60 * 1000
+      return Math.max(0, readyAt - nowTs)
+    },
+    [isPlatformUser, nowTs],
+  )
 
   // 3.3.x: bottom-right progress banner (shared download/task manager,
   // mounted in the admin layout) so emptying Trash runs in the
@@ -165,13 +190,15 @@ export default function TrashPage() {
             <span className="font-medium text-foreground">{item.name}</span>{' '}
             will be deleted right now. This action cannot be undone.
             {item.kind === 'project' && !isPlatformUser && (
-              <>
-                {' '}
+              // 5.10.2: safety note as its own section — divider +
+              // exclamation icon (span-only: description is a <p>).
+              <span className="mt-3 pt-3 border-t border-white/10 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
                 <span className="text-amber-400">
                   For safety, a project must stay in Trash for 24 hours
                   before it can be permanently deleted.
                 </span>
-              </>
+              </span>
             )}
           </>
         ),
@@ -242,7 +269,7 @@ export default function TrashPage() {
         },
       })
     },
-    [fetchTrash],
+    [fetchTrash, isPlatformUser],
   )
 
   // 3.3.x: permanently delete a single trash item (video group /
@@ -270,12 +297,50 @@ export default function TrashPage() {
 
   const handleEmptyTrash = useCallback(() => {
     if (items.length === 0) return
-    const snapshot = items
+    // 5.10.2: tenant projects inside their 24h safety window are kept —
+    // together with everything that belongs to them. Without this, the
+    // item-by-item delete would gut a locked project (its videos and
+    // folders have no individual lock), defeating the safety window.
+    const lockedProjectIds = new Set(
+      items
+        .filter((i) => i.kind === 'project' && purgeLockMs(i) > 0)
+        .map((i) => i.id),
+    )
+    const snapshot = items.filter(
+      (i) => !lockedProjectIds.has(i.id) && !lockedProjectIds.has(i.projectId),
+    )
+    const skipped = items.length - snapshot.length
     const count = snapshot.length
+    if (count === 0) {
+      setConfirmState({
+        open: true,
+        title: 'Nothing to delete yet',
+        description:
+          'Everything in Trash belongs to a project still inside its 24-hour safety window. Try again once the countdown on the project ends.',
+        confirmLabel: 'OK',
+        onConfirm: () => setConfirmState({ open: false, title: '' }),
+      })
+      return
+    }
     setConfirmState({
       open: true,
       title: 'Empty Trash?',
-      description: `${count} ${count === 1 ? 'item' : 'items'} will be deleted permanently. This action cannot be undone.`,
+      description: (
+        <>
+          {count} {count === 1 ? 'item' : 'items'} will be deleted
+          permanently. This action cannot be undone.
+          {skipped > 0 && (
+            <span className="mt-3 pt-3 border-t border-white/10 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
+              <span className="text-amber-400">
+                {skipped} {skipped === 1 ? 'item belongs' : 'items belong'} to
+                a project still inside its 24-hour safety window and will be
+                kept.
+              </span>
+            </span>
+          )}
+        </>
+      ),
       confirmLabel: 'Empty Trash',
       onConfirm: () => {
         // 3.3.x: close the dialog immediately and do the work in the
@@ -284,7 +349,12 @@ export default function TrashPage() {
         setConfirmState({ open: false, title: '' })
         // Optimistically clear the list; the banner reports progress
         // and we re-sync at the end in case some deletes failed.
-        setItems([])
+        // 5.10.2: locked projects (and their contents) stay visible.
+        setItems((prev) =>
+          prev.filter(
+            (i) => lockedProjectIds.has(i.id) || lockedProjectIds.has(i.projectId),
+          ),
+        )
         window.dispatchEvent(new CustomEvent('trash:changed'))
 
         const { bumpItem, finish, signal } = startManualDownload({
@@ -329,7 +399,7 @@ export default function TrashPage() {
         })()
       },
     })
-  }, [items, startManualDownload, deleteOneTrashItem, fetchTrash])
+  }, [items, startManualDownload, deleteOneTrashItem, fetchTrash, purgeLockMs])
 
   const daysLeft = (expiresAt: string) => {
     const ms = new Date(expiresAt).getTime() - Date.now()
@@ -488,6 +558,7 @@ export default function TrashPage() {
                     onRestore={handleRestore}
                     onPermanentDelete={handlePermanentDelete}
                     daysLeft={daysLeft}
+                    purgeLockMs={purgeLockMs}
                   />
                 ))}
               </div>
@@ -535,6 +606,7 @@ function TrashRow({
   onRestore,
   onPermanentDelete,
   daysLeft,
+  purgeLockMs,
 }: {
   node: import('react').ReactElement extends never
     ? never
@@ -548,11 +620,25 @@ function TrashRow({
   onRestore: (item: TrashItem) => void
   onPermanentDelete: (item: TrashItem) => void
   daysLeft: (expiresAt: string) => number
+  /** 5.10.2: remaining ms of the tenant 24h purge window (0 = free). */
+  purgeLockMs: (item: TrashItem) => number
 }) {
   const collapsed = collapsedFolderIds.has(node.id)
   const busy = busyIds.has(node.id)
   const hasChildren = node.children && node.children.length > 0
   const isFolder = node.kind === 'folder'
+
+  // 5.10.2: tenant projects are purge-locked for their first 24h in
+  // Trash (server enforces it; this greys out the button and shows a
+  // countdown so the user isn't invited into a refused action).
+  const lockMs = purgeLockMs(node)
+  const lockLabel = (() => {
+    if (lockMs <= 0) return null
+    const totalMin = Math.ceil(lockMs / 60_000)
+    const h = Math.floor(totalMin / 60)
+    const m = totalMin % 60
+    return h > 0 ? `${h}h ${m}m` : `${m}m`
+  })()
 
   // 1.3.0+: tighter indent step on phones (12 vs 24) so deep nests
   // don't push the controls off-screen. Plus mobile-friendly side
@@ -647,21 +733,40 @@ function TrashRow({
             )}
             <span className="hidden sm:inline">Restore</span>
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            // 2.5.0+: focus-visible ring forced to destructive too,
-            // otherwise the default brand-blue focus ring bleeds
-            // into the red icon and reads as a mixed cyan tint on
-            // click/keyboard focus.
-            className="bg-destructive/15 hover:bg-destructive/25 ring-1 ring-destructive/30 hover:ring-destructive/50 text-destructive hover:text-destructive border-0 focus-visible:ring-destructive/60 focus-visible:ring-offset-0"
-            disabled={busy}
-            onClick={() => onPermanentDelete(node)}
-            aria-label="Delete permanently"
-          >
-            <X className="w-4 h-4" />
-          </Button>
+          {lockLabel ? (
+            // 5.10.2: purge-locked tenant project — greyed-out lock
+            // button + live countdown until permanent delete unlocks.
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled
+              aria-label={`Permanent delete available in ${lockLabel}`}
+              title={`For safety, a project must stay in Trash for 24 hours. You can delete it permanently in ${lockLabel}.`}
+              className="bg-white/[0.04] ring-1 ring-white/10 text-white/40 border-0 disabled:opacity-100 cursor-not-allowed gap-1.5"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span className="text-[11px] tabular-nums text-amber-400/90">
+                {lockLabel}
+              </span>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              // 2.5.0+: focus-visible ring forced to destructive too,
+              // otherwise the default brand-blue focus ring bleeds
+              // into the red icon and reads as a mixed cyan tint on
+              // click/keyboard focus.
+              className="bg-destructive/15 hover:bg-destructive/25 ring-1 ring-destructive/30 hover:ring-destructive/50 text-destructive hover:text-destructive border-0 focus-visible:ring-destructive/60 focus-visible:ring-offset-0"
+              disabled={busy}
+              onClick={() => onPermanentDelete(node)}
+              aria-label="Delete permanently"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -680,6 +785,7 @@ function TrashRow({
               onRestore={onRestore}
               onPermanentDelete={onPermanentDelete}
               daysLeft={daysLeft}
+              purgeLockMs={purgeLockMs}
             />
           ))}
         </div>

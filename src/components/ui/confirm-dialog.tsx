@@ -48,6 +48,11 @@ export interface ConfirmDialogProps {
    *  the caller wants to keep the dialog open (e.g. to surface an
    *  error inline before allowing retry). */
   closeOnConfirm?: boolean
+  /** 5.10.2: informational mode — hides the cancel button so the
+   *  dialog reads as a themed alert (single OK button). Used for
+   *  server-side safety blocks (e.g. the 1-project-per-24h limit)
+   *  instead of the browser's native alert(). */
+  hideCancel?: boolean
 }
 
 export function ConfirmDialog({
@@ -60,6 +65,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   onConfirm,
   closeOnConfirm = true,
+  hideCancel = false,
 }: ConfirmDialogProps) {
   const [busy, setBusy] = React.useState(false)
 
@@ -137,20 +143,22 @@ export function ConfirmDialog({
           </div>
         </DialogHeader>
         <DialogFooter className="mt-2">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
-            className="sm:w-auto ring-1 ring-white/15 hover:ring-white/25 text-white hover:text-white shadow-none"
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.06)',
-              backdropFilter: 'blur(12px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-            }}
-          >
-            {cancelLabel}
-          </Button>
+          {!hideCancel && (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={busy}
+              className="sm:w-auto ring-1 ring-white/15 hover:ring-white/25 text-white hover:text-white shadow-none"
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                backdropFilter: 'blur(12px) saturate(140%)',
+                WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+              }}
+            >
+              {cancelLabel}
+            </Button>
+          )}
           <Button
             type="button"
             variant={isDestructive ? 'destructive' : 'default'}
