@@ -552,8 +552,19 @@ export default function AdminPage() {
           <div className="hidden md:block"><SortModeMenu /></div>
         </TopbarRightSlot>
 
+        {/* 5.9: a brand-new company lands here with ZERO projects and used to
+            have NO way to create one (the New Project affordance only existed
+            in the populated grid). Real empty-state CTA: */}
         <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
-          <div className="text-muted-foreground">{t('noProjects')}</div>
+          <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
+            <div className="rounded-full bg-primary/10 p-4">
+              <FolderKanban size={28} className="text-primary" />
+            </div>
+            <p className="text-muted-foreground">{t('noProjectsYet')}</p>
+            <Button onClick={openNewProjectModal} className="font-semibold" style={{ color: '#ffffff' }}>
+              {t('createFirst')}
+            </Button>
+          </div>
         </div>
         {renderNewProjectModal()}
       </div>

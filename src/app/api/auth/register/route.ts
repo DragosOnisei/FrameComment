@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { prisma, setOrgContextOn } from '@/lib/db'
+import { prisma, prismaPrivileged, setOrgContextOn } from '@/lib/db'
 import { enterOrgContext } from '@/lib/org-context'
 import { issueAdminTokens, type AuthUser } from '@/lib/auth'
 import { hashPassword } from '@/lib/encryption'
@@ -118,6 +118,13 @@ export async function POST(request: NextRequest) {
     // operator's local `prisma generate`) type these fully.
     const orgId = `org_${crypto.randomBytes(12).toString('hex')}`
 
+    // 5.9: platform defaults inherited by every new company (see the
+    // settings.create below). Privileged read — this runs pre-arming.
+    const platformDefaults = (await (prismaPrivileged as any).settings.findUnique({
+      where: { id: 'default' },
+      select: { appDomain: true, shortLinkDomain: true } as any,
+    })) as any
+
     // Bind the new org to this request's async context AND arm the RLS
     // setting as the transaction's first statement — required post-flip so
     // the WITH CHECK policies accept these self-creating inserts.
@@ -151,12 +158,19 @@ export async function POST(request: NextRequest) {
       // The org's own Settings row (companyName pre-filled) and
       // SecuritySettings row. Explicit ids: the legacy singletons use
       // id='default' (owned by org-1), so new orgs get id = their org id.
+      // 5.9: inherit the PLATFORM's domains (single-domain product — share
+      // links and short links must work for tenants out of the box) and
+      // default the storage backend to FrameComment Server (the managed
+      // option a new company expects; they can switch in Settings).
       await tx.settings.create({
         data: {
           id: orgId,
           organizationId: orgId,
           companyName,
-        },
+          appDomain: platformDefaults?.appDomain ?? null,
+          shortLinkDomain: platformDefaults?.shortLinkDomain ?? null,
+          activeStorageBackend: 'fc',
+        } as any,
       })
       await tx.securitySettings.create({
         data: {

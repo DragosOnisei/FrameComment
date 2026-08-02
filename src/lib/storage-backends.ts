@@ -22,7 +22,7 @@
  * legacyBackend() — derived from the STORAGE_PROVIDER env — so an install
  * that never touches the new UI behaves exactly as it did before.
  */
-import { prisma } from './db'
+import { prisma, prismaPrivileged, orgSettingsWhere, currentOrgId } from './db'
 import { decrypt } from './encryption'
 
 export type StorageBackend = 'local' | 'fc' | 'r2' | 'aws'
@@ -118,27 +118,39 @@ export function resolveFileBackend(stored: string | null | undefined): StorageBa
 }
 
 /**
- * The backend that NEW uploads should be written to.
+ * The backend that NEW uploads should be written to. 5.9: PER ORGANIZATION.
  *
- * Read via raw SQL so a stale generated Prisma client (a dev box that hasn't
- * re-run `prisma generate` after the 4.2.0 migration) still resolves it. If
- * the column is NULL or the read fails, fall back to the legacy env backend.
+ * Reads the caller org's Settings row (RLS-safe: a Prisma MODEL read, which
+ * the org-context extension wraps — the old raw-SQL read of id='default' was
+ * never wrapped, so post-flip it returned nothing and silently fell back to
+ * 'local' for EVERYONE, mis-tagging new uploads out of storage billing).
+ *
+ * Fallbacks when the org hasn't chosen a backend yet:
+ *  - org-1 (the platform's own company): the legacy env-derived backend —
+ *    preserves the operator's historical behavior exactly;
+ *  - any OTHER company: 'fc' (FrameComment Server) — the managed default a
+ *    new tenant expects; they can switch to their own storage in Settings.
  */
 export async function getActiveBackend(): Promise<StorageBackend> {
+  const orgId = currentOrgId()
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ activeStorageBackend: string | null }>>(
-      'SELECT "activeStorageBackend" FROM "Settings" WHERE id = $1 LIMIT 1',
-      'default',
-    )
-    const v = rows?.[0]?.activeStorageBackend
+    const settings = (await (prisma as any).settings.findUnique({
+      where: orgSettingsWhere(),
+      select: { activeStorageBackend: true } as any,
+    })) as any
+    const v = settings?.activeStorageBackend
     // Warm the sync cache legacyBackend() reads (NULL = not chosen yet).
-    _activeBackendCache = isValidBackend(v) ? v : null
-    _activeBackendFetchedAt = Date.now()
+    // Only org-1's value feeds that cache — legacyBackend() exists for the
+    // operator's pre-4.2.0 untagged files, which all belong to org-1.
+    if (orgId === 'org-1') {
+      _activeBackendCache = isValidBackend(v) ? v : null
+      _activeBackendFetchedAt = Date.now()
+    }
     if (isValidBackend(v)) return v
   } catch {
-    // Table/column missing or DB unreachable — fall through to legacy.
+    // Table/column missing or DB unreachable — fall through to defaults.
   }
-  return legacyBackend()
+  return orgId === 'org-1' ? legacyBackend() : 'fc'
 }
 
 function required(value: string | null | undefined, label: string): string {
@@ -178,13 +190,18 @@ interface SettingsS3Row {
 }
 
 async function readSettingsS3Row(): Promise<SettingsS3Row | null> {
-  const rows = await prisma.$queryRawUnsafe<Array<SettingsS3Row>>(
-    'SELECT "r2Endpoint","r2Region","r2Bucket","r2AccessKeyId","r2SecretAccessKey",' +
-      '"awsRegion","awsBucket","awsAccessKeyId","awsSecretAccessKey" ' +
-      'FROM "Settings" WHERE id = $1 LIMIT 1',
-    'default',
-  )
-  return rows?.[0] ?? null
+  // 5.9: per-org (a tenant's OWN R2/AWS credentials) + RLS-safe model read
+  // (raw SQL never got the org-context wrap, so post-flip it read nothing).
+  const row = (await (prisma as any).settings.findUnique({
+    where: orgSettingsWhere(),
+    select: {
+      r2Endpoint: true, r2Region: true, r2Bucket: true,
+      r2AccessKeyId: true, r2SecretAccessKey: true,
+      awsRegion: true, awsBucket: true,
+      awsAccessKeyId: true, awsSecretAccessKey: true,
+    } as any,
+  })) as SettingsS3Row | null
+  return row ?? null
 }
 
 /**
@@ -247,14 +264,25 @@ const BACKEND_TABLES = {
 
 export type BackendEntity = keyof typeof BACKEND_TABLES
 
+const BACKEND_MODELS = {
+  video: 'video',
+  asset: 'videoAsset',
+  projectUpload: 'projectUpload',
+  document: 'folderDocument',
+} as const
+
 export async function getEntityBackend(kind: BackendEntity, id: string): Promise<StorageBackend> {
-  const table = BACKEND_TABLES[kind]
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ storageBackend: string | null }>>(
-      `SELECT "storageBackend" FROM "${table}" WHERE id = $1 LIMIT 1`,
-      id,
-    )
-    return resolveFileBackend(rows?.[0]?.storageBackend)
+    // 5.9: PRIVILEGED by-id read — this resolves where an existing file's
+    // bytes live, called from streaming paths that may run before/without an
+    // org context (raw SQL was unarmed post-flip anyway). The caller has
+    // already authorized access to the entity; this is a storage-routing
+    // detail, not an access decision.
+    const row = (await (prismaPrivileged as any)[BACKEND_MODELS[kind]].findUnique({
+      where: { id },
+      select: { storageBackend: true } as any,
+    })) as any
+    return resolveFileBackend(row?.storageBackend)
   } catch {
     return legacyBackend()
   }
@@ -340,14 +368,11 @@ export async function describeBackend(backend: StorageBackend, localRoot: string
     return bk ? `${bk}${ep ? ` @ ${ep}` : ''}` : (ep || 'FrameComment Server')
   }
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<{
-      r2Endpoint: string | null; r2Bucket: string | null
-      awsBucket: string | null; awsRegion: string | null
-    }>>(
-      'SELECT "r2Endpoint","r2Bucket","awsBucket","awsRegion" FROM "Settings" WHERE id = $1 LIMIT 1',
-      'default',
-    )
-    const s = rows?.[0]
+    // 5.9: per-org, RLS-safe model read (labels show the caller's own creds).
+    const s = (await (prisma as any).settings.findUnique({
+      where: orgSettingsWhere(),
+      select: { r2Endpoint: true, r2Bucket: true, awsBucket: true, awsRegion: true } as any,
+    })) as { r2Endpoint: string | null; r2Bucket: string | null; awsBucket: string | null; awsRegion: string | null } | null
     if (backend === 'r2') {
       const bk = s?.r2Bucket?.trim()
       const ep = s?.r2Endpoint?.trim()

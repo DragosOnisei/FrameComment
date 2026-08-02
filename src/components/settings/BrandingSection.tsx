@@ -24,6 +24,9 @@ interface BrandingSectionProps {
   show: boolean
   setShow: (value: boolean) => void
   collapsible?: boolean
+  /** 5.9 multi-tenant: application/short-link domains are PLATFORM-level
+   *  (single-domain product) — tenant companies must not see or edit them. */
+  isPlatformOrg?: boolean
 }
 
 export function BrandingSection({
@@ -43,6 +46,7 @@ export function BrandingSection({
   show,
   setShow,
   collapsible,
+  isPlatformOrg = true,
 }: BrandingSectionProps) {
   const t = useTranslations('settings')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -131,7 +135,9 @@ export function BrandingSection({
         )}
       </div>
 
-      {/* Application Domain */}
+      {/* Application Domain — PLATFORM ONLY (5.9): tenants never see it;
+          changing it would break every share link on the instance. */}
+      {isPlatformOrg && (
       <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <Label htmlFor="appDomain" className="text-white">{t('appearance.appDomain')}</Label>
         <Input
@@ -146,8 +152,11 @@ export function BrandingSection({
           {t('appearance.appDomainHint')}
         </p>
       </div>
+      )}
 
-      {/* 2.4.0+: Short-link domain for Frame.io-style tidy URLs. */}
+      {/* 2.4.0+: Short-link domain for Frame.io-style tidy URLs.
+          PLATFORM ONLY (5.9), same reasoning as the application domain. */}
+      {isPlatformOrg && (
       <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <Label htmlFor="shortLinkDomain" className="text-white">Short link domain</Label>
         <Input
@@ -166,6 +175,7 @@ export function BrandingSection({
           instead of the long signed URL.
         </p>
       </div>
+      )}
 
       {/* Email Templates */}
       <EmailTemplatesEditor

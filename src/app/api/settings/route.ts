@@ -94,6 +94,9 @@ export async function GET(request: NextRequest) {
       security: securitySettings,
       smtpConfigured,
       openaiConfigured,
+      // 5.9 multi-tenant: lets the UI hide PLATFORM-level fields (application
+      // domain, short-link domain, server folder) from tenant companies.
+      isPlatformOrg: currentOrgId() === 'org-1',
     })
   } catch (error) {
     logError('Error fetching settings:', error)
@@ -556,6 +559,14 @@ export async function PATCH(request: NextRequest) {
         select: { adminNotificationSchedule: true }
       })
       previousAdminSchedule = current?.adminNotificationSchedule || null
+    }
+
+    // 5.9 multi-tenant: application/short-link domains are PLATFORM-level;
+    // a tenant's PATCH must never change them (the UI hides the fields, but
+    // the API enforces it too).
+    if (currentOrgId() !== 'org-1') {
+      delete (updateData as any).appDomain
+      delete (updateData as any).shortLinkDomain
     }
 
     // Update or create the settings

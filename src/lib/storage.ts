@@ -26,16 +26,19 @@ let _localRootCache: string | null = null
 let _localRootFetchedAt = 0
 const LOCAL_ROOT_TTL_MS = 30_000
 
-/** Update the cached local root from the DB. Call on settings save + startup. */
+/** Update the cached local root from the DB. Call on settings save + startup.
+ *  5.9: PLATFORM-level (the operator's own disk path — id 'default' is the
+ *  platform org's Settings row), read via the privileged client because the
+ *  refresh can run outside any org context and RLS never applies to it. */
 export async function refreshLocalStorageRoot(): Promise<void> {
   try {
     // Lazy import to avoid a hard prisma dependency in edge/build contexts.
-    const { prisma } = await import('./db')
-    const rows = await prisma.$queryRawUnsafe<Array<{ localStoragePath: string | null }>>(
-      'SELECT "localStoragePath" FROM "Settings" WHERE id = $1 LIMIT 1',
-      'default',
-    )
-    const v = rows?.[0]?.localStoragePath?.trim()
+    const { prismaPrivileged } = await import('./db')
+    const row = (await (prismaPrivileged as any).settings.findUnique({
+      where: { id: 'default' },
+      select: { localStoragePath: true } as any,
+    })) as any
+    const v = row?.localStoragePath?.trim()
     _localRootCache = v && v.length ? v : null
   } catch {
     // Table/column missing or DB unreachable — keep env fallback.

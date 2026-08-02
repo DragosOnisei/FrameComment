@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiManageSettings } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { prisma, orgSettingsWhere, orgSettingsCreateBase } from '@/lib/db'
+import { prisma, orgSettingsWhere, orgSettingsCreateBase, currentOrgId } from '@/lib/db'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { s3FileExists } from '@/lib/s3-storage'
 import { refreshLocalStorageRoot } from '@/lib/storage'
@@ -37,12 +37,19 @@ interface StorageSettingsRow {
 }
 
 async function readRow(): Promise<StorageSettingsRow | null> {
-  const rows = await prisma.$queryRawUnsafe<Array<StorageSettingsRow>>(
-    'SELECT "activeStorageBackend","localStoragePath","r2Endpoint","r2Region","r2Bucket","r2AccessKeyId","r2SecretAccessKey",' +
-      '"awsRegion","awsBucket","awsAccessKeyId","awsSecretAccessKey" FROM "Settings" WHERE id = $1 LIMIT 1',
-    'default',
-  )
-  return rows?.[0] ?? null
+  // 5.9: per-org model read (the guard armed the caller's org; raw SQL was
+  // never wrapped by the RLS extension, so post-flip it read nothing).
+  const row = (await (prisma as any).settings.findUnique({
+    where: orgSettingsWhere(),
+    select: {
+      activeStorageBackend: true, localStoragePath: true,
+      r2Endpoint: true, r2Region: true, r2Bucket: true,
+      r2AccessKeyId: true, r2SecretAccessKey: true,
+      awsRegion: true, awsBucket: true,
+      awsAccessKeyId: true, awsSecretAccessKey: true,
+    } as any,
+  })) as StorageSettingsRow | null
+  return row ?? null
 }
 
 /** Validate a proposed local uploads folder: absolute, and creatable/writable. */
@@ -72,9 +79,14 @@ export async function GET(request: NextRequest) {
       // NULL activeStorageBackend means "follow the legacy env" — surface the
       // effective backend so the UI can preselect the right radio.
       activeStorageBackend: (row?.activeStorageBackend as StorageBackend | null) ?? null,
+      // 5.9: nothing chosen yet → org-1 follows the legacy env (operator's
+      // historical behavior); every other company defaults to FrameComment
+      // Server — the managed option a new tenant expects.
       effectiveBackend: isValidBackend(row?.activeStorageBackend)
         ? (row!.activeStorageBackend as StorageBackend)
-        : legacyBackend(),
+        : currentOrgId() === 'org-1'
+          ? legacyBackend()
+          : 'fc',
       localStoragePath: row?.localStoragePath ?? '',
       defaultLocalStoragePath: process.env.STORAGE_ROOT || '/app/uploads',
       r2: {
@@ -182,9 +194,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid storage backend' }, { status: 400 })
   }
 
-  // Ensure the singleton row exists (typed upsert so DB-managed columns like
-  // updatedAt are handled), then raw-UPDATE the storage columns so a stale
-  // generated client still works.
+  // Ensure the org's row exists (typed upsert so DB-managed columns like
+  // updatedAt are handled), then update the storage columns.
   await prisma.settings.upsert({
     where: orgSettingsWhere(),
     create: { ...orgSettingsCreateBase() },
@@ -201,37 +212,39 @@ export async function POST(request: NextRequest) {
 
   // 4.2.0+ (Phase 2d): local uploads folder. Empty → NULL (use env default).
   // A non-empty value must be an absolute, writable path.
-  const localStoragePath = trimOrNull(body?.localStoragePath)
+  // 5.9: PLATFORM-ONLY — this is a directory on the OPERATOR's server; a
+  // tenant company must never point uploads at arbitrary host paths.
+  const isPlatformOrg = currentOrgId() === 'org-1'
+  const localStoragePath = isPlatformOrg ? trimOrNull(body?.localStoragePath) : null
   if (localStoragePath) {
     const v = await validateLocalPath(localStoragePath)
     if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 })
   }
 
   try {
-    await prisma.$executeRawUnsafe(
-      'UPDATE "Settings" SET ' +
-        '"activeStorageBackend" = $1, ' +
-        '"r2Endpoint" = $2, "r2Region" = $3, "r2Bucket" = $4, "r2AccessKeyId" = $5, ' +
-        '"r2SecretAccessKey" = COALESCE($6, "r2SecretAccessKey"), ' +
-        '"awsRegion" = $7, "awsBucket" = $8, "awsAccessKeyId" = $9, ' +
-        '"awsSecretAccessKey" = COALESCE($10, "awsSecretAccessKey"), ' +
-        '"localStoragePath" = $11 ' +
-        'WHERE id = $12',
-      isValidBackend(activeStorageBackend) ? activeStorageBackend : null,
-      trimOrNull(r2.endpoint),
-      trimOrNull(r2.region) ?? 'auto',
-      trimOrNull(r2.bucket),
-      trimOrNull(r2.accessKeyId),
-      r2Secret ? encrypt(r2Secret) : null,
-      trimOrNull(aws.region) ?? 'us-east-1',
-      trimOrNull(aws.bucket),
-      trimOrNull(aws.accessKeyId),
-      awsSecret ? encrypt(awsSecret) : null,
-      localStoragePath,
-      'default',
-    )
+    // 5.9: model update via the org-aware unique where (RLS-safe; the raw
+    // UPDATE of id='default' both bypassed org scoping and was never wrapped
+    // by the org-context extension).
+    const data: any = {
+      activeStorageBackend: isValidBackend(activeStorageBackend) ? activeStorageBackend : null,
+      r2Endpoint: trimOrNull(r2.endpoint),
+      r2Region: trimOrNull(r2.region) ?? 'auto',
+      r2Bucket: trimOrNull(r2.bucket),
+      r2AccessKeyId: trimOrNull(r2.accessKeyId),
+      awsRegion: trimOrNull(aws.region) ?? 'us-east-1',
+      awsBucket: trimOrNull(aws.bucket),
+      awsAccessKeyId: trimOrNull(aws.accessKeyId),
+    }
+    if (r2Secret) data.r2SecretAccessKey = encrypt(r2Secret)
+    if (awsSecret) data.awsSecretAccessKey = encrypt(awsSecret)
+    if (isPlatformOrg) data.localStoragePath = localStoragePath
+
+    await (prisma as any).settings.update({
+      where: orgSettingsWhere(),
+      data,
+    })
     // Apply the new local root immediately (don't wait for the cache TTL).
-    await refreshLocalStorageRoot()
+    if (isPlatformOrg) await refreshLocalStorageRoot()
     return NextResponse.json({ success: true })
   } catch (error) {
     logError('[settings/storage POST] save failed:', error)

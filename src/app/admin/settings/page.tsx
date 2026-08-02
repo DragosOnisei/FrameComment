@@ -157,6 +157,10 @@ export default function GlobalSettingsPage() {
 
   // Form state for global settings
   const [companyName, setCompanyName] = useState('')
+  // 5.9 multi-tenant: platform-level fields (domains, server folder) are
+  // hidden from tenant companies. Defaults true so the platform never sees
+  // them flash out during load.
+  const [isPlatformOrg, setIsPlatformOrg] = useState(true)
   const [smtpServer, setSmtpServer] = useState('')
   const [smtpPort, setSmtpPort] = useState('587')
   const [smtpUsername, setSmtpUsername] = useState('')
@@ -283,6 +287,9 @@ export default function GlobalSettingsPage() {
     setSmtpSecure(data.smtpSecure || 'STARTTLS')
     setAppDomain(data.appDomain || '')
     setShortLinkDomain(data.shortLinkDomain || '')
+    // 5.9 multi-tenant: hides platform-level fields from tenant companies.
+    // (`as any`: the local Settings interface predates the flag.)
+    setIsPlatformOrg((data as any).isPlatformOrg !== false)
     setOpenaiApiKey(data.openaiApiKey || '')
     setDefaultPreviewResolution(data.defaultPreviewResolution || 'auto')
     setDefaultSkipTranscoding(data.defaultSkipTranscoding ?? false)
@@ -794,6 +801,7 @@ export default function GlobalSettingsPage() {
     brandingLogoUrl: brandingLogoPreview, onUploadLogo: handleLogoUpload,
     onRemoveLogo: handleLogoRemove, logoUploading, logoError,
     emailHeaderStyle, setEmailHeaderStyle,
+    isPlatformOrg,
   }
 
   const privacyProps = {
