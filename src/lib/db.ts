@@ -78,7 +78,49 @@ function withRlsOrgContext(base: PrismaClient): PrismaClient {
       },
     },
   })
-  return extended as PrismaClient
+
+  // 5.10.3: BATCH-transaction arming. The per-operation wrapper above must
+  // skip operations that already run inside a transaction (wrapping them in
+  // another $transaction would escape the caller's), and INTERACTIVE
+  // transactions arm the context themselves via `setOrgContextOn(tx, org)`.
+  // But ARRAY-form transactions — `prisma.$transaction([opA, opB])` — had
+  // NO arming at all post-flip: every statement in the batch ran without
+  // `app.current_organization_id`, RLS matched zero rows, and updateMany-
+  // based flows (folder soft-delete cascade, Trash restore, version
+  // stacking) silently no-opped while reporting success.
+  //
+  // Fix: intercept the array form when an org context is armed and prepend
+  // the same `set_config` to the batch. A batch runs on one connection
+  // inside one transaction, in order — so the setting covers every
+  // statement that follows. The extra result is stripped so callers keep
+  // destructuring exactly what they passed in.
+  const origTransaction = extended.$transaction.bind(extended)
+  const armedTransaction = async (arg: any, opts?: any) => {
+    const organizationId = getOrgContext()
+    if (Array.isArray(arg) && organizationId) {
+      const results = await origTransaction(
+        [
+          (base as any).$executeRaw`SELECT set_config('app.current_organization_id', ${organizationId}, TRUE)`,
+          ...arg,
+        ],
+        opts,
+      )
+      return results.slice(1)
+    }
+    return origTransaction(arg, opts)
+  }
+
+  // The extended client is itself a Proxy — assigning `$transaction` on it
+  // directly isn't guaranteed to stick, so route the override through our
+  // own Proxy layer.
+  const armed = new Proxy(extended, {
+    get(target, prop, receiver) {
+      if (prop === '$transaction') return armedTransaction
+      return Reflect.get(target, prop, receiver)
+    },
+  })
+
+  return armed as PrismaClient
 }
 
 export const prisma = globalForPrisma.prisma ?? withRlsOrgContext(prismaBase)

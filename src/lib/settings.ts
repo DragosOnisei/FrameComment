@@ -329,8 +329,15 @@ export async function initializeSecuritySettings() {
 
     if (httpsEnabled !== null) {
 
-      // Update database with environment variable value
-      await prisma.securitySettings.upsert({
+      // Update database with environment variable value.
+      // 5.10.3: privileged client — this runs at BOOT (instrumentation),
+      // before any request/org context exists. Post-flip the restricted
+      // app role hit the RLS WITH CHECK ("new row violates row-level
+      // security policy") on every start. It's a platform-level init of
+      // the org-1 singleton, so the privileged client is the right tool
+      // (orgSettingsWhere()/orgSettingsCreateBase() fall back to org-1
+      // without a context).
+      await prismaPrivileged.securitySettings.upsert({
         where: orgSettingsWhere(),
         update: { httpsEnabled },
         create: { ...orgSettingsCreateBase(), httpsEnabled },
