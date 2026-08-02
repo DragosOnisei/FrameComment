@@ -303,6 +303,11 @@ export async function chargeInstance(): Promise<ChargeResult> {
       collection_method: 'charge_automatically',
       auto_advance: false,
       description: 'FrameComment usage',
+      // 5.7.3: EXPLICIT currency. Without it, a customer that has never been
+      // invoiced inherits the Stripe ACCOUNT's default currency (RON on a
+      // Romanian account) — and attaching our USD line items then fails with
+      // "You cannot combine currencies on a single invoice" (live incident).
+      currency: BILLING_PRICING.currency,
       // 5.7.2: tag OUR invoices — the webhook only acts on events carrying
       // this metadata, so other products billed from the same Stripe account
       // can never overwrite FrameComment's billing state.
