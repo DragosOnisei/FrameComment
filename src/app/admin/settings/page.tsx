@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Settings as SettingsIcon, Save, Palette, Mail, Video, Shield, Building2, ShieldCheck, FolderCog, Ban, CreditCard, HardDrive } from 'lucide-react'
@@ -236,6 +236,10 @@ export default function GlobalSettingsPage() {
   const [blocklistsLoading, setBlocklistsLoading] = useState(false)
 
   // Collapsible section state (all collapsed by default, used on mobile)
+  // 5.11.1: tenant-only — spinner state for the inline Company Name save
+  // (the global Save Changes button is platform-only now).
+  const [savingCompanyName, setSavingCompanyName] = useState(false)
+
   const [showAppearance, setShowAppearance] = useState(false)
   const [showBranding, setShowBranding] = useState(false)
   const [showPrivacy, setShowPrivacy] = useState(false)
@@ -718,6 +722,79 @@ export default function GlobalSettingsPage() {
     }
   }
 
+  // 5.11.1: tenant-only inline save for Company Name (the one field on a
+  // tenant's Settings that needs an explicit save — the server mirrors it
+  // onto Organization.name + the Stripe customer).
+  async function handleSaveCompanyName() {
+    if (savingCompanyName) return
+    setSavingCompanyName(true)
+    setError('')
+    try {
+      await apiPatch('/api/settings', { companyName: companyName || null })
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
+      // Refresh server components (sidebar shows the company name).
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToSave'))
+    } finally {
+      setSavingCompanyName(false)
+    }
+  }
+
+  // 5.11.1: tenants have NO global Save button — everything they can touch
+  // outside Company Name (accent color, video-processing defaults) is
+  // auto-persisted here with a short debounce, matching how the page
+  // already FEELS (accent previews live, toggles flip instantly).
+  // Platform org keeps the classic top-bar Save Changes flow untouched.
+  const tenantAutoSaveReadyRef = useRef(false)
+  useEffect(() => {
+    if (loading) return
+    // Small grace period so the initial applySettingsToForm() writes
+    // don't count as user edits.
+    const timer = setTimeout(() => {
+      tenantAutoSaveReadyRef.current = true
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [loading])
+  useEffect(() => {
+    if (isPlatformOrg || loading || !tenantAutoSaveReadyRef.current) return
+    const timer = setTimeout(async () => {
+      try {
+        await apiPatch('/api/settings', {
+          accentColor: accentColor || 'blue',
+          defaultPreviewResolution: defaultPreviewResolution || 'auto',
+          defaultSkipTranscoding,
+          defaultWatermarkEnabled,
+          defaultWatermarkText: defaultWatermarkText || null,
+          defaultWatermarkPositions: defaultWatermarkPositions || 'center',
+          defaultWatermarkOpacity,
+          defaultWatermarkFontSize: defaultWatermarkFontSize || 'medium',
+          defaultApplyPreviewLut,
+        })
+        // Keep the accent cache + AppearanceSection's unmount-revert
+        // baseline in sync (same as the platform Save flow does).
+        try {
+          localStorage.setItem('adminAccentColor', accentColor || 'blue')
+          window.dispatchEvent(
+            new CustomEvent('accentcolor:saved', { detail: { accentColor: accentColor || 'blue' } }),
+          )
+        } catch {
+          // localStorage can throw in private mode — non-fatal.
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('failedToSave'))
+      }
+    }, 800)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isPlatformOrg, loading, accentColor,
+    defaultPreviewResolution, defaultSkipTranscoding,
+    defaultWatermarkEnabled, defaultWatermarkText, defaultWatermarkPositions,
+    defaultWatermarkOpacity, defaultWatermarkFontSize, defaultApplyPreviewLut,
+  ])
+
   async function handleTestEmail() {
     setTestEmailSending(true)
     setTestEmailResult(null)
@@ -804,7 +881,9 @@ export default function GlobalSettingsPage() {
   const appearanceProps = {
     language, setLanguage, defaultTheme, setDefaultTheme, accentColor, setAccentColor,
     // 5.11.0: tenants edit Company Name here (Branding is hidden for them).
+    // 5.11.1: …and save it with the inline button (no top-bar Save for tenants).
     showCompanyName: !isPlatformOrg, companyName, setCompanyName,
+    onSaveCompanyName: handleSaveCompanyName, savingCompanyName,
   }
 
   const brandingProps = {
@@ -941,21 +1020,27 @@ export default function GlobalSettingsPage() {
         </h1>
       </TopbarLeftSlot>
       <TopbarRightSlot>
-        <Button
-          onClick={handleSave}
-          variant="ghost"
-          size="sm"
-          disabled={saving}
-          className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
-          style={{
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            backdropFilter: 'blur(12px) saturate(140%)',
-            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-          }}
-        >
-          <Save className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
-        </Button>
+        {/* 5.11.1: the global Save Changes button is PLATFORM-ONLY. On a
+            tenant's trimmed Settings everything auto-saves (accent color,
+            video-processing defaults) or has a dedicated save (Company
+            Name in Appearance, Storage's own button). */}
+        {isPlatformOrg && (
+          <Button
+            onClick={handleSave}
+            variant="ghost"
+            size="sm"
+            disabled={saving}
+            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+          >
+            <Save className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">{saving ? tc('saving') : tc('saveChanges')}</span>
+          </Button>
+        )}
       </TopbarRightSlot>
 
       {/* 2.5.0+: on desktop the page becomes a fixed-height column —

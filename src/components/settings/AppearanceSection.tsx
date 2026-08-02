@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
-import { Check, Globe } from 'lucide-react'
+import { Check, Globe, Loader2, Save } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { applyAccentColor } from '@/components/AccentColorProvider'
 
@@ -43,6 +44,10 @@ interface AppearanceSectionProps {
   showCompanyName?: boolean
   companyName?: string
   setCompanyName?: (value: string) => void
+  /** 5.11.1: tenants have no global Save button — Company Name saves
+   *  from its own button right here in the card. */
+  onSaveCompanyName?: () => void | Promise<void>
+  savingCompanyName?: boolean
 }
 
 export function AppearanceSection({
@@ -58,8 +63,13 @@ export function AppearanceSection({
   showCompanyName,
   companyName,
   setCompanyName,
+  onSaveCompanyName,
+  savingCompanyName,
 }: AppearanceSectionProps) {
   const t = useTranslations('settings')
+  // 5.11.1: shared "Save Changes"/"Saving…" labels for the inline
+  // Company Name save button (tenant mode).
+  const tc = useTranslations('common')
 
   // 2.5.0+: Live preview of accent color.
   //
@@ -154,14 +164,36 @@ export function AppearanceSection({
       {showCompanyName && setCompanyName && (
         <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
           <Label htmlFor="companyName" className="text-white">{t('appearance.companyName')}</Label>
-          <Input
-            id="companyName"
-            type="text"
-            value={companyName ?? ''}
-            onChange={(e) => setCompanyName(e.target.value)}
-            placeholder={t('appearance.companyNamePlaceholder')}
-            className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
-          />
+          {/* 5.11.1: inline Save — the only field on a tenant's Settings
+              that needs an explicit save (everything else persists on
+              change), so the button lives right next to it. */}
+          <div className="flex items-center gap-2">
+            <Input
+              id="companyName"
+              type="text"
+              value={companyName ?? ''}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder={t('appearance.companyNamePlaceholder')}
+              className="flex-1 bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
+            />
+            {onSaveCompanyName && (
+              <Button
+                type="button"
+                onClick={() => void onSaveCompanyName()}
+                disabled={savingCompanyName}
+                className="shrink-0"
+              >
+                {savingCompanyName ? (
+                  <Loader2 className="w-4 h-4 sm:mr-2 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 sm:mr-2" />
+                )}
+                <span className="hidden sm:inline">
+                  {savingCompanyName ? tc('saving') : tc('saveChanges')}
+                </span>
+              </Button>
+            )}
+          </div>
           <p className="text-xs text-white/55">
             {t('appearance.companyNameHint')}
           </p>
