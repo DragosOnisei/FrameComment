@@ -791,10 +791,20 @@ export default function GlobalSettingsPage() {
     { id: 'storage', label: 'Storage', icon: HardDrive },
     // 1.9.2+: usage-based billing summary. UI-only — no Stripe yet.
     { id: 'billing', label: 'Billing', icon: CreditCard },
-  ]
+  ].filter(
+    // 5.11.0: tenant companies get a trimmed Settings — Branding,
+    // Privacy, Security and Blocklist are PLATFORM-ONLY (hidden, not
+    // removed: all state/APIs stay intact, and CPC MARKETING sees
+    // everything). Tenants set their Company Name from Appearance.
+    (s) =>
+      isPlatformOrg ||
+      !['branding', 'privacy', 'security', 'blocklist'].includes(s.id),
+  )
 
   const appearanceProps = {
     language, setLanguage, defaultTheme, setDefaultTheme, accentColor, setAccentColor,
+    // 5.11.0: tenants edit Company Name here (Branding is hidden for them).
+    showCompanyName: !isPlatformOrg, companyName, setCompanyName,
   }
 
   const brandingProps = {
@@ -972,20 +982,31 @@ export default function GlobalSettingsPage() {
         {/* Mobile: stacked collapsible cards */}
         <div className="lg:hidden space-y-4 sm:space-y-6">
           <AppearanceSection {...appearanceProps} show={showAppearance} setShow={setShowAppearance} />
-          <BrandingSection {...brandingProps} show={showBranding} setShow={setShowBranding} />
-          <PrivacySection {...privacyProps} show={showPrivacy} setShow={setShowPrivacy} />
+          {/* 5.11.0: Branding / Privacy / Security / Blocklist are
+              platform-only — hidden (not removed) for tenant companies.
+              Tenants get Company Name inside Appearance instead. */}
+          {isPlatformOrg && (
+            <BrandingSection {...brandingProps} show={showBranding} setShow={setShowBranding} />
+          )}
+          {isPlatformOrg && (
+            <PrivacySection {...privacyProps} show={showPrivacy} setShow={setShowPrivacy} />
+          )}
           <NotificationsSection {...notificationsProps} show={showNotifications} setShow={setShowNotifications} />
           <VideoProcessingSettingsSection {...videoProcessingProps} show={showVideoProcessing} setShow={setShowVideoProcessing} />
           {/* 1.5.8: <ProjectDefaultsSection> removed from the mobile
               collapsible stack alongside the sidebar entry. Props +
               state stay defined so a future re-enable just needs
               to add the JSX back. */}
-          <SecuritySettingsSection
-            {...securityProps}
-            showSecuritySettings={showSecuritySettings}
-            setShowSecuritySettings={setShowSecuritySettings}
-          />
-          <BlocklistSection {...blocklistProps} show={showBlocklist} setShow={setShowBlocklist} />
+          {isPlatformOrg && (
+            <SecuritySettingsSection
+              {...securityProps}
+              showSecuritySettings={showSecuritySettings}
+              setShowSecuritySettings={setShowSecuritySettings}
+            />
+          )}
+          {isPlatformOrg && (
+            <BlocklistSection {...blocklistProps} show={showBlocklist} setShow={setShowBlocklist} />
+          )}
           <StorageSection show={showStorage} setShow={setShowStorage} />
           <BillingSection show={showBilling} setShow={setShowBilling} />
           {/* 5.10 Danger Zone — tenant companies only, Owner only. */}
@@ -1031,10 +1052,14 @@ export default function GlobalSettingsPage() {
             {activeSection === 'appearance' && (
               <AppearanceSection {...appearanceProps} show={true} setShow={() => {}} collapsible={false} />
             )}
-            {activeSection === 'branding' && (
+            {/* 5.11.0: Branding / Privacy / Security / Blocklist panes are
+                platform-only. The nav entries are filtered out for tenants,
+                but the panes are gated too so a deep-link (?section=…)
+                can't surface them either. */}
+            {isPlatformOrg && activeSection === 'branding' && (
               <BrandingSection {...brandingProps} show={true} setShow={() => {}} collapsible={false} />
             )}
-            {activeSection === 'privacy' && (
+            {isPlatformOrg && activeSection === 'privacy' && (
               <PrivacySection {...privacyProps} show={true} setShow={() => {}} collapsible={false} />
             )}
             {activeSection === 'notifications' && (
@@ -1048,10 +1073,10 @@ export default function GlobalSettingsPage() {
                 be 'project-defaults' anymore (it's gone from the
                 sidebar) so this block was unreachable — dropped it
                 to keep the file shorter. */}
-            {activeSection === 'security' && (
+            {isPlatformOrg && activeSection === 'security' && (
               <SecuritySettingsSection {...securityProps} showSecuritySettings={true} setShowSecuritySettings={() => {}} collapsible={false} />
             )}
-            {activeSection === 'blocklist' && (
+            {isPlatformOrg && activeSection === 'blocklist' && (
               <BlocklistSection {...blocklistProps} show={true} setShow={() => {}} collapsible={false} />
             )}
             {activeSection === 'storage' && (

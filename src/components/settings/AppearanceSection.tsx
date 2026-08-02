@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
@@ -36,6 +37,12 @@ interface AppearanceSectionProps {
   show: boolean
   setShow: (value: boolean) => void
   collapsible?: boolean
+  /** 5.11.0: tenant companies don't see the Branding section at all —
+   *  their Company Name field lives here instead. The platform org
+   *  keeps it in Branding (these props stay undefined there). */
+  showCompanyName?: boolean
+  companyName?: string
+  setCompanyName?: (value: string) => void
 }
 
 export function AppearanceSection({
@@ -48,6 +55,9 @@ export function AppearanceSection({
   show,
   setShow,
   collapsible,
+  showCompanyName,
+  companyName,
+  setCompanyName,
 }: AppearanceSectionProps) {
   const t = useTranslations('settings')
 
@@ -136,6 +146,28 @@ export function AppearanceSection({
       contentClassName="space-y-4 border-t border-white/10 pt-4"
       collapsible={collapsible}
     >
+      {/* 5.11.0: Company Name — tenants only (their Branding section is
+          hidden; the platform org keeps this field in Branding). Same
+          markup + i18n keys as the Branding original, same save flow
+          (page-level state → the global Save button PATCHes
+          /api/settings, which also mirrors Organization.name). */}
+      {showCompanyName && setCompanyName && (
+        <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
+          <Label htmlFor="companyName" className="text-white">{t('appearance.companyName')}</Label>
+          <Input
+            id="companyName"
+            type="text"
+            value={companyName ?? ''}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder={t('appearance.companyNamePlaceholder')}
+            className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/45 focus-visible:ring-primary/60"
+          />
+          <p className="text-xs text-white/55">
+            {t('appearance.companyNameHint')}
+          </p>
+        </div>
+      )}
+
       {/* 1.5.8: Application Language card hidden — only English is
           shipped right now, so the dropdown was just visual noise.
           `language` state + the GET/PATCH plumbing stay intact so a
