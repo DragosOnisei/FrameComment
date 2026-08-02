@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForCommentId } from '@/lib/share-org'
 import { rateLimit } from '@/lib/rate-limit'
 import { getAuthContext } from '@/lib/auth'
 import { verifyProjectAccess } from '@/lib/project-access'
@@ -58,6 +59,9 @@ export async function PATCH(
     }
     const { isResolved, resolvedBy } = validation.data
 
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForCommentId(id)
     const existing = await prisma.comment.findUnique({
       where: { id },
       select: {

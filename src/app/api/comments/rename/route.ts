@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectId } from '@/lib/share-org'
 import { rateLimit } from '@/lib/rate-limit'
 import { getAuthContext } from '@/lib/auth'
 import { verifyProjectAccess } from '@/lib/project-access'
@@ -60,6 +61,9 @@ export async function PATCH(request: NextRequest) {
     const projectId = validation.data.projectId
     const newName = validation.data.newName.trim().slice(0, 120)
 
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForProjectId(projectId)
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: { id: true, sharePassword: true, authMode: true },

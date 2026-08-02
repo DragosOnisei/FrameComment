@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForProjectId } from '@/lib/share-org'
 import { handleApprovalNotification } from '@/lib/notifications'
 import { getAutoApproveProject, isSmtpConfigured } from '@/lib/settings'
 import { verifyProjectAccess } from '@/lib/project-access'
@@ -51,6 +52,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     // SECURITY: Validate share password if project is password-protected
     // This allows clients to approve their own projects via the share link
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForProjectId(projectId)
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForVideoId } from '@/lib/share-org'
 import { getFilePath, sanitizeFilenameForHeader, getVideoContentType, createWebReadableStream } from '@/lib/storage'
 import { s3GetPresignedDownloadUrl, s3FileExists } from '@/lib/s3-storage'
 import { resolveReadTarget } from '@/lib/storage-backends'
@@ -39,6 +40,9 @@ export async function GET(
     const { id } = await params
 
     // Get video metadata
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoId(id)
     const video = await prisma.video.findUnique({
       where: { id },
       include: { project: true },

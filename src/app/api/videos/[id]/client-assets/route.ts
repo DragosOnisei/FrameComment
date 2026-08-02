@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere } from '@/lib/db'
+import { armOrgForVideoId } from '@/lib/share-org'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile, sanitizeFilename, isSuspiciousFilename } from '@/lib/file-validation'
@@ -35,6 +36,9 @@ export async function POST(
 
   try {
     // Verify video exists and get project
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoId(videoId)
     const video = await prisma.video.findUnique({
       where: { id: videoId },
       include: { project: true },
@@ -181,6 +185,9 @@ export async function GET(
   if (rateLimitResult) return rateLimitResult
 
   try {
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoId(videoId)
     const video = await prisma.video.findUnique({
       where: { id: videoId },
       include: { project: true },
@@ -266,6 +273,9 @@ export async function DELETE(
     const { searchParams } = new URL(request.url)
     const assetId = searchParams.get('assetId') ?? ''
 
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoId(videoId)
     const video = await prisma.video.findUnique({
       where: { id: videoId },
       include: { project: true },

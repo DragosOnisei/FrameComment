@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForCommentId } from '@/lib/share-org'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireApiAdmin, getAuthContext } from '@/lib/auth'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
@@ -66,6 +67,9 @@ export async function DELETE(
     const { id } = await params
 
     // Look up the comment plus the fields we need for authorization.
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForCommentId(id)
     const existingComment = await prisma.comment.findUnique({
       where: { id },
       select: {
@@ -179,6 +183,9 @@ export async function PATCH(
     const { content, timecode, timecodeEnd } = validation.data
 
     // Look up the existing comment
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForCommentId(id)
     const existingComment = await prisma.comment.findUnique({
       where: { id },
       select: {

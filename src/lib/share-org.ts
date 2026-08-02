@@ -55,3 +55,73 @@ export async function armOrgForFolderSlug(slug: string): Promise<void> {
     logError('[share-org] folder slug arming failed:', err)
   }
 }
+
+// ─── 5.8 post-flip: BY-ID arming for the dual-auth routes ───────────────────
+//
+// The dual-auth routes (comments, markers, video assets/downloads, approve)
+// fetch the target entity BEFORE verifyProjectAccess — they need its
+// sharePassword/authMode to run the access check at all. Post-flip those
+// pre-auth lookups ran unarmed and RLS blanked them (admin comment lists
+// came back empty on live). These helpers arm the owning org from the
+// entity itself; verifyProjectAccess then decides authorization exactly as
+// before. Also covers auth-mode NONE flows, which carry no token at all.
+
+async function armFromRow(row: any): Promise<void> {
+  if (row?.organizationId) enterOrgContext(row.organizationId)
+}
+
+export async function armOrgForProjectId(id: string): Promise<void> {
+  if (!id || typeof id !== 'string') return
+  try {
+    await armFromRow(
+      await prismaPrivileged.project.findUnique({
+        where: { id },
+        select: { organizationId: true } as any,
+      }),
+    )
+  } catch (err) {
+    logError('[share-org] project id arming failed:', err)
+  }
+}
+
+export async function armOrgForVideoId(id: string): Promise<void> {
+  if (!id || typeof id !== 'string') return
+  try {
+    await armFromRow(
+      await prismaPrivileged.video.findUnique({
+        where: { id },
+        select: { organizationId: true } as any,
+      }),
+    )
+  } catch (err) {
+    logError('[share-org] video id arming failed:', err)
+  }
+}
+
+export async function armOrgForCommentId(id: string): Promise<void> {
+  if (!id || typeof id !== 'string') return
+  try {
+    await armFromRow(
+      await prismaPrivileged.comment.findUnique({
+        where: { id },
+        select: { organizationId: true } as any,
+      }),
+    )
+  } catch (err) {
+    logError('[share-org] comment id arming failed:', err)
+  }
+}
+
+export async function armOrgForVideoAssetId(id: string): Promise<void> {
+  if (!id || typeof id !== 'string') return
+  try {
+    await armFromRow(
+      await prismaPrivileged.videoAsset.findUnique({
+        where: { id },
+        select: { organizationId: true } as any,
+      }),
+    )
+  } catch (err) {
+    logError('[share-org] video asset id arming failed:', err)
+  }
+}

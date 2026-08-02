@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForVideoAssetId } from '@/lib/share-org'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -22,6 +23,9 @@ export async function POST(
     const { id: videoId, assetId } = await params
 
     // Get asset with video and project info
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoAssetId(assetId)
     const asset = await prisma.videoAsset.findUnique({
       where: { id: assetId },
       include: {

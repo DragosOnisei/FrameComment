@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere } from '@/lib/db'
+import { armOrgForProjectId } from '@/lib/share-org'
 import { getAuthContext } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest, createCommentSchema, safeParseBody } from '@/lib/validation'
@@ -49,6 +50,9 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get('projectId') ?? ''
 
     // Fetch the project to check password protection
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForProjectId(projectId)
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: {
@@ -267,6 +271,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Get project for access verification
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForProjectId(projectId)
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: {

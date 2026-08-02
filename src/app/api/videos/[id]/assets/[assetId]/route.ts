@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForVideoAssetId } from '@/lib/share-org'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, sanitizeFilenameForHeader, createWebReadableStream } from '@/lib/storage'
@@ -42,6 +43,9 @@ export async function GET(
 
   try {
     // Get asset with video and project info
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoAssetId(assetId)
     const asset = await prisma.videoAsset.findUnique({
       where: { id: assetId },
       include: {
@@ -200,6 +204,9 @@ export async function DELETE(
 
   try {
     // Get asset with video info
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoAssetId(assetId)
     const asset = await prisma.videoAsset.findUnique({
       where: { id: assetId },
       include: {

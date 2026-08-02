@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { armOrgForVideoId } from '@/lib/share-org'
 import { getCurrentUserFromRequest, requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
@@ -50,6 +51,9 @@ export async function GET(
 
   try {
     // Verify video exists
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoId(videoId)
     const video = await prisma.video.findUnique({
       where: { id: videoId },
       include: {
@@ -164,6 +168,9 @@ export async function POST(
 
   try {
     // Verify video exists
+    // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
+    // the un-armed query was blanked by the policies; see lib/share-org.ts).
+    await armOrgForVideoId(videoId)
     const video = await prisma.video.findUnique({
       where: { id: videoId },
       include: {
