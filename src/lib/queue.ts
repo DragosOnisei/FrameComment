@@ -398,6 +398,13 @@ export interface StorageTransferJob {
   mode?: 'transfer' | 'purge'
   purgeBackend?: string
   requestedBy?: string
+  // 5.12.0: the requesting company. The worker runs on a privileged DB role
+  // (RLS doesn't bind it), so the transfer scopes itself to this org
+  // explicitly — and resolves the ACTIVE backend from this org's settings.
+  // Missing (legacy job) → 'org-1', preserving pre-multi-tenant behavior.
+  organizationId?: string
+  // 5.12.0: transfer just ONE video's files (kebab → "Transfer to …").
+  videoId?: string
 }
 
 export function getStorageTransferQueue(): Queue<StorageTransferJob> {

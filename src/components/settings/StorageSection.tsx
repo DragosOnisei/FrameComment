@@ -91,6 +91,11 @@ interface TransferStatus {
   error: string | null
   recentErrors: string[]
   backends?: BackendStatus[]
+  /** 5.12.0: false when the SAVED active R2/AWS backend doesn't answer
+   *  with its stored credentials (local/fc are always true). */
+  activeReachable?: boolean
+  totalBytes?: number
+  copiedBytes?: number
 }
 
 const SECRET_MASK = '••••••••••••'
@@ -184,6 +189,8 @@ export function StorageSection({ show, setShow, collapsible = true }: StorageSec
     try {
       await apiPost('/api/settings/storage/transfer', { action: 'start' })
       await fetchTransfer()
+      // 5.12.0: wake the global bottom-right progress banner immediately.
+      window.dispatchEvent(new Event('storage-transfer:poke'))
     } catch (e: any) {
       setTransferError(e?.message || 'Failed to start transfer')
     } finally {
@@ -195,6 +202,7 @@ export function StorageSection({ show, setShow, collapsible = true }: StorageSec
     try {
       await apiPost('/api/settings/storage/transfer', { action: 'cancel' })
       await fetchTransfer()
+      window.dispatchEvent(new Event('storage-transfer:poke'))
     } catch {
       /* ignore */
     }
@@ -215,6 +223,7 @@ export function StorageSection({ show, setShow, collapsible = true }: StorageSec
     try {
       await apiPost('/api/settings/storage/transfer', { action: 'purge', backend })
       await fetchTransfer()
+      window.dispatchEvent(new Event('storage-transfer:poke'))
     } catch (e: any) {
       setTransferError(e?.message || 'Failed to start deletion')
     } finally {
@@ -495,21 +504,58 @@ export function StorageSection({ show, setShow, collapsible = true }: StorageSec
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3 flex-wrap">
-                <Button type="button" variant="outline" onClick={handleStartTransfer} disabled={starting}>
-                  {starting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ArrowLeftRight className="w-4 h-4 mr-2" />}
-                  Transfer files now
-                </Button>
-                {transfer && transfer.status !== 'idle' && (
-                  <span className={'text-sm ' + (transfer.status === 'error' ? 'text-red-300' : transfer.status === 'cancelled' ? 'text-amber-300' : 'text-emerald-300')}>
-                    {transfer.status === 'completed' && (transfer.mode === 'purge'
-                      ? `Deleted ${transfer.deletedFiles} files${transfer.failed > 0 ? `, ${transfer.failed} skipped` : ''}`
-                      : `Done — ${transfer.copiedFiles} files copied${transfer.failed > 0 ? `, ${transfer.failed} skipped` : ''}`)}
-                    {transfer.status === 'cancelled' && `Cancelled — ${transfer.processed}/${transfer.total} done`}
-                    {transfer.status === 'error' && `Error: ${transfer.error || 'job failed'}`}
-                  </span>
-                )}
-              </div>
+              // 5.12.0: the button only shows when there is actually
+              // something to move AND the destination is real: the saved
+              // active backend (not an unsaved card selection) that — for
+              // R2/AWS — answered a live connection probe with the stored
+              // credentials. Everything on the active backend already →
+              // a green "nothing to transfer" note instead of a dead button.
+              (() => {
+                const savedActive = transfer?.activeBackend ?? null
+                const statusKnown = !!transfer?.backends
+                const needsTransfer = !!transfer?.backends?.some(
+                  (b) => !b.isActive && b.fileCount > 0 && !b.fullyMirroredOnActive,
+                )
+                const unsavedSelection = savedActive !== null && selected !== savedActive
+                const unreachable = transfer?.activeReachable === false
+                const showButton = statusKnown && needsTransfer && !unsavedSelection && !unreachable
+                return (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {showButton && (
+                      <Button type="button" onClick={handleStartTransfer} disabled={starting}>
+                        {starting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ArrowLeftRight className="w-4 h-4 mr-2" />}
+                        Transfer all files to {transfer?.activeBackendLabel || 'active storage'}
+                      </Button>
+                    )}
+                    {statusKnown && !needsTransfer && (
+                      <span className="inline-flex items-center gap-1.5 text-sm text-emerald-300">
+                        <Check className="w-4 h-4" />
+                        All files are already on {transfer?.activeBackendLabel || 'the active storage'} — nothing to transfer.
+                      </span>
+                    )}
+                    {statusKnown && needsTransfer && unsavedSelection && (
+                      <span className="text-sm text-amber-300">
+                        Save your storage choice first — transfers always go to the saved active backend.
+                      </span>
+                    )}
+                    {statusKnown && needsTransfer && !unsavedSelection && unreachable && (
+                      <span className="text-sm text-amber-300">
+                        Can&apos;t reach {transfer?.activeBackendLabel} with the saved credentials — run
+                        Test connection, fix them and save.
+                      </span>
+                    )}
+                    {transfer && transfer.status !== 'idle' && (
+                      <span className={'text-sm ' + (transfer.status === 'error' ? 'text-red-300' : transfer.status === 'cancelled' ? 'text-amber-300' : 'text-emerald-300')}>
+                        {transfer.status === 'completed' && (transfer.mode === 'purge'
+                          ? `Deleted ${transfer.deletedFiles} files${transfer.failed > 0 ? `, ${transfer.failed} skipped` : ''}`
+                          : `Done — ${transfer.copiedFiles} files copied${transfer.failed > 0 ? `, ${transfer.failed} skipped` : ''}`)}
+                        {transfer.status === 'cancelled' && `Cancelled — ${transfer.processed}/${transfer.total} done`}
+                        {transfer.status === 'error' && `Error: ${transfer.error || 'job failed'}`}
+                      </span>
+                    )}
+                  </div>
+                )
+              })()
             )}
 
             {/* Per-backend storage locations + delete buttons */}
@@ -617,7 +663,9 @@ function TestRow({
   const result = testResult && testResult.backend === backend ? testResult : null
   return (
     <div className="flex items-center gap-3 pt-1">
-      <Button type="button" variant="outline" size="sm" disabled={testing === backend} onClick={() => onTest(backend)}>
+      {/* 5.12.0: accent-colored (default variant) — same visual weight as
+          "Save storage settings", per the storage UX pass. */}
+      <Button type="button" size="sm" disabled={testing === backend} onClick={() => onTest(backend)}>
         {testing === backend ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
         Test connection
       </Button>

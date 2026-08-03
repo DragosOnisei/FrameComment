@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  ArrowLeftRight,
   ArrowUpFromLine,
   Copy,
   Download,
@@ -23,6 +24,8 @@ import {
 import { computePopoverStyle } from '@/lib/popover-position'
 import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
 import { storageLocationLabels } from '@/lib/storage-labels'
+import { fetchActiveBackendInfo, type ActiveBackendInfo } from '@/lib/active-backend-client'
+import { apiPost } from '@/lib/api-client'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -417,6 +420,43 @@ export default function VideoCard({
       document.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
+
+  // 5.12.0: "Transfer to <active backend>" — offered when this video isn't
+  // yet stored on the company's active backend. The lookup is a module-
+  // cached, admin-gated fetch (non-privileged roles cache `null` → item
+  // hidden). Resolved lazily when the menu opens so grids stay cheap.
+  const [transferTarget, setTransferTarget] = useState<ActiveBackendInfo | null>(null)
+  const [transferBusy, setTransferBusy] = useState(false)
+  useEffect(() => {
+    if (!menuOpen) return
+    let alive = true
+    void fetchActiveBackendInfo().then((info) => {
+      if (alive) setTransferTarget(info)
+    })
+    return () => {
+      alive = false
+    }
+  }, [menuOpen])
+  const videoLocations = (storageLocations || storageBackend || 'local')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const showTransfer =
+    !!transferTarget && !videoLocations.includes(transferTarget.backend)
+  const handleTransferToActive = async () => {
+    if (!transferTarget || transferBusy) return
+    setTransferBusy(true)
+    try {
+      await apiPost(`/api/videos/${id}/transfer`, {})
+      // Wake the global bottom-right "Transferring files" banner.
+      window.dispatchEvent(new Event('storage-transfer:poke'))
+      setMenuOpen(false)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to start transfer')
+    } finally {
+      setTransferBusy(false)
+    }
+  }
 
   const fmtDuration = formatDuration(duration)
   const uploadDate = formatUploadDate(createdAt)
@@ -1153,6 +1193,21 @@ export default function VideoCard({
                 >
                   <RefreshCw className="w-4 h-4 shrink-0" />
                   Regenerate thumbnail
+                </button>
+              )}
+              {/* 5.12.0: manual per-video transfer to the company's ACTIVE
+                  backend. Hidden when the video already lives there, in
+                  bulk mode, or for roles without settings access. */}
+              {showTransfer && !isBulk && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  disabled={transferBusy}
+                  onClick={() => void handleTransferToActive()}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap disabled:opacity-50"
+                >
+                  <ArrowLeftRight className="w-4 h-4 shrink-0" />
+                  Transfer to {transferTarget!.label}
                 </button>
               )}
               {onDelete && (

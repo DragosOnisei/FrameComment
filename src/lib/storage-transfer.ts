@@ -45,8 +45,12 @@ import {
 } from './storage-backends'
 import { logError, logMessage } from './logging'
 
-const STATE_KEY = 'storage-transfer:state'
-const CANCEL_KEY = 'storage-transfer:cancel'
+// 5.12.0: state + cancel flags are PER-ORGANIZATION. The queue still runs one
+// job at a time globally, but each company only ever sees ITS OWN progress
+// (entity labels in the state would otherwise leak another tenant's file
+// names to whoever polls the status endpoint).
+const stateKey = (organizationId: string) => `storage-transfer:state:${organizationId}`
+const cancelKey = (organizationId: string) => `storage-transfer:cancel:${organizationId}`
 const STATE_TTL_SECONDS = 7 * 24 * 60 * 60
 
 export interface TransferState {
@@ -68,6 +72,13 @@ export interface TransferState {
   finishedAt: number | null
   error: string | null
   recentErrors: string[]
+  // 5.12.0: byte-level progress for the global banner. `totalBytes` is the
+  // DB-known size estimate of the entities queued this run (originals +
+  // attachments + uploads + documents — derived previews/HLS have no DB
+  // size); `copiedBytes` counts ACTUAL bytes copied, so the pair gives an
+  // honest "copied X of ~Y" plus an MB/s rate when polled.
+  totalBytes: number
+  copiedBytes: number
 }
 
 function emptyState(): TransferState {
@@ -88,12 +99,14 @@ function emptyState(): TransferState {
     finishedAt: null,
     error: null,
     recentErrors: [],
+    totalBytes: 0,
+    copiedBytes: 0,
   }
 }
 
-export async function getTransferState(): Promise<TransferState> {
+export async function getTransferState(organizationId: string): Promise<TransferState> {
   try {
-    const raw = await getRedis().get(STATE_KEY)
+    const raw = await getRedis().get(stateKey(organizationId))
     if (!raw) return emptyState()
     return { ...emptyState(), ...(JSON.parse(raw) as Partial<TransferState>) }
   } catch {
@@ -101,33 +114,33 @@ export async function getTransferState(): Promise<TransferState> {
   }
 }
 
-async function saveState(state: TransferState): Promise<void> {
+async function saveState(organizationId: string, state: TransferState): Promise<void> {
   try {
-    await getRedis().set(STATE_KEY, JSON.stringify(state), 'EX', STATE_TTL_SECONDS)
+    await getRedis().set(stateKey(organizationId), JSON.stringify(state), 'EX', STATE_TTL_SECONDS)
   } catch (err) {
     logError('[storage-transfer] failed to persist state:', err)
   }
 }
 
-export async function requestCancel(): Promise<void> {
+export async function requestCancel(organizationId: string): Promise<void> {
   try {
-    await getRedis().set(CANCEL_KEY, '1', 'EX', STATE_TTL_SECONDS)
+    await getRedis().set(cancelKey(organizationId), '1', 'EX', STATE_TTL_SECONDS)
   } catch (err) {
     logError('[storage-transfer] failed to set cancel flag:', err)
   }
 }
 
-async function isCancelled(): Promise<boolean> {
+async function isCancelled(organizationId: string): Promise<boolean> {
   try {
-    return (await getRedis().get(CANCEL_KEY)) === '1'
+    return (await getRedis().get(cancelKey(organizationId))) === '1'
   } catch {
     return false
   }
 }
 
-async function clearCancel(): Promise<void> {
+async function clearCancel(organizationId: string): Promise<void> {
   try {
-    await getRedis().del(CANCEL_KEY)
+    await getRedis().del(cancelKey(organizationId))
   } catch {
     /* ignore */
   }
@@ -151,7 +164,7 @@ function guessContentType(p: string): string {
   return 'application/octet-stream'
 }
 
-type CopyResult = 'copied' | 'exists' | 'missing'
+type CopyResult = { result: 'copied' | 'exists' | 'missing'; bytes: number }
 
 /** Copy one file from `from` → `to`, verifying the size. Idempotent + resumable. */
 async function copyOneFile(pathStr: string, from: StorageBackend, to: StorageBackend): Promise<CopyResult> {
@@ -163,7 +176,7 @@ async function copyOneFile(pathStr: string, from: StorageBackend, to: StorageBac
       // Source already gone. Sources are only ever deleted AFTER a verified
       // copy, so a present target + absent source means this file was fully
       // migrated on a prior run. Nothing to do.
-      return 'exists'
+      return { result: 'exists', bytes: 0 }
     }
     // Both exist — a prior run may have been interrupted mid-copy, leaving a
     // TRUNCATED target. Never trust the target on size alone: verify it's a
@@ -172,11 +185,11 @@ async function copyOneFile(pathStr: string, from: StorageBackend, to: StorageBac
       getStorageFileSize(pathStr, from),
       getStorageFileSize(pathStr, to),
     ])
-    if (srcSize === dstSize) return 'exists'
+    if (srcSize === dstSize) return { result: 'exists', bytes: 0 }
     await deleteFile(pathStr, to).catch(() => {})
   } else if (!sourceExists) {
     // Neither side has it (dangling DB path) → skip, non-fatal.
-    return 'missing'
+    return { result: 'missing', bytes: 0 }
   }
 
   const size = await getStorageFileSize(pathStr, from)
@@ -187,7 +200,7 @@ async function copyOneFile(pathStr: string, from: StorageBackend, to: StorageBac
   if (destSize !== size) {
     throw new Error(`size mismatch copying "${pathStr}": source=${size} dest=${destSize}`)
   }
-  return 'copied'
+  return { result: 'copied', bytes: size }
 }
 
 interface WorkItem {
@@ -198,6 +211,9 @@ interface WorkItem {
   locations: StorageBackend[] // every backend this file currently lives on
   files: string[]
   hlsBasePath: string | null
+  /** 5.12.0: DB-known size (original/attachment/upload/document bytes) —
+   *  the per-run `totalBytes` estimate for the progress banner. */
+  approxBytes: number
 }
 
 function pushIf(arr: string[], v: unknown) {
@@ -214,17 +230,23 @@ function currentLocations(storageBackend: unknown, storageLocations: unknown): {
 }
 
 /**
- * Enumerate EVERY stored entity with its files + current physical locations.
+ * Enumerate stored entities with their files + current physical locations.
  * Callers filter for what they need (transfer copies to active; purge deletes
  * from a specific backend; status counts per backend).
+ *
+ * 5.12.0: scoped to ONE organization (the worker runs on a privileged role
+ * that RLS doesn't bind, so the filter must be explicit) and optionally to a
+ * single video (the per-video "Transfer to …" kebab action).
  */
-async function enumerateAll(): Promise<WorkItem[]> {
+async function enumerateAll(organizationId: string, opts?: { videoId?: string }): Promise<WorkItem[]> {
   const items: WorkItem[] = []
+  const orgWhere: any = { organizationId }
 
   const videos = await (prisma as any).video.findMany({
+    where: opts?.videoId ? { ...orgWhere, id: opts.videoId } : orgWhere,
     select: {
       id: true, name: true, versionLabel: true, storageBackend: true, storageLocations: true, hlsBasePath: true,
-      originalStoragePath: true, thumbnailPath: true, storyboardPath: true,
+      originalStoragePath: true, thumbnailPath: true, storyboardPath: true, originalFileSize: true,
       preview480Path: true, preview720Path: true, preview1080Path: true, preview2160Path: true,
       cleanPreview720Path: true, cleanPreview1080Path: true, cleanPreview2160Path: true,
     },
@@ -250,34 +272,42 @@ async function enumerateAll(): Promise<WorkItem[]> {
       locations,
       files,
       hlsBasePath: v.hlsBasePath || null,
+      approxBytes: numOr0(v.originalFileSize),
     })
   }
 
+  // Per-video transfers move ONLY the video row's own files — its comment
+  // attachments/uploads/documents belong to project/folder scopes.
+  if (opts?.videoId) return items
+
   const assets = await (prisma as any).videoAsset.findMany({
-    select: { id: true, fileName: true, storagePath: true, storageBackend: true, storageLocations: true },
+    where: orgWhere,
+    select: { id: true, fileName: true, storagePath: true, storageBackend: true, storageLocations: true, fileSize: true },
   })
   for (const a of assets as any[]) {
     if (!a.storagePath) continue
     const { primary, locations } = currentLocations(a.storageBackend, a.storageLocations)
-    items.push({ kind: 'VideoAsset', id: a.id, label: `Attachment: ${a.fileName || a.id}`, from: primary, locations, files: [a.storagePath], hlsBasePath: null })
+    items.push({ kind: 'VideoAsset', id: a.id, label: `Attachment: ${a.fileName || a.id}`, from: primary, locations, files: [a.storagePath], hlsBasePath: null, approxBytes: numOr0(a.fileSize) })
   }
 
   const uploads = await (prisma as any).projectUpload.findMany({
-    select: { id: true, fileName: true, storagePath: true, storageBackend: true, storageLocations: true },
+    where: orgWhere,
+    select: { id: true, fileName: true, storagePath: true, storageBackend: true, storageLocations: true, fileSize: true },
   })
   for (const u of uploads as any[]) {
     if (!u.storagePath) continue
     const { primary, locations } = currentLocations(u.storageBackend, u.storageLocations)
-    items.push({ kind: 'ProjectUpload', id: u.id, label: `Upload: ${u.fileName || u.id}`, from: primary, locations, files: [u.storagePath], hlsBasePath: null })
+    items.push({ kind: 'ProjectUpload', id: u.id, label: `Upload: ${u.fileName || u.id}`, from: primary, locations, files: [u.storagePath], hlsBasePath: null, approxBytes: numOr0(u.fileSize) })
   }
 
   const documents = await (prisma as any).folderDocument.findMany({
-    select: { id: true, name: true, storagePath: true, storageBackend: true, storageLocations: true },
+    where: orgWhere,
+    select: { id: true, name: true, storagePath: true, storageBackend: true, storageLocations: true, size: true },
   })
   for (const d of documents as any[]) {
     if (!d.storagePath) continue
     const { primary, locations } = currentLocations(d.storageBackend, d.storageLocations)
-    items.push({ kind: 'FolderDocument', id: d.id, label: `Document: ${d.name || d.id}`, from: primary, locations, files: [d.storagePath], hlsBasePath: null })
+    items.push({ kind: 'FolderDocument', id: d.id, label: `Document: ${d.name || d.id}`, from: primary, locations, files: [d.storagePath], hlsBasePath: null, approxBytes: numOr0(d.size) })
   }
 
   return items
@@ -309,9 +339,12 @@ async function retag(kind: string, id: string, target: StorageBackend, locations
  * deletion is a separate, explicit step (runStoragePurge). Safe to re-run:
  * files already on the active backend are skipped.
  */
-export async function runStorageTransfer(): Promise<void> {
+export async function runStorageTransfer(
+  organizationId: string,
+  opts?: { videoId?: string },
+): Promise<void> {
   const target = await getActiveBackend()
-  await clearCancel()
+  await clearCancel(organizationId)
 
   const state: TransferState = {
     ...emptyState(),
@@ -321,7 +354,7 @@ export async function runStorageTransfer(): Promise<void> {
     targetLabel: backendLabel(target),
     startedAt: Date.now(),
   }
-  await saveState(state)
+  await saveState(organizationId, state)
 
   const recordError = (msg: string) => {
     state.failed += 1
@@ -330,27 +363,29 @@ export async function runStorageTransfer(): Promise<void> {
   }
 
   try {
-    const all = await enumerateAll()
+    const all = await enumerateAll(organizationId, { videoId: opts?.videoId })
     // Only entities not yet on the target need a copy.
     const work = all.filter((it) => !it.locations.includes(target))
     state.total = work.length
-    await saveState(state)
+    state.totalBytes = work.reduce((acc, it) => acc + (it.approxBytes || 0), 0)
+    await saveState(organizationId, state)
 
-    logMessage(`[storage-transfer] Transfer start: ${work.length} entities → ${backendLabel(target)}`)
+    logMessage(`[storage-transfer] Transfer start (org=${organizationId}${opts?.videoId ? `, video=${opts.videoId}` : ''}): ${work.length} entities → ${backendLabel(target)}`)
 
     for (const item of work) {
-      if (await isCancelled()) throw new CancelledError()
+      if (await isCancelled(organizationId)) throw new CancelledError()
       state.currentLabel = item.label
-      await saveState(state)
+      await saveState(organizationId, state)
 
       try {
         const paths = await allFilePaths(item, item.from)
         for (const p of paths) {
-          if (await isCancelled()) throw new CancelledError()
+          if (await isCancelled(organizationId)) throw new CancelledError()
           const r = await copyOneFile(p, item.from, target)
-          if (r === 'copied') {
+          if (r.result === 'copied') {
             state.copiedFiles += 1
-            await saveState(state)
+            state.copiedBytes += r.bytes
+            await saveState(organizationId, state)
           }
         }
         // Retag: reads now resolve to the target; record BOTH locations.
@@ -362,18 +397,18 @@ export async function runStorageTransfer(): Promise<void> {
         recordError(`${item.label}: ${(err as Error)?.message || String(err)}`)
         state.processed += 1
       }
-      await saveState(state)
+      await saveState(organizationId, state)
     }
 
     state.status = 'completed'
     state.currentLabel = ''
     state.finishedAt = Date.now()
-    await saveState(state)
+    await saveState(organizationId, state)
     logMessage(
       `[storage-transfer] Transfer done: ${state.processed}/${state.total} entities, ${state.copiedFiles} files copied, ${state.failed} failed`,
     )
   } catch (err) {
-    await finalizeError(state, err, 'Transfer')
+    await finalizeError(organizationId, state, err, 'Transfer')
     if (!(err instanceof CancelledError)) throw err
   }
 }
@@ -384,9 +419,9 @@ export async function runStorageTransfer(): Promise<void> {
  * fully mirrored is left untouched (and reported) — nothing is ever deleted
  * without a confirmed copy elsewhere. `purgeBackend` must not be the active one.
  */
-export async function runStoragePurge(purgeBackend: StorageBackend): Promise<void> {
+export async function runStoragePurge(organizationId: string, purgeBackend: StorageBackend): Promise<void> {
   const target = await getActiveBackend()
-  await clearCancel()
+  await clearCancel(organizationId)
 
   const state: TransferState = {
     ...emptyState(),
@@ -397,7 +432,7 @@ export async function runStoragePurge(purgeBackend: StorageBackend): Promise<voi
     purgeBackend,
     startedAt: Date.now(),
   }
-  await saveState(state)
+  await saveState(organizationId, state)
 
   const recordError = (msg: string) => {
     state.failed += 1
@@ -410,20 +445,20 @@ export async function runStoragePurge(purgeBackend: StorageBackend): Promise<voi
       throw new Error('Cannot delete the active storage backend')
     }
 
-    const all = await enumerateAll()
+    const all = await enumerateAll(organizationId)
     // Entities that still have a copy on the backend we're purging.
     const work = all.filter((it) => it.locations.includes(purgeBackend))
     state.total = work.length
-    await saveState(state)
+    await saveState(organizationId, state)
 
     logMessage(
       `[storage-transfer] Purge start: ${work.length} entities on ${backendLabel(purgeBackend)} (verify against ${backendLabel(target)})`,
     )
 
     for (const item of work) {
-      if (await isCancelled()) throw new CancelledError()
+      if (await isCancelled(organizationId)) throw new CancelledError()
       state.currentLabel = item.label
-      await saveState(state)
+      await saveState(organizationId, state)
 
       try {
         const paths = await allFilePaths(item, purgeBackend)
@@ -432,7 +467,7 @@ export async function runStoragePurge(purgeBackend: StorageBackend): Promise<voi
         // before we delete anything from purgeBackend.
         let verified = true
         for (const p of paths) {
-          if (await isCancelled()) throw new CancelledError()
+          if (await isCancelled(organizationId)) throw new CancelledError()
           const srcExists = await storageFileExists(p, purgeBackend)
           if (!srcExists) continue // already gone on source — fine
           const dstExists = await storageFileExists(p, target)
@@ -447,7 +482,7 @@ export async function runStoragePurge(purgeBackend: StorageBackend): Promise<voi
         if (!verified) {
           recordError(`${item.label}: not fully on ${backendLabel(target)} yet — run Transfer first (skipped, nothing deleted)`)
           state.processed += 1
-          await saveState(state)
+          await saveState(organizationId, state)
           continue
         }
 
@@ -469,37 +504,37 @@ export async function runStoragePurge(purgeBackend: StorageBackend): Promise<voi
         recordError(`${item.label}: ${(err as Error)?.message || String(err)}`)
         state.processed += 1
       }
-      await saveState(state)
+      await saveState(organizationId, state)
     }
 
     state.status = 'completed'
     state.currentLabel = ''
     state.finishedAt = Date.now()
-    await saveState(state)
+    await saveState(organizationId, state)
     logMessage(
       `[storage-transfer] Purge done: ${state.processed}/${state.total} entities, ${state.deletedFiles} files deleted from ${backendLabel(purgeBackend)}, ${state.failed} skipped`,
     )
   } catch (err) {
-    await finalizeError(state, err, 'Purge')
+    await finalizeError(organizationId, state, err, 'Purge')
     if (!(err instanceof CancelledError)) throw err
   }
 }
 
 /** Shared terminal-state handling for cancel / fatal error. */
-async function finalizeError(state: TransferState, err: unknown, what: string): Promise<void> {
+async function finalizeError(organizationId: string, state: TransferState, err: unknown, what: string): Promise<void> {
   if (err instanceof CancelledError) {
     state.status = 'cancelled'
     state.currentLabel = ''
     state.finishedAt = Date.now()
-    await saveState(state)
-    await clearCancel()
+    await saveState(organizationId, state)
+    await clearCancel(organizationId)
     logMessage(`[storage-transfer] ${what} cancelled by admin`)
     return
   }
   state.status = 'error'
   state.error = (err as Error)?.message || String(err)
   state.finishedAt = Date.now()
-  await saveState(state)
+  await saveState(organizationId, state)
   logError(`[storage-transfer] ${what} fatal error:`, err)
 }
 

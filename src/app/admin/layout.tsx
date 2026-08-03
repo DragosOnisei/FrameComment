@@ -9,6 +9,7 @@ import { NotificationsProvider } from '@/contexts/NotificationsContext'
 import { DownloadBanners } from '@/components/DownloadBanners'
 import { ProcessingStatusProvider } from '@/contexts/ProcessingStatusContext'
 import { ProcessingStatusBanners } from '@/components/ProcessingStatusBanners'
+import { StorageTransferBanner } from '@/components/StorageTransferBanner'
 import { GlobalDropOverlay } from '@/components/GlobalDropOverlay'
 import BillingWall from '@/components/BillingWall'
 import OrgDeletionBanner from '@/components/OrgDeletionBanner'
@@ -152,6 +153,10 @@ export default function AdminLayout({
               <SessionMonitor />
               <DownloadBanners />
               {!hideFloatingBanners && <ProcessingStatusBanners />}
+              {/* 5.12.0: global "Transferring files" progress (storage
+                  worker) — same corner + glass recipe as the other
+                  status banners. */}
+              {!hideFloatingBanners && <StorageTransferBanner />}
               <GlobalDropOverlay />
             </div>
           )}
