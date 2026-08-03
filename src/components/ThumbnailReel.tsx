@@ -359,6 +359,18 @@ export default function ThumbnailReel({
     stripExt(activeVideo?.originalFileName) ||
     ''
 
+  // 5.13.1: "what was this version called back then?" — stacking renames
+  // every row to the newest video's name, so older versions lose their
+  // visible identity. The row's ORIGINAL upload filename is untouched by
+  // stacking/renames, so when it differs from the displayed stack name we
+  // surface it as a small "Uploaded as:" line under the title. The title
+  // itself stays the stack name on every version (by design).
+  const activeOriginalName = stripExt(activeVideo?.originalFileName)
+  const uploadedAsLabel =
+    activeOriginalName && activeOriginalName !== displayedHeaderName
+      ? activeOriginalName
+      : null
+
   // 1.2.0+: surface the active version's upload timestamp directly
   // under the title so the reviewer can see how long passed between
   // v1, v2, v3… `createdAt` is the row's insertion time on Video,
@@ -479,6 +491,16 @@ export default function ThumbnailReel({
                     >
                       {uploadedAtLabel}
                       {relativeUploadedLabel ? ` (${relativeUploadedLabel})` : ''}
+                    </span>
+                  )}
+                  {/* 5.13.1: original per-version name — only when it
+                      differs from the stack's current display name. */}
+                  {uploadedAsLabel && (
+                    <span
+                      className="text-[10px] text-muted-foreground/90 italic truncate max-w-full"
+                      title={`Uploaded as: ${uploadedAsLabel}`}
+                    >
+                      Uploaded as: {uploadedAsLabel}
                     </span>
                   )}
                 </div>
