@@ -129,18 +129,53 @@ export async function POST(
         video.folder && video.folder.deletedAt !== null
       const projectId = video.projectId as string
       const name = video.name as string
+      const targetFolderId = folderStillTrashed
+        ? null
+        : ((video.folderId as string | null) ?? null)
+
+      // 5.13.0: collision-safe restore. If a LIVE video with this name
+      // already exists at the destination (same project + folder), the
+      // restored group would silently merge into that stack (two "v1"s).
+      // Instead it comes back as "name (2)" / "name (3)" … — the exact
+      // convention uploads use for duplicate filenames.
+      let restoredName = name
+      {
+        const folderFilter =
+          targetFolderId === null
+            ? { folderId: null }
+            : { folderId: targetFolderId }
+        const conflicts = await prisma.video.findMany({
+          where: {
+            projectId,
+            ...folderFilter,
+            deletedAt: null,
+            OR: [{ name }, { name: { startsWith: `${name} (` } }],
+          } as any,
+          select: { name: true },
+        })
+        if (conflicts.some((v: any) => v.name === name)) {
+          let n = 2
+          const taken = new Set(conflicts.map((v: any) => v.name))
+          while (taken.has(`${name} (${n})`)) n++
+          restoredName = `${name} (${n})`
+        }
+      }
+
       await prisma.$transaction([
         prisma.video.updateMany({
-          where: { projectId, name },
+          // 5.13.0: ONLY trashed rows — now that a restore can rename, the
+          // live same-named stack must never be touched by this update.
+          where: { projectId, name, deletedAt: { not: null } } as any,
           data: {
             deletedAt: null,
+            ...(restoredName !== name ? { name: restoredName } : {}),
             // Re-parent to the project root when the original
             // folder is also gone.
             ...(folderStillTrashed ? { folderId: null } : {}),
           } as any,
         }),
       ])
-      return NextResponse.json({ success: true })
+      return NextResponse.json({ success: true, restoredName })
     }
 
     if (kind === 'document') {

@@ -3791,14 +3791,20 @@ function FolderBrowserInner(
             const displayName =
               dot > 0 ? p.fileName.slice(0, dot) : p.fileName
             return (
+              // 5.13.0: styled with the SAME glass vocabulary as the real
+              // VideoCard (rounded-xl, white-4% tint, hairline ring, soft
+              // shadow, p-4 body, base/semibold title) — the old legacy
+              // `border-border bg-card` shell read as a small brown card
+              // that visibly "popped" into the modern one a second later
+              // when the server row replaced the placeholder.
               <div
                 key={p.localId}
-                className="rounded-lg overflow-hidden border border-border bg-card animate-in fade-in-0 duration-150"
+                className="group relative flex flex-col rounded-xl overflow-hidden ring-1 ring-white/10 bg-white/[0.04] shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] animate-in fade-in-0 duration-150"
               >
-                <div className="aspect-video relative bg-black/40">
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-muted-foreground">
+                <div className="aspect-video relative bg-white/[0.03] rounded-t-xl overflow-hidden">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-white/55">
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    <span className="text-[10px]">Generating thumbnail…</span>
+                    <span className="text-xs">Generating thumbnail…</span>
                   </div>
                   {/* Thin blue bar at the bottom edge of the cover —
                       indeterminate (no TUS hook here yet), so it
@@ -3808,14 +3814,14 @@ function FolderBrowserInner(
                     <div className="h-full w-1/3 bg-primary animate-[pulse_1.4s_ease-in-out_infinite] rounded-r-full" />
                   </div>
                 </div>
-                <div className="px-2.5 py-2">
+                <div className="p-4">
                   <div
-                    className="text-xs font-medium truncate text-card-foreground"
+                    className="text-base font-semibold truncate text-white"
                     title={p.fileName}
                   >
                     {displayName || 'Uploading…'}
                   </div>
-                  <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  <div className="text-xs text-white/55 truncate mt-1">
                     Uploading…
                   </div>
                 </div>
