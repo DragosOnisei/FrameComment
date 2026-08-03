@@ -214,7 +214,10 @@ export async function PATCH(
           projectId: video.projectId,
           name: video.name, // Same video name
           id: { not: id }, // But different version
-        },
+          // 5.12.1: never touch soft-deleted rows — a trashed video that
+          // happens to share the name is NOT part of this live stack.
+          deletedAt: null,
+        } as any,
         data: {
           approved: false,
           approvedAt: null,
@@ -264,7 +267,11 @@ export async function PATCH(
             projectId: video.projectId,
             folderId: video.folderId,
             name: video.name,
-          },
+            // 5.12.1: leave trashed rows out of group renames — renaming a
+            // same-named Trash row would otherwise drag it into this stack
+            // when restored.
+            deletedAt: null,
+          } as any,
           data: { name: newName },
         })
       }
@@ -309,7 +316,11 @@ export async function DELETE(
 
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
-    maxRequests: 30,
+    // 5.12.2: 30/min starved "Empty Trash" (item-by-item client loop) on
+    // large trashes — the tail of a 300-item sweep got 429s and stuck in
+    // Trash. This is an authenticated admin route; 240/min still throttles
+    // abuse while letting legitimate bulk sweeps drain.
+    maxRequests: 240,
     message: videoMessages.tooManyVideoDeleteRequests || 'Too many video delete requests. Please slow down.',
   }, 'video-delete')
   if (rateLimitResult) return rateLimitResult

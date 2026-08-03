@@ -71,6 +71,12 @@ export async function GET(
       where: { id },
       include: {
         videos: {
+          // 5.12.1: EXCLUDE soft-deleted rows. This endpoint feeds the admin
+          // project page + player, whose version reel groups rows by NAME —
+          // without this filter a trashed video whose name matches a live
+          // stack (delete v2 → re-upload v2 → stack) showed up as a ghost
+          // third version.
+          where: { deletedAt: null } as any,
           orderBy: { version: 'desc' },
         },
         comments: {

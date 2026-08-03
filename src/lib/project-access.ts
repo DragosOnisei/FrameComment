@@ -158,12 +158,17 @@ export async function fetchProjectWithVideos(
   guestLatestOnly: boolean,
   projectId: string
 ) {
+  // 5.12.1: every share-view listing must EXCLUDE soft-deleted rows. The
+  // status filter alone left trashed videos (still READY) visible on client
+  // share links, and let a trashed row whose name matches a live stack show
+  // up as a ghost version in the reviewer's reel.
   if (isGuest && guestLatestOnly) {
     const allVideos = await prisma.video.findMany({
       where: {
         projectId,
         status: 'READY',
-      },
+        deletedAt: null,
+      } as any,
       orderBy: { version: 'desc' },
     })
 
@@ -183,7 +188,8 @@ export async function fetchProjectWithVideos(
           where: {
             id: { in: latestVideoIds },
             status: 'READY',
-          },
+            deletedAt: null,
+          } as any,
           orderBy: { version: 'desc' },
         },
       },
@@ -194,7 +200,7 @@ export async function fetchProjectWithVideos(
     where: { slug: token },
     include: {
       videos: {
-        where: { status: 'READY' as const },
+        where: { status: 'READY', deletedAt: null } as any,
         orderBy: { version: 'desc' },
       },
     },

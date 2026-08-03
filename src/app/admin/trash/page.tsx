@@ -276,24 +276,41 @@ export default function TrashPage() {
   // folder / project). Extracted so the Empty-Trash background worker
   // can reuse it. 404 is treated as success — the row was already
   // removed (e.g. cascaded when its parent project was deleted).
-  const deleteOneTrashItem = useCallback(async (item: TrashItem) => {
+  //
+  // 5.12.2: 429-aware. On big sweeps (300+ items) the per-endpoint rate
+  // limits kicked in near the tail and ~10 items "could not be deleted"
+  // (retrying Empty Trash immediately hit the same window). Rate-limited
+  // calls now wait with exponential backoff and retry instead of failing
+  // the item — Empty Trash is a background banner task, so taking a few
+  // extra seconds is invisible; losing items is not.
+  const deleteWithBackoff = useCallback(async (url: string, signal?: AbortSignal) => {
+    for (let attempt = 0; ; attempt++) {
+      const res = await apiFetch(url, { method: 'DELETE' })
+      if (res.status !== 429 || attempt >= 6) return res
+      const waitMs = Math.min(30_000, 1500 * 2 ** attempt)
+      await new Promise((r) => setTimeout(r, waitMs))
+      if (signal?.aborted) return res
+    }
+  }, [])
+
+  const deleteOneTrashItem = useCallback(async (item: TrashItem, signal?: AbortSignal) => {
     if (item.kind === 'folder') {
-      const res = await apiFetch(`/api/folders/${item.id}?permanent=1`, { method: 'DELETE' })
+      const res = await deleteWithBackoff(`/api/folders/${item.id}?permanent=1`, signal)
       if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
     } else if (item.kind === 'project') {
-      const res = await apiFetch(`/api/projects/${item.id}?permanent=1`, { method: 'DELETE' })
+      const res = await deleteWithBackoff(`/api/projects/${item.id}?permanent=1`, signal)
       if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
     } else if (item.kind === 'document') {
-      const res = await apiFetch(`/api/documents/${item.id}?permanent=true`, { method: 'DELETE' })
+      const res = await deleteWithBackoff(`/api/documents/${item.id}?permanent=true`, signal)
       if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
     } else {
       const ids = item.allIds && item.allIds.length > 0 ? item.allIds : [item.id]
       for (const id of ids) {
-        const res = await apiFetch(`/api/videos/${id}?permanent=1`, { method: 'DELETE' })
+        const res = await deleteWithBackoff(`/api/videos/${id}?permanent=1`, signal)
         if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
       }
     }
-  }, [])
+  }, [deleteWithBackoff])
 
   const handleEmptyTrash = useCallback(() => {
     if (items.length === 0) return
@@ -378,7 +395,7 @@ export default function TrashPage() {
               if (signal.aborted) return
               const item = ordered[next++]
               try {
-                await deleteOneTrashItem(item)
+                await deleteOneTrashItem(item, signal)
               } catch (err) {
                 failed++
                 logError('[TrashPage] empty: item delete failed', err)
