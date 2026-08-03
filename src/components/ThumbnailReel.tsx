@@ -353,23 +353,26 @@ export default function ThumbnailReel({
     const dot = filename.lastIndexOf('.')
     return dot > 0 ? filename.slice(0, dot) : filename
   }
-  const displayedHeaderName =
-    activeVideoName ||
-    (activeVideo?.name as string | undefined) ||
-    stripExt(activeVideo?.originalFileName) ||
-    ''
-
-  // 5.13.1: "what was this version called back then?" — stacking renames
-  // every row to the newest video's name, so older versions lose their
-  // visible identity. The row's ORIGINAL upload filename is untouched by
-  // stacking/renames, so when it differs from the displayed stack name we
-  // surface it as a small "Uploaded as:" line under the title. The title
-  // itself stays the stack name on every version (by design).
-  const activeOriginalName = stripExt(activeVideo?.originalFileName)
-  const uploadedAsLabel =
-    activeOriginalName && activeOriginalName !== displayedHeaderName
-      ? activeOriginalName
-      : null
+  // 5.13.2: Frame.io-style per-version titles. The LATEST version keeps
+  // showing the stack's current NAME (the value the grid card shows and
+  // Rename edits — preserving the 4.2.4 rationale above). But when the
+  // user flips the chip to an OLDER version, the title switches to that
+  // version's ORIGINAL upload name — stacking renames every row to the
+  // newest video's name, and the raw filename is the only per-version
+  // identity left ("what was this called back then?"). Example: a stack
+  // named "…_V4" shows "…_V3" in the title while v3 is selected.
+  const latestVersionRow = currentVersions[currentVersions.length - 1]
+  const isLatestActive =
+    !activeVideo || !latestVersionRow || activeVideo.id === latestVersionRow.id
+  const displayedHeaderName = isLatestActive
+    ? activeVideoName ||
+      (activeVideo?.name as string | undefined) ||
+      stripExt(activeVideo?.originalFileName) ||
+      ''
+    : stripExt(activeVideo?.originalFileName) ||
+      activeVideoName ||
+      (activeVideo?.name as string | undefined) ||
+      ''
 
   // 1.2.0+: surface the active version's upload timestamp directly
   // under the title so the reviewer can see how long passed between
@@ -491,16 +494,6 @@ export default function ThumbnailReel({
                     >
                       {uploadedAtLabel}
                       {relativeUploadedLabel ? ` (${relativeUploadedLabel})` : ''}
-                    </span>
-                  )}
-                  {/* 5.13.1: original per-version name — only when it
-                      differs from the stack's current display name. */}
-                  {uploadedAsLabel && (
-                    <span
-                      className="text-[10px] text-muted-foreground/90 italic truncate max-w-full"
-                      title={`Uploaded as: ${uploadedAsLabel}`}
-                    >
-                      Uploaded as: {uploadedAsLabel}
                     </span>
                   )}
                 </div>
