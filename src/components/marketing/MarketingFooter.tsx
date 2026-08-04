@@ -31,7 +31,7 @@ export function MarketingFooter({ onLanding = false }: { onLanding?: boolean }) 
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 md:gap-14">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-white/55 mb-3">
                 Product
               </p>
               <ul className="space-y-2 text-sm">
@@ -42,7 +42,7 @@ export function MarketingFooter({ onLanding = false }: { onLanding?: boolean }) 
               </ul>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-white/55 mb-3">
                 Get started
               </p>
               <ul className="space-y-2 text-sm">
@@ -51,7 +51,7 @@ export function MarketingFooter({ onLanding = false }: { onLanding?: boolean }) 
               </ul>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-white/55 mb-3">
                 Legal
               </p>
               <ul className="space-y-2 text-sm">
@@ -63,10 +63,10 @@ export function MarketingFooter({ onLanding = false }: { onLanding?: boolean }) 
         </div>
 
         <div className="mt-10 pt-6 border-t border-white/[0.06] flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-          <p className="text-xs text-white/40">
+          <p className="text-xs text-white/55">
             These Services are operated by MINDQUB S.R.L.
           </p>
-          <p className="text-xs text-white/40">
+          <p className="text-xs text-white/55">
             © {year} MINDQUB S.R.L. All rights reserved.
           </p>
         </div>

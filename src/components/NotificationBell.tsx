@@ -181,7 +181,13 @@ export default function NotificationBell() {
           // Opaque accent-tinted surface (inline color-mix) to match the other
           // menus — no more see-through glass.
           className="fixed left-2 right-2 top-[calc(var(--topbar-height)_+_0.5rem)] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[380px] sm:max-w-[92vw] rounded-xl overflow-hidden ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.7)] text-white z-[100] bg-background"
+          // 5.15.2: translateZ(0) + isolation — same iOS Safari fix as the
+          // account menu: backdrop-filter layers (card checkboxes) were
+          // composited above this panel on phones despite the lower z-index.
           style={{
+            transform: 'translateZ(0)',
+            willChange: 'transform',
+            isolation: 'isolate',
             backgroundColor:
               'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
           }}

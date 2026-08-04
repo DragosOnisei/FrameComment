@@ -119,9 +119,19 @@ export default function TopbarAccountMenu() {
           className="brand-menu-surface fixed z-[130] min-w-[220px] rounded-lg text-white ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1.5 animate-in fade-in-0 slide-in-from-top-1 duration-150"
           // Inline opaque accent-tint as a guarantee (wins over any cached /
           // layered background), matching `.brand-menu-surface`.
+          //
+          // 5.15.2: translateZ(0) + isolation force the menu onto its OWN
+          // compositing layer. iOS Safari promotes elements with
+          // backdrop-filter (the card select checkboxes) to composited
+          // layers and paints them ABOVE non-composited fixed elements,
+          // ignoring z-index — the checkboxes bled through this menu on
+          // phones. Compositing the menu restores correct z ordering.
           style={{
             top: coords.top,
             right: coords.right,
+            transform: 'translateZ(0)',
+            willChange: 'transform',
+            isolation: 'isolate',
             backgroundColor:
               'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
           }}

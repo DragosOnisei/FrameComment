@@ -119,7 +119,7 @@ export default function RequestAccessPage() {
                     required
                     maxLength={120}
                     placeholder="Your name"
-                    className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/35"
+                    className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/50"
                   />
                 </div>
 
@@ -133,7 +133,7 @@ export default function RequestAccessPage() {
                     required
                     maxLength={254}
                     placeholder="you@studio.com"
-                    className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/35"
+                    className="bg-white/[0.04] border-white/10 text-white placeholder:text-white/50"
                   />
                 </div>
 
@@ -188,7 +188,7 @@ export default function RequestAccessPage() {
                       onChange={(e) => setProfessionOther(e.target.value)}
                       maxLength={120}
                       placeholder="Tell us what you do"
-                      className="mt-2 bg-white/[0.04] border-white/10 text-white placeholder:text-white/35"
+                      className="mt-2 bg-white/[0.04] border-white/10 text-white placeholder:text-white/50"
                     />
                   )}
                 </div>
@@ -206,7 +206,7 @@ export default function RequestAccessPage() {
                   Send request
                 </Button>
 
-                <p className="text-[11px] text-white/40 text-center">
+                <p className="text-[11px] text-white/55 text-center">
                   Already have an invite code?{' '}
                   <Link href="/register" className="text-primary hover:underline">
                     Create your company

@@ -47,6 +47,8 @@ import {
   Check,
   Play,
   GitCompare,
+  Smartphone,
+  Zap,
 } from 'lucide-react'
 import { MarketingNav } from './MarketingNav'
 import { MarketingFooter } from './MarketingFooter'
@@ -158,7 +160,7 @@ function HeroMock() {
               />
             ))}
           </div>
-          <div className="mt-2 flex items-center justify-between text-[10px] text-white/40 tabular-nums">
+          <div className="mt-2 flex items-center justify-between text-[10px] text-white/55 tabular-nums">
             <span>00:41:12</span>
             <span>01:06:00</span>
           </div>
@@ -225,7 +227,7 @@ function ReviewMock() {
           </div>
         </div>
       ))}
-      <div className="flex items-center gap-2 rounded-xl bg-white/[0.03] ring-1 ring-white/10 px-3 py-2.5 text-xs text-white/40">
+      <div className="flex items-center gap-2 rounded-xl bg-white/[0.03] ring-1 ring-white/10 px-3 py-2.5 text-xs text-white/55">
         Leave your comment at 01:14…
         <span className="ml-auto inline-flex items-center gap-2 text-white/50">
           <Mic className="w-3.5 h-3.5" />
@@ -262,11 +264,70 @@ function ShareMock() {
           <UploadCloud className="w-3.5 h-3.5 text-primary" /> Client can upload
         </span>
       </div>
-      <p className="text-[11px] text-white/40">
+      <p className="text-[11px] text-white/55">
         No account needed on the client side, they open the link, watch, and
         comment.
       </p>
     </Glass>
+  )
+}
+
+function PhoneMock() {
+  return (
+    <div className="relative mx-auto w-[230px] sm:w-[250px]">
+      {/* Phone frame */}
+      <div className="rounded-[2.4rem] bg-white/[0.05] ring-1 ring-white/15 p-2 shadow-[0_24px_60px_-16px_rgba(0,0,0,0.8)]">
+        <div className="relative rounded-[2rem] overflow-hidden bg-[#0b1220] ring-1 ring-white/10">
+          {/* notch */}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 h-5 w-20 rounded-full bg-black/70 z-10" />
+          {/* mini player — 9:19.5 = real iPhone proportions, tall not wide */}
+          <div className="relative aspect-[9/19.5] flex flex-col">
+            <div className="relative flex-1 bg-gradient-to-br from-[#12314f] via-[#0d1b2a] to-[#1a1030]">
+              <div className="absolute -top-1/4 -left-1/4 w-2/3 h-2/3 rounded-full bg-primary/25 blur-2xl fc-aurora" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/25 backdrop-blur-md">
+                  <Play className="w-4 h-4 text-white translate-x-0.5" />
+                </span>
+              </div>
+              <span className="absolute top-9 right-3 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-primary text-primary-foreground">
+                v2
+              </span>
+            </div>
+            {/* timeline */}
+            <div className="px-3 pt-2.5">
+              <div className="relative h-1.5 rounded-full bg-white/10">
+                <div className="absolute left-0 top-0 h-full w-[45%] rounded-full bg-primary/80" />
+                {[22, 45, 74].map((pct, i) => (
+                  <span
+                    key={pct}
+                    className={
+                      'absolute -top-[2px] h-2.5 w-2.5 rounded-full ring-2 ring-[#0b1220] ' +
+                      ['bg-amber-400', 'bg-primary', 'bg-emerald-400'][i]
+                    }
+                    style={{ left: `${pct}%` }}
+                  />
+                ))}
+              </div>
+            </div>
+            {/* comment + approve */}
+            <div className="p-3 space-y-2">
+              <div className="rounded-lg bg-white/[0.05] ring-1 ring-white/10 px-2.5 py-1.5">
+                <p className="text-[9px] font-semibold text-white">Client · 00:41</p>
+                <p className="text-[9px] text-white/60 mt-0.5">Perfect, ship it! 🎉</p>
+              </div>
+              <div className="flex items-center justify-center gap-1.5 h-8 rounded-lg bg-emerald-500/20 ring-1 ring-emerald-500/40 text-emerald-300 text-[11px] font-semibold">
+                <Check className="w-3 h-3" /> Approve
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* floating voice-note chip */}
+      <div className="fc-float absolute -right-8 top-1/3 hidden sm:flex items-center gap-1.5 rounded-full bg-white/[0.06] ring-1 ring-white/15 px-3 py-1.5 backdrop-blur-xl">
+        <Mic className="w-3.5 h-3.5 text-rose-300" />
+        <span className="text-[10px] text-white/70">Voice note · 0:12</span>
+      </div>
+    </div>
   )
 }
 
@@ -294,12 +355,12 @@ function StorageMock() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold text-white">{r.label}</p>
-            <p className="text-[10px] text-white/45">{r.note}</p>
+            <p className="text-[10px] text-white/55">{r.note}</p>
           </div>
           {r.active && <Check className="w-4 h-4 text-emerald-300 shrink-0" />}
         </div>
       ))}
-      <p className="text-[11px] text-white/40 pt-1">
+      <p className="text-[11px] text-white/55 pt-1">
         Switch anytime, files are copied and verified before anything moves.
       </p>
     </Glass>
@@ -392,6 +453,15 @@ export function LandingClient() {
 
   return (
     <div ref={rootRef} className="relative min-h-screen bg-background text-foreground">
+      {/* 5.15 a11y: keyboard/screen-reader users can jump straight past
+          the nav. Visually hidden until focused. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-[60] focus:top-3 focus:left-3 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-primary focus:text-primary-foreground focus:text-sm focus:font-semibold"
+      >
+        Skip to main content
+      </a>
+
       {/* Aurora / light-spot background — lives at the PAGE root (not
           inside the hero) so it also glows through the transparent
           sticky top bar instead of stopping right below it. */}
@@ -402,6 +472,9 @@ export function LandingClient() {
       </div>
 
       <MarketingNav onLanding />
+
+      {/* 5.15 a11y: single <main> landmark wrapping all page content. */}
+      <main id="main-content">
 
       {/* ── HERO ─────────────────────────────────────────────────── */}
       <section className="relative">
@@ -441,7 +514,14 @@ export function LandingClient() {
             </Link>
           </div>
 
-          <div className="fc-reveal mt-14 sm:mt-20">
+          {/* 5.15 a11y: the mock is a decorative illustration of the
+              product — screen readers get the description instead. */}
+          <p className="sr-only">
+            Illustration of the FrameComment player: a video approved by the
+            client, at version 3, with color-coded comments pinned along the
+            timeline and a stack of previous versions ready to compare.
+          </p>
+          <div className="fc-reveal mt-14 sm:mt-20" aria-hidden="true">
             <HeroMock />
           </div>
         </div>
@@ -524,7 +604,7 @@ export function LandingClient() {
             />
           </div>
         </div>
-        <div className="fc-reveal"><StorageMock /></div>
+        <div className="fc-reveal" aria-hidden="true"><StorageMock /></div>
       </section>
 
       {/* ── DEEP DIVE 1: REVIEW ──────────────────────────────────── */}
@@ -558,12 +638,12 @@ export function LandingClient() {
             />
           </div>
         </div>
-        <div className="fc-reveal"><ReviewMock /></div>
+        <div className="fc-reveal" aria-hidden="true"><ReviewMock /></div>
       </section>
 
       {/* ── DEEP DIVE 2: SHARING ─────────────────────────────────── */}
       <section className="mx-auto max-w-6xl px-4 sm:px-6 py-16 grid gap-10 lg:grid-cols-2 lg:items-center">
-        <div className="fc-reveal order-2 lg:order-1"><ShareMock /></div>
+        <div className="fc-reveal order-2 lg:order-1" aria-hidden="true"><ShareMock /></div>
         <div className="space-y-8 order-1 lg:order-2">
           <SectionHeading
             eyebrow="Sharing & presenting"
@@ -588,6 +668,40 @@ export function LandingClient() {
             />
           </div>
         </div>
+      </section>
+
+      {/* ── MOBILE ───────────────────────────────────────────────── */}
+      <section className="mx-auto max-w-6xl px-4 sm:px-6 py-16 grid gap-10 lg:grid-cols-2 lg:items-center">
+        <div className="space-y-8">
+          <SectionHeading
+            eyebrow="Made for phones"
+            title="Your clients live on their phones. So does FrameComment."
+            sub="Most feedback happens on the move, between shoots, in a taxi, on set. Every review link opens beautifully in any mobile browser: no app to install, no account to create."
+          />
+          <div className="space-y-5">
+            <Bullet
+              icon={Smartphone}
+              title="Review anywhere"
+              text="Clients open the link on their phone, scrub the timeline, and drop comments on the exact moment, with their thumb."
+            />
+            <Bullet
+              icon={Mic}
+              title="Talk instead of type"
+              text="On the phone it's easier to say it: voice notes record straight from the phone's microphone, pinned to the frame."
+            />
+            <Bullet
+              icon={ThumbsUp}
+              title="Approve on the go"
+              text="One tap to approve a cut. Your editor sees it instantly, no waiting for the client to get back to a desk."
+            />
+            <Bullet
+              icon={Zap}
+              title="The whole app, pocket-sized"
+              text="Not just review pages, the entire workspace is built responsive: manage projects, check notifications and share work from your phone."
+            />
+          </div>
+        </div>
+        <div className="fc-reveal" aria-hidden="true"><PhoneMock /></div>
       </section>
 
       {/* ── SECURITY ─────────────────────────────────────────────── */}
@@ -641,7 +755,7 @@ export function LandingClient() {
             <p className="text-sm font-semibold text-white/60">Free</p>
             <p className="mt-2 text-4xl font-bold text-white">
               $0
-              <span className="text-base font-normal text-white/45"> / month</span>
+              <span className="text-base font-normal text-white/55"> / month</span>
             </p>
             <p className="mt-2 text-sm text-white/55">
               Everything included. No credit card required.
@@ -665,7 +779,7 @@ export function LandingClient() {
             <p className="text-sm font-semibold text-primary">As you grow</p>
             <p className="mt-2 text-4xl font-bold text-white">
               $25
-              <span className="text-base font-normal text-white/45">
+              <span className="text-base font-normal text-white/55">
                 {' '}/ extra member / month
               </span>
             </p>
@@ -720,6 +834,8 @@ export function LandingClient() {
           </div>
         </div>
       </section>
+
+      </main>
 
       <MarketingFooter onLanding />
     </div>

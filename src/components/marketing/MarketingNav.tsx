@@ -34,7 +34,7 @@ export function MarketingNav({ onLanding = false }: { onLanding?: boolean }) {
     // surfaces so they stay legible over any content.
     <header className="sticky top-0 z-50">
       <div>
-        <nav className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center gap-6">
+        <nav aria-label="Main navigation" className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center gap-6">
           <Link href="/" className="shrink-0 text-white" aria-label="FrameComment home">
             <WordMark iconSize={26} noBackground />
           </Link>

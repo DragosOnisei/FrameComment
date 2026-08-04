@@ -493,9 +493,12 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
             {/* 3.3.x: Videos (default) / Folders tabs live on the right
                 of the search bar. The API returns both result sets in
                 one payload, so switching is instant. Only shown once a
-                query is active so the empty bar stays clean. */}
+                query is active so the empty bar stays clean.
+                5.16 mobile: inline only from sm: up — on phones the tabs
+                overflowed the bar ("Fol…"), so they move to their own
+                full-width row below the input (rendered further down). */}
             {hasQuery && (
-              <div className="shrink-0 flex items-center gap-1">
+              <div className="hidden sm:flex shrink-0 items-center gap-1">
                 {([
                   ['videos', 'Videos', total],
                   ['folders', 'Folders', folderTotal],
@@ -526,6 +529,31 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {/* 5.16 mobile: full-width segmented tabs under the input —
+              always fit, thumb-sized, never clipped. Phones only. */}
+          {hasQuery && (
+            <div className="sm:hidden flex items-stretch gap-1.5 px-3 pb-3">
+              {([
+                ['videos', 'Videos', total],
+                ['folders', 'Folders', folderTotal],
+              ] as const).map(([key, label, count]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setActiveTab(key as SearchTab)}
+                  className={`flex-1 h-9 rounded-lg text-[13px] font-medium ring-1 transition-colors ${
+                    activeTab === key
+                      ? 'bg-primary/15 text-primary ring-primary/40'
+                      : 'bg-white/[0.04] text-white/60 ring-white/10'
+                  }`}
+                >
+                  {label}
+                  {count > 0 ? ` (${count})` : ''}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -574,12 +602,21 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                     <button
                       key={r.id}
                       type="button"
-                      onClick={() => setSelectedId(r.id)}
+                      onClick={() => {
+                        // 5.16 mobile: no preview pane below md, so a tap
+                        // opens the video directly. Desktop keeps the
+                        // select-to-preview / double-click-to-open flow.
+                        const mdUp =
+                          typeof window !== 'undefined' &&
+                          window.matchMedia('(min-width: 768px)').matches
+                        if (mdUp) setSelectedId(r.id)
+                        else navigateToVideo(r)
+                      }}
                       onDoubleClick={() => navigateToVideo(r)}
                       // 2.5.0+: brand-blue tint for the active
                       // row (same recipe as the sidebar's active
                       // link). Neutral white-5 hover for the rest.
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                      className={`w-full flex items-center gap-3 px-4 py-3 md:py-2.5 text-left transition-colors ${
                         active
                           ? 'bg-primary/15 text-primary'
                           : 'hover:bg-white/5 text-white/85'
@@ -652,8 +689,13 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                 here: without it, intrinsic-width children (long
                 filenames, video tag at native size, etc.) make the
                 grid track stretch past `1fr` and the whole panel
-                grows a horizontal scrollbar. */}
-            <div className="overflow-y-auto overflow-x-hidden custom-scrollbar min-h-0 min-w-0">
+                grows a horizontal scrollbar.
+
+                5.16 mobile: HIDDEN below md. On phones the pane used to
+                stack under the list and swallow the whole screen; the
+                phone flow is now list-only — tapping a row opens the
+                video directly (see the row onClick). */}
+            <div className="hidden md:block overflow-y-auto overflow-x-hidden custom-scrollbar min-h-0 min-w-0">
               {!showPanel ? null : !selected ? (
                 <div className="h-full flex items-center justify-center text-sm text-white/55">
                   {loading ? 'Searching…' : 'Select a result to see details.'}
