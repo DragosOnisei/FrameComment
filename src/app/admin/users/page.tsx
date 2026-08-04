@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useAuth } from '@/components/AuthProvider'
@@ -8,8 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { Users, UserPlus, Edit, Trash2, Mail, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus, Crown, RotateCcw, Link2 } from 'lucide-react'
+import { Users, UserPlus, Edit, Trash2, Mail, Search, RefreshCw, AlertCircle, Eye, EyeOff, Copy, Check, KeyRound, Fingerprint, Plus, Crown, RotateCcw, Link2, Menu } from 'lucide-react'
 import InviteLinkModal from '@/components/InviteLinkModal'
+import AccessLinkModal from '@/components/AccessLinkModal'
 import { formatDate } from '@/lib/utils'
 import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -65,33 +66,34 @@ export default function UsersPage() {
   const [showAddUserModal, setShowAddUserModal] = useState(false)
   // 5.6 Phase 4: team-invite links modal
   const [showInviteModal, setShowInviteModal] = useState(false)
-  // 5.14: platform-owner ACCESS LINK (single-use company registration).
-  const [accessLink, setAccessLink] = useState<{ url: string; code: string; expiresAt: string } | null>(null)
-  const [accessLinkBusy, setAccessLinkBusy] = useState(false)
-  const [accessLinkCopied, setAccessLinkCopied] = useState(false)
+  // 5.16: platform-owner ACCESS LINK modal (create + list + revoke lives
+  // in AccessLinkModal — mirrors the team-invite modal).
+  const [showAccessLinkModal, setShowAccessLinkModal] = useState(false)
+  // 5.16: the topbar actions collapsed into ONE ☰ menu (Access link /
+  // Invite / Add User) so they can never overlap the search bar on
+  // narrower screens.
+  const [showActionsMenu, setShowActionsMenu] = useState(false)
+  const actionsMenuRef = useRef<HTMLDivElement>(null)
 
-  const handleGenerateAccessLink = async () => {
-    if (accessLinkBusy) return
-    setAccessLinkBusy(true)
-    try {
-      const res = await apiPost<{ ok: boolean; code: string; path: string; expiresAt: string }>(
-        '/api/platform/access-links',
-        {},
-      )
-      // Relative path from the server + the browser's own origin —
-      // correct on localhost AND on framecomment.com.
-      setAccessLink({
-        url: `${window.location.origin}${res.path}`,
-        code: res.code,
-        expiresAt: res.expiresAt,
-      })
-      setAccessLinkCopied(false)
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to generate access link')
-    } finally {
-      setAccessLinkBusy(false)
+  useEffect(() => {
+    if (!showActionsMenu) return
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
+        setShowActionsMenu(false)
+      }
     }
-  }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowActionsMenu(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('touchstart', onDown, { passive: true })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('touchstart', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [showActionsMenu])
   const [showEditUserModal, setShowEditUserModal] = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [showPasskeyModal, setShowPasskeyModal] = useState(false)
@@ -601,119 +603,98 @@ export default function UsersPage() {
         </h1>
       </TopbarLeftSlot>
       <TopbarRightSlot>
-        {/* 5.14: ACCESS LINK — PLATFORM OWNER ONLY. Generates a single-use
-            /register?code=… link that lets one new company sign up. */}
-        {isOwner(myRole) && (authUser as any)?.isPlatformOrg !== false && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(12px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-            }}
-            onClick={() => void handleGenerateAccessLink()}
-            disabled={accessLinkBusy}
-            aria-label="Generate access link"
-          >
-            <KeyRound className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">
-              {accessLinkBusy ? 'Generating…' : 'Access link'}
-            </span>
-          </Button>
-        )}
-        {/* 5.6 Phase 4: invite-with-link (Owner/Admin — same gate as Add user) */}
+        {/* 5.16: ONE ☰ menu holds every page action (Access link / Invite /
+            Add User) so nothing can ever overlap the search bar, at any
+            screen width. Sits just before the notification bell. */}
         {canManageUsers(myRole) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(12px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-            }}
-            onClick={() => setShowInviteModal(true)}
-            aria-label="Invite with link"
-          >
-            <Link2 className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Invite</span>
-          </Button>
-        )}
-        {canManageUsers(myRole) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(12px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-            }}
-            onClick={() => {
-              setNewUserData({ email: '', username: '', name: '', password: '', confirmPassword: '' })
-              setNewUserRole('EDITOR')
-              setShowPassword(false)
-              setShowConfirmPassword(false)
-              setError('')
-              setShowAddUserModal(true)
-            }}
-            aria-label={t('addUser')}
-          >
-            <UserPlus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">{t('addUser')}</span>
-          </Button>
+          <div ref={actionsMenuRef} className="relative">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                backdropFilter: 'blur(12px) saturate(140%)',
+                WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+              }}
+              onClick={() => setShowActionsMenu((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={showActionsMenu}
+              aria-label="User management actions"
+            >
+              <Menu className="w-4 h-4" />
+            </Button>
+            {showActionsMenu && (
+              <div
+                role="menu"
+                className="brand-menu-surface absolute right-0 top-full mt-1 z-[130] min-w-[200px] rounded-lg text-white ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1"
+                // Same iOS compositing guard as the account menu — without
+                // it, backdrop-filter card checkboxes bleed through on phones.
+                style={{
+                  transform: 'translateZ(0)',
+                  willChange: 'transform',
+                  isolation: 'isolate',
+                  backgroundColor:
+                    'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
+                }}
+              >
+                {isOwner(myRole) && (authUser as any)?.isPlatformOrg !== false && (
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      setShowActionsMenu(false)
+                      setShowAccessLinkModal(true)
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm hover:bg-white/[0.08] text-left"
+                  >
+                    <KeyRound className="w-4 h-4 shrink-0" />
+                    Access link
+                  </button>
+                )}
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setShowActionsMenu(false)
+                    setShowInviteModal(true)
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm hover:bg-white/[0.08] text-left"
+                >
+                  <Link2 className="w-4 h-4 shrink-0" />
+                  Invite
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setShowActionsMenu(false)
+                    setNewUserData({ email: '', username: '', name: '', password: '', confirmPassword: '' })
+                    setNewUserRole('EDITOR')
+                    setShowPassword(false)
+                    setShowConfirmPassword(false)
+                    setError('')
+                    setShowAddUserModal(true)
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm hover:bg-white/[0.08] text-left"
+                >
+                  <UserPlus className="w-4 h-4 shrink-0" />
+                  {t('addUser')}
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </TopbarRightSlot>
 
-      {/* 5.14: generated ACCESS LINK dialog (platform owner only). */}
-      <Dialog open={accessLink !== null} onOpenChange={(next) => { if (!next) setAccessLink(null) }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5 text-primary" />
-              Access link generated
-            </DialogTitle>
-            <DialogDescription>
-              Send this link to the company you want to invite. It lets them
-              create their own FrameComment company, works exactly once, and
-              expires in 30 days.
-            </DialogDescription>
-          </DialogHeader>
-          {accessLink && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Input
-                  readOnly
-                  value={accessLink.url}
-                  className="font-mono text-xs"
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={async () => {
-                    const ok = await copyToClipboard(accessLink.url)
-                    if (ok) {
-                      setAccessLinkCopied(true)
-                      setTimeout(() => setAccessLinkCopied(false), 2000)
-                    }
-                  }}
-                >
-                  {accessLinkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  <span className="ml-1.5">{accessLinkCopied ? 'Copied' : 'Copy'}</span>
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Access code: <span className="font-mono">{accessLink.code}</span> · expires{' '}
-                {formatDate(accessLink.expiresAt)}
-              </p>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* 5.16: ACCESS LINK modal (platform owner only) — create + list +
+          revoke, mirroring the team-invite modal. */}
+      {isOwner(myRole) && (authUser as any)?.isPlatformOrg !== false && (
+        <AccessLinkModal
+          open={showAccessLinkModal}
+          onOpenChange={setShowAccessLinkModal}
+        />
+      )}
 
       {canManageUsers(myRole) && (
         <InviteLinkModal

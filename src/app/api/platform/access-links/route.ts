@@ -24,6 +24,67 @@ export const dynamic = 'force-dynamic'
 
 const ACCESS_LINK_TTL_DAYS = 30
 
+/** Shared gate: platform org OWNER only. */
+async function requirePlatformOwner(request: NextRequest) {
+  const auth = await requireApiOwner(request)
+  if (auth instanceof Response) return auth
+  if (currentOrgId() !== 'org-1') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+  return auth
+}
+
+// GET — list the latest access links (code, status, expiry) for the modal.
+export async function GET(request: NextRequest) {
+  const auth = await requirePlatformOwner(request)
+  if (auth instanceof Response) return auth
+
+  try {
+    const rows = (await (prismaPrivileged as any).registrationInvite.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        code: true,
+        createdAt: true,
+        expiresAt: true,
+        usedAt: true,
+        usedByEmail: true,
+      },
+    })) as any[]
+    return NextResponse.json({ invites: rows })
+  } catch (error) {
+    logError('[GET /api/platform/access-links] failed:', error)
+    return NextResponse.json({ error: 'Failed to load access links' }, { status: 500 })
+  }
+}
+
+// DELETE ?id=… — revoke an UNUSED access link.
+export async function DELETE(request: NextRequest) {
+  const auth = await requirePlatformOwner(request)
+  if (auth instanceof Response) return auth
+
+  const id = new URL(request.url).searchParams.get('id') || ''
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+  try {
+    const row = (await (prismaPrivileged as any).registrationInvite.findUnique({
+      where: { id },
+      select: { id: true, usedAt: true },
+    })) as any
+    if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (row.usedAt) {
+      return NextResponse.json({ error: 'This link was already used and is kept for the record.' }, { status: 400 })
+    }
+    await (prismaPrivileged as any).registrationInvite.delete({ where: { id } })
+    logMessage(`[access-links] platform owner revoked access link ${id}`)
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    logError('[DELETE /api/platform/access-links] failed:', error)
+    return NextResponse.json({ error: 'Failed to revoke access link' }, { status: 500 })
+  }
+}
+
 export async function POST(request: NextRequest) {
   const auth = await requireApiOwner(request)
   if (auth instanceof Response) return auth
