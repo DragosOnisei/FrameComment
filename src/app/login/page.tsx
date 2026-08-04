@@ -250,12 +250,15 @@ function LoginForm() {
               blue), so the wordmark IS the title — no duplicate
               heading needed. The h1 stays as a visually-hidden
               landmark for screen readers + SEO. */}
-          <WordMark
-            variant="stacked"
-            iconSize={64}
-            className="mx-auto mb-4"
-            ariaHidden
-          />
+          {/* 5.14: the logo is a door back to the public landing page. */}
+          <Link href="/" aria-label="FrameComment home" className="inline-block">
+            <WordMark
+              variant="stacked"
+              iconSize={64}
+              className="mx-auto mb-4"
+              ariaHidden
+            />
+          </Link>
           <h1 className="sr-only">{tc('viTransfer')}</h1>
           <p className="text-sm text-muted-foreground mt-2">
             {tc('videoReviewTagline')}
@@ -336,37 +339,43 @@ function LoginForm() {
                 {loading ? t('signingIn') : t('signIn')}
               </Button>
 
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">{tc('or')}</span>
-                </div>
-              </div>
+              {/* 5.14: passkey sign-in HIDDEN (not removed) until the
+                  WebAuthn config is production-ready — the button showed a
+                  "check your configuration" error. All handlers/state stay
+                  wired; flip `false` to restore. */}
+              {false && (
+                <>
+                  <div className="relative my-4">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">{tc('or')}</span>
+                    </div>
+                  </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="default"
-                className="w-full"
-                disabled={passkeyLoading}
-                onClick={handlePasskeyLogin}
-              >
-                <Fingerprint className="w-4 h-4 mr-2" />
-                {passkeyLoading ? t('authenticating') : t('usePassKey')}
-              </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    className="w-full"
+                    disabled={passkeyLoading}
+                    onClick={handlePasskeyLogin}
+                  >
+                    <Fingerprint className="w-4 h-4 mr-2" />
+                    {passkeyLoading ? t('authenticating') : t('usePassKey')}
+                  </Button>
+                </>
+              )}
 
-              {/* 5.0 multi-tenant: public company registration (private beta). */}
-              <p className="text-center text-sm text-muted-foreground pt-2">
-                New here?{' '}
-                <Link
-                  href="/register"
-                  className="text-foreground underline underline-offset-4 hover:text-primary transition-colors"
-                >
-                  Create your company
-                </Link>
-              </p>
+              {/* 5.14: "Request early access" button replaces the old
+                  "New here? Create your company" text link — sign-ups are
+                  invite-gated, so the honest path is the request form. */}
+              <Link href="/request-access" className="block pt-2">
+                <Button type="button" variant="outline" className="w-full">
+                  Request early access
+                </Button>
+              </Link>
             </form>
           </CardContent>
         </Card>

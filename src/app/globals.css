@@ -730,3 +730,91 @@ textarea,
   max-height: none !important;
   object-fit: contain;
 }
+
+/* ─── 5.14.0: public marketing pages (landing / privacy / terms) ─────────
+   Same visual system as the app (dark glass + accent), plus a few
+   marketing-only animations. Everything respects prefers-reduced-motion. */
+
+/* Slow drifting aurora blobs behind the hero. */
+@keyframes fc-aurora {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  33%  { transform: translate3d(4%, -6%, 0) scale(1.08); }
+  66%  { transform: translate3d(-5%, 4%, 0) scale(0.94); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+.fc-aurora {
+  animation: fc-aurora 18s ease-in-out infinite;
+  will-change: transform;
+}
+.fc-aurora-slow { animation-duration: 26s; animation-delay: -8s; }
+
+/* Gentle float for the hero mock cards. */
+@keyframes fc-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
+}
+.fc-float   { animation: fc-float 7s ease-in-out infinite; }
+.fc-float-2 { animation: fc-float 9s ease-in-out infinite; animation-delay: -3s; }
+.fc-float-3 { animation: fc-float 8s ease-in-out infinite; animation-delay: -5s; }
+
+/* Scroll-reveal: elements start slightly sunk + transparent, and a tiny
+   IntersectionObserver in the landing client adds .fc-in when they enter
+   the viewport. */
+.fc-reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.fc-reveal.fc-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Soft pulsing dot for the live-comment mock. */
+@keyframes fc-ping {
+  0%   { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.5); }
+  70%  { box-shadow: 0 0 0 10px hsl(var(--primary) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
+}
+.fc-ping { animation: fc-ping 2.4s ease-out infinite; }
+
+/* Shimmering gradient headline. */
+@keyframes fc-gradient-pan {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.fc-gradient-text {
+  background: linear-gradient(
+    100deg,
+    hsl(var(--primary)) 0%,
+    #7dd3fc 30%,
+    hsl(var(--primary)) 60%,
+    #a5b4fc 85%,
+    hsl(var(--primary)) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fc-gradient-pan 9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fc-aurora,
+  .fc-aurora-slow,
+  .fc-float,
+  .fc-float-2,
+  .fc-float-3,
+  .fc-ping,
+  .fc-gradient-text {
+    animation: none;
+  }
+  .fc-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}

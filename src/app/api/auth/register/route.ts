@@ -57,11 +57,11 @@ function slugify(name: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  const expectedCode = process.env.REGISTER_INVITE_CODE
-  if (!expectedCode) {
-    // Registration is not enabled on this instance.
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  }
+  // 5.14: TWO ways in — the shared REGISTER_INVITE_CODE env secret (as
+  // before) OR a single-use RegistrationInvite "access link" code generated
+  // by the platform owner. With neither configured/valid, registration
+  // stays closed.
+  const expectedCode = process.env.REGISTER_INVITE_CODE || null
 
   // Strict per-IP limit — registration is an unauthenticated write.
   const limited = await rateLimit(
@@ -87,7 +87,20 @@ export async function POST(request: NextRequest) {
     }
     const { companyName, name, email, password, inviteCode } = parsed.data
 
-    if (!safeEqual(inviteCode, expectedCode)) {
+    // 5.14: env shared secret OR a live single-use access-link code.
+    let accessInviteId: string | null = null
+    let allowed = !!expectedCode && safeEqual(inviteCode, expectedCode)
+    if (!allowed && inviteCode) {
+      const invite = (await (prismaPrivileged as any).registrationInvite.findUnique({
+        where: { code: inviteCode },
+        select: { id: true, usedAt: true, expiresAt: true },
+      })) as any
+      if (invite && !invite.usedAt && new Date(invite.expiresAt) > new Date()) {
+        allowed = true
+        accessInviteId = invite.id
+      }
+    }
+    if (!allowed) {
       await logSecurityEvent({
         type: 'REGISTER_INVALID_INVITE_CODE',
         severity: 'WARNING',
@@ -181,6 +194,17 @@ export async function POST(request: NextRequest) {
 
       return created
     })
+
+    // 5.14: burn the single-use access-link code (best-effort — the org is
+    // already created; a failed burn just leaves a code the owner can see).
+    if (accessInviteId) {
+      await (prismaPrivileged as any).registrationInvite
+        .update({
+          where: { id: accessInviteId },
+          data: { usedAt: new Date(), usedByOrgId: orgId, usedByEmail: email },
+        })
+        .catch((err: unknown) => logError('[REGISTER] failed to mark access link used:', err))
+    }
 
     const authUser: AuthUser = {
       id: user.id,

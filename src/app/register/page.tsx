@@ -12,8 +12,8 @@
  * whole endpoint is disabled when that env is unset.
  */
 
-import { useState, Suspense } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -26,12 +26,20 @@ import WordMark from '@/components/WordMark'
 
 function RegisterForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [companyName, setCompanyName] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [inviteCode, setInviteCode] = useState('')
+
+  // 5.14: access links land here as /register?code=… — pre-fill the
+  // invite-code field so the invited company just fills in their details.
+  useEffect(() => {
+    const code = searchParams?.get('code')
+    if (code) setInviteCode(code)
+  }, [searchParams])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 

@@ -65,6 +65,33 @@ export default function UsersPage() {
   const [showAddUserModal, setShowAddUserModal] = useState(false)
   // 5.6 Phase 4: team-invite links modal
   const [showInviteModal, setShowInviteModal] = useState(false)
+  // 5.14: platform-owner ACCESS LINK (single-use company registration).
+  const [accessLink, setAccessLink] = useState<{ url: string; code: string; expiresAt: string } | null>(null)
+  const [accessLinkBusy, setAccessLinkBusy] = useState(false)
+  const [accessLinkCopied, setAccessLinkCopied] = useState(false)
+
+  const handleGenerateAccessLink = async () => {
+    if (accessLinkBusy) return
+    setAccessLinkBusy(true)
+    try {
+      const res = await apiPost<{ ok: boolean; code: string; path: string; expiresAt: string }>(
+        '/api/platform/access-links',
+        {},
+      )
+      // Relative path from the server + the browser's own origin —
+      // correct on localhost AND on framecomment.com.
+      setAccessLink({
+        url: `${window.location.origin}${res.path}`,
+        code: res.code,
+        expiresAt: res.expiresAt,
+      })
+      setAccessLinkCopied(false)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to generate access link')
+    } finally {
+      setAccessLinkBusy(false)
+    }
+  }
   const [showEditUserModal, setShowEditUserModal] = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [showPasskeyModal, setShowPasskeyModal] = useState(false)
@@ -574,6 +601,28 @@ export default function UsersPage() {
         </h1>
       </TopbarLeftSlot>
       <TopbarRightSlot>
+        {/* 5.14: ACCESS LINK — PLATFORM OWNER ONLY. Generates a single-use
+            /register?code=… link that lets one new company sign up. */}
+        {isOwner(myRole) && (authUser as any)?.isPlatformOrg !== false && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="sm:h-9 sm:px-3 ring-1 ring-white/10 text-white hover:text-white"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+            onClick={() => void handleGenerateAccessLink()}
+            disabled={accessLinkBusy}
+            aria-label="Generate access link"
+          >
+            <KeyRound className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">
+              {accessLinkBusy ? 'Generating…' : 'Access link'}
+            </span>
+          </Button>
+        )}
         {/* 5.6 Phase 4: invite-with-link (Owner/Admin — same gate as Add user) */}
         {canManageUsers(myRole) && (
           <Button
@@ -617,6 +666,54 @@ export default function UsersPage() {
           </Button>
         )}
       </TopbarRightSlot>
+
+      {/* 5.14: generated ACCESS LINK dialog (platform owner only). */}
+      <Dialog open={accessLink !== null} onOpenChange={(next) => { if (!next) setAccessLink(null) }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-primary" />
+              Access link generated
+            </DialogTitle>
+            <DialogDescription>
+              Send this link to the company you want to invite. It lets them
+              create their own FrameComment company, works exactly once, and
+              expires in 30 days.
+            </DialogDescription>
+          </DialogHeader>
+          {accessLink && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={accessLink.url}
+                  className="font-mono text-xs"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={async () => {
+                    const ok = await copyToClipboard(accessLink.url)
+                    if (ok) {
+                      setAccessLinkCopied(true)
+                      setTimeout(() => setAccessLinkCopied(false), 2000)
+                    }
+                  }}
+                >
+                  {accessLinkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  <span className="ml-1.5">{accessLinkCopied ? 'Copied' : 'Copy'}</span>
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Access code: <span className="font-mono">{accessLink.code}</span> · expires{' '}
+                {formatDate(accessLink.expiresAt)}
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {canManageUsers(myRole) && (
         <InviteLinkModal

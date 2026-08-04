@@ -22,6 +22,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
+  // 5.14 SEO: absolute base for canonicals / Open Graph across the app —
+  // machine-readable metadata only, zero UI impact.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://framecomment.com'),
   title: "FrameComment",
   description: "Professional video review and approval platform",
   manifest: '/manifest.json',

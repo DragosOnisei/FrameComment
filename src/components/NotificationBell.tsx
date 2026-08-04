@@ -61,7 +61,10 @@ function dateGroupLabel(iso: string): string {
   })
 }
 
-function deepLink(n: InAppNotification): string {
+function deepLink(n: InAppNotification): string | null {
+  // 5.14: EARLY_ACCESS rows (landing-page requests) have no video to
+  // open — clicking just marks them read.
+  if (!n.projectId || !n.videoName) return null
   // Include the STABLE video id so the review page can resolve the video even
   // if its display name changed (rename / version-stack) since the notification
   // was created — `video` (name) stays as a fallback for older links.
@@ -124,10 +127,13 @@ export default function NotificationBell() {
   }, [notifications, tab])
 
   const onRowClick = (n: InAppNotification) => {
-    setOpen(false)
     // Opening the video marks it read but keeps it in the list.
     if (!n.isRead) void markRead(n.id)
-    router.push(deepLink(n))
+    const link = deepLink(n)
+    if (link) {
+      setOpen(false)
+      router.push(link)
+    }
   }
 
   const badge = unreadCount > 99 ? '99+' : String(unreadCount)
@@ -259,16 +265,35 @@ export default function NotificationBell() {
                           onClick={() => onRowClick(n)}
                           className="flex-1 min-w-0 text-left"
                         >
-                          <div className="text-sm leading-snug text-white/80">
-                            New comments on
-                          </div>
-                          <div className="text-sm font-medium truncate">
-                            {n.videoName}
-                          </div>
-                          <div className="text-xs text-white/50 truncate mt-0.5">
-                            {n.actorName ? `${n.actorName} · ` : ''}
-                            {relativeTime(n.createdAt)}
-                          </div>
+                          {n.type === 'EARLY_ACCESS' ? (
+                            <>
+                              {/* 5.14: landing-page access request — no
+                                  video to open; the message carries
+                                  name, email and profession. */}
+                              <div className="text-sm leading-snug text-white/80">
+                                Early access request
+                              </div>
+                              <div className="text-sm font-medium whitespace-normal break-words">
+                                {n.message || n.actorName || 'New request'}
+                              </div>
+                              <div className="text-xs text-white/50 truncate mt-0.5">
+                                {relativeTime(n.createdAt)}
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="text-sm leading-snug text-white/80">
+                                New comments on
+                              </div>
+                              <div className="text-sm font-medium truncate">
+                                {n.videoName}
+                              </div>
+                              <div className="text-xs text-white/50 truncate mt-0.5">
+                                {n.actorName ? `${n.actorName} · ` : ''}
+                                {relativeTime(n.createdAt)}
+                              </div>
+                            </>
+                          )}
                         </button>
 
                         {/* Per-row actions */}

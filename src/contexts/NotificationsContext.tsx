@@ -34,11 +34,14 @@ import { logError } from '@/lib/logging'
 export interface InAppNotification {
   id: string
   type: string
-  projectId: string
-  videoId: string
-  videoName: string
+  // 5.14: nullable — EARLY_ACCESS notifications (landing-page access
+  // requests) have no project/video; they carry `message` instead.
+  projectId: string | null
+  videoId: string | null
+  videoName: string | null
   folderId: string | null
   actorName: string | null
+  message?: string | null
   isRead: boolean
   createdAt: string
 }

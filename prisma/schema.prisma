@@ -814,21 +814,27 @@ model Notification {
   id   String @id @default(cuid())
   // The admin who receives this (the video's uploader / "editor").
   recipientId String
-  // Signal type. Only NEW_COMMENTS today; kept as a string so future
+  // Signal type. NEW_COMMENTS (video feedback) or EARLY_ACCESS (a
+  // landing-page access request, 5.14); kept as a string so future
   // signals (approvals, mentions, …) don't need a migration.
   type        String @default("NEW_COMMENTS")
 
-  projectId String
-  videoId   String
+  // 5.14: optional — EARLY_ACCESS notifications aren't tied to a
+  // project/video (they carry `message` instead).
+  projectId String?
+  videoId   String?
   // Denormalized for display + deep-link without a join. Kept even if
   // the video is later renamed — the link resolves by name, and a
   // stale name is better than a broken bell row.
-  videoName String
+  videoName String?
   folderId  String?
 
   // Display name of whoever clicked "Send to editor" (client guest
   // name or admin name). Nullable for anonymous reviewers.
   actorName String?
+
+  // 5.14: free-text body for non-video notifications (EARLY_ACCESS).
+  message String?
 
   isRead Boolean   @default(false)
   readAt DateTime?
@@ -836,9 +842,9 @@ model Notification {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  recipient User    @relation("UserNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  video     Video   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  recipient User     @relation("UserNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  video     Video?   @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   // Primary read path: "my unread/recent notifications, newest first".
   @@index([recipientId, isRead, createdAt])
@@ -1511,4 +1517,24 @@ model TeamInvite {
   createdAt      DateTime  @default(now())
 
   @@index([organizationId])
+}
+
+// 5.14: single-use registration access links ("Invite a company").
+// PLATFORM-LEVEL table: created only by the platform org's Owner and
+// consumed by the public /register flow, so it deliberately has NO
+// organizationId and is accessed exclusively through owner-gated /
+// privileged code paths. A valid, unexpired, unused code lets one new
+// company register (in addition to the shared REGISTER_INVITE_CODE env
+// secret, which keeps working).
+model RegistrationInvite {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  usedAt       DateTime?
+  usedByOrgId  String?
+  usedByEmail  String?
+
+  @@index([expiresAt])
 }

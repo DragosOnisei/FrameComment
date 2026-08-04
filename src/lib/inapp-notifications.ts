@@ -40,11 +40,14 @@ export function notificationChannel(userId: string): string {
 export interface InAppNotification {
   id: string
   type: string
-  projectId: string
-  videoId: string
-  videoName: string
+  // 5.14: nullable — EARLY_ACCESS notifications have no project/video;
+  // they carry `message` instead.
+  projectId: string | null
+  videoId: string | null
+  videoName: string | null
   folderId: string | null
   actorName: string | null
+  message: string | null
   isRead: boolean
   createdAt: string
 }
@@ -52,11 +55,12 @@ export interface InAppNotification {
 interface NotificationRow {
   id: string
   type: string
-  projectId: string
-  videoId: string
-  videoName: string
+  projectId: string | null
+  videoId: string | null
+  videoName: string | null
   folderId: string | null
   actorName: string | null
+  message?: string | null
   isRead: boolean
   createdAt: Date | string
 }
@@ -65,11 +69,12 @@ export function serializeNotification(row: NotificationRow): InAppNotification {
   return {
     id: row.id,
     type: row.type,
-    projectId: row.projectId,
-    videoId: row.videoId,
-    videoName: row.videoName,
+    projectId: row.projectId ?? null,
+    videoId: row.videoId ?? null,
+    videoName: row.videoName ?? null,
     folderId: row.folderId ?? null,
     actorName: row.actorName ?? null,
+    message: row.message ?? null,
     isRead: row.isRead,
     createdAt:
       row.createdAt instanceof Date
