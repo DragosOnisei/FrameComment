@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useAuth } from '@/components/AuthProvider'
@@ -73,14 +73,19 @@ export default function UsersPage() {
   // Invite / Add User) so they can never overlap the search bar on
   // narrower screens.
   const [showActionsMenu, setShowActionsMenu] = useState(false)
-  const actionsMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!showActionsMenu) return
+    // NOTE: TopbarRightSlot portals its children into TWO targets (desktop +
+    // mobile), so this menu exists twice in the DOM and a single ref would
+    // only ever point at the copy that mounted last. Matching by attribute
+    // recognises clicks in EITHER copy — otherwise mousedown here counted as
+    // "outside", the menu unmounted before the click landed, and the items
+    // did nothing.
     const onDown = (e: MouseEvent | TouchEvent) => {
-      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
-        setShowActionsMenu(false)
-      }
+      const el = e.target as Element | null
+      if (el && typeof el.closest === 'function' && el.closest('[data-users-actions]')) return
+      setShowActionsMenu(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setShowActionsMenu(false)
@@ -607,7 +612,7 @@ export default function UsersPage() {
             Add User) so nothing can ever overlap the search bar, at any
             screen width. Sits just before the notification bell. */}
         {canManageUsers(myRole) && (
-          <div ref={actionsMenuRef} className="relative">
+          <div data-users-actions className="relative">
             <Button
               variant="ghost"
               size="sm"
