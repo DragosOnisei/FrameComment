@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, orgSettingsWhere } from '@/lib/db'
 import { getCurrentUserFromRequest } from '@/lib/auth'
+import { canonicalPublicOrigin } from '@/lib/url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -43,9 +44,14 @@ export async function GET(request: NextRequest) {
       brandingLogoPath: settings?.brandingLogoPath || null,
       companyName: settings?.companyName || null,
       appDomain: settings?.appDomain || null,
+      // 6.0.3: ALWAYS hand the client a public origin to mint share links
+      // against. Before this, an unset `appDomain` meant the admin UI fell
+      // back to `window.location.origin` — an IP when browsing over LAN or
+      // the TrueNAS portal, which produced share links no client could open.
+      shareOrigin: settings?.appDomain?.trim() || canonicalPublicOrigin(),
     })
   } catch (error) {
     // Default values on error
-    return NextResponse.json({ defaultTheme: 'dark', accentColor: 'blue', brandingLogoPath: null, companyName: null, appDomain: null })
+    return NextResponse.json({ defaultTheme: 'dark', accentColor: 'blue', brandingLogoPath: null, companyName: null, appDomain: null, shareOrigin: canonicalPublicOrigin() })
   }
 }

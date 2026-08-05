@@ -224,6 +224,9 @@ export function ShareModal({
   // one. Flipping the polarity (start false → set true after the
   // POST resolves, success OR failure) closes that race.
   const [shortUrl, setShortUrl] = useState<string | null>(null)
+  // 6.0.3: server-normalised long URL (LAN host rewritten to the public
+  // domain). Used instead of `shareUrl` whenever the server sends one.
+  const [normalisedLongUrl, setNormalisedLongUrl] = useState<string | null>(null)
   // 3.5.x: whether a short-link DOMAIN is configured server-side.
   //   null  → we don't know yet (POST in flight) → show "Generating…",
   //           never reveal/copy the long URL.
@@ -269,6 +272,7 @@ export function ShareModal({
     if (!open) {
       shortRequestedRef.current = null
       setShortUrl(null)
+      setNormalisedLongUrl(null)
       setShortDomainConfigured(null)
       return
     }
@@ -301,6 +305,13 @@ export function ShareModal({
         const data = (await res.json()) as {
           shortUrl: string
           shortDomainConfigured: boolean
+          targetUrl?: string
+        }
+        // 6.0.3: the server normalises the long URL onto the public domain
+        // (we may have minted it from a LAN host). Adopt the echoed value so
+        // the "no short domain" fallback is client-reachable as well.
+        if (data.targetUrl && data.targetUrl !== shareUrl) {
+          setNormalisedLongUrl(data.targetUrl)
         }
         // Record whether a real short-link domain is configured. When
         // it IS, the modal shows ONLY the short URL (never the long
@@ -348,7 +359,9 @@ export function ShareModal({
   //     long one). This is the core guarantee the admin asked for.
   //   - No domain configured → the original long URL.
   const displayUrl =
-    shortDomainConfigured && shortUrl ? shortUrl : shareUrl
+    shortDomainConfigured && shortUrl
+      ? shortUrl
+      : normalisedLongUrl || shareUrl
   // Ready to show/copy once we KNOW the outcome:
   //   - domain configured AND the short URL has arrived, OR
   //   - domain not configured (long URL is correct), OR

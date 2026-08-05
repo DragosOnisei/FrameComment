@@ -78,13 +78,16 @@ export async function refreshPublicShareOriginFromTheme(): Promise<void> {
     const res = await fetch('/api/settings/theme')
     if (!res.ok) return
     const data = await res.json()
-    if (typeof data?.appDomain === 'string' && data.appDomain.trim()) {
-      setPublicShareOrigin(data.appDomain)
-    } else {
-      // The admin cleared the setting — clear the cache too so we
-      // fall back to `window.location.origin` immediately.
-      setPublicShareOrigin(null)
-    }
+    // 6.0.3: `shareOrigin` is the server's resolved public origin
+    // (appDomain when configured, otherwise the platform domain). Prefer
+    // it over the raw appDomain so an UNSET appDomain no longer degrades
+    // to `window.location.origin` — which is an IP over LAN / the TrueNAS
+    // portal, and produced share links clients couldn't open.
+    const resolved =
+      (typeof data?.shareOrigin === 'string' && data.shareOrigin.trim()) ||
+      (typeof data?.appDomain === 'string' && data.appDomain.trim()) ||
+      ''
+    setPublicShareOrigin(resolved || null)
   } catch {
     /* network blip — keep whatever we had cached. */
   }

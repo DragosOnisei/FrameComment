@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiAdmin } from '@/lib/auth'
 import { prisma, orgSettingsWhere } from '@/lib/db'
 import { buildShortUrl, createShortLink } from '@/lib/short-link'
-import { logError } from '@/lib/logging'
+import { forcePublicOrigin } from '@/lib/url'
+import { logError, logMessage } from '@/lib/logging'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -88,7 +89,20 @@ export async function POST(request: NextRequest) {
       select: { shortLinkDomain: true, appDomain: true },
     })
 
-    const link = await createShortLink(targetUrl, expiresAt)
+    // 6.0.3: the long URL is minted CLIENT-side, so it inherits whatever
+    // host the editor happens to be on — over LAN or the TrueNAS portal
+    // that's an IP the client can never open. Normalise before storing:
+    // path, query and HMAC signature are untouched, only the origin moves
+    // to the studio's public domain.
+    const publicTargetUrl = forcePublicOrigin(
+      targetUrl,
+      settings?.appDomain?.trim() || undefined,
+    )
+    if (publicTargetUrl !== targetUrl) {
+      logMessage('[short-link] normalised an unreachable share host to the public origin')
+    }
+
+    const link = await createShortLink(publicTargetUrl, expiresAt)
 
     const shortDomain = settings?.shortLinkDomain?.trim()
     const shortUrl = shortDomain
@@ -103,9 +117,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       slug: link.slug,
       shortUrl,
-      // Echo the targetUrl back so callers can offer "long URL"
-      // as a fallback to copy without a second round-trip.
-      targetUrl,
+      // Echo the NORMALISED targetUrl back so callers can offer "long URL"
+      // as a fallback to copy without a second round-trip — and so the
+      // fallback is client-reachable too, not the LAN URL they sent us.
+      targetUrl: publicTargetUrl,
       shortDomainConfigured: !!shortDomain,
     })
   } catch (err) {

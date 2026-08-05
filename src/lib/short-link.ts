@@ -21,7 +21,8 @@
 
 import { randomInt } from 'node:crypto'
 import { prisma, prismaPrivileged } from './db'
-import { logError } from './logging'
+import { logError, logMessage } from './logging'
+import { forcePublicOrigin, isNonPublicHost } from './url'
 
 // 51 chars, no 0/O/o/1/I/l — those four are the standard "looks
 // alike at a glance" set across helvetica, inter, arial.
@@ -103,14 +104,50 @@ export async function resolveShortLink(
   // the un-armed default client would be denied by RLS and every short link
   // would 404. Read-only, returns only the redirect target — the target URL
   // then goes through the share route's own org arming + auth.
-  const row = await prismaPrivileged.shortLink.findUnique({
+  const row = (await prismaPrivileged.shortLink.findUnique({
     where: { slug },
-    select: { targetUrl: true, expiresAt: true },
-  })
+    select: { targetUrl: true, expiresAt: true, organizationId: true } as any,
+  })) as any
   if (!row) return null
   const expired =
     row.expiresAt != null && row.expiresAt.getTime() <= Date.now()
-  return { targetUrl: row.targetUrl, expired }
+
+  // 6.0.3 SELF-HEALING: links minted before the public-origin guard (or by
+  // an editor browsing over LAN) point at an IP / localhost and are dead
+  // for the client who received them. Rewrite the origin at redirect time
+  // — path, query and HMAC signature are preserved, so an already-sent
+  // fcmt.io link starts working without re-issuing it.
+  let targetUrl: string = row.targetUrl
+  if (isNonPublicHost(safeHost(targetUrl))) {
+    let base: string | undefined
+    if (row.organizationId) {
+      try {
+        const settings = (await (prismaPrivileged as any).settings.findFirst({
+          where: { organizationId: row.organizationId },
+          select: { appDomain: true },
+        })) as { appDomain?: string | null } | null
+        if (settings?.appDomain?.trim()) base = settings.appDomain.trim()
+      } catch {
+        /* fall back to the canonical origin below */
+      }
+    }
+    const rewritten = forcePublicOrigin(targetUrl, base)
+    if (rewritten !== targetUrl) {
+      logMessage(`[short-link] ${slug}: rewrote unreachable host to the public origin`)
+      targetUrl = rewritten
+    }
+  }
+
+  return { targetUrl, expired }
+}
+
+/** Host of a URL, or '' when it isn't parseable (treated as non-public). */
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return ''
+  }
 }
 
 /**
