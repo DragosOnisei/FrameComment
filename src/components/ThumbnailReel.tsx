@@ -681,15 +681,19 @@ export default function ThumbnailReel({
           // drag-to-scroll working across the whole strip.
           className="absolute left-2 right-2 sm:left-3 sm:right-3 top-full z-50 mt-1"
         >
-          {/* 2.5.1+: glass panel matching the rest of the v2.5
-              vocabulary — soft white tint over `.spotlight-bg`,
-              hairline ring, deep outward shadow so it reads as
-              elevated above the player. */}
+          {/* 6.1.1: SOLID accent panel, no glass. The blurred version was
+              see-through, so the video underneath bled into the tiles and the
+              strip lost contrast. Now it's an opaque accent-tinted surface
+              with the same corner gradient the comments panel uses, so the
+              two read as one family and the colour tracks the user's accent
+              (`--spotlight-tint`). */}
           <div
-            className="rounded-xl bg-white/[0.06] ring-1 ring-white/15 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.7)]"
+            className="rounded-xl ring-1 ring-white/15 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.7)]"
             style={{
-              backdropFilter: 'blur(20px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+              backgroundColor:
+                'color-mix(in srgb, hsl(var(--spotlight-tint)) 12%, hsl(var(--background)))',
+              backgroundImage:
+                'radial-gradient(140% 70% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.08) 40%, transparent 72%)',
             }}
           >
             {/* 2.5.1+: vertical padding moved off the outer wrapper
@@ -707,9 +711,11 @@ export default function ThumbnailReel({
                   onClick={() => scrollVersionReel('left')}
                   className={cn(
                     'absolute left-1 sm:left-2 top-1/2 -translate-y-1/2 z-10',
-                    'h-8 w-8 rounded-full bg-white/[0.08] ring-1 ring-white/15 shadow-md text-white',
-                    'flex items-center justify-center backdrop-blur-md',
-                    'hover:bg-white/[0.14] hover:ring-white/25 transition-colors',
+                    // 6.1.1: solid, like the panel — the blurred pill let the
+                    // tiles behind it show through as a smear.
+                    'h-8 w-8 rounded-full bg-white/[0.10] ring-1 ring-white/15 shadow-md text-white',
+                    'flex items-center justify-center',
+                    'hover:bg-white/[0.18] hover:ring-white/25 transition-colors',
                   )}
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -909,9 +915,11 @@ export default function ThumbnailReel({
                   onClick={() => scrollVersionReel('right')}
                   className={cn(
                     'absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 z-10',
-                    'h-8 w-8 rounded-full bg-background/95 ring-1 ring-border shadow-md',
+                    // 6.1.1: match the left arrow (it had drifted to the old
+                    // light-theme tokens, which read grey on the accent panel).
+                    'h-8 w-8 rounded-full bg-white/[0.10] ring-1 ring-white/15 shadow-md text-white',
                     'flex items-center justify-center',
-                    'hover:bg-muted transition-colors',
+                    'hover:bg-white/[0.18] hover:ring-white/25 transition-colors',
                   )}
                 >
                   <ChevronRight className="w-4 h-4" />
