@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
+import { stackVideoIntoGroup } from '@/lib/video-versions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -10,23 +10,21 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/videos/[id]/stack — Frame.io-style versioning (1.0.6+).
  *
- * Reparent the SOURCE video (and the rest of its version group) into
- * the TARGET video's group. After the call:
+ * Reparent the SOURCE video (and the rest of its version group) into the
+ * TARGET video's group. After the call:
  *
- *   - Every Video row in the source group is renamed to `target.name`
- *   - Their `version` numbers are shifted to start at `target.maxVersion + 1`
- *   - `versionLabel` is regenerated as "vN" to match
+ *   - Every row in the resulting stack is renamed to the SOURCE's name
+ *     (newest delivery drives the card title)
+ *   - The stack is renumbered 1..N with the source rows appended last, so
+ *     the newest upload is always the highest version
  *
- * The whole operation runs in a transaction so a partial failure
- * doesn't leave the table in a mixed state.
+ * 6.0.4: the version arithmetic moved into `stackVideoIntoGroup` and is now
+ * a full renumber instead of `max + 1`. The old code returned early when the
+ * source already carried the group's name, which left a freshly uploaded row
+ * at v1 — the "4th version shows up as V1" bug. Renumbering is idempotent
+ * and repairs groups that were already damaged.
  *
  *   Body: { targetVideoId: string }
- *
- * Validation:
- *   - Source and target must exist
- *   - Same project, same folder (a video can't jump folders by stacking)
- *   - Source !== target (can't stack onto self)
- *   - Source is NOT already a version of target (no-op)
  */
 export async function POST(
   request: NextRequest,
@@ -58,124 +56,38 @@ export async function POST(
       )
     }
 
-    if (sourceId === targetId) {
-      return NextResponse.json(
-        { error: 'Cannot stack a video onto itself' },
-        { status: 400 },
-      )
+    const result = await stackVideoIntoGroup(sourceId, targetId)
+
+    if (typeof result === 'string') {
+      switch (result) {
+        case 'SOURCE_NOT_FOUND':
+        case 'TARGET_NOT_FOUND':
+          return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+        case 'SAME_VIDEO':
+          return NextResponse.json(
+            { error: 'Cannot stack a video onto itself' },
+            { status: 400 },
+          )
+        case 'DIFFERENT_PROJECT':
+          return NextResponse.json(
+            { error: 'Videos belong to different projects' },
+            { status: 400 },
+          )
+        case 'DIFFERENT_FOLDER':
+          return NextResponse.json(
+            { error: 'Videos must be in the same folder to be stacked' },
+            { status: 400 },
+          )
+        default:
+          return NextResponse.json({ error: 'Failed to stack videos' }, { status: 400 })
+      }
     }
-
-    const [source, target] = await Promise.all([
-      prisma.video.findUnique({
-        where: { id: sourceId },
-        select: {
-          id: true,
-          projectId: true,
-          folderId: true,
-          name: true,
-          version: true,
-        },
-      }),
-      prisma.video.findUnique({
-        where: { id: targetId },
-        select: {
-          id: true,
-          projectId: true,
-          folderId: true,
-          name: true,
-          version: true,
-        },
-      }),
-    ])
-
-    if (!source || !target) {
-      return NextResponse.json({ error: 'Video not found' }, { status: 404 })
-    }
-    if (source.projectId !== target.projectId) {
-      return NextResponse.json(
-        { error: 'Videos belong to different projects' },
-        { status: 400 },
-      )
-    }
-    if ((source.folderId ?? null) !== (target.folderId ?? null)) {
-      return NextResponse.json(
-        { error: 'Videos must be in the same folder to be stacked' },
-        { status: 400 },
-      )
-    }
-    if (source.name === target.name) {
-      // Already in the same group — nothing to do.
-      return NextResponse.json({ ok: true, alreadyStacked: true })
-    }
-
-    // Snapshot the two groups so we can re-version them atomically.
-    //
-    // `deletedAt: null` is CRUCIAL: only LIVE rows may count toward the next
-    // version number. Without it, a soft-deleted version (sitting in Trash for
-    // 30 days) still bumped the counter — delete v3, re-upload + stack, and it
-    // came back as v4 instead of reclaiming v3 (the "ghost of its former self").
-    const folderFilter =
-      target.folderId === null
-        ? { folderId: null, deletedAt: null }
-        : { folderId: target.folderId, deletedAt: null }
-
-    const [targetGroup, sourceGroup] = await Promise.all([
-      prisma.video.findMany({
-        where: { projectId: target.projectId, name: target.name, ...folderFilter },
-        orderBy: { version: 'asc' },
-        select: { id: true, version: true },
-      }),
-      prisma.video.findMany({
-        where: { projectId: source.projectId, name: source.name, ...folderFilter },
-        orderBy: { version: 'asc' },
-        select: { id: true, version: true },
-      }),
-    ])
-
-    const targetMaxVersion =
-      targetGroup.length > 0 ? targetGroup[targetGroup.length - 1].version : 0
-
-    // Frame.io convention: the freshly-added video drives the
-    // displayed name of the whole stack. So when "Episode 2" is
-    // dragged onto "Episode 1", the whole group becomes "Episode 2"
-    // — Episode 2 is what you see on the card now.
-    const newName = source.name
-
-    // Step 1: rename the existing target rows (keep their version
-    // numbers intact — they stay as v1..N).
-    const targetUpdates = targetGroup.map((v) =>
-      prisma.video.update({
-        where: { id: v.id },
-        data: { name: newName },
-      }),
-    )
-
-    // Step 2: append the source rows after the target — they take
-    // versions targetMax+1, +2, … (their name already equals newName
-    // since `newName === source.name`, but we set it explicitly to
-    // keep the SQL self-consistent if anything else changes later).
-    const sourceUpdates = sourceGroup.map((v, i) => {
-      const newVersion = targetMaxVersion + i + 1
-      return prisma.video.update({
-        where: { id: v.id },
-        data: {
-          name: newName,
-          version: newVersion,
-          versionLabel: `v${newVersion}`,
-        },
-      })
-    })
-
-    await prisma.$transaction([...targetUpdates, ...sourceUpdates])
 
     return NextResponse.json({
       ok: true,
-      movedCount: sourceGroup.length,
-      newName,
-      newVersionRange: [
-        targetMaxVersion + 1,
-        targetMaxVersion + sourceGroup.length,
-      ],
+      movedCount: result.movedCount,
+      newName: result.newName,
+      versions: result.order,
     })
   } catch (error) {
     logError('[POST /api/videos/[id]/stack] failed:', error)

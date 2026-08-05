@@ -16,6 +16,7 @@ import { invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { updateProjectSchema } from '@/lib/validation'
+import { findDamagedVersionGroups, renumberVersionGroup } from '@/lib/video-versions'
 import { syncCompanyToDirectory } from '@/lib/client-directory-sync'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import {
@@ -119,6 +120,27 @@ export async function GET(
       return NextResponse.json({ error: projectMessages.projectNotFoundApi || 'Project not found' }, { status: 404 })
     }
 
+    // 6.0.4 SELF-HEAL: repair stacks whose version numbers were left broken
+    // by an older build (duplicate badges, e.g. a 4th upload sitting at V1
+    // next to the real v1). Detection is pure in-memory over rows we already
+    // fetched, and the write only fires for groups that are ACTUALLY damaged
+    // — which, after this release, should be never.
+    let videos = project.videos as any[]
+    const damaged = findDamagedVersionGroups(videos)
+    if (damaged.length > 0) {
+      try {
+        for (const group of damaged) {
+          await renumberVersionGroup({ projectId: project.id, ...group })
+        }
+        videos = (await prisma.video.findMany({
+          where: { projectId: project.id, deletedAt: null } as any,
+          orderBy: { version: 'desc' },
+        })) as any[]
+      } catch (healErr) {
+        logError('[projects GET] version self-heal failed:', healErr)
+      }
+    }
+
     // Check SMTP configuration status
     const smtpConfigured = await isSmtpConfigured()
 
@@ -143,7 +165,7 @@ export async function GET(
     // Convert BigInt fields to strings for JSON serialization
     const projectData = {
       ...project,
-      videos: project.videos.map((video: any) => ({
+      videos: videos.map((video: any) => ({
         ...video,
         originalFileSize: video.originalFileSize.toString(),
         // 4.2.0+: resolve NULL (legacy) to the instance default backend so the

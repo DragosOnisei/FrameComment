@@ -609,6 +609,10 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
           originalFileSize: file.size,
           mimeType: file.type || undefined,
           name: trimmedVideoName,
+          // 6.0.4: let the SERVER do the stacking as part of creation. The
+          // follow-up POST below stays as an idempotent retry for older
+          // servers, but the version number no longer depends on it.
+          stackOntoVideoId: uploadItem.stackOntoVideoId,
         })
         videoId = response.videoId
         createdVideoRecord = true

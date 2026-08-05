@@ -8,6 +8,7 @@ import {
 } from '@/lib/file-validation'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
+import { stackVideoIntoGroup } from '@/lib/video-versions'
 
 export const runtime = 'nodejs'
 
@@ -40,6 +41,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, folderId } = body
+    // 6.0.4: when the upload was dropped ONTO a video, stack it server-side
+    // right after the row exists. The browser also calls
+    // /api/videos/[id]/stack (best-effort), but that request could fail or
+    // never fire — and then the new row stayed at the v1 it was created
+    // with, sitting in the group as a second V1. Doing it here removes that
+    // window entirely; the client call is now just an idempotent retry.
+    const stackOntoVideoId =
+      typeof body?.stackOntoVideoId === 'string' && body.stackOntoVideoId.trim()
+        ? body.stackOntoVideoId.trim()
+        : null
 
     // Validate required fields
     if (!name || !name.trim()) {
@@ -157,6 +168,21 @@ export async function POST(request: NextRequest) {
     } catch {
       // Fall back without createdById — very old dev DBs.
       video = await prisma.video.create({ data: baseCreate })
+    }
+
+    // 6.0.4: upload-as-version — join the target's stack immediately, with
+    // the canonical renumber (1..N, newest last). Best-effort: a stacking
+    // failure must not fail the upload itself, and the client's retry (plus
+    // any later stack action) will renumber the group anyway.
+    if (stackOntoVideoId) {
+      try {
+        const stacked = await stackVideoIntoGroup(video.id, stackOntoVideoId)
+        if (typeof stacked === 'string') {
+          logError(`[POST /api/videos] server-side stack skipped: ${stacked}`)
+        }
+      } catch (stackErr) {
+        logError('[POST /api/videos] server-side stack failed:', stackErr)
+      }
     }
 
     // Return videoId - TUS will handle upload directly

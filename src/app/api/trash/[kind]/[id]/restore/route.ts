@@ -17,6 +17,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
+import { renumberVersionGroup } from '@/lib/video-versions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -175,6 +176,22 @@ export async function POST(
           } as any,
         }),
       ])
+
+      // 6.0.4: the restored rows keep the version numbers they had when they
+      // were trashed, which can collide with (or leave gaps against) whatever
+      // the live stack looks like now. Renumber the resulting group 1..N so a
+      // stack never shows two identical version badges. Best-effort — the
+      // restore itself already succeeded.
+      try {
+        await renumberVersionGroup({
+          projectId,
+          folderId: targetFolderId,
+          name: restoredName,
+        })
+      } catch (renumberErr) {
+        logError('[restore] version renumber failed:', renumberErr)
+      }
+
       return NextResponse.json({ success: true, restoredName })
     }
 
