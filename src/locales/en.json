@@ -1969,6 +1969,7 @@
     "operationFailed": "Operation failed",
     "userNotFound": "User not found",
     "emailAlreadyTaken": "Email already taken",
+    "invalidEmail": "Enter a valid email address",
     "invalidRoleAdminOrUser": "Invalid role. Must be ADMIN or USER",
     "currentPasswordRequiredToChangePassword": "Current password is required to change password",
     "currentPasswordIncorrect": "Current password is incorrect",

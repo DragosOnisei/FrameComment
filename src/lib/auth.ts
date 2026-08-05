@@ -402,9 +402,12 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<A
     where: { id: payload.userId },
     // 2.5.1+: include `avatarUrl` so the session payload carries it
     // back to the client without an extra round-trip.
+    // 6.0.2: `username` joins it so the Profile page can seed the real
+    // value instead of an empty box that browsers then autofill.
     select: {
       id: true,
       email: true,
+      username: true,
       name: true,
       avatarUrl: true,
       role: true,

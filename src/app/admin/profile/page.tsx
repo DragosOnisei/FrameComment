@@ -56,6 +56,10 @@ export default function ProfilePage() {
 
   // --- Profile section state -------------------------------------
   const [name, setName] = useState('')
+  // 6.0.2: the account email is now editable here. It IS the identity the
+  // app shows everywhere (sidebar, user list, notifications) and the one
+  // you sign in with, so it lives next to the display name.
+  const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   // 3.2.x: file pending crop. Non-null opens the AvatarCropModal.
@@ -76,6 +80,7 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!user) return
     setName(user.name ?? '')
+    setEmail(user.email ?? '')
     setUsername((user as any).username ?? '')
     setAvatarPreview((user as any).avatarUrl ?? null)
   }, [user])
@@ -127,17 +132,25 @@ export default function ProfilePage() {
 
   const handleSaveProfile = useCallback(async () => {
     if (!user) return
+    const nextEmail = email.trim().toLowerCase()
+    // Mirror the server check so the user gets instant feedback and we
+    // never send an address that would lock them out of signing in.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      setProfileMsg({ kind: 'err', text: 'Enter a valid email address.' })
+      return
+    }
     setSavingProfile(true)
     setProfileMsg(null)
     try {
-      // 3.2.x: this button now only saves Display name + Username. The
-      // avatar persists on its own (Apply / Remove) so a name/username
-      // error here can't block a photo change.
+      // 3.2.x: this button saves Display name + Email + Username. The
+      // avatar persists on its own (Apply / Remove) so an error here
+      // can't block a photo change.
       const res = await apiFetch(`/api/users/${user.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
+          email: nextEmail,
           username: username.trim() || null,
         }),
       })
@@ -145,15 +158,23 @@ export default function ProfilePage() {
         const body = await res.json().catch(() => ({}))
         throw new Error(body?.error || 'Could not save profile')
       }
-      updateUser({ name: name.trim() }) // propagate the name change
-      setProfileMsg({ kind: 'ok', text: 'Profile updated.' })
+      // Propagate instantly — the sidebar chip and account menu read these.
+      updateUser({ name: name.trim(), email: nextEmail, username: username.trim() || null })
+      setEmail(nextEmail)
+      const emailChanged = nextEmail !== (user.email ?? '').toLowerCase()
+      setProfileMsg({
+        kind: 'ok',
+        text: emailChanged
+          ? 'Profile updated. Sign in with your new email address from now on.'
+          : 'Profile updated.',
+      })
     } catch (err) {
       logError('Save profile failed:', err)
       setProfileMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Save failed' })
     } finally {
       setSavingProfile(false)
     }
-  }, [user, name, username, updateUser])
+  }, [user, name, email, username, updateUser])
 
   const handleSavePassword = useCallback(async () => {
     if (!user) return
@@ -222,6 +243,7 @@ export default function ProfilePage() {
   // avatar is excluded — it saves on its own.
   const profileDirty =
     name.trim() !== (user.name ?? '').trim() ||
+    email.trim().toLowerCase() !== (user.email ?? '').trim().toLowerCase() ||
     (username.trim() || '') !== (((user as any).username ?? '') as string)
 
   // Reused field-input className — `bg-white/[0.04]` glass surface
@@ -316,15 +338,43 @@ export default function ProfilePage() {
                 className={inputClass}
               />
             </div>
+            {/* 6.0.2: the account email — what the app shows everywhere and
+                what you sign in with. Editable here so it can't drift from
+                the address you actually use. */}
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-email" className="text-white/80">Email</Label>
+              <Input
+                id="profile-email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                className={inputClass}
+              />
+              <p className="text-xs text-white/45">
+                Your account email. Shown across the app and used to sign in.
+              </p>
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="profile-username" className="text-white/80">Username</Label>
               <Input
                 id="profile-username"
+                // autoComplete="off" + a neutral name: browsers used to
+                // autofill this box with the saved login, and saving the
+                // profile then stored that value without the user noticing.
+                autoComplete="off"
+                name="profile-handle"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="username"
+                placeholder="Optional"
                 className={inputClass}
               />
+              <p className="text-xs text-white/45">
+                Optional short handle you can sign in with instead of your
+                email. Leave empty if you don&apos;t need one.
+              </p>
             </div>
           </div>
 

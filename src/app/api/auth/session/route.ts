@@ -49,6 +49,11 @@ export async function GET(request: NextRequest) {
       user: {
         id: user.id,
         email: user.email,
+        // 6.0.2: the optional alternative login handle. Without it the
+        // Profile page seeded an EMPTY username box, which browsers then
+        // autofilled with the saved login — and "Save profile" quietly
+        // stored whatever autofill had put there.
+        username: (user as any).username ?? null,
         name: user.name,
         // 2.5.1+: surface the profile avatar so the sidebar avatar
         // circle + the Profile page can render without extra fetches.

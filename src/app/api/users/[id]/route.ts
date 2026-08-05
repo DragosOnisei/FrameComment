@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
+import { prisma, prismaPrivileged } from '@/lib/db'
 import { requireApiAdmin, requireApiDeleteUsers, getCurrentUserFromRequest } from '@/lib/auth'
 import { hashPassword, validatePassword, verifyPassword } from '@/lib/encryption'
 import { revokeAllUserTokens } from '@/lib/token-revocation'
@@ -149,12 +149,25 @@ export async function PATCH(
     let roleChanged = false
 
     if (email !== undefined) {
-      // Check if email is already taken by another user
-      const existingUser = await prisma.user.findFirst({
+      // 6.0.2: normalize before storing — emails are the login identity and
+      // must not differ from the typed value only by case or stray spaces.
+      const nextEmail = String(email).trim().toLowerCase()
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+        return NextResponse.json(
+          { error: usersMessages.invalidEmail || 'Enter a valid email address' },
+          { status: 400 }
+        )
+      }
+
+      // 6.0.2: `email` is GLOBALLY unique (across every organization), so the
+      // collision check must bypass RLS — the org-scoped client would miss a
+      // clash in another company and we'd surface a raw constraint error.
+      const existingUser = await prismaPrivileged.user.findFirst({
         where: {
-          email,
+          email: nextEmail,
           NOT: { id },
         },
+        select: { id: true },
       })
 
       if (existingUser) {
@@ -164,26 +177,33 @@ export async function PATCH(
         )
       }
 
-      updateData.email = email
+      updateData.email = nextEmail
     }
 
     if (username !== undefined) {
-      // Check if username is already taken by another user
-      const existingUsername = await prisma.user.findFirst({
-        where: {
-          username,
-          NOT: { id },
-        },
-      })
+      const nextUsername = username === null ? null : String(username).trim() || null
 
-      if (existingUsername) {
-        return NextResponse.json(
-          { error: usersMessages.usernameAlreadyTaken || 'Username already taken' },
-          { status: 409 }
-        )
+      // 6.0.2: only check collisions for a REAL value. The old code ran the
+      // query with `username: null` when clearing the field, which matched
+      // every user that has no username and wrongly reported "already taken".
+      if (nextUsername) {
+        const existingUsername = await prismaPrivileged.user.findFirst({
+          where: {
+            username: nextUsername,
+            NOT: { id },
+          },
+          select: { id: true },
+        })
+
+        if (existingUsername) {
+          return NextResponse.json(
+            { error: usersMessages.usernameAlreadyTaken || 'Username already taken' },
+            { status: 409 }
+          )
+        }
       }
 
-      updateData.username = username || null
+      updateData.username = nextUsername
     }
 
     if (name !== undefined) {

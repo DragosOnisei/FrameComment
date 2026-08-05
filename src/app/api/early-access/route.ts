@@ -12,14 +12,18 @@ export const dynamic = 'force-dynamic'
  * The landing page's "Request early access" form. Collects name, email
  * and profession, and delivers them as an IN-APP notification to the
  * platform owner ONLY (there is no outbound email system yet):
- * the OWNER of org-1 with the configured email address.
+ * the OWNER of org-1.
+ *
+ * 6.0.2: the recipient is resolved by ROLE, not by a hardcoded address —
+ * the platform owner can change their email in Profile, and these
+ * requests must keep arriving. Oldest OWNER wins if there's ever more
+ * than one, so the founding account stays the default recipient.
  *
  * Uses the privileged client on purpose: this is an unauthenticated
  * public route with no org context, writing a single platform-scoped
  * notification row. Strictly rate-limited + honeypot-protected.
  */
 
-const PLATFORM_OWNER_EMAIL = 'dragosonisei@gmail.com'
 const PROFESSIONS = ['Editor', 'Director', 'YouTuber', 'Entrepreneur', 'Other']
 
 export async function POST(request: NextRequest) {
@@ -59,13 +63,13 @@ export async function POST(request: NextRequest) {
         ? `Other: ${professionOther.slice(0, 120) || 'unspecified'}`
         : professionRaw
 
-    // Deliver ONLY to the platform owner (org-1 + exact email + OWNER).
+    // Deliver ONLY to the platform owner (org-1 OWNER, oldest account).
     const recipient = await (prismaPrivileged as any).user.findFirst({
       where: {
         organizationId: 'org-1',
         role: 'OWNER',
-        email: { equals: PLATFORM_OWNER_EMAIL, mode: 'insensitive' },
       },
+      orderBy: { createdAt: 'asc' },
       select: { id: true },
     })
 

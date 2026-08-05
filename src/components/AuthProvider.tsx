@@ -8,6 +8,9 @@ import { clearTokens, getAccessToken, getRefreshToken } from '@/lib/token-store'
 interface User {
   id: string
   email: string
+  // 6.0.2: optional alternative login handle (email works too). Carried in
+  // the session so the Profile page seeds the real value.
+  username?: string | null
   name: string | null
   // 2.5.1+: inline data: URL for the profile avatar (null when the
   // user hasn't uploaded one yet — UI falls back to initials).
