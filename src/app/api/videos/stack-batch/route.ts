@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
+import { stackVideoIntoGroup } from '@/lib/video-versions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -88,16 +89,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Target video not found' }, { status: 404 })
     }
 
-    // `deletedAt: null` is CRUCIAL: only LIVE rows may count toward the next
-    // version number. Without it, a soft-deleted version (in Trash) still bumped
-    // the counter — delete the last version, re-upload + stack, and it came back
-    // one number too high (the "ghost of its former self") instead of reclaiming
-    // the freed number.
-    const folderFilter =
-      target.folderId === null
-        ? { folderId: null, deletedAt: null }
-        : { folderId: target.folderId, deletedAt: null }
-
     // Resolve each source representative to its group name.
     const sources = await prisma.video.findMany({
       where: { id: { in: sourceIds } },
@@ -150,60 +141,37 @@ export async function POST(request: NextRequest) {
         return a.idx - b.idx
       })
 
-    // The top (last) source drives the whole stack's name.
-    const finalName = ordered[ordered.length - 1].nm
-
-    // Snapshot the target group; it keeps its v1..N numbers.
-    const targetGroup = await prisma.video.findMany({
-      where: { projectId: target.projectId, name: target.name, ...folderFilter },
-      orderBy: { version: 'asc' },
-      select: { id: true, version: true },
-    })
-    let counter =
-      targetGroup.length > 0
-        ? targetGroup[targetGroup.length - 1].version
-        : 0
-
-    const updates: ReturnType<typeof prisma.video.update>[] = []
-
-    // Rename the target rows to the final name (versions unchanged).
-    for (const v of targetGroup) {
-      updates.push(
-        prisma.video.update({ where: { id: v.id }, data: { name: finalName } }),
-      )
+    // 6.1.0: stack one representative at a time through the canonical helper,
+    // which moves the whole source stack, renames and RENUMBERS 1..N. The old
+    // inline `counter += 1` arithmetic here was a second, divergent
+    // implementation — exactly the kind that leaves duplicate version numbers
+    // behind for the self-heal to clean up.
+    const nameToRepresentative = new Map<string, string>()
+    for (const id of sourceIds) {
+      const nm = idToName.get(id)
+      if (nm && !nameToRepresentative.has(nm)) nameToRepresentative.set(nm, id)
     }
 
-    // Append each source group, continuing the version counter, in the
-    // computed order.
+    let topVersion = 0
+    let finalName = ordered[ordered.length - 1].nm
+
     for (const { nm } of ordered) {
-      const grp = await prisma.video.findMany({
-        where: { projectId: target.projectId, name: nm, ...folderFilter },
-        orderBy: { version: 'asc' },
-        select: { id: true },
-      })
-      for (const v of grp) {
-        counter += 1
-        const newVersion = counter
-        updates.push(
-          prisma.video.update({
-            where: { id: v.id },
-            data: {
-              name: finalName,
-              version: newVersion,
-              versionLabel: `v${newVersion}`,
-            },
-          }),
-        )
+      const representative = nameToRepresentative.get(nm)
+      if (!representative) continue
+      const result = await stackVideoIntoGroup(representative, target.id)
+      if (typeof result === 'string') {
+        logError(`[stack-batch] skipped "${nm}": ${result}`)
+        continue
       }
+      topVersion = result.order.length
+      finalName = result.newName
     }
-
-    await prisma.$transaction(updates)
 
     return NextResponse.json({
       ok: true,
       stackedGroups: ordered.length,
       finalName,
-      topVersion: counter,
+      topVersion,
     })
   } catch (error) {
     logError('[POST /api/videos/stack-batch] failed:', error)

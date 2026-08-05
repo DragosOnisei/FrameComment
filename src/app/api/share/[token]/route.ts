@@ -12,6 +12,7 @@ import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { verifyVideoShareName } from '@/lib/share-video-sig'
+import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 export const runtime = 'nodejs'
 
 
@@ -237,18 +238,22 @@ export async function GET(
       ? videosSanitizedBase.filter((v: any) => v.name === singleVideoName)
       : videosSanitizedBase
 
-    const videosByName = scopedVideos.reduce((acc: any, video: any) => {
-      const name = video.name
-      if (!acc[name]) {
-        acc[name] = []
+    // 6.1.0: versions are grouped by the explicit STACK. The client payload
+    // stays keyed by display name (the share URL signs the name), and every
+    // row of a stack carries the same one; two stacks sharing a name are
+    // disambiguated rather than merged into one fake version list.
+    const videosByName: Record<string, any[]> = {}
+    for (const rows of groupByStack(scopedVideos as any[]).values()) {
+      const sorted = sortVersionsDesc(rows as any[])
+      const name = (sorted[0] as any).name as string
+      if (!videosByName[name]) {
+        videosByName[name] = sorted
+      } else {
+        let n = 2
+        while (videosByName[`${name} (${n})`]) n++
+        videosByName[`${name} (${n})`] = sorted
       }
-      acc[name].push(video)
-      return acc
-    }, {})
-
-    Object.keys(videosByName).forEach(name => {
-      videosByName[name].sort((a: any, b: any) => b.version - a.version)
-    })
+    }
 
     const sortedVideosByName: Record<string, any[]> = {}
     const sortedKeys = Object.keys(videosByName).sort((nameA, nameB) => {

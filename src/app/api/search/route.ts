@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { logError } from '@/lib/logging'
+import { stackKeyOf } from '@/lib/video-stack'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -115,11 +116,11 @@ export async function GET(request: NextRequest) {
       take: fetchWindow,
     })
 
-    // Dedupe by (projectId, folderId, name) — keep the latest
-    // version (highest `version`, with `updatedAt` as a tiebreaker).
+    // 6.1.0: dedupe by the explicit STACK — keep the latest version (highest
+    // `version`, with `updatedAt` as a tiebreaker).
     const byStack = new Map<string, any>()
     for (const v of rawVideos) {
-      const key = `${v.projectId}::${v.folderId ?? ''}::${v.name}`
+      const key = stackKeyOf(v as any)
       const existing = byStack.get(key)
       if (
         !existing ||
@@ -142,7 +143,10 @@ export async function GET(request: NextRequest) {
     // count. Cheaper than COUNT(DISTINCT (...)) — Prisma's groupBy
     // returns one row per stack so its length IS the count.
     const stackGroups = await prisma.video.groupBy({
-      by: ['projectId', 'folderId', 'name'],
+      // 6.1.0: distinct STACKS. `stackId` is the grouping key everywhere now;
+      // name/folder stay in the tuple so rows an older container wrote without
+      // a stackId still collapse the way the list does.
+      by: ['stackId', 'projectId', 'folderId', 'name'] as any,
       where,
     })
     const total = stackGroups.length

@@ -44,6 +44,8 @@ import {
 } from '@/lib/storage'
 import { resolveFileBackend, backendIsLocalFilesystem, type StorageBackend } from '@/lib/storage-backends'
 import { generateUniqueFolderSlug } from '@/lib/folder-helpers'
+import { newStackId } from '@/lib/video-versions'
+import { stackKeyOf } from '@/lib/video-stack'
 import { videoQueue } from '@/lib/queue'
 import { Readable } from 'stream'
 
@@ -220,22 +222,37 @@ async function duplicateVideoGroup(
   takenNames: Set<string>,
   adminId: string | null,
 ): Promise<string | null> {
-  const card = await prisma.video.findUnique({
+  const card = (await prisma.video.findUnique({
     where: { id: cardId },
-    select: { name: true, projectId: true },
-  })
+    select: { name: true, projectId: true, folderId: true, stackId: true } as any,
+  })) as { name: string; projectId: string; folderId: string | null; stackId: string | null } | null
   if (!card) return null
-  // All versions in the source group.
-  const versions = await prisma.video.findMany({
-    where: { projectId: card.projectId, name: card.name } as any,
-    orderBy: { version: 'asc' },
-  })
+  // 6.1.0: all versions of the source STACK. Selecting by name pulled in an
+  // unrelated asset that happened to share the filename.
+  const versions = card.stackId
+    ? await prisma.video.findMany({
+        where: { stackId: card.stackId, deletedAt: null } as any,
+        orderBy: { version: 'asc' },
+      })
+    : await prisma.video.findMany({
+        where: {
+          projectId: card.projectId,
+          name: card.name,
+          folderId: card.folderId,
+          deletedAt: null,
+        } as any,
+        orderBy: { version: 'asc' },
+      })
   if (versions.length === 0) return null
 
   // Pick a target name that doesn't collide with anything in the
   // destination folder (or with already-claimed dup names this run).
   const newName = uniqueName(card.name, takenNames)
   takenNames.add(newName)
+
+  // 6.1.0: the copies form ONE new stack of their own — sharing the source's
+  // stackId would silently merge the duplicate into the original's versions.
+  const copyStackId = newStackId()
 
   let latestId: string | null = null
   for (let i = 0; i < versions.length; i++) {
@@ -248,7 +265,8 @@ async function duplicateVideoGroup(
       data: {
         version: v.version,
         versionLabel: v.versionLabel,
-      },
+        stackId: copyStackId,
+      } as any,
     })
     latestId = newId
   }
@@ -295,20 +313,21 @@ async function duplicateFolderRecursive(
   const innerTaken = new Set<string>()
 
   // Duplicate every video group living directly inside the source.
-  const videos = await prisma.video.findMany({
+  const videos = (await prisma.video.findMany({
     where: { folderId: sourceFolderId, deletedAt: null } as any,
-    select: { id: true, name: true, version: true },
-  })
-  // Reduce to one card per name (latest version) so we don't process
-  // versions in isolation.
-  const groupsByName = new Map<string, { id: string; version: number }>()
+    select: { id: true, name: true, version: true, projectId: true, folderId: true, stackId: true } as any,
+  })) as any[]
+  // 6.1.0: one card per STACK (its latest version) so we never duplicate a
+  // single version in isolation, and two same-named assets stay distinct.
+  const groupsByStack = new Map<string, { id: string; version: number }>()
   for (const v of videos) {
-    const prev = groupsByName.get(v.name)
+    const key = stackKeyOf(v)
+    const prev = groupsByStack.get(key)
     if (!prev || v.version > prev.version) {
-      groupsByName.set(v.name, { id: v.id, version: v.version })
+      groupsByStack.set(key, { id: v.id, version: v.version })
     }
   }
-  for (const { id } of groupsByName.values()) {
+  for (const { id } of groupsByStack.values()) {
     await duplicateVideoGroup(id, newFolder.id, innerTaken, adminId)
   }
 

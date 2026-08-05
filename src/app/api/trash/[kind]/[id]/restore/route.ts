@@ -17,7 +17,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
-import { renumberVersionGroup } from '@/lib/video-versions'
+import { renumberVersionStack } from '@/lib/video-versions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -183,11 +183,19 @@ export async function POST(
       // stack never shows two identical version badges. Best-effort — the
       // restore itself already succeeded.
       try {
-        await renumberVersionGroup({
-          projectId,
-          folderId: targetFolderId,
-          name: restoredName,
-        })
+        // 6.1.0: restored rows carry the numbers they had when trashed, which
+        // can collide with what the live stack looks like now. Renumber every
+        // stack the restored rows belong to.
+        const restored = (await (prisma as any).video.findMany({
+          where: { projectId, name: restoredName, deletedAt: null },
+          select: { stackId: true },
+        })) as Array<{ stackId: string | null }>
+        const stackIds = new Set(
+          restored.map((r) => r.stackId).filter((s): s is string => !!s),
+        )
+        for (const stackId of stackIds) {
+          await renumberVersionStack(stackId)
+        }
       } catch (renumberErr) {
         logError('[restore] version renumber failed:', renumberErr)
       }

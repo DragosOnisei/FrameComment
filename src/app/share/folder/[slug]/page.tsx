@@ -16,6 +16,7 @@ import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
 import { logError } from '@/lib/logging'
 import { detectLoggedInAdmin } from '@/lib/share-auth'
+import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 
 /**
@@ -452,12 +453,9 @@ function PublicFolderSharePageInner() {
   // version on top; the comment badge reflects the LATEST version's
   // comments, not the sum across versions).
   const videoGroups = (() => {
-    const byName = new Map<string, VideoRow[]>()
-    for (const v of videos) {
-      const list = byName.get(v.name)
-      if (list) list.push(v)
-      else byName.set(v.name, [v])
-    }
+    // 6.1.0: group by the explicit STACK (see src/lib/video-stack.ts), so the
+    // public grid matches the admin one even when two assets share a filename.
+    const byStack = groupByStack(videos as any[]) as Map<string, VideoRow[]>
     const groups: Array<{
       id: string
       name: string
@@ -473,9 +471,10 @@ function PublicFolderSharePageInner() {
       uploaderName: string | null
       createdAt?: string
     }> = []
-    for (const [name, rows] of byName) {
-      const sorted = [...rows].sort((a, b) => b.version - a.version)
+    for (const rows of byStack.values()) {
+      const sorted = sortVersionsDesc(rows as any[]) as VideoRow[]
       const latest = sorted[0]
+      const name = latest.name
       const uploaderName =
         latest.createdBy?.name ||
         latest.createdBy?.username ||

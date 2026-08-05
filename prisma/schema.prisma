@@ -380,7 +380,15 @@ model Video {
   // are introduced in 1.0.6; existing rows migrate as folderId = null.
   folderId     String?
   name         String // Name to distinguish different videos in a project (required)
-  version      Int // 1, 2, 3 (for revisions)
+  // 6.1.0: EXPLICIT version-stack identity. Membership of a version stack
+  // used to be inferred from `name`, which broke in both directions: a new
+  // upload whose filename matched a stack silently joined it (and kept its
+  // creation-time v1), while a rename or a split could scatter a stack.
+  // Now a stack is a stackId, `name` is only what we display, and `version`
+  // is the row's POSITION inside its stack (always 1..N, no gaps).
+  // Nullable for legacy rows; the migration backfills every existing row.
+  stackId      String?
+  version      Int // position inside the stack: 1, 2, 3…
   versionLabel String // "v1", "v2", "v3" or custom
 
   // Original file
@@ -508,6 +516,8 @@ model Video {
 
   @@index([projectId, version])
   @@index([projectId, name])
+  // 6.1.0: every stack read/mutation is keyed on this.
+  @@index([stackId])
   @@index([folderId])
   @@index([createdById])
   @@index([deletedAt])

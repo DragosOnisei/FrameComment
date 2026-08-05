@@ -15,6 +15,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import ThemeToggle from '@/components/ThemeToggle'
 import PlayerTopMenu from '@/components/PlayerTopMenu'
+import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useTranslations } from 'next-intl'
 
 const MAX_TOKEN_FETCH_ATTEMPTS = 2
@@ -293,19 +294,26 @@ function AdminSharePageInner() {
   }, [id])
 
   const transformProjectData = (projectData: any) => {
-    const videosByName = projectData.videos.reduce((acc: any, video: any) => {
-      const name = video.name
-      if (!acc[name]) {
-        acc[name] = []
+    // 6.1.0: membership comes from the explicit STACK, not from the name —
+    // a filename can no longer pull an unrelated upload into the version
+    // reel (that's how a 4th delivery ended up displaying as V1). The map is
+    // still keyed by the display name because the URL (`?video=`) and the
+    // saved-selection contract use it; every row of a stack carries the same
+    // name, so the mapping is 1:1. Two stacks that somehow share a name get
+    // disambiguated instead of merged.
+    const stacks = groupByStack(projectData.videos as any[])
+    const videosByName: Record<string, any[]> = {}
+    for (const rows of stacks.values()) {
+      const sorted = sortVersionsDesc(rows as any[])
+      const name = (sorted[0] as any).name as string
+      if (!videosByName[name]) {
+        videosByName[name] = sorted
+      } else {
+        let n = 2
+        while (videosByName[`${name} (${n})`]) n++
+        videosByName[`${name} (${n})`] = sorted
       }
-      acc[name].push(video)
-      return acc
-    }, {})
-
-    // Sort versions within each video name (newest first)
-    Object.keys(videosByName).forEach(name => {
-      videosByName[name].sort((a: any, b: any) => b.version - a.version)
-    })
+    }
 
     return {
       ...projectData,

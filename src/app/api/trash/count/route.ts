@@ -18,6 +18,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
+import { stackKeyOf } from '@/lib/video-stack'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,14 +43,15 @@ export async function GET(request: NextRequest) {
       (prisma as any).folderDocument.count({ where: { deletedAt: { not: null } } }),
       prisma.video.findMany({
         where: { deletedAt: { not: null } } as any,
-        select: { projectId: true, name: true },
+        select: { projectId: true, folderId: true, name: true, stackId: true } as any,
       }),
     ])
 
-    // Collapse versions of the same video into a single trash entry.
+    // 6.1.0: collapse versions of the same STACK into a single trash entry —
+    // the count must match the list, which groups by stackId.
     const videoGroupKeys = new Set<string>()
-    for (const v of trashedVideos) {
-      videoGroupKeys.add(`${v.projectId}:${v.name}`)
+    for (const v of trashedVideos as any[]) {
+      videoGroupKeys.add(stackKeyOf(v))
     }
 
     const count = folderCount + projectCount + documentCount + videoGroupKeys.size

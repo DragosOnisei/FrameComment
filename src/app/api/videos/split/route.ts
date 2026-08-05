@@ -26,6 +26,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
+import { newStackId, renumberVersionStack } from '@/lib/video-versions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const videos = await prisma.video.findMany({
+    const videos = (await prisma.video.findMany({
       where: { id: { in: videoIds } },
       select: {
         id: true,
@@ -78,10 +79,23 @@ export async function POST(request: NextRequest) {
         folderId: true,
         name: true,
         originalFileName: true,
-      },
-    })
+        // 6.1.0: the stack each row is leaving, so we can renumber it after.
+        stackId: true,
+      } as any,
+    })) as unknown as Array<{
+      id: string
+      projectId: string
+      folderId: string | null
+      name: string
+      originalFileName: string
+      stackId: string | null
+    }>
 
     const selectedIds = new Set(videos.map((v) => v.id))
+    // 6.1.0: donor stacks to normalise once the extraction is done.
+    const donorStackIds = new Set(
+      videos.map((v) => v.stackId).filter((s): s is string => !!s),
+    )
 
     // Per-folder filter helper — stacks live inside ONE folder, so all
     // lookups must be scoped to the same (projectId, folderId).
@@ -191,9 +205,22 @@ export async function POST(request: NextRequest) {
       )
       await prisma.video.update({
         where: { id: v.id },
-        data: { name: newName, version: 1, versionLabel: 'v1' },
+        // 6.1.0: a brand-new stack identity is what actually takes the row
+        // OUT of its stack. Resetting `version` alone left it a member, so a
+        // lone video could keep claiming V4 and its version pill opened an
+        // empty list.
+        data: { name: newName, version: 1, versionLabel: 'v1', stackId: newStackId() } as any,
       })
       pending.delete(v.id)
+    }
+
+    // 6.1.0: compact whatever is left in each donor stack (1..N, no gaps).
+    for (const stackId of donorStackIds) {
+      try {
+        await renumberVersionStack(stackId)
+      } catch (renumberErr) {
+        logError('[split] donor stack renumber failed:', renumberErr)
+      }
     }
 
     return NextResponse.json({ success: true, split: videos.length })

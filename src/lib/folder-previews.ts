@@ -19,6 +19,7 @@ import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { logError } from '@/lib/logging'
+import { stackKeyOf } from '@/lib/video-stack'
 
 export type FolderPreviewItem =
   | {
@@ -86,8 +87,10 @@ export async function fetchFolderPreviewData(
   // This drives the "N items" label so it never inflates with
   // versions the user already views as a single asset. Trashed rows
   // are skipped (1.0.8+).
+  // 6.1.0: count distinct STACKS. `stackId` leads; folderId/name stay in the
+  // tuple so rows written by an older container (stackId NULL) still collapse.
   const grouped = await prisma.video.groupBy({
-    by: ['folderId', 'name'],
+    by: ['stackId', 'folderId', 'name'] as any,
     where: { folderId: { in: folderIds }, deletedAt: null } as any,
   })
   const distinctVideoGroups = new Map<string, number>()
@@ -103,7 +106,7 @@ export async function fetchFolderPreviewData(
   // over-fetch slightly so dedup by `name` (latest version per group)
   // still leaves room for MAX_PREVIEW distinct rows.
   const cap = Math.max(MAX_PREVIEW * 4, MAX_PREVIEW * folderIds.length * 2)
-  const videos = await prisma.video.findMany({
+  const videos = (await prisma.video.findMany({
     where: {
       folderId: { in: folderIds },
       status: 'READY',
@@ -117,15 +120,25 @@ export async function fetchFolderPreviewData(
       folderId: true,
       projectId: true,
       name: true,
+      stackId: true,
       thumbnailPath: true,
       storyboardPath: true,
-    },
-  })
+    } as any,
+  })) as unknown as Array<{
+    id: string
+    folderId: string | null
+    projectId: string
+    name: string
+    stackId: string | null
+    thumbnailPath: string | null
+    storyboardPath: string | null
+  }>
   const videosByFolder = new Map<string, typeof videos>()
   for (const v of videos) {
     if (!v.folderId) continue
     const bucket = videosByFolder.get(v.folderId) ?? []
-    if (bucket.some((existing) => existing.name === v.name)) continue
+    // 6.1.0: one tile per STACK, so two assets sharing a filename both show.
+    if (bucket.some((existing) => stackKeyOf(existing as any) === stackKeyOf(v as any))) continue
     bucket.push(v)
     videosByFolder.set(v.folderId, bucket)
   }

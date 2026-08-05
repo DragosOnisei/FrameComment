@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserFromRequest, getShareContext } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { getClientIpAddress } from '@/lib/utils'
+import { stackKeyOf } from '@/lib/video-stack'
 
 /**
  * Verify project access using dual authentication pattern
@@ -172,12 +173,16 @@ export async function fetchProjectWithVideos(
       orderBy: { version: 'desc' },
     })
 
+    // 6.1.0: latest row per STACK (rows arrive version-desc, so the first one
+    // seen for a stack is its newest). Keying on the name collapsed two
+    // unrelated assets that happened to share a filename into one.
     const latestVideoIds: string[] = []
-    const seenNames = new Set<string>()
+    const seenStacks = new Set<string>()
     for (const video of allVideos) {
-      if (!seenNames.has(video.name)) {
+      const key = stackKeyOf(video as any)
+      if (!seenStacks.has(key)) {
         latestVideoIds.push(video.id)
-        seenNames.add(video.name)
+        seenStacks.add(key)
       }
     }
 

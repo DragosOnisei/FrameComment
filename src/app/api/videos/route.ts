@@ -8,7 +8,7 @@ import {
 } from '@/lib/file-validation'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
-import { stackVideoIntoGroup } from '@/lib/video-versions'
+import { newStackId, stackVideoIntoGroup } from '@/lib/video-versions'
 
 export const runtime = 'nodejs'
 
@@ -145,6 +145,10 @@ export async function POST(request: NextRequest) {
       projectId,
       folderId: resolvedFolderId,
       name: finalName,
+      // 6.1.0: every upload starts in a stack OF ITS OWN. Joining an existing
+      // stack is an explicit act (drop onto a video / the stack endpoint), so a
+      // filename can never silently pull a row into someone else's versions.
+      stackId: newStackId(),
       version: nextVersion,
       versionLabel: versionLabel || `v${nextVersion}`,
       originalFileName,

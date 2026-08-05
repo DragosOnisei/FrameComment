@@ -19,6 +19,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { TRASH_RETENTION_DAYS } from '@/lib/trash-cleanup'
+import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -84,21 +85,15 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
-    // Group videos by `(projectId, name)` so each video group shows
-    // as a single Trash entry (matches the grid UX). The latest
-    // version drives the thumbnail + metadata.
+    // 6.1.0: group by the explicit STACK so each stack is a single Trash
+    // entry. Keying on `(projectId, name)` merged two unrelated assets that
+    // happened to share a filename into one row.
     type VideoRow = (typeof trashedVideos)[number]
-    const groups = new Map<string, VideoRow[]>()
-    for (const v of trashedVideos) {
-      const key = `${v.projectId}:${v.name}`
-      const bucket = groups.get(key) ?? []
-      bucket.push(v)
-      groups.set(key, bucket)
-    }
+    const groups = groupByStack(trashedVideos as any[]) as Map<string, VideoRow[]>
 
     const videoItems = await Promise.all(
       Array.from(groups.values()).map(async (rows) => {
-        const sorted = [...rows].sort((a, b) => b.version - a.version)
+        const sorted = sortVersionsDesc(rows as any[]) as VideoRow[]
         const latest = sorted[0]
         let thumbnailUrl: string | null = null
         if (latest.thumbnailPath) {

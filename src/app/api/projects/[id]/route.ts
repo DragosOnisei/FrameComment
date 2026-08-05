@@ -16,7 +16,11 @@ import { invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { updateProjectSchema } from '@/lib/validation'
-import { findDamagedVersionGroups, renumberVersionGroup } from '@/lib/video-versions'
+import {
+  assignMissingStackIds,
+  findDamagedStacks,
+  renumberVersionStack,
+} from '@/lib/video-versions'
 import { syncCompanyToDirectory } from '@/lib/client-directory-sync'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import {
@@ -126,11 +130,16 @@ export async function GET(
     // fetched, and the write only fires for groups that are ACTUALLY damaged
     // — which, after this release, should be never.
     let videos = project.videos as any[]
-    const damaged = findDamagedVersionGroups(videos)
-    if (damaged.length > 0) {
+    const { stackIds, unassignedVideoIds } = findDamagedStacks(videos)
+    if (stackIds.length > 0 || unassignedVideoIds.length > 0) {
       try {
-        for (const group of damaged) {
-          await renumberVersionGroup({ projectId: project.id, ...group })
+        // Rows from an older container may still have no stackId: give them
+        // one (adopting their old name-based siblings) before renumbering.
+        if (unassignedVideoIds.length > 0) {
+          await assignMissingStackIds(unassignedVideoIds)
+        }
+        for (const stackId of stackIds) {
+          await renumberVersionStack(stackId)
         }
         videos = (await prisma.video.findMany({
           where: { projectId: project.id, deletedAt: null } as any,

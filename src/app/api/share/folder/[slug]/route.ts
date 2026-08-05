@@ -200,12 +200,14 @@ export async function GET(
           _count: { select: { subfolders: true, videos: true } },
         },
       }),
-      prisma.video.findMany({
+      (prisma.video.findMany as any)({
         where: { folderId: folderMeta.id, deletedAt: null } as any,
         orderBy: [{ name: 'asc' }, { version: 'desc' }],
         select: {
           id: true,
           name: true,
+          // 6.1.0: the client groups versions by stack, not by name.
+          stackId: true,
           version: true,
           versionLabel: true,
           duration: true,
@@ -234,7 +236,7 @@ export async function GET(
     // rows that pre-date the createdById column).
     const uploadersByVideoId = new Map<string, any>()
     try {
-      const videoIds = videos.map((v) => v.id)
+      const videoIds = (videos as any[]).map((v: any) => v.id)
       if (videoIds.length > 0) {
         const rows = await prisma.video.findMany({
           where: { id: { in: videoIds } },

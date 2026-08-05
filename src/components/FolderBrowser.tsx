@@ -45,6 +45,7 @@ import QuickPreviewOverlay, { type QuickPreviewTarget } from './QuickPreviewOver
 import FolderBrowserTable from './FolderBrowserTable'
 import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import { useIsMobile } from '@/lib/use-is-mobile'
+import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import {
   snapshotDataTransferEntries,
   walkSnapshotEntries,
@@ -1121,17 +1122,18 @@ function FolderBrowserInner(
     // itself (in `rootVideos`) since the parent doesn't currently
     // know about them. Either way we group them the same way.
     const allVideos = videos.length > 0 ? videos : rootVideos
-    const byName = new Map<string, VideoRow[]>()
-    for (const v of allVideos) {
-      const existing = byName.get(v.name)
-      if (existing) existing.push(v)
-      else byName.set(v.name, [v])
-    }
+    // 6.1.0: group by the explicit STACK, not by name. Two assets that happen
+    // to share a filename are two cards; a rename never splits or fuses a
+    // stack. `stackKeyOf` falls back to the old project+folder+name key for
+    // rows an older container wrote without a stackId.
+    const byStack = groupByStack(allVideos as any[]) as Map<string, VideoRow[]>
     const groups: VideoGroup[] = []
-    for (const [name, rows] of byName) {
-      // Sort within the group: latest version first.
-      const sorted = [...rows].sort((a, b) => b.version - a.version)
+    for (const rows of byStack.values()) {
+      // Sort within the stack: latest version first.
+      const sorted = sortVersionsDesc(rows as any[]) as VideoRow[]
       const latest = sorted[0]
+      // The card's title is the stack's display name — every row carries it.
+      const name = latest.name
       // The card shows the LATEST version (v2, v3, …), so its comment
       // badge must reflect THAT version's comments — not the sum across
       // the whole stack. Comments are tied to a specific version's
