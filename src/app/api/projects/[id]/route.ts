@@ -83,6 +83,12 @@ export async function GET(
           // third version.
           where: { deletedAt: null } as any,
           orderBy: { version: 'desc' },
+          // 6.3.0: who uploaded each version — shown under the title in the
+          // player ("Andreea · 07-08-2026 14:46"). Same relation the folder
+          // grid already reads, so no new query shape.
+          include: {
+            createdBy: { select: { id: true, name: true, username: true, email: true } },
+          },
         },
         comments: {
           where: { parentId: null },
@@ -144,6 +150,11 @@ export async function GET(
         videos = (await prisma.video.findMany({
           where: { projectId: project.id, deletedAt: null } as any,
           orderBy: { version: 'desc' },
+          // Keep the uploader relation on the refetch too — without it the
+          // "who uploaded this" line vanished whenever a self-heal ran.
+          include: {
+            createdBy: { select: { id: true, name: true, username: true, email: true } },
+          },
         })) as any[]
       } catch (healErr) {
         logError('[projects GET] version self-heal failed:', healErr)

@@ -30,6 +30,15 @@ interface PendingUpload {
   status: 'pending' | 'uploading' | 'completed' | 'error'
   progress: number
   speed: number
+  /** 6.3.0 stall detection: bytes seen so far and when they last moved.
+   *  A transfer sitting at the same byte count for STALL_TIMEOUT_MS is
+   *  stuck — the browser keeps the request open and the UI used to show a
+   *  cheerful progress bar forever. */
+  bytesUploaded?: number
+  lastProgressAt?: number
+  /** Set once we've auto-resumed this file, so we never loop on it. */
+  stallRetried?: boolean
+  stalled?: boolean
   error?: string
   videoId?: string
   paused?: boolean
@@ -138,6 +147,76 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     const interval = setInterval(reconcile, 5000)
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
   }, [hasReconcileCandidates])
+
+  // 6.3.0 STALL WATCHDOG.
+  //
+  // A transfer can go quiet without erroring: the socket stays open, TUS keeps
+  // waiting, and the row sits at the same percentage forever. The user has no
+  // way to tell that from a slow-but-alive upload, so a file could be "almost
+  // done" for an hour.
+  //
+  // Rule: no byte movement for STALL_TIMEOUT_MS while uploading and not paused
+  // → resume it ONCE (TUS picks up where it left off, so nothing re-uploads);
+  // if it stalls again, fail the row and say so. Retry stays available.
+  const STALL_TIMEOUT_MS = 30_000
+  const [stallNotice, setStallNotice] = useState<string | null>(null)
+  const hasLiveUploads = pendingUploads.some((u) => u.status === 'uploading' && !u.paused)
+  useEffect(() => {
+    if (!hasLiveUploads) return
+    const tick = () => {
+      const now = Date.now()
+      const rows = pendingUploadsRef.current
+      for (const u of rows) {
+        if (u.status !== 'uploading' || u.paused) continue
+        const since = now - (u.lastProgressAt ?? now)
+        if (since < STALL_TIMEOUT_MS) continue
+
+        if (!u.stallRetried) {
+          // First strike: resume from where it stopped.
+          setPendingUploads((prev) =>
+            prev.map((r) =>
+              r.id === u.id
+                ? { ...r, stalled: true, stallRetried: true, speed: 0, lastProgressAt: now }
+                : r,
+            ),
+          )
+          try {
+            const tusUpload = uploadRefs.current.get(u.id)
+            if (tusUpload) {
+              tusUpload.abort().then(() => tusUpload.start()).catch(() => {})
+            }
+          } catch {
+            /* best effort — the second strike below still catches it */
+          }
+          continue
+        }
+
+        // Second strike: stop pretending it's working.
+        setPendingUploads((prev) =>
+          prev.map((r) =>
+            r.id === u.id
+              ? {
+                  ...r,
+                  status: 'error' as const,
+                  speed: 0,
+                  stalled: false,
+                  error: 'Upload stalled — no data sent for 30 seconds',
+                }
+              : r,
+          ),
+        )
+        setStallNotice(u.videoName || u.file.name)
+        try {
+          uploadRefs.current.get(u.id)?.abort()
+          uploadRefs.current.delete(u.id)
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+    const interval = setInterval(tick, 5000)
+    return () => clearInterval(interval)
+  }, [hasLiveUploads])
 
   // 1.5.7: detects if the modal is being opened on a public hostname
   // (i.e. likely behind a CDN / reverse proxy like Cloudflare). If so we
@@ -668,9 +747,18 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
                 lastLoaded = bytesUploaded
                 lastTime = now
               }
-              setPendingUploads(prev => prev.map(u =>
-                u.id === id ? { ...u, progress: percentage, speed: speed || u.speed } : u
-              ))
+              setPendingUploads(prev => prev.map(u => {
+                if (u.id !== id) return u
+                const moved = bytesUploaded > (u.bytesUploaded ?? 0)
+                return {
+                  ...u,
+                  progress: percentage,
+                  speed: speed || u.speed,
+                  bytesUploaded,
+                  lastProgressAt: moved ? now : (u.lastProgressAt ?? now),
+                  stalled: moved ? false : u.stalled,
+                }
+              }))
             },
             onSuccess: () => {
               clearFileContext(file)
@@ -746,9 +834,19 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
             lastTime = now
           }
 
-          setPendingUploads(prev => prev.map(u =>
-            u.id === id ? { ...u, progress: percentage, speed: speed || u.speed } : u
-          ))
+          setPendingUploads(prev => prev.map(u => {
+            if (u.id !== id) return u
+            // 6.3.0: only treat it as movement when bytes actually grew.
+            const moved = bytesUploaded > (u.bytesUploaded ?? 0)
+            return {
+              ...u,
+              progress: percentage,
+              speed: speed || u.speed,
+              bytesUploaded,
+              lastProgressAt: moved ? now : (u.lastProgressAt ?? now),
+              stalled: moved ? false : u.stalled,
+            }
+          }))
         },
 
         onSuccess: () => {
@@ -911,6 +1009,8 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
       handleClose={handleClose}
       allCompleted={allCompleted}
       hasActiveUploads={hasActiveUploads}
+      stallNotice={stallNotice}
+      onDismissStall={() => setStallNotice(null)}
     />
   )
 }
@@ -941,6 +1041,8 @@ function UploadBannerView({
   handleClose,
   allCompleted,
   hasActiveUploads,
+  stallNotice,
+  onDismissStall,
 }: {
   isOpen: boolean
   pendingUploads: PendingUpload[]
@@ -950,6 +1052,9 @@ function UploadBannerView({
   handlePauseResume: (id: string) => void
   handleRetry: (id: string) => void
   handleClose: () => void
+  /** 6.3.0: name of the file whose upload was cancelled after stalling. */
+  stallNotice: string | null
+  onDismissStall: () => void
   allCompleted: boolean
   hasActiveUploads: boolean
 }) {
@@ -1015,6 +1120,38 @@ function UploadBannerView({
         className="fixed bottom-4 right-4 z-[2147483700] flex flex-col gap-2 max-w-[calc(100vw-2rem)] pointer-events-none"
         aria-live="polite"
       >
+        {/* 6.3.0: a stalled upload deserves an interruption, not a quiet row
+            in a collapsed panel — the file is NOT going to finish on its own. */}
+        {stallNotice && (
+          <div
+            role="alert"
+            className="pointer-events-auto w-[min(24rem,calc(100vw-2rem))] rounded-xl px-4 py-3 text-white ring-1 ring-red-400/30 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.8)]"
+            style={{
+              backgroundColor:
+                'color-mix(in srgb, rgb(248 113 113) 14%, hsl(var(--background)))',
+            }}
+          >
+            <div className="flex items-start gap-2.5">
+              <X className="w-4 h-4 mt-0.5 text-red-300 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Upload stopped</p>
+                <p className="mt-0.5 text-xs text-white/70 break-words">
+                  <span className="text-white/90">{stallNotice}</span> sent no
+                  data for 30 seconds, so it was cancelled. Check your
+                  connection and upload it again.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onDismissStall}
+                className="shrink-0 p-1 rounded-md text-white/55 hover:text-white hover:bg-white/10 transition-colors"
+                aria-label="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
         <div
           // 2.5.1+: v2.5 frosted glass — match ProcessingStatusBanners
           // and DownloadBanners so the stack reads as a single
@@ -1162,10 +1299,15 @@ function UploadRow({
             ? formatFileSize(upload.file.size)
             : upload.status === 'error'
               ? (upload.error || 'Failed')
+              : upload.stalled
+              ? 'Stalled — reconnecting…'
               : `${upload.progress}% · ${formatFileSize(upload.file.size)}${
-                  upload.speed > 0 && !upload.paused
-                    ? ` · ${upload.speed} MB/s`
-                    : ''
+                  upload.paused
+                    ? ''
+                    // 6.3.0: show the rate ALWAYS while running, including
+                    // 0 MB/s. A blank where the speed should be looked like
+                    // a healthy upload; a visible zero is the warning sign.
+                    : ` · ${upload.speed.toFixed(1)} MB/s`
                 }`}
         </div>
         {(upload.status === 'uploading' || upload.status === 'pending') && (

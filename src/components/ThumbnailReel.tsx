@@ -254,6 +254,16 @@ export default function ThumbnailReel({
   // dropped from the centre of the bar in favour of the breadcrumb-style
   // filename + version dropdown — see the JSX below.
   const activeIndex = videoNames.indexOf(activeVideoName)
+  // 6.3.0: step between the videos of THIS folder without going back to the
+  // grid. The arrows sit on the title line and wrap around, so a long review
+  // pass never needs the mouse to leave the player.
+  const canStepVideos = videoNames.length > 1 && activeIndex >= 0
+  const stepVideo = (delta: 1 | -1) => {
+    if (!canStepVideos) return
+    const next = (activeIndex + delta + videoNames.length) % videoNames.length
+    const name = videoNames[next]
+    if (name && name !== activeVideoName) onVideoSelect(name)
+  }
 
   // Reset scroll flag when collapsing
   useEffect(() => {
@@ -387,6 +397,15 @@ export default function ThumbnailReel({
     activeUploadedAt && !isNaN(activeUploadedAt.getTime())
       ? formatDateTime(activeUploadedAt)
       : null
+  // 6.3.0: who delivered this version. Reads whatever the payload carries —
+  // the admin player has the uploader relation, the client share view does
+  // not, so on a share link the line stays exactly as it was (date only).
+  const uploaderName: string | null =
+    (activeVideo as any)?.createdBy?.name ||
+    (activeVideo as any)?.createdBy?.username ||
+    (activeVideo as any)?.createdBy?.email ||
+    (activeVideo as any)?.uploaderName ||
+    null
   // Compact relative-time tag ("Just now", "5m ago", "2h ago",
   // "3d ago", "1mo ago", "2y ago"). Frame.io-style — keeps the line
   // short even when the timestamp is years old.
@@ -451,6 +470,22 @@ export default function ThumbnailReel({
               switching videos the user goes back to the grid. */}
           <div className="flex-1 flex items-center justify-center min-w-0">
             <div ref={versionMenuRef} className="relative flex items-center gap-2 min-w-0">
+              {/* 6.3.0: previous video in this folder. */}
+              {canStepVideos && (
+                <button
+                  type="button"
+                  onClick={() => stepVideo(-1)}
+                  aria-label="Previous video"
+                  title="Previous video"
+                  className={cn(
+                    'shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-lg',
+                    'bg-white/[0.06] ring-1 ring-white/10 text-foreground/80',
+                    'hover:bg-white/[0.12] hover:text-foreground transition-colors',
+                  )}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              )}
               <button
                 data-tutorial="video-reel-center"
                 type="button"
@@ -490,8 +525,18 @@ export default function ThumbnailReel({
                   {uploadedAtLabel && (
                     <span
                       className="text-[10px] text-muted-foreground truncate max-w-full"
-                      title={`Uploaded ${uploadedAtLabel}`}
+                      title={
+                        uploaderName
+                          ? `Uploaded by ${uploaderName} · ${uploadedAtLabel}`
+                          : `Uploaded ${uploadedAtLabel}`
+                      }
                     >
+                      {uploaderName ? (
+                        <>
+                          <span className="text-foreground/70">{uploaderName}</span>
+                          {' · '}
+                        </>
+                      ) : null}
                       {uploadedAtLabel}
                       {relativeUploadedLabel ? ` (${relativeUploadedLabel})` : ''}
                     </span>
@@ -537,6 +582,23 @@ export default function ThumbnailReel({
                 >
                   <span>{activeVersionLabel}</span>
                   {currentVersions.length > 1 && <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              )}
+
+              {/* 6.3.0: next video in this folder. */}
+              {canStepVideos && (
+                <button
+                  type="button"
+                  onClick={() => stepVideo(1)}
+                  aria-label="Next video"
+                  title="Next video"
+                  className={cn(
+                    'shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-lg',
+                    'bg-white/[0.06] ring-1 ring-white/10 text-foreground/80',
+                    'hover:bg-white/[0.12] hover:text-foreground transition-colors',
+                  )}
+                >
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               )}
 
