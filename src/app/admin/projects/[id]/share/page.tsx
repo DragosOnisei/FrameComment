@@ -6,7 +6,6 @@ import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
-import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
 import ResizableSidebar from '@/components/ResizableSidebar'
 import { Card, CardContent } from '@/components/ui/card'
@@ -65,6 +64,25 @@ function getPersistentAdminSessionId(): string {
     // module-scope cache will still hit within the same mount.
     return `admin:${Date.now()}`
   }
+}
+
+/**
+ * 6.3.1 — used when the share route has nothing to play: bounce back to the
+ * folder (or project) instead of rendering a project-wide grid.
+ */
+function RedirectAway({ href }: { href: string }) {
+  const router = useRouter()
+  useEffect(() => {
+    router.replace(href)
+  }, [router, href])
+  return (
+    <div
+      className="spotlight-bg-tr fixed inset-0 flex items-center justify-center p-4"
+      style={{ height: '100dvh' }}
+    >
+      <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-white/70 animate-spin" />
+    </div>
+  )
 }
 
 export default function AdminSharePage() {
@@ -1124,8 +1142,12 @@ function AdminSharePageInner() {
   )
 
   // Handle video selection
-  const handleVideoSelect = useCallback((videoName: string) => {
-    enteredViaGridRef.current = true
+  const handleVideoSelect = useCallback((videoName: string, fromGrid = false) => {
+    // 6.3.1: only a click in the in-page grid counts as "entered via grid".
+    // The version reel's prev/next arrows also call this, and marking them as
+    // grid entries made "Back" drop the user into the project-wide grid
+    // instead of returning to the folder they came from.
+    if (fromGrid) enteredViaGridRef.current = true
     setActiveVideoName(videoName)
     setActiveVideosRaw(scopeGroupToFolder(project.videosByName[videoName]))
     setViewState('player')
@@ -1170,29 +1192,18 @@ function AdminSharePageInner() {
 
   // Handle the player's "Back" button.
   const handleBackToGrid = useCallback(() => {
-    // Case A — the user picked this video from the in-page grid:
-    // "Back" returns to that grid (the original behaviour).
-    if (enteredViaGridRef.current) {
-      setViewState('grid')
-      const params = new URLSearchParams(searchParams?.toString() || '')
-      params.delete('video')
-      const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
-      router.replace(newUrl || '', { scroll: false })
-      return
-    }
-    // Case B — the user arrived straight on the player (clicked a
-    // card on the admin folder / project page). The in-page grid is
-    // NOT where they came from — it's a redundant detour that just
-    // looks like the client share view. Leave the share route
-    // entirely and go back to the folder the video was opened from,
-    // or the project root when there's no folder context.
+    // 6.3.1: there is no in-page grid on this route any more. It listed EVERY
+    // video in the project — including material from other folders — which is
+    // both confusing and a small confidentiality leak, and it was reachable by
+    // accident (open a video, step to the next one, press Back). "Back" now
+    // always returns to the folder the video was opened from, or the project.
     const folderId = searchParams?.get('folderId')
     router.push(
       folderId
         ? `/admin/projects/${id}/folder/${folderId}`
         : `/admin/projects/${id}`,
     )
-  }, [searchParams, pathname, router, id])
+  }, [searchParams, router, id])
 
   // "Back" target (1.0.9+). When the player was opened from inside a
   // folder, FolderBrowser tacks a `&folderId=` onto the share URL —
@@ -1348,41 +1359,18 @@ function AdminSharePageInner() {
     )
   }
 
-  // Show thumbnail grid when in grid view (same as public share layout)
+  // 6.3.1: the in-page "all videos in this project" grid is GONE.
+  //
+  // It duplicated the client share view inside the admin app, listed every
+  // asset in the project regardless of folder, and you could land on it by
+  // accident: open a video, step to the next one with the arrows, press Back.
+  // With no video to show, we simply return to where the video lives.
   if (effectiveViewState === 'grid') {
+    const backTarget = urlFolderId
+      ? `/admin/projects/${id}/folder/${urlFolderId}`
+      : `/admin/projects/${id}`
     return (
-      <div className="fixed inset-0 bg-background flex flex-col overflow-hidden">
-        {/* Grid view toolbar */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-background/95 backdrop-blur-sm z-20 flex-shrink-0">
-          {/* Left: back to project */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push(projectUrl)}
-            title={t('backToProject')}
-          >
-            <ArrowLeft className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">{t('backToProject')}</span>
-          </Button>
-
-          {/* Right: theme toggle */}
-          <ThemeToggle />
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
-            <ThumbnailGrid
-              videosByName={project.videosByName}
-              thumbnailsByName={thumbnailsByName}
-              thumbnailsLoading={thumbnailsLoading}
-              onVideoSelect={handleVideoSelect}
-              projectTitle={project.title}
-              projectDescription={project.description}
-              clientName={clientDisplayName}
-            />
-          </div>
-        </div>
-      </div>
+      <RedirectAway href={backTarget} />
     )
   }
 

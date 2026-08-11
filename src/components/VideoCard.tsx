@@ -1078,7 +1078,9 @@ export default function VideoCard({
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
                 >
                   <Share2 className="w-4 h-4 shrink-0" />
-                  Share video
+                  {/* 6.3.1: name the thing you are actually sharing. A still
+                      offering "Share video" reads like the wrong menu. */}
+                  {isImage ? 'Share image' : 'Share video'}
                 </button>
               )}
               {(showDownload || showShare) && (showDuplicate || showRename || showSplit || showRegenThumb || showTranscript) && (

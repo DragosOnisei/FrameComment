@@ -188,13 +188,10 @@ function pickInitialHlsLevelIdx(
  * have it (PNG, JPG, MP4), otherwise the media type.
  */
 function mediaLoadingLabel(video: any): string {
-  const isImage = video?.mediaType === 'IMAGE'
-  const source = String(video?.originalFileName || video?.name || '')
-  const dot = source.lastIndexOf('.')
-  const ext = dot > 0 ? source.slice(dot + 1).toUpperCase() : ''
-  const looksLikeExt = /^[A-Z0-9]{2,5}$/.test(ext)
-  if (looksLikeExt) return `Loading ${ext}…`
-  return isImage ? 'Loading image…' : 'Loading video…'
+  // 6.3.1: use the SAME word the card's type tag shows — "Image" or "Video".
+  // The previous version guessed from the file extension, which produced
+  // "Loading PNG…" on one screen and "Loading video…" on the next.
+  return video?.mediaType === 'IMAGE' ? 'Loading Image…' : 'Loading Video…'
 }
 
 export default function VideoPlayer({
@@ -645,6 +642,19 @@ export default function VideoPlayer({
   // Safety check: ensure index is valid
   const safeIndex = Math.min(selectedVideoIndex, displayVideos.length - 1)
   const selectedVideo = displayVideos[safeIndex >= 0 ? safeIndex : 0]
+
+  // 6.3.1: what counts as "ready to paint". A video needs its resolved stream
+  // URL; an image only needs one of its own sources. The gate used to wait on
+  // `videoUrl` for BOTH, so opening a still left the spinner turning forever
+  // because images never go through the HLS/MP4 ladder that sets it.
+  const isImageAsset = (selectedVideo as any)?.mediaType === 'IMAGE'
+  const hasDisplayableSource = isImageAsset
+    ? !!(
+        (selectedVideo as any)?.thumbnailUrl ||
+        (selectedVideo as any)?.streamUrl ||
+        videoUrl
+      )
+    : !!videoUrl
 
   // 3.9.x: comments are per-VERSION. `comments` arrives scoped to the
   // whole active version group (v1…vN), but a comment — and its saved
@@ -2507,13 +2517,17 @@ export default function VideoPlayer({
           share). flex-1 + min-h-0 makes this the box that absorbs all
           spare vertical space, so the inner video+controls stack always
           fits the viewport and the control bar never gets clipped. */}
+      {/* 6.3.1: images don't go through the HLS/MP4 ladder, so `videoUrl`
+          stays empty for them — and the gate below used to wait on it
+          forever, leaving a still spinning on "Loading…" that never
+          resolved. An image is displayable as soon as it has ANY source. */}
       <div
         ref={containerRef}
         className={`relative w-full flex flex-col ${
           fillContainer ? 'flex-1 min-h-0' : 'flex-shrink min-h-0 lg:order-1'
         } ${isPlaying && !showControls ? 'cursor-none' : ''}`}
       >
-        {videoUrl ? (
+        {hasDisplayableSource ? (
           <>
             {/*
               Simple letterbox approach:
