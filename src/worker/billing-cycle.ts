@@ -28,7 +28,9 @@ export async function processBillingCycle() {
   let orgs: Array<{ id: string }> = []
   try {
     orgs = await (prismaPrivileged as any).organization.findMany({
-      where: { status: 'ACTIVE' },
+      // 6.2.0: the PLATFORM organization is the operator itself — it has no
+      // card, owes nothing, and must never appear on an invoice run.
+      where: { status: 'ACTIVE', isPlatform: false },
       select: { id: true },
     })
   } catch (err) {

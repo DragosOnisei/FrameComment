@@ -25,14 +25,20 @@
  */
 
 import { prismaPrivileged, currentOrgId } from './db'
+import { isPlatformOrgContext } from './platform'
 import { logError } from './logging'
 
 export const PROJECT_TRASH_LOCK_MS = 24 * 60 * 60 * 1000 // 24h (hard-coded)
 export const ORG_DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
-export function isPlatformOrgContext(): boolean {
-  return currentOrgId() === 'org-1'
-}
+/**
+ * 6.2.0: re-exported from `./platform`, which is now the single source of
+ * truth. This used to be `currentOrgId() === 'org-1'`, exempting the founder's
+ * own marketing company from every tenant rule. Only the dedicated platform
+ * organization is exempt now; 'org-1' plays by the same rules as any other
+ * customer (project-trash throttle included).
+ */
+export { isPlatformOrgContext }
 
 export interface OrgDangerState {
   id: string

@@ -16,6 +16,10 @@ interface User {
   // user hasn't uploaded one yet — UI falls back to initials).
   avatarUrl?: string | null
   role: string
+  // 6.2.0: TRUE only for the founder (OWNER of the platform organization).
+  // Gates the Founder area and its redirect.
+  isPlatformAdmin?: boolean
+  isPlatformOrg?: boolean
 }
 
 interface AuthContextType {

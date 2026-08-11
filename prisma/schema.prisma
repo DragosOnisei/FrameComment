@@ -1483,6 +1483,14 @@ model Organization {
   // ACTIVE | SUSPENDED (billing) | DELETED (soft). Plain string to avoid an
   // enum migration dance while statuses are still evolving.
   status    String   @default("ACTIVE")
+  // 6.2.0 Founder area: TRUE for the single organization that owns the
+  // platform itself (FrameComment / MINDQUB). Platform privileges used to be
+  // hardcoded to 'org-1', which is also the founder's own marketing company —
+  // so that company could never become an ordinary customer. The flag moves
+  // those privileges onto a dedicated org, and every tenant (including the
+  // founder's own company) is billed and counted like any other client.
+  // The platform org is never billed and never deletable.
+  isPlatform Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1502,6 +1510,7 @@ model Organization {
 
   @@index([status])
   @@index([deletionScheduledAt])
+  @@index([isPlatform])
 }
 
 // 5.6 multi-tenant Phase 4: team-member invite links.

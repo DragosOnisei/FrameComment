@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense, useEffect, useRef } from 'react'
+import { useState, Suspense, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
@@ -24,6 +24,16 @@ function LoginForm() {
   const rawReturnUrl = searchParams?.get('returnUrl') || '/admin/projects'
   // SECURITY: Only allow relative paths — prevents javascript: and open redirect attacks
   const returnUrl = rawReturnUrl.startsWith('/') && !rawReturnUrl.startsWith('//') ? rawReturnUrl : '/admin/projects'
+  // 6.2.0: the founder's account belongs to the PLATFORM organization and has
+  // no projects of its own — send it straight to the Founder area unless an
+  // explicit returnUrl asked for somewhere specific (e.g. an expired session
+  // bouncing back to the page you were on).
+  const hadExplicitReturnUrl = !!searchParams?.get('returnUrl')
+  const landingFor = useCallback(
+    (user: { isPlatformAdmin?: boolean } | null | undefined) =>
+      !hadExplicitReturnUrl && user?.isPlatformAdmin ? '/founder' : returnUrl,
+    [hadExplicitReturnUrl, returnUrl],
+  )
   const sessionExpired = searchParams?.get('sessionExpired') === 'true'
 
   const [email, setEmail] = useState('')
@@ -106,7 +116,7 @@ function LoginForm() {
         }
 
         // Success - redirect
-        router.push(returnUrl)
+        router.push(landingFor(data?.user))
         router.refresh()
       } catch (err: any) {
         if (!mounted) return
@@ -125,7 +135,7 @@ function LoginForm() {
       // Abort any pending conditional UI request
       conditionalAbortController.current?.abort()
     }
-  }, [router, returnUrl, t])
+  }, [router, returnUrl, landingFor, t])
 
   async function handlePasskeyLogin() {
     setError('')
@@ -177,7 +187,7 @@ function LoginForm() {
       }
 
       // Success - redirect
-      router.push(returnUrl)
+      router.push(landingFor(data?.user))
       router.refresh()
     } catch (err: any) {
       // Log full error for debugging
@@ -230,8 +240,8 @@ function LoginForm() {
         clearTokens()
       }
 
-      // Success - redirect to return URL or admin
-      router.push(returnUrl)
+      // Success - redirect to return URL, the Founder area, or admin
+      router.push(landingFor(data?.user))
       router.refresh()
     } catch (err) {
       setError(tc('errorTryAgain'))

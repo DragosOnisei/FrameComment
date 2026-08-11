@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { isPlatformOrgId, userIsPlatformAdmin } from '@/lib/platform'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 export const runtime = 'nodejs'
@@ -61,7 +62,11 @@ export async function GET(request: NextRequest) {
         role: user.role,
         // 5.10.1: lets the UI adapt platform-vs-tenant copy (e.g. the
         // project-deletion safety notes only apply to tenant companies).
-        isPlatformOrg: ((user as any).organizationId ?? 'org-1') === 'org-1',
+        // 6.2.0: the platform is its OWN organization now, so the founder's
+        // marketing company reads as the tenant it actually is.
+        isPlatformOrg: isPlatformOrgId((user as any).organizationId ?? null),
+        // 6.2.0: drives the redirect into the Founder area and gates its UI.
+        isPlatformAdmin: userIsPlatformAdmin(user as any),
       },
     })
     

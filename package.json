@@ -1,6 +1,6 @@
 {
   "name": "framecomment",
-  "version": "6.1.1",
+  "version": "6.2.0",
   "description": "FrameComment — self-hosted video review and approval platform for filmmakers and video professionals.",
   "author": {
     "name": "Dragos Onisei",
@@ -34,7 +34,8 @@
     "lint": "eslint .",
     "postinstall": "prisma generate",
     "worker:dev": "tsx watch src/worker/dev.ts",
-    "worker": "tsx src/worker/index.ts"
+    "worker": "tsx src/worker/index.ts",
+    "founder:create": "tsx scripts/create-founder.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1022.0",

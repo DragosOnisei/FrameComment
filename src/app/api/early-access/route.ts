@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prismaPrivileged } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
+import { platformOrgId } from '@/lib/platform'
 import { logError, logMessage } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -63,10 +64,12 @@ export async function POST(request: NextRequest) {
         ? `Other: ${professionOther.slice(0, 120) || 'unspecified'}`
         : professionRaw
 
-    // Deliver ONLY to the platform owner (org-1 OWNER, oldest account).
+    // Deliver ONLY to the platform owner: the OWNER of the PLATFORM
+    // organization (6.2.0 — previously 'org-1', the founder's own company),
+    // oldest account wins if there is ever more than one.
     const recipient = await (prismaPrivileged as any).user.findFirst({
       where: {
-        organizationId: 'org-1',
+        organizationId: platformOrgId(),
         role: 'OWNER',
       },
       orderBy: { createdAt: 'asc' },

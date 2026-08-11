@@ -1,6 +1,6 @@
 'use client'
 
-import { AuthProvider } from '@/components/AuthProvider'
+import { AuthProvider, useAuth } from '@/components/AuthProvider'
 import AdminSidebar from '@/components/AdminSidebar'
 import AdminTopBar from '@/components/AdminTopBar'
 import SessionMonitor from '@/components/SessionMonitor'
@@ -13,7 +13,7 @@ import { StorageTransferBanner } from '@/components/StorageTransferBanner'
 import { GlobalDropOverlay } from '@/components/GlobalDropOverlay'
 import BillingWall from '@/components/BillingWall'
 import OrgDeletionBanner from '@/components/OrgDeletionBanner'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 
 /**
@@ -37,6 +37,31 @@ import { useEffect } from 'react'
  * look identical to the public share page so admins can preview
  * the client experience without UI noise.
  */
+/**
+ * 6.2.0 Founder area: the founder's account owns the PLATFORM, not a company —
+ * the app workspace (projects, videos, comments, share links) is simply not its
+ * world. Anything under /admin bounces back to /founder.
+ *
+ * ONE exception for now: /admin/settings still holds the platform-level fields
+ * (application domain, short-link domain, the shared OpenAI key) and only the
+ * platform org may edit them. Phase 1 moves those into the Founder area, and
+ * this exception goes away with them.
+ */
+function FounderRedirect() {
+  const { user, loading } = useAuth()
+  const router = useRouter()
+  const pathname = usePathname()
+  const isPlatformSettings = !!pathname?.startsWith('/admin/settings')
+
+  useEffect(() => {
+    if (loading || !user?.isPlatformAdmin) return
+    if (isPlatformSettings) return
+    router.replace('/founder')
+  }, [loading, user?.isPlatformAdmin, isPlatformSettings, router])
+
+  return null
+}
+
 export default function AdminLayout({
   children,
 }: {
@@ -113,6 +138,7 @@ export default function AdminLayout({
           {/* 3.8.0+: billing wall — overlays the admin (except Settings)
               when the account is suspended for unpaid/over-tier billing.
               Client share routes are separate and unaffected. */}
+          <FounderRedirect />
           <BillingWall />
           {/* 5.10 Danger Zone: red countdown banner while a company
               deletion is pending (self-hides otherwise). */}

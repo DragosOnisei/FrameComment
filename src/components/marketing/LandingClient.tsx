@@ -393,7 +393,11 @@ export function LandingClient() {
         if (!alive) return
         if (res.ok) {
           const data = await res.json().catch(() => null)
-          if (data?.authenticated) router.replace('/admin/projects')
+          // 6.2.0: the founder's account has no projects of its own — it owns
+          // the platform, so a cold entry belongs in the Founder area.
+          if (data?.authenticated) {
+            router.replace(data.user?.isPlatformAdmin ? '/founder' : '/admin/projects')
+          }
         }
       } catch {
         /* logged out or offline, stay on the landing */

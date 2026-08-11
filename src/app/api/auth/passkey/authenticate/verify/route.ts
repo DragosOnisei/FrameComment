@@ -6,6 +6,7 @@ import type { AuthenticationResponseJSON } from '@simplewebauthn/browser'
 import { issueAdminTokens } from '@/lib/auth'
 import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
 import { getAppUrl } from '@/lib/url'
+import { userIsPlatformAdmin } from '@/lib/platform'
 import { safeParseBody } from '@/lib/validation'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import crypto from 'crypto'
@@ -168,6 +169,8 @@ export async function POST(request: NextRequest) {
         email: result.user.email,
         name: result.user.name,
         role: result.user.role,
+        // 6.2.0: same landing decision as the password login.
+        isPlatformAdmin: userIsPlatformAdmin(result.user as any),
       },
       tokens: {
         accessToken: tokens.accessToken,

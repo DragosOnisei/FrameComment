@@ -16,11 +16,16 @@ import { logError, logMessage } from '../lib/logging'
  * reach this point with any.
  */
 export async function processOrgDeletions(): Promise<void> {
-  let due: Array<{ id: string; name: string; deletionScheduledAt: Date }> = []
+  let due: Array<{
+    id: string
+    name: string
+    deletionScheduledAt: Date
+    isPlatform?: boolean
+  }> = []
   try {
     due = await (prismaPrivileged as any).organization.findMany({
       where: { deletionScheduledAt: { not: null, lte: new Date() } },
-      select: { id: true, name: true, deletionScheduledAt: true },
+      select: { id: true, name: true, deletionScheduledAt: true, isPlatform: true },
     })
   } catch (err) {
     logError('[danger-zone] due-deletion query failed:', err)
@@ -29,9 +34,12 @@ export async function processOrgDeletions(): Promise<void> {
 
   for (const org of due) {
     try {
-      if (org.id === 'org-1') {
-        // Absolute backstop — the platform org is never deletable.
-        logError(`[danger-zone] REFUSING to wipe platform org (org-1) — clearing schedule`)
+      // 6.2.0: the backstop follows the PLATFORM FLAG, not a hardcoded id.
+      // 'org-1' stays protected too: it is the founder's own production
+      // company, and an accidental wipe there is unrecoverable. Remove that
+      // half of the condition deliberately, never by accident.
+      if ((org as any).isPlatform || org.id === 'org-1') {
+        logError(`[danger-zone] REFUSING to wipe protected org (${org.id}) — clearing schedule`)
         await (prismaPrivileged as any).organization.update({
           where: { id: org.id },
           data: { deletionScheduledAt: null, deletionRequestedById: null },

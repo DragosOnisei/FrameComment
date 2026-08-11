@@ -3,6 +3,7 @@ import { prisma, prismaPrivileged, orgSettingsWhere, orgSettingsCreateBase, curr
 import { requireApiAdmin, requireApiManageSettings } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
+import { isPlatformOrgContext } from '@/lib/platform'
 import { isSmtpConfigured, getOpenAiApiKey } from '@/lib/settings'
 import { getFilePath } from '@/lib/storage'
 import { flushPendingAdminNotifications } from '@/lib/notifications'
@@ -93,7 +94,9 @@ export async function GET(request: NextRequest) {
       openaiConfigured,
       // 5.9 multi-tenant: lets the UI hide PLATFORM-level fields (application
       // domain, short-link domain, server folder) from tenant companies.
-      isPlatformOrg: currentOrgId() === 'org-1',
+      // 6.2.0: "platform" is the dedicated platform org, not the founder's own
+      // company — see src/lib/platform.ts.
+      isPlatformOrg: isPlatformOrgContext(),
     })
   } catch (error) {
     logError('Error fetching settings:', error)
@@ -561,7 +564,7 @@ export async function PATCH(request: NextRequest) {
     // 5.9 multi-tenant: application/short-link domains are PLATFORM-level;
     // a tenant's PATCH must never change them (the UI hides the fields, but
     // the API enforces it too).
-    if (currentOrgId() !== 'org-1') {
+    if (!isPlatformOrgContext()) {
       delete (updateData as any).appDomain
       delete (updateData as any).shortLinkDomain
     }
@@ -638,7 +641,11 @@ export async function PATCH(request: NextRequest) {
     // company) — only the platform org may change it, and the write targets
     // the platform row explicitly. (The old raw UPDATE also stopped working
     // post-flip: raw SQL is never wrapped by the org-context extension.)
-    if (openaiKeyUpdate !== undefined && currentOrgId() === 'org-1') {
+    // 6.2.0: only the PLATFORM org may change the shared key. The write still
+    // targets Settings id='default' — that row is where every transcript job
+    // reads the key from (see getOpenAiApiKey), so the storage location must
+    // not move.
+    if (openaiKeyUpdate !== undefined && isPlatformOrgContext()) {
       try {
         await (prismaPrivileged as any).settings.update({
           where: { id: 'default' },

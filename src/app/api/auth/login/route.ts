@@ -6,6 +6,7 @@ import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
 import { getAppUrl } from '@/lib/url'
+import { userIsPlatformAdmin } from '@/lib/platform'
 import { prisma } from '@/lib/db'
 import { prismaPrivileged } from '@/lib/db'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -247,6 +248,9 @@ export async function POST(request: NextRequest) {
         email: user.email,
         name: user.name,
         role: user.role,
+        // 6.2.0: lets the login page land the founder in the Founder area
+        // instead of a projects list that belongs to no company.
+        isPlatformAdmin: userIsPlatformAdmin(user as any),
       },
       tokens: {
         accessToken: tokens.accessToken,

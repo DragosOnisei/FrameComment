@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { requireApiOwner } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { prismaPrivileged, currentOrgId } from '@/lib/db'
+import { prismaPrivileged } from '@/lib/db'
+import { isPlatformOrgContext } from '@/lib/platform'
 import { logMessage, logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -24,11 +25,17 @@ export const dynamic = 'force-dynamic'
 
 const ACCESS_LINK_TTL_DAYS = 30
 
-/** Shared gate: platform org OWNER only. */
+/**
+ * Shared gate: platform org OWNER only.
+ *
+ * 6.2.0: the platform is a dedicated organization now (it used to be 'org-1',
+ * the founder's own marketing company), so access links can no longer be
+ * minted from a customer account.
+ */
 async function requirePlatformOwner(request: NextRequest) {
   const auth = await requireApiOwner(request)
   if (auth instanceof Response) return auth
-  if (currentOrgId() !== 'org-1') {
+  if (!isPlatformOrgContext()) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
   return auth
@@ -90,7 +97,7 @@ export async function POST(request: NextRequest) {
   if (auth instanceof Response) return auth
 
   // Platform org only — tenant Owners never see or reach this.
-  if (currentOrgId() !== 'org-1') {
+  if (!isPlatformOrgContext()) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
