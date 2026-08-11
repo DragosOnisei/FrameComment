@@ -11,6 +11,7 @@ import { trackSharePageAccess, readAnalyticsConsent } from '@/lib/share-access-t
 import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { logMessage } from '@/lib/logging'
 import { verifyVideoShareName } from '@/lib/share-video-sig'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 export const runtime = 'nodejs'
@@ -234,9 +235,41 @@ export async function GET(
     // (videosByName, the thumbnail reel, the version chip) keys off
     // this array, so this single filter is enough to lock the share
     // to one video.
-    const scopedVideos = singleVideoScopeActive
-      ? videosSanitizedBase.filter((v: any) => v.name === singleVideoName)
-      : videosSanitizedBase
+    // 6.2.1: the scope is by NAME, and a stack takes the name of its newest
+    // delivery — so uploading v6 renames the whole stack and a link minted for
+    // "…_v5" suddenly matches nothing. The old code then returned an EMPTY
+    // payload and the client landed on a blank "Select a video to begin"
+    // screen, with no way to tell that anything was wrong.
+    //
+    // Two changes: match the stack the name USED to belong to (originalFileName
+    // still carries each version's own upload name), and never scope down to
+    // nothing — if the target can't be resolved, fall back to the whole
+    // project so the visitor gets the grid instead of a dead end.
+    const stripExt = (n: string) => {
+      const dot = n.lastIndexOf('.')
+      return dot > 0 ? n.slice(0, dot) : n
+    }
+    let scopedVideos = videosSanitizedBase
+    if (singleVideoScopeActive) {
+      const exact = videosSanitizedBase.filter((v: any) => v.name === singleVideoName)
+      // The link's name may be an older version's ORIGINAL upload name: find
+      // that row, then take every row of the stack it lives in.
+      const byOriginal = exact.length
+        ? []
+        : videosSanitizedBase.filter(
+            (v: any) => stripExt(String(v.originalFileName || '')) === singleVideoName,
+          )
+      if (exact.length > 0) {
+        scopedVideos = exact
+      } else if (byOriginal.length > 0) {
+        const names = new Set(byOriginal.map((v: any) => v.name))
+        scopedVideos = videosSanitizedBase.filter((v: any) => names.has(v.name))
+      } else {
+        logMessage(
+          `[share] single-video scope "${singleVideoName}" no longer matches any video on ${token} — serving the full project instead of an empty page`,
+        )
+      }
+    }
 
     // 6.1.0: versions are grouped by the explicit STACK. The client payload
     // stays keyed by display name (the share URL signs the name), and every
@@ -303,6 +336,7 @@ export async function GET(
     const sanitizedVideos = isGuest ? videosSanitizedBase.map(video => ({
       id: video.id,
       name: video.name,
+      folderId: video.folderId ?? null,
       version: video.version,
       versionLabel: video.versionLabel,
       duration: video.duration,
@@ -322,6 +356,11 @@ export async function GET(
       acc[name] = sortedVideosByName[name].map(video => ({
         id: video.id,
         name: video.name,
+        // 6.2.1: guests need `folderId` too. The share page scopes the grid to
+        // the folder the link came from, and stripping the field made EVERY
+        // guest arriving from a folder share match nothing — a blank page. The
+        // id is already in their URL, so this reveals nothing new.
+        folderId: video.folderId ?? null,
         version: video.version,
         versionLabel: video.versionLabel,
         duration: video.duration,

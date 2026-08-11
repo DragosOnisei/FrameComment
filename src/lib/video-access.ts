@@ -382,7 +382,14 @@ export async function logSecurityEvent(params: {
       return
     }
 
-    await prisma.securityEvent.create({
+    // 6.2.1: PRIVILEGED write. Security events are logged from pre-auth paths
+    // (failed logins, share-token probes) where no organization context is
+    // armed, so post-RLS-flip the restricted role was denied every insert:
+    // "new row violates row-level security policy for table SecurityEvent".
+    // The audit trail was silently empty on production. The row carries the
+    // org from the DB default when a context exists, and belongs to the
+    // platform's own log when it doesn't.
+    await (prismaPrivileged as any).securityEvent.create({
       data: {
         type: params.type,
         severity: params.severity,

@@ -73,10 +73,31 @@ export default function ThumbnailGrid({
             {projectDescription}
           </p>
         )}
-        <p className="text-xs text-muted-foreground">
-          {t('selectVideoToBegin')}
-        </p>
+        {/* 6.2.1: only invite a selection when there IS something to select.
+            An empty grid used to render this line over blank space, which read
+            as a broken page to the client. */}
+        {videoNames.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {t('selectVideoToBegin')}
+          </p>
+        )}
       </div>
+
+      {/* 6.2.1: honest empty state. Previously zero tiles meant zero feedback:
+          the visitor saw a title and nothing else, with no way to tell whether
+          the link was wrong, the upload was still processing, or the studio had
+          removed the material. */}
+      {videoNames.length === 0 && (
+        <div className="mx-auto max-w-md rounded-xl bg-white/[0.03] ring-1 ring-white/10 px-6 py-8 text-center">
+          <p className="text-sm font-medium text-foreground/85">
+            Nothing to review here yet
+          </p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            The videos may still be processing, or this link points somewhere
+            that has been moved. Ask the studio to resend it.
+          </p>
+        </div>
+      )}
 
       {/* Grid */}
       <div className="grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3 lg:gap-6 xl:grid-cols-4 2xl:grid-cols-5">

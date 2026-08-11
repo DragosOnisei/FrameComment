@@ -182,6 +182,21 @@ function pickInitialHlsLevelIdx(
   return idx >= 0 ? idx : levels.length - 1
 }
 
+/**
+ * 6.2.1 — the loading slate used to say "Loading video…" for everything,
+ * including stills. Name what is actually opening: the file extension when we
+ * have it (PNG, JPG, MP4), otherwise the media type.
+ */
+function mediaLoadingLabel(video: any): string {
+  const isImage = video?.mediaType === 'IMAGE'
+  const source = String(video?.originalFileName || video?.name || '')
+  const dot = source.lastIndexOf('.')
+  const ext = dot > 0 ? source.slice(dot + 1).toUpperCase() : ''
+  const looksLikeExt = /^[A-Z0-9]{2,5}$/.test(ext)
+  if (looksLikeExt) return `Loading ${ext}…`
+  return isImage ? 'Loading image…' : 'Loading video…'
+}
+
 export default function VideoPlayer({
   videos,
   projectId,
@@ -1623,7 +1638,15 @@ export default function VideoPlayer({
   useEffect(() => {
     const handleGetCurrentTime = (e: CustomEvent) => {
       if (e.detail.callback) {
-        e.detail.callback(currentTimeRef.current, selectedVideoIdRef.current)
+        // 6.2.1: read the element directly. `currentTimeRef` is updated by a
+        // 200 ms-throttled `timeupdate`, so capturing at the very end of a
+        // clip could land up to a fifth of a second short — and the last
+        // update before playback stops is often swallowed entirely. The ref
+        // stays as the fallback for the brief window before metadata loads.
+        const live = videoRef.current?.currentTime
+        const exact =
+          typeof live === 'number' && Number.isFinite(live) ? live : currentTimeRef.current
+        e.detail.callback(exact, selectedVideoIdRef.current)
       }
     }
 
@@ -2633,7 +2656,9 @@ export default function VideoPlayer({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
-                    <p className="text-sm font-medium text-white/85">Loading video…</p>
+                    <p className="text-sm font-medium text-white/85">
+                      {mediaLoadingLabel(selectedVideo)}
+                    </p>
                   </div>
                 )}
 
@@ -2768,7 +2793,9 @@ export default function VideoPlayer({
             }}
           >
             <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
-            <p className="text-sm font-medium text-white/85">Loading video...</p>
+            <p className="text-sm font-medium text-white/85">
+              {mediaLoadingLabel(selectedVideo)}
+            </p>
           </div>
         )}
       </div>

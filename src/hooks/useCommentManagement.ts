@@ -338,6 +338,15 @@ export function useCommentManagement({
       if (!hasAutoFilledTimestamp || selectedTimestamp === null) return
       // 1.3.2+: never touch IN once an OUT (range) is committed.
       if (selectedTimecodeEnd !== null) return
+      // 6.2.1: never touch IN once the user has actually WRITTEN something.
+      //
+      // The IN point follows the playhead so the chip stays live while the
+      // composer is empty. But once there is text, the comment belongs to the
+      // moment it was captured. Without this guard, composing a note at the
+      // very end of a clip and then pressing Play (the browser rewinds to 0
+      // when playback restarts from the end) silently moved the comment to
+      // 00:00 — the "my end-of-video comment shows up at the beginning" bug.
+      if (newComment.trim().length > 0) return
 
       setSelectedTimestamp(time)
     }
@@ -346,7 +355,7 @@ export function useCommentManagement({
     return () => {
       window.removeEventListener('videoTimeUpdated', handleVideoTimeUpdated as EventListener)
     }
-  }, [hasAutoFilledTimestamp, selectedTimestamp, selectedTimecodeEnd, selectedVideoId])
+  }, [hasAutoFilledTimestamp, selectedTimestamp, selectedTimecodeEnd, selectedVideoId, newComment])
 
   // Broadcast the current pending in/out range so the timeline (which
   // lives several components away) can paint the IN bracket and the

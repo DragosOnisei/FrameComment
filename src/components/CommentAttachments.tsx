@@ -252,6 +252,76 @@ function ImageThumbnail({
   )
 }
 
+/**
+ * 6.2.1 — compact preview strip for the TIMELINE popover.
+ *
+ * Hovering a comment chip used to read "No content" whenever the comment was
+ * nothing but attachments, which is exactly the case where the reader most
+ * wants to see them. This renders small image thumbs plus a chip per
+ * non-image file, read-only: opening/downloading stays in the comment thread.
+ */
+export function AttachmentPreviewStrip({
+  attachments,
+  videoId,
+  shareToken,
+  max = 4,
+}: {
+  attachments: Array<{ id: string; fileName: string; fileType: string; isImage: boolean }>
+  videoId: string
+  shareToken?: string | null
+  max?: number
+}) {
+  if (!attachments.length) return null
+  const images = attachments.filter((a) => a.isImage).slice(0, max)
+  const files = attachments.filter((a) => !a.isImage)
+  const hiddenImages = attachments.filter((a) => a.isImage).length - images.length
+
+  return (
+    <div className="pt-2.5 space-y-1.5">
+      {images.length > 0 && (
+        <div className="flex items-center gap-1.5">
+          {images.map((a) => (
+            <PreviewThumb key={a.id} asset={a} videoId={videoId} shareToken={shareToken} />
+          ))}
+          {hiddenImages > 0 && (
+            <span className="text-[10px] text-white/55 tabular-nums">+{hiddenImages}</span>
+          )}
+        </div>
+      )}
+      {files.map((a) => (
+        <div
+          key={a.id}
+          className="flex items-center gap-1.5 text-[11px] sm:text-[10px] text-white/70 min-w-0"
+        >
+          <FileText className="w-3 h-3 shrink-0" />
+          <span className="truncate">{a.fileName}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PreviewThumb({
+  asset,
+  videoId,
+  shareToken,
+}: {
+  asset: { id: string; fileName: string }
+  videoId: string
+  shareToken?: string | null
+}) {
+  const { url, loading } = useAssetUrl(videoId, asset.id, shareToken)
+  return (
+    <span className="relative w-10 h-10 rounded-md overflow-hidden bg-white/[0.06] ring-1 ring-white/12 shrink-0 flex items-center justify-center">
+      {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-white/50" />}
+      {url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt={asset.fileName} className="w-full h-full object-cover" loading="lazy" />
+      )}
+    </span>
+  )
+}
+
 /** Full-screen modal that shows a single image. Closes on click outside / Esc. */
 function ImageLightbox({
   asset,

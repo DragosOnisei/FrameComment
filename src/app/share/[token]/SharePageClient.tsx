@@ -106,6 +106,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       )
       if (inFolder.length > 0) filtered[name] = inFolder
     }
+    // 6.2.1: NEVER scope down to nothing. Arriving from a folder share with a
+    // folderId that matches no video (its clips aren't READY yet, or the
+    // payload simply doesn't carry them) used to leave the visitor on a blank
+    // "Select a video to begin" page with no explanation. Falling back to the
+    // whole project is imperfect, but it is never a dead end.
+    if (Object.keys(filtered).length === 0) return project.videosByName
     return filtered
   }, [project?.videosByName, urlFolderId])
   const [comments, setComments] = useState<any[]>([])

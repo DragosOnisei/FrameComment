@@ -11,7 +11,7 @@ import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatComm
 import { isRangeEditActive } from '@/lib/comment-range-edit'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
-import { AudioAttachment } from './CommentAttachments'
+import { AttachmentPreviewStrip, AudioAttachment } from './CommentAttachments'
 import type { SafeZonePreset } from './SafeZoneOverlay'
 
 type CommentWithReplies = Comment & {
@@ -258,6 +258,15 @@ interface MarkerData {
     category: string | null
     createdAt: string
   } | null
+  /** 6.2.1: everything that ISN'T the voice note — images, PDFs, LUTs.
+   *  Without these the popover fell back to "No content" for a comment
+   *  whose whole point was the attachment. */
+  attachments: Array<{
+    id: string
+    fileName: string
+    fileType: string
+    isImage: boolean
+  }>
 }
 
 interface RangeBarData {
@@ -734,12 +743,14 @@ export default function CustomVideoControls({
         const assets: any[] = Array.isArray((comment as any).assets)
           ? (comment as any).assets
           : []
-        const audio = assets.find(
-          (a) =>
-            a &&
-            (a.category === 'audio' ||
-              (typeof a.fileType === 'string' && a.fileType.startsWith('audio/'))),
-        )
+        const isAudioAsset = (a: any) =>
+          !!a &&
+          (a.category === 'audio' ||
+            (typeof a.fileType === 'string' && a.fileType.startsWith('audio/')))
+        const audio = assets.find(isAudioAsset)
+        // 6.2.1: the rest of the attachments, surfaced on the marker so the
+        // timeline popover can show them instead of "No content".
+        const otherAssets = assets.filter((a) => a && !isAudioAsset(a))
 
         return {
           id: comment.id,
@@ -765,6 +776,14 @@ export default function CustomVideoControls({
                 createdAt: String(audio.createdAt ?? new Date().toISOString()),
               }
             : null,
+          attachments: otherAssets.map((a) => ({
+            id: String(a.id),
+            fileName: String(a.fileName ?? 'file'),
+            fileType: String(a.fileType ?? ''),
+            isImage:
+              a.category === 'image' ||
+              (typeof a.fileType === 'string' && a.fileType.startsWith('image/')),
+          })),
         }
       })
       .sort((a, b) => a.timestamp - b.timestamp)
@@ -2058,11 +2077,27 @@ export default function CustomVideoControls({
                             <p className="pt-2.5 text-sm sm:text-xs text-white/90 leading-relaxed break-words whitespace-pre-wrap">
                               {marker.content}
                             </p>
-                          ) : !marker.audioAsset ? (
+                          ) : !marker.audioAsset && marker.attachments.length === 0 ? (
                             <p className="pt-2.5 text-sm sm:text-xs text-white/55 italic leading-relaxed">
                               No content
                             </p>
                           ) : null}
+                          {/* 6.2.1: attachments are content too — a comment
+                              that is just a reference image used to read as
+                              "No content" on the timeline. */}
+                          {marker.attachments.length > 0 && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                            >
+                              <AttachmentPreviewStrip
+                                attachments={marker.attachments}
+                                videoId={videoId}
+                                shareToken={shareToken}
+                              />
+                            </div>
+                          )}
                           {marker.audioAsset && (
                             <div
                               className="pt-2.5"
