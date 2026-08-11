@@ -93,7 +93,12 @@ const ADMIN_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET
 const SHARE_TOKEN_SECRET = process.env.SHARE_TOKEN_SECRET
 
 const ACCESS_TOKEN_DURATION = safeParseInt(process.env.ADMIN_ACCESS_TTL_SECONDS, 15 * 60) // 15 minutes
-const REFRESH_TOKEN_DURATION = safeParseInt(process.env.ADMIN_REFRESH_TTL_SECONDS, 7 * 24 * 60 * 60) // 7 days
+// 6.3.2: 30 days (720 hours). This is the token that decides how long a
+// person stays signed in — the ACCESS token stays short-lived and is renewed
+// silently in the background, so lengthening this doesn't widen the window an
+// intercepted access token would be useful for. Overridable per install via
+// ADMIN_REFRESH_TTL_SECONDS.
+const REFRESH_TOKEN_DURATION = safeParseInt(process.env.ADMIN_REFRESH_TTL_SECONDS, 30 * 24 * 60 * 60) // 30 days
 const SHARE_TOKEN_DURATION = safeParseInt(process.env.SHARE_TOKEN_TTL_SECONDS, 45 * 60) // 45 minutes
 const DUMMY_BCRYPT_HASH = '$2a$14$aoLibk0GEJrzo6fSqPoQIONMGynUKWEoQhkCrFcEapn6I.WzXXdki'
 

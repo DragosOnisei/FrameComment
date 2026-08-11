@@ -1089,6 +1089,17 @@ function AdminSharePageInner() {
     return null
   }, [project?.videosByName, urlVideoId, urlVideoName])
 
+  // 6.3.2: the PAGE-level slate said "Loading video..." for everything. It is
+  // the first thing you see after double-clicking a still, so it has to name
+  // the right medium. Reads the target group when we already know it.
+  const pageLoadingLabel = (() => {
+    const group = urlTargetVideoName
+      ? (project?.videosByName as Record<string, any[]> | undefined)?.[urlTargetVideoName]
+      : null
+    const first = Array.isArray(group) ? group[0] : null
+    return (first as any)?.mediaType === 'IMAGE' ? 'Loading Image…' : 'Loading Video…'
+  })()
+
   // Determine initial view state based on URL params (same behavior as public
   // share). Uses the id-or-name resolution above so a stale name still opens
   // the player instead of falling through to the grid.
@@ -1254,7 +1265,7 @@ function AdminSharePageInner() {
           }}
         >
           <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
-          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+          <p className="text-sm font-medium text-white/85">{pageLoadingLabel}</p>
         </div>
       </div>
     )
@@ -1353,7 +1364,7 @@ function AdminSharePageInner() {
           }}
         >
           <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
-          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+          <p className="text-sm font-medium text-white/85">{pageLoadingLabel}</p>
         </div>
       </div>
     )

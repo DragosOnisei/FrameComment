@@ -114,6 +114,16 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     if (Object.keys(filtered).length === 0) return project.videosByName
     return filtered
   }, [project?.videosByName, urlFolderId])
+  // 6.3.2: name the medium on the page-level slate — a still used to greet
+  // the client with "Loading video...".
+  const pageLoadingLabel = (() => {
+    const group = urlVideoName
+      ? (project?.videosByName as Record<string, any[]> | undefined)?.[urlVideoName]
+      : null
+    const first = Array.isArray(group) ? group[0] : null
+    return (first as any)?.mediaType === 'IMAGE' ? 'Loading Image…' : 'Loading Video…'
+  })()
+
   const [comments, setComments] = useState<any[]>([])
   const [_commentsLoading, setCommentsLoading] = useState(false)
   const [_companyName, setCompanyName] = useState('Studio')
@@ -1584,7 +1594,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           }}
         >
           <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
-          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+          <p className="text-sm font-medium text-white/85">{pageLoadingLabel}</p>
         </div>
       </div>
     )
@@ -1665,7 +1675,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           }}
         >
           <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
-          <p className="text-sm font-medium text-white/85">{t('loadingVideo')}</p>
+          <p className="text-sm font-medium text-white/85">{pageLoadingLabel}</p>
         </div>
       </div>
     )
