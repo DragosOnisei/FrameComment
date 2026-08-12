@@ -59,7 +59,9 @@ export interface FounderMetrics {
     approvals: number
     projectsCreated: number
   }
-  /** Daily platform totals from the billing snapshots already written each day. */
+  /** History for the chart, from the daily billing snapshots. Sparse by
+   *  nature: a company is snapshotted only on days its billing was read. The
+   *  headline figures above are measured live instead. */
   series: Array<{ day: string; users: number; storageBytes: number; mrrCents: number }>
   companiesTable: Array<{
     id: string
@@ -173,7 +175,54 @@ export async function computeFounderMetrics(
     Number(uploadBytes?._sum?.fileSize ?? 0) +
     Number(docBytes?._sum?.size ?? 0)
 
-  // ── Snapshots: the only historical series we already keep ────────────────
+  // ── Current billable usage, measured live ────────────────────────────────
+  //
+  // 6.7.0 — this used to read the latest BillingSnapshot, and it was wrong.
+  // Snapshots are written by `recordDailySnapshotIfNeeded`, which only runs
+  // when a company's billing status is READ. A customer who hasn't opened
+  // their Billing pane in weeks has a weeks-old snapshot, so the founder
+  // dashboard reported $6 of storage for a company whose own Billing pane
+  // said $270. The dashboard now measures the same thing the invoice will:
+  // current fc-backend bytes and current user count, per company.
+  //
+  // Snapshots keep exactly one job: the historical series for the chart.
+  const fcScope = { AND: [fcStorageWhere(), { organizationId: { in: orgIds } }] }
+  const [fcVideos, fcAssets, fcUploads] = await Promise.all([
+    (prismaPrivileged as any).video.groupBy({
+      by: ['organizationId'],
+      where: fcScope,
+      _sum: { originalFileSize: true },
+    }) as Promise<Array<{ organizationId: string | null; _sum: { originalFileSize: bigint | null } }>>,
+    (prismaPrivileged as any).videoAsset.groupBy({
+      by: ['organizationId'],
+      where: fcScope,
+      _sum: { fileSize: true },
+    }) as Promise<Array<{ organizationId: string | null; _sum: { fileSize: bigint | null } }>>,
+    (prismaPrivileged as any).projectUpload.groupBy({
+      by: ['organizationId'],
+      where: fcScope,
+      _sum: { fileSize: true },
+    }) as Promise<Array<{ organizationId: string | null; _sum: { fileSize: bigint | null } }>>,
+  ])
+
+  const fcBytesByOrg = new Map<string, number>()
+  const addBytes = (orgId: string | null, n: number) => {
+    const key = orgId ?? ''
+    fcBytesByOrg.set(key, (fcBytesByOrg.get(key) ?? 0) + n)
+  }
+  for (const r of fcVideos) addBytes(r.organizationId, Number(r._sum.originalFileSize ?? 0))
+  for (const r of fcAssets) addBytes(r.organizationId, Number(r._sum.fileSize ?? 0))
+  for (const r of fcUploads) addBytes(r.organizationId, Number(r._sum.fileSize ?? 0))
+
+  const usageByOrg = new Map<string, { userCount: number; storageBytes: number }>()
+  for (const org of orgs) {
+    usageByOrg.set(org.id, {
+      userCount: userCountByOrg.get(org.id) ?? 0,
+      storageBytes: fcBytesByOrg.get(org.id) ?? 0,
+    })
+  }
+
+  // ── Snapshots: history only, for the chart ───────────────────────────────
   const snapshots = (await (prismaPrivileged as any).billingSnapshot.findMany({
     where: { organizationId: { in: orgIds }, day: { gte: from, lte: to } },
     select: { organizationId: true, day: true, userCount: true, storageBytes: true },
@@ -184,54 +233,6 @@ export async function computeFounderMetrics(
     userCount: number
     storageBytes: bigint
   }>
-
-  // Latest snapshot per company drives MRR and the billable-storage figure.
-  const latestByOrg = new Map<string, { userCount: number; storageBytes: number }>()
-  for (const s of snapshots) {
-    latestByOrg.set(s.organizationId ?? '', {
-      userCount: s.userCount,
-      storageBytes: Number(s.storageBytes),
-    })
-  }
-
-  // A company only gets a snapshot once its billing status is read for the day,
-  // so a brand-new company (or a fresh local database) has none. Rather than
-  // reporting it as 0 users / 0 bytes — which reads like a real measurement —
-  // compute its current usage live, by exactly the definition the snapshot uses.
-  const missingSnapshot = orgs.map((o) => o.id).filter((id) => !latestByOrg.has(id))
-  if (missingSnapshot.length > 0) {
-    const scope = { AND: [fcStorageWhere(), { organizationId: { in: missingSnapshot } }] }
-    const [vs, as, us] = await Promise.all([
-      (prismaPrivileged as any).video.groupBy({
-        by: ['organizationId'],
-        where: scope,
-        _sum: { originalFileSize: true },
-      }) as Promise<Array<{ organizationId: string | null; _sum: { originalFileSize: bigint | null } }>>,
-      (prismaPrivileged as any).videoAsset.groupBy({
-        by: ['organizationId'],
-        where: scope,
-        _sum: { fileSize: true },
-      }) as Promise<Array<{ organizationId: string | null; _sum: { fileSize: bigint | null } }>>,
-      (prismaPrivileged as any).projectUpload.groupBy({
-        by: ['organizationId'],
-        where: scope,
-        _sum: { fileSize: true },
-      }) as Promise<Array<{ organizationId: string | null; _sum: { fileSize: bigint | null } }>>,
-    ])
-    const live = new Map<string, number>()
-    for (const r of vs) {
-      live.set(r.organizationId ?? '', (live.get(r.organizationId ?? '') ?? 0) + Number(r._sum.originalFileSize ?? 0))
-    }
-    for (const r of [...as, ...us]) {
-      live.set(r.organizationId ?? '', (live.get(r.organizationId ?? '') ?? 0) + Number(r._sum.fileSize ?? 0))
-    }
-    for (const id of missingSnapshot) {
-      latestByOrg.set(id, {
-        userCount: userCountByOrg.get(id) ?? 0,
-        storageBytes: live.get(id) ?? 0,
-      })
-    }
-  }
 
   let mrrCents = 0
   let mrrUserCents = 0
@@ -244,9 +245,9 @@ export async function computeFounderMetrics(
     { totalCents: number; userCents: number; storageCents: number; billableUsers: number; billableGiB: number }
   >()
   for (const org of activeOrgs) {
-    const snap = latestByOrg.get(org.id)
-    if (!snap) continue
-    const bill = computeBillable(snap.userCount, snap.storageBytes)
+    const usage = usageByOrg.get(org.id)
+    if (!usage) continue
+    const bill = computeBillable(usage.userCount, usage.storageBytes)
     estimatedByOrg.set(org.id, {
       totalCents: bill.totalCents,
       userCents: bill.userCents,
@@ -259,7 +260,7 @@ export async function computeFounderMetrics(
     mrrStorageCents += bill.storageCents
     billableUsersTotal += bill.billableUsers
     billableGiBTotal += bill.billableGiB
-    billableBytes += snap.storageBytes
+    billableBytes += usage.storageBytes
   }
 
   // Daily platform totals for the chart.
@@ -309,7 +310,7 @@ export async function computeFounderMetrics(
   // ── Per-company table ────────────────────────────────────────────────────
   const companiesTable = orgs.map((org) => {
     const s = settingsByOrg.get(org.id)
-    const snap = latestByOrg.get(org.id)
+    const usage = usageByOrg.get(org.id)
     const est = estimatedByOrg.get(org.id)
     return {
       id: org.id,
@@ -317,7 +318,7 @@ export async function computeFounderMetrics(
       createdAt: org.createdAt.toISOString(),
       status: org.status,
       users: userCountByOrg.get(org.id) ?? 0,
-      storageBytes: snap?.storageBytes ?? 0,
+      storageBytes: usage?.storageBytes ?? 0,
       billingStatus: s?.billingStatus ?? 'none',
       hasCard: !!s?.paymentMethodLast4,
       lastInvoiceCents: s?.lastInvoiceAmount ?? null,

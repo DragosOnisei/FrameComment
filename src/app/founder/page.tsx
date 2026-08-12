@@ -224,7 +224,7 @@ export default function FounderDashboardPage() {
           value={data ? `${money(data.revenue.mrrCents)}/mo` : null}
           hint={
             data
-              ? `${money(data.revenue.mrrUserCents)} users · ${money(data.revenue.mrrStorageCents)} storage`
+              ? `${money(data.revenue.mrrUserCents)} from users + ${money(data.revenue.mrrStorageCents)} from storage`
               : "What today's usage would invoice"
           }
         />
@@ -256,40 +256,41 @@ export default function FounderDashboardPage() {
           <FounderCard title="How the recurring revenue is made up">
             <div className="grid gap-2 sm:grid-cols-3">
               <div className="rounded-lg bg-white/[0.03] ring-1 ring-white/10 px-3 py-2.5">
-                <p className="text-xs text-muted-foreground">Seats</p>
+                <p className="text-xs text-muted-foreground">Charged for users</p>
                 <p className="mt-0.5 text-lg font-semibold tabular-nums">
                   {money(data.revenue.mrrUserCents)}<span className="text-sm font-normal text-muted-foreground">/mo</span>
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {data.revenue.billableUsers} billable ×{' '}
-                  {unitPrice(data.revenue.pricing.perUserPerMonthCents)} · first{' '}
-                  {data.revenue.pricing.freeUsers} free per company
+                  {data.revenue.billableUsers} paid users ×{' '}
+                  {unitPrice(data.revenue.pricing.perUserPerMonthCents)} each · every company gets{' '}
+                  {data.revenue.pricing.freeUsers} free
                 </p>
               </div>
               <div className="rounded-lg bg-white/[0.03] ring-1 ring-white/10 px-3 py-2.5">
-                <p className="text-xs text-muted-foreground">Storage</p>
+                <p className="text-xs text-muted-foreground">Charged for storage</p>
                 <p className="mt-0.5 text-lg font-semibold tabular-nums">
                   {money(data.revenue.mrrStorageCents)}<span className="text-sm font-normal text-muted-foreground">/mo</span>
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {data.revenue.billableGiB.toLocaleString('en-US')} GiB ×{' '}
-                  {unitPrice(data.revenue.pricing.perGibPerMonthCents)} · first{' '}
-                  {data.revenue.pricing.freeGib} GiB free per company
+                  {data.revenue.billableGiB.toLocaleString('en-US')} paid GB ×{' '}
+                  {unitPrice(data.revenue.pricing.perGibPerMonthCents)} each · every company gets{' '}
+                  {data.revenue.pricing.freeGib} GB free
                 </p>
               </div>
               <div className="rounded-lg bg-primary/10 ring-1 ring-primary/25 px-3 py-2.5">
-                <p className="text-xs text-muted-foreground">Total</p>
+                <p className="text-xs text-muted-foreground">Total per month</p>
                 <p className="mt-0.5 text-lg font-semibold tabular-nums">
                   {money(data.revenue.mrrCents)}<span className="text-sm font-normal text-muted-foreground">/mo</span>
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {money(data.revenue.invoicedInRangeCents)} invoiced in period (floor)
+                  {money(data.revenue.invoicedInRangeCents)} recorded as invoiced in this period
                 </p>
               </div>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Only storage on the FrameComment backend is charged per GiB; files a company keeps on
-              its own Local / R2 / AWS storage cost seats only.
+              Measured live, the same way each company&apos;s own Billing page measures it: current
+              users and current bytes on the FrameComment backend. Files a company keeps on its own
+              Local / R2 / AWS storage are charged per user only, never per GB.
             </p>
           </FounderCard>
         </div>
@@ -304,6 +305,13 @@ export default function FounderDashboardPage() {
                 <span>{data.series[0].day}</span>
                 <span>{data.series[data.series.length - 1].day}</span>
               </div>
+              {/* Snapshots are written when a company's billing is read that
+                  day, so the line is uneven where nobody looked. Better to say
+                  so than to let a dip read as lost revenue. */}
+              <p className="mt-2 text-xs text-muted-foreground">
+                From the daily billing snapshots. A company is only recorded on days its billing
+                was read, so gaps show as dips — they are missing readings, not lost revenue.
+              </p>
             </>
           ) : (
             <p className="text-sm text-muted-foreground py-6 text-center">

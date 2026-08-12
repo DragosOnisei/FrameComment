@@ -67,12 +67,12 @@ function buildPdf(m: FounderMetrics): Promise<Buffer> {
       doc.fontSize(13).fillColor('#111111').text('Revenue')
       doc.moveDown(0.35)
       row(
-        'Seats',
-        `${money(m.revenue.mrrUserCents)} / month  (${m.revenue.billableUsers} billable × ${unit(p.perUserPerMonthCents)}, first ${p.freeUsers} free per company)`,
+        'Charged for users',
+        `${money(m.revenue.mrrUserCents)} / month  (${m.revenue.billableUsers} paid users × ${unit(p.perUserPerMonthCents)}; ${p.freeUsers} free per company)`,
       )
       row(
-        'Storage',
-        `${money(m.revenue.mrrStorageCents)} / month  (${m.revenue.billableGiB} GiB × ${unit(p.perGibPerMonthCents)}, first ${p.freeGib} GiB free per company)`,
+        'Charged for storage',
+        `${money(m.revenue.mrrStorageCents)} / month  (${m.revenue.billableGiB} paid GB × ${unit(p.perGibPerMonthCents)}; ${p.freeGib} GB free per company)`,
       )
       row('Recurring total, at current usage', `${money(m.revenue.mrrCents)} / month`)
       row('Invoiced in period (recorded locally)', money(m.revenue.invoicedInRangeCents))
@@ -150,7 +150,7 @@ function buildPdf(m: FounderMetrics): Promise<Buffer> {
 
       doc.moveDown(1)
       doc.fontSize(8).fillColor('#999999').text(
-        'Figures are computed from this instance’s own records. Storage and user counts come from the daily billing snapshots; revenue at current usage applies the published pricing to those snapshots.',
+        'Figures are computed from this instance’s own records. Recurring revenue is measured live — current users and current bytes on the FrameComment backend — the same way each company’s own Billing page measures it, so the two agree.',
         56,
         doc.y,
         { width: 480 },

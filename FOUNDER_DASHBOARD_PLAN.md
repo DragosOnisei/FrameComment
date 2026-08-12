@@ -179,6 +179,30 @@ status + căutare, panou de detaliu.
 - ✅ Rapoarte de business și utilizare, sumarizări de loguri, detectare de anomalii, inventar de dependențe cu CVE-uri cunoscute (`npm audit`), review de configurări (headers, TTL-uri, permisiuni), generare de Incident Response Plan și politici, pregătire de răspunsuri pentru due diligence.
 - ❌ **Nu** rulează atacuri sau penetration testing real. Un pentest serios se face de o firmă specializată, iar unelte de exploatare pornite din interiorul aplicației sunt un risc în sine, nu o măsură de securitate. Ce pot face: scope-ul, checklistul, remedierea și documentația pentru un pentest făcut de specialiști.
 
+**4a livrat în 6.7.0.** Trei agenți: `WEEKLY_DIGEST`, `PIPELINE_REVIEW`,
+`CHURN_WATCH` — registru, „Run now", istoric de rulări cu durată/model/cost,
+rapoarte salvate și citibile. Tabelele sunt platform-level cu `REVOKE` pentru
+rolul de tenant, ca la CRM.
+
+Reguli fixate în cod, nu doar în plan:
+
+- **Cifrele se calculează în cod.** Modelul primește cifrele deja măsurate și
+  scrie doar sinteza. Prompt-ul de sistem îi interzice explicit să inventeze o
+  cifră, un nume sau o cauză.
+- **Fără cheie OpenAI raportul tot se produce**, marcat `hasNarrative: false`.
+  Un raport care se degradează tăcut în „modelul a inventat ceva" ar fi mai rău
+  decât lipsa raportului.
+- **Doar citire.** Niciun agent nu scanează, nu sondează și nu modifică nimic.
+
+**Rămâne pentru 4b:** programarea pe worker-ul BullMQ, limite de cost și oprire
+de urgență. Câmpul `cadence` există deja, cu valoarea `manual`, ca rulările de
+acum să rămână comparabile cu cele programate.
+
+Notă onestă despre restul listei de mai sus: `npm audit`, review de configurări
+și generarea de politici **nu** sunt implementate. Sunt tipuri de agent
+plauzibile, dar fiecare cere altă sursă de date — nu am vrut să le declar
+livrate pentru că enum-ul le-ar putea conține.
+
 ---
 
 ## Faza 5 — Pachet pentru investitori

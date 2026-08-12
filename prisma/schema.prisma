@@ -1643,3 +1643,84 @@ model FollowUp {
   @@index([dueAt])
   @@index([leadId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6.7.0 Founder AI Agents (Faza 4)
+//
+// Platform-level, same treatment as the CRM tables: no organizationId, no
+// grant for the tenant role, reachable only through `prismaPrivileged` behind
+// `requirePlatformAdmin`.
+//
+// Scope, stated once so it stays honest: an agent READS data this instance
+// already has and writes a report. Nothing here scans, probes or attacks
+// anything — not the app, not a customer, not a third party. The narrative is
+// optional; when no OpenAI key is configured, the report is still produced
+// from the measured facts and says the narrative was skipped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AgentType {
+  // What the platform did this period: revenue, customers, usage, activity.
+  WEEKLY_DIGEST
+  // Leads gone quiet and follow-ups past due.
+  PIPELINE_REVIEW
+  // Paying companies whose usage or activity dropped.
+  CHURN_WATCH
+}
+
+enum AgentRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model Agent {
+  id        String    @id @default(cuid())
+  name      String
+  type      AgentType
+  enabled   Boolean   @default(true)
+  // "manual" today. Faza 4b turns the other values into real schedules; the
+  // field exists now so runs recorded meanwhile stay comparable.
+  cadence   String    @default("manual")
+  // Free-form JSON for per-agent options (period length, thresholds).
+  configJson String?
+  lastRunAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  runs AgentRun[]
+}
+
+model AgentRun {
+  id         String         @id @default(cuid())
+  agentId    String
+  agent      Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  status     AgentRunStatus @default(RUNNING)
+  startedAt  DateTime       @default(now())
+  finishedAt DateTime?
+  durationMs Int?
+  error      String?
+  // Only set when a model was actually called, so a report with no cost is
+  // visibly a report with no model behind it.
+  model      String?
+  tokensIn   Int?
+  tokensOut  Int?
+  costCents  Int?
+  triggeredBy String?
+
+  report AgentReport?
+
+  @@index([agentId, startedAt])
+}
+
+model AgentReport {
+  id        String   @id @default(cuid())
+  runId     String   @unique
+  run       AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  title     String
+  markdown  String
+  // False when no model was available and the report is facts only.
+  hasNarrative Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

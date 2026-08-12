@@ -14,6 +14,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-08-12
+
+### Fix: venitul recurent era greșit
+
+Dashboard-ul Founder citea venitul din ultimul `BillingSnapshot`, iar
+snapshot-urile se scriu **doar când cineva deschide pagina de Billing a
+companiei**. Pentru o companie care nu intrase de câteva săptămâni,
+snapshot-ul era vechi: dashboard-ul raporta $6 de storage acolo unde
+pagina de Billing a clientului arăta $270.
+
+Acum se măsoară live, exact ce va fi facturat: utilizatorii curenți și
+octeții curenți de pe backendul FrameComment. Cele două pagini arată
+aceeași cifră, pentru că fac aceeași măsurătoare. Snapshot-urile rămân
+doar pentru graficul istoric, iar sub grafic scrie de ce are goluri —
+sunt citiri lipsă, nu venit pierdut.
+
+Formularea s-a schimbat și ea: „$300 users · $6 storage" devine
+**„$300 din utilizatori + $6 din storage"**, cu cantitate × preț și
+alocația gratuită scrise explicit.
+
+### Founder Dashboard, Faza 4: AI Agents
+
+Trei agenți care **citesc** ce știe deja instanța și scriu un raport:
+**Weekly digest** (ce s-a schimbat pe platformă săptămâna asta),
+**Pipeline review** (cine te așteaptă și cine a tăcut) și
+**Churn watch** (companii care plătesc dar nu au mai încărcat sau
+comentat de 30 de zile).
+
+Trei lucruri stabilite explicit, pentru că sunt ușor de greșit în tăcere:
+
+1. **Cifrele se calculează în cod, niciodată de model.** Modelul e
+   întrebat doar să scrie propoziția de sinteză peste cifrele deja
+   măsurate.
+2. **Fără cheie OpenAI, raportul tot se produce** — cu cifrele, marcat
+   „figures only". Nu inventează nimic ca să pară complet.
+3. **Agenții doar citesc.** Nu scanează, nu sondează, nu atacă nimic și
+   nu modifică nimic — nici aplicația, nici datele vreunei companii.
+
+Fiecare rulare se înregistrează cu durată, model și cost estimat, ca un
+agent scump să se vadă. Rulare manuală în această versiune; câmpul de
+cadență există deja pentru programare.
+
+Tabelele (`Agent`, `AgentRun`, `AgentReport`) sunt la nivel de platformă,
+cu `REVOKE` explicit pentru rolul de tenant, ca și cele de CRM.
+
 ## [6.6.0] - 2026-08-12
 
 ### Founder Dashboard, Faza 3: CRM
