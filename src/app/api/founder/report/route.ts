@@ -61,18 +61,36 @@ function buildPdf(m: FounderMetrics): Promise<Buffer> {
         doc.moveDown(0.25)
       }
 
+      const p = m.revenue.pricing
+      const unit = (cents: number) => `$${(cents / 100).toFixed(2)}`
+
       doc.fontSize(13).fillColor('#111111').text('Revenue')
       doc.moveDown(0.35)
-      row('Recurring, at current usage', `${money(m.revenue.mrrCents)} / month`)
+      row(
+        'Seats',
+        `${money(m.revenue.mrrUserCents)} / month  (${m.revenue.billableUsers} billable × ${unit(p.perUserPerMonthCents)}, first ${p.freeUsers} free per company)`,
+      )
+      row(
+        'Storage',
+        `${money(m.revenue.mrrStorageCents)} / month  (${m.revenue.billableGiB} GiB × ${unit(p.perGibPerMonthCents)}, first ${p.freeGib} GiB free per company)`,
+      )
+      row('Recurring total, at current usage', `${money(m.revenue.mrrCents)} / month`)
       row('Invoiced in period (recorded locally)', money(m.revenue.invoicedInRangeCents))
-      doc.fontSize(8).fillColor('#999999').text(m.revenue.revenueNote, { width: 420 })
+      doc.fontSize(8).fillColor('#999999').text(m.revenue.revenueNote, { width: 460 })
+      doc.moveDown(0.2)
+      doc.fontSize(8).fillColor('#999999').text(
+        'Only storage on the FrameComment backend is charged per GiB; files kept on a company’s own Local / R2 / AWS storage cost seats only.',
+        { width: 460 },
+      )
       doc.moveDown(0.8)
 
       doc.fontSize(13).fillColor('#111111').text('Customers')
       doc.moveDown(0.35)
       row('Companies', String(m.companies.total))
       row('Active', String(m.companies.active))
-      row('Paying (card on file)', String(m.companies.paying))
+      row('On paid tier', String(m.companies.onPaidTier))
+      row('On free tier', String(m.companies.onFreeTier))
+      row('With a card on file', String(m.companies.paying))
       row('New in period', String(m.companies.newInRange))
       row('Suspended', String(m.companies.suspended))
       doc.moveDown(0.6)
@@ -91,13 +109,14 @@ function buildPdf(m: FounderMetrics): Promise<Buffer> {
       doc.fontSize(13).fillColor('#111111').text('Companies')
       doc.moveDown(0.4)
       doc.fontSize(9).fillColor('#666666')
-      const cols = [56, 230, 300, 380, 470]
+      const cols = [56, 190, 250, 320, 375, 445]
       doc.text('Company', cols[0], doc.y, { continued: false })
       const headerY = doc.y - 11
       doc.text('Users', cols[1], headerY)
       doc.text('Storage', cols[2], headerY)
-      doc.text('Billing', cols[3], headerY)
-      doc.text('Est. / mo', cols[4], headerY)
+      doc.text('Tier', cols[3], headerY)
+      doc.text('Seats + storage', cols[4], headerY)
+      doc.text('Est. / mo', cols[5], headerY)
       doc.moveDown(0.3)
 
       for (const c of m.companiesTable) {
@@ -106,12 +125,26 @@ function buildPdf(m: FounderMetrics): Promise<Buffer> {
         }
         const y = doc.y
         doc.fontSize(9).fillColor('#111111')
-          .text(c.name.slice(0, 28), cols[0], y, { width: 165 })
+          .text(c.name.slice(0, 24), cols[0], y, { width: 128 })
         doc.fillColor('#333333')
-        doc.text(String(c.users), cols[1], y)
+        doc.text(c.billableUsers > 0 ? `${c.users} (${c.billableUsers})` : String(c.users), cols[1], y)
         doc.text(bytes(c.storageBytes), cols[2], y)
-        doc.text(c.hasCard ? c.billingStatus : 'no card', cols[3], y)
-        doc.text(money(c.estimatedMonthlyCents), cols[4], y)
+        // Tier is the plan; a paid company with no card is the exception worth
+        // naming, so it travels with the tier instead of hiding in a footnote.
+        doc.text(
+          c.tier === 'paid' ? (c.hasCard ? 'Paid' : 'Paid · no card') : 'Free',
+          cols[3],
+          y,
+          { width: 68 },
+        )
+        doc.text(
+          c.estimatedMonthlyCents > 0
+            ? `${money(c.estimatedUserCents)} + ${money(c.estimatedStorageCents)}`
+            : '—',
+          cols[4],
+          y,
+        )
+        doc.text(money(c.estimatedMonthlyCents), cols[5], y)
         doc.moveDown(0.35)
       }
 

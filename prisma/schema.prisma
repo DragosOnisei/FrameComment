@@ -1557,3 +1557,89 @@ model RegistrationInvite {
 
   @@index([expiresAt])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6.6.0 Founder CRM (Faza 3)
+//
+// PLATFORM-LEVEL tables, same treatment as RegistrationInvite: no
+// organizationId, no RLS policy, reachable only through `prismaPrivileged`
+// behind `requirePlatformAdmin`. They describe people who want to BECOME
+// customers, which is the platform's own business — not any tenant's data,
+// and no tenant may ever see it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Pipeline position. NEW is what a fresh access request lands as; CUSTOMER is
+// set automatically when the person registers a company, LOST only by hand.
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  TRIAL
+  CUSTOMER
+  LOST
+}
+
+// What happened with a lead. STATUS_CHANGE is written by the app itself so the
+// timeline explains its own history instead of silently mutating.
+enum LeadActivityType {
+  NOTE
+  CALL
+  EMAIL
+  DEMO
+  STATUS_CHANGE
+}
+
+model Lead {
+  id                  String     @id @default(cuid())
+  name                String
+  // Unique on purpose: the same person asking twice is the same lead, which
+  // makes the access-request import idempotent (upsert, never duplicate).
+  email               String     @unique
+  company             String?
+  profession          String?
+  // Where it came from: "request-access" | "manual" | "import".
+  source              String     @default("manual")
+  status              LeadStatus @default(NEW)
+  estimatedValueCents Int?
+  notes               String?
+  // Proof of conversion, filled in by the register flow — not guessed.
+  convertedOrgId      String?
+  convertedAt         DateTime?
+  registrationInviteId String?
+  lastContactedAt     DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  activities LeadActivity[]
+  followUps  FollowUp[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model LeadActivity {
+  id         String           @id @default(cuid())
+  leadId     String
+  lead       Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type       LeadActivityType @default(NOTE)
+  body       String?
+  authorId   String?
+  authorName String?
+  createdAt  DateTime         @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model FollowUp {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  dueAt       DateTime
+  doneAt      DateTime?
+  note        String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  @@index([dueAt])
+  @@index([leadId])
+}

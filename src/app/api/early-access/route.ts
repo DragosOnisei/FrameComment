@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prismaPrivileged } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { platformOrgId } from '@/lib/platform'
+import { upsertLeadFromAccessRequest } from '@/lib/founder-crm'
 import { logError, logMessage } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -93,6 +94,11 @@ export async function POST(request: NextRequest) {
         email,
       })
     }
+
+    // 6.6.0: the request also enters the CRM pipeline. Outside the recipient
+    // check on purpose — a missing owner account must not lose the lead. The
+    // helper swallows its own errors, so this can never break the form.
+    await upsertLeadFromAccessRequest({ name, email, profession })
 
     return NextResponse.json({ ok: true })
   } catch (error) {

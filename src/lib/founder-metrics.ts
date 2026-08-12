@@ -13,7 +13,7 @@
 
 import { prismaPrivileged } from './db'
 import { platformOrgId } from './platform'
-import { BILLING_PRICING, computeBillable, fcStorageWhere } from './billing'
+import { BILLING_PRICING, FREE_TIER, computeBillable, fcStorageWhere } from './billing'
 
 export interface FounderMetrics {
   range: { from: string; to: string }
@@ -22,17 +22,35 @@ export interface FounderMetrics {
     active: number
     suspended: number
     newInRange: number
+    /** Card on file AND billing active — i.e. actually chargeable today. */
     paying: number
+    /** Usage above the free tier, so the next invoice is > $0. */
+    onPaidTier: number
+    onFreeTier: number
   }
   users: { total: number; newInRange: number }
   revenue: {
     /** Sum of what every active company would be invoiced today, in cents. */
     mrrCents: number
+    /** The same figure split by what actually drives it, so the dashboard can
+     *  say "$X from seats, $Y from storage" instead of one opaque number. */
+    mrrUserCents: number
+    mrrStorageCents: number
+    /** Billable quantities behind the split (free tier already subtracted). */
+    billableUsers: number
+    billableGiB: number
     /** Cents actually invoiced inside the range, from the last invoice we
      *  recorded per company. Partial by construction — see `revenueNote`. */
     invoicedInRangeCents: number
     revenueNote: string
     currency: string
+    /** Published pricing + free allowance, so the UI never hardcodes them. */
+    pricing: {
+      perUserPerMonthCents: number
+      perGibPerMonthCents: number
+      freeUsers: number
+      freeGib: number
+    }
   }
   storage: { totalBytes: number; billableBytes: number }
   activity: {
@@ -55,6 +73,16 @@ export interface FounderMetrics {
     lastInvoiceCents: number | null
     lastChargedAt: string | null
     estimatedMonthlyCents: number
+    /** Where the estimate comes from, per company. */
+    estimatedUserCents: number
+    estimatedStorageCents: number
+    billableUsers: number
+    billableGiB: number
+    /** 'paid' = usage above the free allowance, so it gets an invoice.
+     *  'free' = inside the allowance, nothing to charge. This is about the
+     *  PLAN, not about whether a card is attached — `hasCard`/`billingStatus`
+     *  still carry that, and the UI flags a paid company with no card. */
+    tier: 'free' | 'paid'
   }>
 }
 
@@ -206,14 +234,31 @@ export async function computeFounderMetrics(
   }
 
   let mrrCents = 0
+  let mrrUserCents = 0
+  let mrrStorageCents = 0
+  let billableUsersTotal = 0
+  let billableGiBTotal = 0
   let billableBytes = 0
-  const estimatedByOrg = new Map<string, number>()
+  const estimatedByOrg = new Map<
+    string,
+    { totalCents: number; userCents: number; storageCents: number; billableUsers: number; billableGiB: number }
+  >()
   for (const org of activeOrgs) {
     const snap = latestByOrg.get(org.id)
     if (!snap) continue
     const bill = computeBillable(snap.userCount, snap.storageBytes)
-    estimatedByOrg.set(org.id, bill.totalCents)
+    estimatedByOrg.set(org.id, {
+      totalCents: bill.totalCents,
+      userCents: bill.userCents,
+      storageCents: bill.storageCents,
+      billableUsers: bill.billableUsers,
+      billableGiB: bill.billableGiB,
+    })
     mrrCents += bill.totalCents
+    mrrUserCents += bill.userCents
+    mrrStorageCents += bill.storageCents
+    billableUsersTotal += bill.billableUsers
+    billableGiBTotal += bill.billableGiB
     billableBytes += snap.storageBytes
   }
 
@@ -265,6 +310,7 @@ export async function computeFounderMetrics(
   const companiesTable = orgs.map((org) => {
     const s = settingsByOrg.get(org.id)
     const snap = latestByOrg.get(org.id)
+    const est = estimatedByOrg.get(org.id)
     return {
       id: org.id,
       name: org.name,
@@ -276,7 +322,12 @@ export async function computeFounderMetrics(
       hasCard: !!s?.paymentMethodLast4,
       lastInvoiceCents: s?.lastInvoiceAmount ?? null,
       lastChargedAt: s?.lastChargedAt ? s.lastChargedAt.toISOString() : null,
-      estimatedMonthlyCents: estimatedByOrg.get(org.id) ?? 0,
+      estimatedMonthlyCents: est?.totalCents ?? 0,
+      estimatedUserCents: est?.userCents ?? 0,
+      estimatedStorageCents: est?.storageCents ?? 0,
+      billableUsers: est?.billableUsers ?? 0,
+      billableGiB: est?.billableGiB ?? 0,
+      tier: ((est?.totalCents ?? 0) > 0 ? 'paid' : 'free') as 'free' | 'paid',
     }
   })
 
@@ -288,14 +339,26 @@ export async function computeFounderMetrics(
       suspended: orgs.filter((o) => o.status === 'SUSPENDED').length,
       newInRange: newCompanies,
       paying,
+      onPaidTier: companiesTable.filter((c) => c.tier === 'paid').length,
+      onFreeTier: companiesTable.filter((c) => c.tier === 'free').length,
     },
     users: { total: userTotal, newInRange: newUsers },
     revenue: {
       mrrCents,
+      mrrUserCents,
+      mrrStorageCents,
+      billableUsers: billableUsersTotal,
+      billableGiB: billableGiBTotal,
       invoicedInRangeCents,
       revenueNote:
         'Invoiced figure counts the most recent paid invoice per company, which is all this instance stores locally. Stripe holds the complete ledger.',
       currency: BILLING_PRICING.currency,
+      pricing: {
+        perUserPerMonthCents: BILLING_PRICING.perUserPerMonthCents,
+        perGibPerMonthCents: BILLING_PRICING.perGibPerMonthCents,
+        freeUsers: FREE_TIER.users,
+        freeGib: FREE_TIER.gib,
+      },
     },
     storage: { totalBytes, billableBytes },
     activity: { uploads, comments, approvals, projectsCreated },

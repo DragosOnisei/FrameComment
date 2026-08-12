@@ -148,6 +148,23 @@ companii. Seria zilnică din grafic vine din snapshot-uri, deci se umple în tim
 - Când un lead se înregistrează prin access link → devine CUSTOMER, legat de organizația creată.
 - UI: listă cu filtre + board pe status, detaliu lead cu istoric, follow-up cu memento în clopoțel.
 
+**Livrat în 6.6.0.** Ce s-a făcut exact: cele trei tabele (platform-level, cu
+`REVOKE` explicit pentru rolul de tenant — vezi migrarea), import retroactiv
+idempotent din notificările `EARLY_ACCESS`, lead automat la fiecare cerere
+nouă, conversie automată la înregistrare cu `convertedOrgId` salvat, istoric
+cu `STATUS_CHANGE` scris de aplicație, follow-up-uri cu scadență, filtre pe
+status + căutare, panou de detaliu.
+
+**Ce NU s-a făcut, și de ce:**
+
+- **Memento-ul de follow-up în clopoțel** nu există încă. `Notification` e un
+  tabel de tenant, legat de `recipientId` + RLS; a-l folosi pentru platformă
+  ar amesteca exact granițele pe care le-am separat în Faza 0. Follow-up-urile
+  scadente se văd în tile-ul „Follow-ups due" din CRM. Un canal de notificare
+  la nivel de platformă e o decizie separată.
+- **Board-ul pe coloane (drag & drop)** nu s-a făcut; e listă cu filtre pe
+  status. Cu volumul de acum, coloanele ar fi ornament.
+
 ---
 
 ## Faza 4 — AI Agents

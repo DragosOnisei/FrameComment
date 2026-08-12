@@ -14,6 +14,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.6.0] - 2026-08-12
+
+### Founder Dashboard, Faza 3: CRM
+
+Zona Founder are acum un pipeline propriu: **Lead**, **LeadActivity** și
+**FollowUp**, tabele la nivel de platformă (fără `organizationId`), la care
+rolul de bază de date al aplicației **nu are niciun drept** — accesul se
+face exclusiv prin conexiunea privilegiată, în spatele
+`requirePlatformAdmin`. Nicio companie nu poate vedea nimic de aici.
+
+Cererile de acces de pe site devin automat lead-uri (upsert pe email, deci
+o a doua cerere nu duplică persoana), iar butonul **Import access requests**
+recuperează retroactiv tot ce a venit înainte să existe CRM-ul — rulat de
+două ori, nu importă nimic în plus.
+
+Când cineva își înregistrează compania, lead-ul trece singur pe
+**CUSTOMER** și reține **care** organizație a devenit, ca afirmația să
+rămână verificabilă. Tot ce schimbă starea scrie o intrare de tip
+`STATUS_CHANGE` în istoric — un pipeline care mută statusuri pe tăcute e un
+pipeline în care nu mai ai încredere după prima surpriză.
+
+Interfața: filtre pe status cu numere, căutare, panou de detaliu cu istoric,
+notă/apel/email/demo, follow-up-uri cu scadență, valoare estimată.
+Conversia se afișează doar când există decizii luate — un procent din zero
+decizii nu înseamnă nimic.
+
+### Fix la Faza 2
+
+Venitul recurent arată acum din ce e făcut: cât vine din utilizatori și cât
+din storage, cu cantitate × preț și alocația gratuită scrise pe pagină.
+Coloana „Billing" din tabelul de companii devine **Tier: Free / Paid**
+(peste sau sub alocația gratuită), iar o companie pe Paid fără card sau cu
+plată restantă e marcată separat — asta e informația care contează.
+
 ## [6.5.0] - 2026-08-12
 
 ### Founder Dashboard, Faza 2: metrici reale + export PDF

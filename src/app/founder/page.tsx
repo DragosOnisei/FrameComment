@@ -16,9 +16,32 @@ import { logError } from '@/lib/logging'
 
 interface Metrics {
   range: { from: string; to: string }
-  companies: { total: number; active: number; suspended: number; newInRange: number; paying: number }
+  companies: {
+    total: number
+    active: number
+    suspended: number
+    newInRange: number
+    paying: number
+    onPaidTier: number
+    onFreeTier: number
+  }
   users: { total: number; newInRange: number }
-  revenue: { mrrCents: number; invoicedInRangeCents: number; revenueNote: string; currency: string }
+  revenue: {
+    mrrCents: number
+    mrrUserCents: number
+    mrrStorageCents: number
+    billableUsers: number
+    billableGiB: number
+    invoicedInRangeCents: number
+    revenueNote: string
+    currency: string
+    pricing: {
+      perUserPerMonthCents: number
+      perGibPerMonthCents: number
+      freeUsers: number
+      freeGib: number
+    }
+  }
   storage: { totalBytes: number; billableBytes: number }
   activity: { uploads: number; comments: number; approvals: number; projectsCreated: number }
   series: Array<{ day: string; users: number; storageBytes: number; mrrCents: number }>
@@ -34,6 +57,11 @@ interface Metrics {
     lastInvoiceCents: number | null
     lastChargedAt: string | null
     estimatedMonthlyCents: number
+    estimatedUserCents: number
+    estimatedStorageCents: number
+    billableUsers: number
+    billableGiB: number
+    tier: 'free' | 'paid'
   }>
 }
 
@@ -45,6 +73,11 @@ const RANGES = [
 
 function money(cents: number): string {
   return `$${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+}
+
+/** Unit price, which can be cents ($0.10/GiB) — don't round it away. */
+function unitPrice(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`
 }
 
 function bytes(n: number): string {
@@ -189,17 +222,25 @@ export default function FounderDashboardPage() {
         <MetricTile
           label="Recurring revenue"
           value={data ? `${money(data.revenue.mrrCents)}/mo` : null}
-          hint="What today's usage would invoice"
+          hint={
+            data
+              ? `${money(data.revenue.mrrUserCents)} users · ${money(data.revenue.mrrStorageCents)} storage`
+              : "What today's usage would invoice"
+          }
         />
         <MetricTile
-          label="Paying companies"
-          value={data ? String(data.companies.paying) : null}
-          hint={data ? `${data.companies.active} active of ${data.companies.total}` : 'Card on file'}
+          label="Paid tier"
+          value={data ? String(data.companies.onPaidTier) : null}
+          hint={
+            data
+              ? `${data.companies.onFreeTier} on free · ${data.companies.paying} with card`
+              : 'Companies above the free allowance'
+          }
         />
         <MetricTile
           label="Users"
           value={data ? String(data.users.total) : null}
-          hint={data ? `${data.users.newInRange} new in period` : 'Across every company'}
+          hint={data ? `${data.revenue.billableUsers} billable · ${data.users.newInRange} new` : 'Across every company'}
         />
         <MetricTile
           label="Storage"
@@ -207,6 +248,52 @@ export default function FounderDashboardPage() {
           hint={data ? `${bytes(data.storage.billableBytes)} billable` : 'All backends'}
         />
       </div>
+
+      {/* Where the recurring number comes from. One opaque total invites the
+          question "from what?", so answer it on the page: quantity × price. */}
+      {data && (
+        <div className="mt-3">
+          <FounderCard title="How the recurring revenue is made up">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded-lg bg-white/[0.03] ring-1 ring-white/10 px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">Seats</p>
+                <p className="mt-0.5 text-lg font-semibold tabular-nums">
+                  {money(data.revenue.mrrUserCents)}<span className="text-sm font-normal text-muted-foreground">/mo</span>
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {data.revenue.billableUsers} billable ×{' '}
+                  {unitPrice(data.revenue.pricing.perUserPerMonthCents)} · first{' '}
+                  {data.revenue.pricing.freeUsers} free per company
+                </p>
+              </div>
+              <div className="rounded-lg bg-white/[0.03] ring-1 ring-white/10 px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">Storage</p>
+                <p className="mt-0.5 text-lg font-semibold tabular-nums">
+                  {money(data.revenue.mrrStorageCents)}<span className="text-sm font-normal text-muted-foreground">/mo</span>
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {data.revenue.billableGiB.toLocaleString('en-US')} GiB ×{' '}
+                  {unitPrice(data.revenue.pricing.perGibPerMonthCents)} · first{' '}
+                  {data.revenue.pricing.freeGib} GiB free per company
+                </p>
+              </div>
+              <div className="rounded-lg bg-primary/10 ring-1 ring-primary/25 px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">Total</p>
+                <p className="mt-0.5 text-lg font-semibold tabular-nums">
+                  {money(data.revenue.mrrCents)}<span className="text-sm font-normal text-muted-foreground">/mo</span>
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {money(data.revenue.invoicedInRangeCents)} invoiced in period (floor)
+                </p>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Only storage on the FrameComment backend is charged per GiB; files a company keeps on
+              its own Local / R2 / AWS storage cost seats only.
+            </p>
+          </FounderCard>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         <FounderCard title="Recurring revenue over time">
@@ -256,7 +343,7 @@ export default function FounderDashboardPage() {
                     <th className="font-medium py-2 pr-3">Company</th>
                     <th className="font-medium py-2 pr-3 text-right">Users</th>
                     <th className="font-medium py-2 pr-3 text-right">Storage</th>
-                    <th className="font-medium py-2 pr-3">Billing</th>
+                    <th className="font-medium py-2 pr-3">Tier</th>
                     <th className="font-medium py-2 text-right">Est. / mo</th>
                   </tr>
                 </thead>
@@ -269,23 +356,44 @@ export default function FounderDashboardPage() {
                           since {new Date(c.createdAt).toLocaleDateString()}
                         </div>
                       </td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{c.users}</td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{bytes(c.storageBytes)}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">
+                        <div>{c.users}</div>
+                        {c.billableUsers > 0 && (
+                          <div className="text-xs text-muted-foreground">{c.billableUsers} billable</div>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums">
+                        <div>{bytes(c.storageBytes)}</div>
+                        {c.billableGiB > 0 && (
+                          <div className="text-xs text-muted-foreground">{c.billableGiB} GiB billable</div>
+                        )}
+                      </td>
                       <td className="py-2 pr-3">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ${
-                            c.billingStatus === 'active'
+                            c.tier === 'paid'
                               ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30'
-                              : c.billingStatus === 'past_due'
-                                ? 'bg-red-500/10 text-red-300 ring-red-500/30'
-                                : 'bg-white/[0.05] text-muted-foreground ring-white/10'
+                              : 'bg-white/[0.05] text-muted-foreground ring-white/10'
                           }`}
                         >
-                          {c.hasCard ? c.billingStatus : 'no card'}
+                          {c.tier === 'paid' ? 'Paid' : 'Free'}
                         </span>
+                        {/* A company that owes money without a way to charge it
+                            is the one billing fact worth surfacing here. */}
+                        {c.tier === 'paid' && !c.hasCard && (
+                          <div className="mt-0.5 text-xs text-red-300">no card on file</div>
+                        )}
+                        {c.tier === 'paid' && c.hasCard && c.billingStatus === 'past_due' && (
+                          <div className="mt-0.5 text-xs text-red-300">past due</div>
+                        )}
                       </td>
                       <td className="py-2 text-right tabular-nums">
-                        {money(c.estimatedMonthlyCents)}
+                        <div>{money(c.estimatedMonthlyCents)}</div>
+                        {c.estimatedMonthlyCents > 0 && (
+                          <div className="text-xs text-muted-foreground">
+                            {money(c.estimatedUserCents)} + {money(c.estimatedStorageCents)}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -8,6 +8,7 @@ import { registerSchema } from '@/lib/validation'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError, logMessage } from '@/lib/logging'
 import { logSecurityEvent } from '@/lib/video-access'
+import { markLeadConverted } from '@/lib/founder-crm'
 import { getClientIpAddress } from '@/lib/utils'
 
 export const runtime = 'nodejs'
@@ -205,6 +206,15 @@ export async function POST(request: NextRequest) {
         })
         .catch((err: unknown) => logError('[REGISTER] failed to mark access link used:', err))
     }
+
+    // 6.6.0: if this person was in the CRM pipeline, they are now a customer.
+    // Matched on email, and it records WHICH organization they became, so the
+    // claim stays checkable. Best-effort: registration already succeeded.
+    await markLeadConverted({
+      email,
+      organizationId: orgId,
+      registrationInviteId: accessInviteId,
+    })
 
     const authUser: AuthUser = {
       id: user.id,
