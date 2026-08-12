@@ -118,6 +118,22 @@ păstreze, se poate printr-un flag separat — spune-mi înainte de Faza 0.
 
 **Teste:** numere verificate manual în baza de date pentru un interval scurt, PDF descărcat și comparat, interval fără date → raport gol corect (nu erori).
 
+**Livrat în 6.4.0** — cu două precizări de onestitate față de planul inițial:
+
+- **Venitul facturat este un prag minim, nu un total.** Local se păstrează doar
+  ULTIMA factură per companie (`Settings.lastInvoice*`); nu există tabel de
+  istoric. Registrul complet e la Stripe. API-ul și PDF-ul spun asta explicit,
+  în loc să afișeze o cifră care pare completă și nu e.
+- **Churn nu e calculat.** Nu există o coloană care să înregistreze *când* o
+  companie a devenit inactivă, deci orice procent ar fi ghicit. Rămâne pentru
+  când adăugăm marcajul de dată la suspendare/ștergere.
+
+Ce e real: MRR la utilizarea curentă (prețul publicat aplicat pe ultimul
+`BillingSnapshot`, cu fallback pe măsurare live pentru companiile fără snapshot),
+companii totale/active/suspendate/noi/plătitoare, utilizatori, storage stocat vs.
+facturabil, activitate (upload-uri, comentarii, aprobări, proiecte) și tabelul pe
+companii. Seria zilnică din grafic vine din snapshot-uri, deci se umple în timp.
+
 ---
 
 ## Faza 3 — CRM

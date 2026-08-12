@@ -45,6 +45,12 @@ const nextConfig = {
     }
   },
 
+  // 6.4.0: pdfkit reads its standard-font metrics (.afm) from its own package
+  // directory at runtime. Bundling it into the server build breaks that lookup
+  // ("ENOENT … Helvetica.afm"), so it must stay an external require. It was
+  // only used by the worker (plain Node) until the founder PDF report route.
+  serverExternalPackages: ['pdfkit'],
+
   // 5.0 multi-tenant: `src/lib/org-context.ts` uses Node's `async_hooks`
   // (AsyncLocalStorage) and is pulled — via db.ts — into a few CLIENT bundles
   // through long import chains (e.g. i18n/locale.ts). Prisma ships a browser
