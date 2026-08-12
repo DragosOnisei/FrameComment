@@ -14,6 +14,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import ThemeToggle from '@/components/ThemeToggle'
 import PlayerTopMenu from '@/components/PlayerTopMenu'
+import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useTranslations } from 'next-intl'
 
@@ -1092,6 +1093,16 @@ function AdminSharePageInner() {
   // 6.3.2: the PAGE-level slate said "Loading video..." for everything. It is
   // the first thing you see after double-clicking a still, so it has to name
   // the right medium. Reads the target group when we already know it.
+  // 6.3.4: ONE loading state for the whole "open a clip" path. Project fetch,
+  // target resolution and version-token minting used to render three separate
+  // cards back to back; each mount/unmount flickered, and the sequence read as
+  // a stuck app even when the whole thing took a few hundred milliseconds.
+  const isPreparing = loading || (!!urlTargetVideoName && !activeVideoName)
+  // And show it only when the wait is actually perceptible — fast opens now
+  // paint nothing at all.
+  const showPreparingSlate = useDelayedFlag(isPreparing, 350)
+  const showTokenSlate = useDelayedFlag(tokensLoading, 350)
+
   const pageLoadingLabel = (() => {
     const group = urlTargetVideoName
       ? (project?.videosByName as Record<string, any[]> | undefined)?.[urlTargetVideoName]
@@ -1246,6 +1257,10 @@ function AdminSharePageInner() {
   // the glass card below is now reachable and renders for the full
   // duration of the project fetch.
   if (loading) {
+    // 6.3.4: quiet until the wait is noticeable — see useDelayedFlag.
+    if (!showPreparingSlate) {
+      return <div className="spotlight-bg-tr fixed inset-0" style={{ height: '100dvh' }} />
+    }
     return (
       <div
         className="spotlight-bg-tr fixed inset-0 flex items-center justify-center p-4"
@@ -1345,6 +1360,10 @@ function AdminSharePageInner() {
   // the player with empty `readyVideos`. Same visual recipe as the
   // `if (loading)` glass card above so the transition is seamless.
   if (targetingSpecificVideo && !activeVideoName) {
+    // 6.3.4: quiet until the wait is noticeable — see useDelayedFlag.
+    if (!showPreparingSlate) {
+      return <div className="spotlight-bg-tr fixed inset-0" style={{ height: '100dvh' }} />
+    }
     return (
       <div
         className="spotlight-bg-tr fixed inset-0 flex items-center justify-center p-4"
@@ -1524,10 +1543,50 @@ function AdminSharePageInner() {
               </div>
             )
           }
-          /* 3.2.0+: same frosted-glass card recipe as the top-level
-             `if (loading)` gate above — so the transition from project
-             loading → tokens loading → empty/loaded reads as one
-             continuous glass surface instead of a flat dark card flash. */
+          // 6.3.5 — THE ROOT CAUSE, finally named.
+          //
+          // "No ready videos" was being read as "there is nothing to review",
+          // but it is also true for a beat every time you open something: the
+          // page knows WHICH asset you clicked before the version tokens are
+          // minted, and `tokensLoading` is still false in that first tick. So
+          // a perfectly good image flashed "No videos are ready for review
+          // yet" (and, after 6.3.4 hid the spinner, an empty card).
+          //
+          // Three states, told apart properly:
+          //   1. preparing  → one quiet slate, labelled by media type
+          //   2. processing → the progress card above
+          //   3. nothing    → the honest empty message
+          const awaitingVersions = !!activeVideoName && (activeVideos?.length ?? 0) === 0
+          const stillPreparing = tokensLoading || awaitingVersions
+
+          if (stillPreparing) {
+            // Quiet for the first moments: a fast open paints nothing at all
+            // rather than a card that appears and vanishes.
+            if (!showTokenSlate && !showPreparingSlate) {
+              return <div className="flex-1" />
+            }
+            return (
+              <div className="flex-1 flex items-center justify-center p-4">
+                <div
+                  className="rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white px-8 py-7 flex items-center gap-4"
+                  style={{
+                    backgroundColor: 'rgba(22, 37, 51, 0.62)',
+                    backgroundImage:
+                      'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+                    backdropFilter: 'blur(40px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                    transform: 'translate3d(0, 0, 0)',
+                    willChange: 'backdrop-filter, transform',
+                    isolation: 'isolate',
+                  }}
+                >
+                  <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin shrink-0" />
+                  <p className="text-sm font-medium text-white/85">{pageLoadingLabel}</p>
+                </div>
+              </div>
+            )
+          }
+
           return (
             <div className="flex-1 flex items-center justify-center p-4">
               <div
@@ -1543,11 +1602,8 @@ function AdminSharePageInner() {
                   isolation: 'isolate',
                 }}
               >
-                {tokensLoading && (
-                  <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin shrink-0" />
-                )}
                 <p className="text-sm font-medium text-white/85">
-                  {tokensLoading ? t('loadingVideo') : t('noVideosReadyForReview')}
+                  {t('noVideosReadyForReview')}
                 </p>
               </div>
             </div>

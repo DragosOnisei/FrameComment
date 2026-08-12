@@ -7,6 +7,7 @@ import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
 import ShareOnboarding from '@/components/ShareOnboarding'
 import { detectLoggedInAdmin } from '@/lib/share-auth'
+import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
@@ -174,6 +175,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
+  // 6.3.4: one quiet loading state instead of a chain of cards.
+  const showTokenSlate = useDelayedFlag(tokensLoading, 350)
+  // 6.3.5: "still resolving" is NOT the same as "nothing to review" — see the
+  // render branch below for the bug this distinction fixes.
+  const stillPreparing = tokensLoading || (!!activeVideoName && activeVideos.length === 0)
   // 2.2.0+: Mirror of the admin share page's "last good tokenized
   // list" guard — used by the tokenize effect to refuse publishing a
   // degraded array (empty, or every entry missing a playable surface)
@@ -1902,12 +1908,23 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 isolation: 'isolate',
               }}
             >
-              {tokensLoading && (
-                <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin shrink-0" />
+              {/* 6.3.5: same root cause as the admin player — "no ready
+                  videos" is ALSO true for a beat while the version tokens are
+                  being minted, so a perfectly good asset briefly told the
+                  client there was nothing to review. Preparing and empty are
+                  now separate states. */}
+              {stillPreparing ? (
+                showTokenSlate ? (
+                  <>
+                    <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin shrink-0" />
+                    <p className="text-sm font-medium text-white/85">{pageLoadingLabel}</p>
+                  </>
+                ) : null
+              ) : (
+                <p className="text-sm font-medium text-white/85">
+                  No videos are ready for review yet. Please check back later.
+                </p>
               )}
-              <p className="text-sm font-medium text-white/85">
-                {tokensLoading ? 'Loading video...' : 'No videos are ready for review yet. Please check back later.'}
-              </p>
             </div>
           </div>
         ) : (

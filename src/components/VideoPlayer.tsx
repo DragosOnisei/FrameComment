@@ -15,6 +15,7 @@ import RulersOverlay from './RulersOverlay'
 import type { QualityChoice } from './PlayerSettingsMenu'
 import { useAnnotation } from '@/contexts/AnnotationContext'
 import { secondsToTimecode } from '@/lib/timecode'
+import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { logError } from '@/lib/logging'
 import {
   isRangeEditActive,
@@ -655,6 +656,9 @@ export default function VideoPlayer({
         videoUrl
       )
     : !!videoUrl
+  // 6.3.4: don't paint a loading slate for a wait nobody notices — the open
+  // path already had several of them stacked back to back.
+  const showPlayerSlate = useDelayedFlag(!hasDisplayableSource, 350)
 
   // 3.9.x: comments are per-VERSION. `comments` arrives scoped to the
   // whole active version group (v1…vN), but a comment — and its saved
@@ -688,6 +692,8 @@ export default function VideoPlayer({
   // buffering overlay until the <video> fires `canplay`, so once the play
   // button shows, playback is instant. Reset whenever the clip changes.
   const [mediaReady, setMediaReady] = useState(false)
+  // 6.3.4: the buffering veil waits a beat too — a fast start shows nothing.
+  const showBufferingSlate = useDelayedFlag(!mediaReady, 600)
   // 4.1.10+: touch devices (phones/tablets) don't pre-buffer video, so
   // `canplay` never fires until the user taps play — the buffering overlay
   // would stay stuck on "Loading video…". Skip the overlay there; the
@@ -2663,7 +2669,7 @@ export default function VideoPlayer({
                     video can actually play, so the controls don't tease a
                     Play button that stalls for a few seconds on first load
                     (cold HLS fragment on the server). */}
-                {(selectedVideo as any)?.mediaType !== 'IMAGE' && !mediaReady && !coarsePointer && (
+                {(selectedVideo as any)?.mediaType !== 'IMAGE' && !mediaReady && showBufferingSlate && !coarsePointer && (
                   <div
                     className="absolute inset-0 z-30 flex items-center justify-center gap-3 cursor-default"
                     style={{ backgroundColor: 'rgba(10, 12, 16, 0.55)' }}
@@ -2789,7 +2795,9 @@ export default function VideoPlayer({
             </div>
           </>
         ) : (
-          /* 3.2.0+: frosted-glass loading slate inside the player frame —
+          /* 6.3.4: silent for the first moments; the glass slate only appears
+             if the wait is long enough to notice (see useDelayedFlag).
+             3.2.0+: frosted-glass loading slate inside the player frame —
              matches the share page's outer loading card so once the
              player wrapper mounts, the visual stays consistent (no flash
              from glass card → flat black box → real player). */
@@ -2806,10 +2814,14 @@ export default function VideoPlayer({
               isolation: 'isolate',
             }}
           >
-            <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
-            <p className="text-sm font-medium text-white/85">
-              {mediaLoadingLabel(selectedVideo)}
-            </p>
+            {showPlayerSlate && (
+              <>
+                <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-white/85 animate-spin" />
+                <p className="text-sm font-medium text-white/85">
+                  {mediaLoadingLabel(selectedVideo)}
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>

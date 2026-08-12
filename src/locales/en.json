@@ -417,7 +417,7 @@
     "clientSharePageDescription": "Control client access, downloads, and approval permissions",
     "failedToCreateProject": "Failed to create project",
     "backToProject": "Back to Project",
-    "loadingVideo": "Loading video...",
+    "loadingVideo": "Loading…",
     "noVideosReadyForReview": "No videos are ready for review yet.",
     "preparingVideo": "Preparing video…",
     "processingVideo": "Processing video…",
@@ -583,7 +583,7 @@
     "failedToDelete": "Failed to delete video",
     "deleteConfirm": "Are you sure you want to delete this video?",
     "noVideosAvailable": "No videos available",
-    "loadingVideo": "Loading video...",
+    "loadingVideo": "Loading…",
     "approvedVersion": "Approved Version",
     "compare": "Compare",
     "playPause": "Play / Pause",
@@ -899,7 +899,7 @@
     "stepOf": "{current} of {total}"
   },
   "share": {
-    "loadingVideo": "Loading video...",
+    "loadingVideo": "Loading…",
     "downloadVideo": "Download Video",
     "authRequired": "Authentication Required",
     "tooManyRequestsSlowDown": "Too many requests. Please slow down.",
