@@ -118,7 +118,7 @@ păstreze, se poate printr-un flag separat — spune-mi înainte de Faza 0.
 
 **Teste:** numere verificate manual în baza de date pentru un interval scurt, PDF descărcat și comparat, interval fără date → raport gol corect (nu erori).
 
-**Livrat în 6.4.0** — cu două precizări de onestitate față de planul inițial:
+**Livrat în 6.5.0** — cu două precizări de onestitate față de planul inițial:
 
 - **Venitul facturat este un prag minim, nu un total.** Local se păstrează doar
   ULTIMA factură per companie (`Settings.lastInvoice*`); nu există tabel de

@@ -7,7 +7,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
- * 6.4.0 — GET /api/founder/metrics?from&to
+ * 6.5.0 — GET /api/founder/metrics?from&to
  *
  * Platform-wide figures for the Founder dashboard. Gated to the founder
  * (`requirePlatformAdmin` answers 404 to everyone else, so the surface isn't

@@ -45,7 +45,7 @@ const nextConfig = {
     }
   },
 
-  // 6.4.0: pdfkit reads its standard-font metrics (.afm) from its own package
+  // 6.5.0: pdfkit reads its standard-font metrics (.afm) from its own package
   // directory at runtime. Bundling it into the server build breaks that lookup
   // ("ENOENT … Helvetica.afm"), so it must stay an external require. It was
   // only used by the worker (plain Node) until the founder PDF report route.

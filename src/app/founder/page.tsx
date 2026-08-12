@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * 6.4.0 Founder → Dashboard, on real data.
+ * 6.5.0 Founder → Dashboard, on real data.
  *
  * Every tile is computed from records this instance already keeps. Where a
  * figure is partial (invoice history lives in Stripe) the UI says so rather

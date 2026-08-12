@@ -1,5 +1,5 @@
 /**
- * 6.4.0 Founder dashboard — platform-wide metrics.
+ * 6.5.0 Founder dashboard — platform-wide metrics.
  *
  * Every number here is computed from data the app already stores; nothing is
  * estimated or padded. Where a figure is genuinely partial (invoice history

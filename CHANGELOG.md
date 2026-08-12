@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.5.0] - 2026-08-12
+
+### Founder Dashboard, Faza 2: metrici reale + export PDF
+
+Zona Founder arată acum cifre calculate din datele instanței, nu
+placeholdere: venit recurent la utilizarea curentă, companii
+(total / active / suspendate / noi / plătitoare), utilizatori, storage
+stocat vs. facturabil, activitate (upload-uri, comentarii, aprobări,
+proiecte) și un tabel pe companii. Selector de perioadă 30 zile /
+90 zile / 12 luni, grafic din snapshot-urile zilnice de facturare.
+
+**Export PDF** pe aceeași perioadă, cu `pdfkit`.
+
+**Ce NU raportează, și de ce.** Venitul „facturat" este un prag minim,
+nu un total: local se păstrează doar ultima factură per companie, iar
+registrul complet e la Stripe — scrie explicit atât în interfață, cât
+și în PDF. Churn nu apare deloc, pentru că nu există nicăieri data la
+care o companie a devenit inactivă, deci orice procent ar fi ghicit.
+
+Companiile fără snapshot încă (companie nouă, bază de date proaspătă)
+sunt măsurate live, după exact aceeași definiție ca snapshot-ul, ca să
+nu apară „0 GB" acolo unde există fișiere.
+
+Toate rutele noi (`/api/founder/metrics`, `/api/founder/report`) sunt
+în spatele `requirePlatformAdmin` și răspund 404 pentru oricine
+altcineva. Nicio schimbare în aplicația folosită de companii.
+
 ## [3.5.6] - 2026-06-28
 
 ### Multi-stack, root uploads, Finder-style selection, search scrollbar

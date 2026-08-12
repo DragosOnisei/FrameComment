@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
- * 6.4.0 — GET /api/founder/report?from&to
+ * 6.5.0 — GET /api/founder/report?from&to
  *
  * The same numbers as the dashboard, as a PDF you can hand to someone. Built
  * with pdfkit (already used for transcripts) so no new dependency.
