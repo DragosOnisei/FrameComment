@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePlatformAdmin } from '@/lib/platform'
 import { LEAD_STATUSES, listLeads, logLeadActivity, type LeadStatus } from '@/lib/founder-crm'
 import { prismaPrivileged } from '@/lib/db'
+import { logPlatformAudit, actorFrom } from '@/lib/platform-audit'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -83,6 +84,15 @@ export async function POST(request: NextRequest) {
       body: 'Added by hand.',
       authorId: auth.id,
       authorName: auth.name || auth.email,
+    })
+
+    await logPlatformAudit({
+      actor: actorFrom(auth),
+      action: 'lead.created',
+      targetType: 'lead',
+      targetId: lead.id,
+      summary: `${name} <${email}>`,
+      ipAddress: request.headers.get('x-forwarded-for'),
     })
 
     return NextResponse.json({ ok: true, id: lead.id }, { status: 201 })

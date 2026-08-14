@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePlatformAdmin } from '@/lib/platform'
 import { runAgent } from '@/lib/founder-agents'
 import { prismaPrivileged } from '@/lib/db'
+import { logPlatformAudit, actorFrom } from '@/lib/platform-audit'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -46,6 +47,14 @@ export async function POST(
     }
 
     const result = await runAgent(id, auth.name || auth.email)
+    await logPlatformAudit({
+      actor: actorFrom(auth),
+      action: 'agent.run',
+      targetType: 'agent',
+      targetId: id,
+      summary: result.status === 'SUCCEEDED' ? 'succeeded' : `failed: ${result.error ?? 'unknown'}`,
+      ipAddress: request.headers.get('x-forwarded-for'),
+    })
     if (result.status === 'FAILED') {
       return NextResponse.json({ error: result.error || 'The run failed.' }, { status: 500 })
     }

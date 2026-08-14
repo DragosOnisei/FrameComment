@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePlatformAdmin } from '@/lib/platform'
 import { LEAD_STATUSES, getLeadDetail, logLeadActivity, type LeadStatus } from '@/lib/founder-crm'
 import { prismaPrivileged } from '@/lib/db'
+import { logPlatformAudit, actorFrom } from '@/lib/platform-audit'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -83,6 +84,15 @@ export async function PATCH(
       })
     }
 
+    await logPlatformAudit({
+      actor: actorFrom(auth),
+      action: statusChanged ? 'lead.status_changed' : 'lead.updated',
+      targetType: 'lead',
+      targetId: id,
+      summary: statusChanged ? `${current.status} → ${statusChanged}` : Object.keys(data).join(', '),
+      ipAddress: request.headers.get('x-forwarded-for'),
+    })
+
     return NextResponse.json({ ok: true })
   } catch (error) {
     logError('[PATCH /api/founder/crm/leads/[id]] failed:', error)
@@ -101,6 +111,13 @@ export async function DELETE(
     const { id } = await params
     // Activities and follow-ups cascade at the database level.
     await (prismaPrivileged as any).lead.delete({ where: { id } })
+    await logPlatformAudit({
+      actor: actorFrom(auth),
+      action: 'lead.deleted',
+      targetType: 'lead',
+      targetId: id,
+      ipAddress: request.headers.get('x-forwarded-for'),
+    })
     return NextResponse.json({ ok: true })
   } catch (error) {
     logError('[DELETE /api/founder/crm/leads/[id]] failed:', error)

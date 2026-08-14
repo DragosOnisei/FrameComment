@@ -34,6 +34,7 @@ import { createStorageTransferWorker } from './storage-transfer-processor'
 import { processDueDateReminders } from './due-date-reminders'
 import { processBillingCycle } from './billing-cycle'
 import { processOrgDeletions } from './org-deletion'
+import { recordHeartbeat } from '../lib/platform-uptime'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { logError, logMessage } from '../lib/logging'
 
@@ -44,6 +45,13 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 async function main() {
   logMessage('[WORKER] Initializing video processing worker...')
+
+  // 6.8.0 Faza 5: mark the boot before anything else can fail. If the worker
+  // was down, the gap since the last beat is recorded as an outage right here.
+  await recordHeartbeat('worker', {
+    isBoot: true,
+    version: process.env.npm_package_version || null,
+  })
 
   // Get centralized CPU allocation (coordinates with FFmpeg threads)
   const cpuAllocation = getCpuAllocation()
@@ -246,6 +254,10 @@ async function main() {
         // 5.10 Danger Zone: wipes orgs whose 30-day deletion countdown has
         // elapsed (server-side clock; re-verifies zero projects first).
         processOrgDeletions(),
+        // 6.8.0 Faza 5: uptime. One beat a minute; a missing beat is written
+        // down as an outage when the worker comes back. See platform-uptime.ts
+        // for what this can and cannot see.
+        recordHeartbeat('worker'),
       ])
 
       logMessage('Notification check completed')

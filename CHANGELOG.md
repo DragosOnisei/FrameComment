@@ -14,6 +14,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.8.0] - 2026-08-14
+
+### Founder Dashboard, Faza 5: pachetul pentru investitori
+
+O secțiune nouă, **Investors**, cu ce se cere la due diligence — dar
+măsurat, nu declarat.
+
+**Uptime real, cu limitele scrise pe pagină.** Fiecare serviciu (app și
+worker) scrie un puls pe minut. Când un puls lipsește, golul se
+înregistrează ca avarie în momentul în care serviciul revine. O linie per
+serviciu plus una per avarie reală — fără serie de timp de curățat.
+
+Ce vede și ce nu vede, spus explicit în interfață: vede aplicația,
+worker-ul sau baza de date căzute; **nu** vede cazul în care serverul e
+sănătos dar utilizatorii nu ajung la el (DNS, TLS, proxy, rețea). Pentru
+asta e nevoie de o sondă din afara mașinii. Cifra înseamnă „serviciul
+rula", nu „clienții puteau folosi produsul", și așa scrie.
+
+**Audit log de platformă.** Tabel separat, nu `SecurityEvent` — acela e
+per-companie, nu are actor și poate fi oprit dintr-o setare de tenant. Un
+jurnal de audit pe care clientul îl poate reduce la tăcere nu e jurnal de
+audit. Se înregistrează fiecare acțiune din zona Founder, cu cine a
+făcut-o.
+
+**Arhivă de rapoarte.** „Archive last month" îngheață **cifrele** unei
+perioade, nu PDF-ul. Un raport pentru martie continuă să spună ce spunea
+martie, chiar după ce datele se mișcă; iar formatul poate fi îmbunătățit
+fără să falsifice trecutul. PDF-ul se regenerează din cifrele înghețate,
+cu același randator ca raportul live (extras în `founder-report-pdf.ts`,
+ca să nu existe două randări care diverg).
+
+**Cohorte și retenție** pe luna de înregistrare, cu o precizare care
+contează: schema **nu** reține data la care o companie devine inactivă,
+deci ce se afișează e unde stă fiecare cohortă **azi**, nu o curbă lunară
+de churn. „A folosit produsul" înseamnă upload sau comentariu —
+autentificările nu se înregistrează nicăieri, iar a pretinde altceva ar
+umfla fiecare cifră de pe pagină.
+
+**Postura de securitate, verificată.** RLS se citește din catalogul
+Postgres în timp real, TTL-urile din configurația care rulează. Ce nu
+poate fi verificat din interiorul aplicației — backup-uri testate,
+monitorizare externă, pentest independent — apare marcat ca neverificat,
+nu omis. O listă numai cu bife verzi e cel mai puțin credibil document
+dintr-un data room.
+
+Tabelele noi sunt platform-level, cu `REVOKE` explicit pentru rolul de
+tenant, ca cele de CRM și de agenți.
+
 ## [6.7.1] - 2026-08-14
 
 ### Oferta de cod sursă cerută de AGPL §13, pe site

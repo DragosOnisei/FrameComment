@@ -49,6 +49,22 @@ export async function register() {
       // Initialize security settings from environment variables
       await initializeSecuritySettings()
 
+      // 6.8.0 (Faza 5): start measuring uptime. One heartbeat at boot, then
+      // one a minute; a missing beat becomes a recorded outage when the
+      // process comes back. `unref()` so this timer never holds the process
+      // open during a shutdown.
+      const g2 = globalThis as unknown as { __fcHeartbeat?: NodeJS.Timeout }
+      if (!g2.__fcHeartbeat) {
+        const { recordHeartbeat, HEARTBEAT_INTERVAL_MS } = await import('./lib/platform-uptime')
+        const pkgVersion = process.env.npm_package_version || null
+        await recordHeartbeat('web', { isBoot: true, version: pkgVersion })
+        g2.__fcHeartbeat = setInterval(() => {
+          void recordHeartbeat('web')
+        }, HEARTBEAT_INTERVAL_MS)
+        g2.__fcHeartbeat.unref?.()
+        logMessage('[INIT] Uptime heartbeat started')
+      }
+
       logMessage('[INIT] Server initialization complete')
     } catch (error) {
       logError('[INIT] Initialization error:', error)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePlatformAdmin } from '@/lib/platform'
 import { prismaPrivileged } from '@/lib/db'
+import { logPlatformAudit, actorFrom } from '@/lib/platform-audit'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -26,6 +27,14 @@ export async function PATCH(
     }
 
     await (prismaPrivileged as any).agent.update({ where: { id }, data })
+    await logPlatformAudit({
+      actor: actorFrom(auth),
+      action: 'agent.updated',
+      targetType: 'agent',
+      targetId: id,
+      summary: typeof data.enabled === 'boolean' ? (data.enabled ? 'enabled' : 'disabled') : 'renamed',
+      ipAddress: request.headers.get('x-forwarded-for'),
+    })
     return NextResponse.json({ ok: true })
   } catch (error) {
     logError('[PATCH /api/founder/agents/[id]] failed:', error)

@@ -211,6 +211,22 @@ livrate pentru că enum-ul le-ar putea conține.
 - Audit log al acțiunilor de platformă (cine, ce, când).
 - Uptime și istoric de incidente, security posture, retenție și cohorte.
 
+**Livrat în 6.8.0**, pagina `/founder/investors`. Ce e real și ce nu:
+
+| Cerut | Livrat |
+|---|---|
+| Rapoarte arhivate | Da — se îngheață **cifrele**, nu PDF-ul, iar PDF-ul se regenerează din ele. Arhivare **manuală** („Archive last month"); generarea automată lunară rămâne pentru mai târziu. |
+| Audit log | Da — tabel propriu, cu actor. Deliberat NU `SecurityEvent`: acela e per-companie, fără actor, și oprit de o setare de tenant. |
+| Uptime | Da — puls pe minut per serviciu, golurile devin avarii. Vede app/worker/DB căzute; **nu** vede rețeaua dintre server și utilizator. Scris în interfață, nu ascuns. |
+| Istoric de incidente | Parțial — doar avariile detectate automat. Nu există intrare manuală de incident (câmpul `source` din `ServiceOutage` o anticipează). |
+| Security posture | Da, dar **verificat**: RLS din catalogul Postgres, TTL-uri din configurație. Backup-uri, monitorizare externă și pentest apar ca neverificate, pentru că din aplicație chiar nu pot fi verificate. |
+| Retenție și cohorte | Da, pe luna de înregistrare — dar e o fotografie de azi, nu o curbă de churn: schema nu reține data la care o companie devine inactivă. |
+
+**Ce ar debloca restul:** o coloană de `deactivatedAt` pe `Organization`
+(curbă de churn reală), o sondă externă (uptime din perspectiva
+utilizatorului) și un job lunar de arhivare (rapoarte automate). Toate
+trei sunt mici; niciuna nu s-a făcut pe ghicite.
+
 ---
 
 ## De rezolvat separat (securitate, azi)

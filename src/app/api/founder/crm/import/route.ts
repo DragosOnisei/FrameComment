@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePlatformAdmin } from '@/lib/platform'
 import { importLeadsFromAccessRequests } from '@/lib/founder-crm'
+import { logPlatformAudit, actorFrom } from '@/lib/platform-audit'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -19,6 +20,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await importLeadsFromAccessRequests()
+    await logPlatformAudit({
+      actor: actorFrom(auth),
+      action: 'lead.imported',
+      summary: `Scanned ${result.scanned}, imported ${result.imported}, skipped ${result.skipped}`,
+      ipAddress: request.headers.get('x-forwarded-for'),
+    })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
     logError('[POST /api/founder/crm/import] failed:', error)

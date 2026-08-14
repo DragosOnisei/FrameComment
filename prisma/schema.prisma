@@ -1724,3 +1724,75 @@ model AgentReport {
 
   @@index([createdAt])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6.8.0 Founder — investor pack (Faza 5)
+//
+// Platform-level like the CRM and agent tables: no organizationId, no grant
+// for the tenant role, privileged access only behind requirePlatformAdmin.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Who did what in the Founder area. Deliberately NOT SecurityEvent: that
+// table is org-scoped, has no actor, and can be switched off by a per-tenant
+// setting — an audit trail a tenant can silence is not an audit trail.
+model PlatformAuditEvent {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actorName String?
+  // Verb in past tense, dotted scope: "lead.created", "agent.run", …
+  action    String
+  // What it happened to, when there is a single subject.
+  targetType String?
+  targetId   String?
+  summary   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+}
+
+// A period's figures, frozen. The PDF is regenerated from THESE numbers, so
+// a report for March keeps saying what March said even after the underlying
+// data moves. Storing the metrics instead of the rendered bytes keeps the
+// archive small and lets the layout improve without rewriting history.
+model PlatformReportArchive {
+  id         String   @id @default(cuid())
+  label      String
+  periodFrom DateTime
+  periodTo   DateTime
+  metricsJson String
+  createdById String?
+  createdByName String?
+  createdAt  DateTime @default(now())
+
+  @@index([periodTo])
+}
+
+// One row per service, rewritten every minute. Uptime is derived from the
+// gaps: if the last beat is older than the tolerance, the service was down
+// in between, and the gap is recorded as an outage once it comes back.
+model ServiceHeartbeat {
+  service    String   @id
+  lastSeenAt DateTime
+  bootedAt   DateTime
+  // Bumped on every process start, so restarts are visible even when they
+  // are too quick to leave a gap.
+  bootCount  Int      @default(1)
+  version    String?
+  updatedAt  DateTime @updatedAt
+}
+
+model ServiceOutage {
+  id        String   @id @default(cuid())
+  service   String
+  startedAt DateTime
+  endedAt   DateTime
+  seconds   Int
+  // "gap" = inferred from a missing heartbeat. Room for "manual" later.
+  source    String   @default("gap")
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([service, startedAt])
+}

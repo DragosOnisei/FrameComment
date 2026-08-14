@@ -21,6 +21,7 @@ import {
   ChevronUp,
   LogOut,
   Settings as SettingsIcon,
+  ShieldCheck,
   User,
   Users2,
 } from 'lucide-react'
@@ -31,6 +32,7 @@ export const FOUNDER_NAV = [
   { href: '/founder', label: 'Dashboard', icon: BarChart3 },
   { href: '/founder/crm', label: 'CRM', icon: Users2 },
   { href: '/founder/agents', label: 'AI Agents', icon: Bot },
+  { href: '/founder/investors', label: 'Investors', icon: ShieldCheck },
 ] as const
 
 export default function FounderSidebar() {
