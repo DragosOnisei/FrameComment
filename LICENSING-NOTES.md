@@ -241,3 +241,35 @@ Singurele lucruri pe care le mai ai de adăugat:
 2. Clauză în MSA: "Vendor provides hosting service. Software is AGPL-3.0
    open source. Customer acknowledges access to source code at [link]."
 3. Consultă un avocat înainte de primul contract serios.
+
+---
+
+## 12. §13 pe framecomment.com — rezolvat în 6.7.1 (14 august 2026)
+
+Punctul 1 din concluzia de mai sus („Footer cu source code link în UI") a
+rămas neimplementat pe site-ul public timp de două luni, de la lansarea
+din 5.14.0. Autorul upstream (Mansi Visuals) a semnalat-o ca notificare
+formală sub §8, împreună cu a doua problemă: `© MINDQUB S.R.L. All
+rights reserved.` în footer, fără nicio licență numită nicăieri pe site.
+
+Ambele erau reale. Ce s-a schimbat:
+
+| Unde | Ce |
+|---|---|
+| `src/components/LicenseNotice.tsx` | Componenta unică ce poartă oferta. Dacă se schimbă, se schimbă peste tot deodată. |
+| `MarketingFooter` | Linia de licență pe fiecare pagină publică; „All rights reserved" scos, înlocuit cu „Brand and original additions". |
+| `/source` | Oferta onorată complet: sursa pentru versiunea care rulează, imaginea Docker, alternativă prin email, drepturile acordate, delimitarea mărcii. |
+| `/login` | Nota compactă — mulți utilizatori nu văd niciodată landing-ul. |
+| Pagina de share | Licența numită lângă „Powered by FrameComment"; clienții-recenzenți folosesc software-ul prin rețea la fel ca oricine. |
+| `sitemap.ts`, `llms.txt` | `/source` indexabil, licența și originea menționate. |
+
+**Regula de ținut minte:** §13 se aplică *fiecărei* suprafețe prin care
+cineva folosește aplicația prin rețea, nu doar paginii de marketing.
+Orice suprafață publică nouă (o pagină de status, un portal, un embed)
+trebuie să poarte oferta din start.
+
+**Despre copyright:** mențiunea MINDQUB rămâne legitimă pentru ce a fost
+adăugat aici, plus marca. Ce nu e legitim e o rezervare generală de
+drepturi peste o operă derivată AGPL — §5 cere ca întregul să fie
+licențiat AGPL oricui îl primește, iar §10 interzice restricții
+suplimentare peste drepturile acordate.

@@ -1749,8 +1749,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               clientName={isGuest ? undefined : project.clientName}
             />
           </div>
-          {/* Powered by footer */}
-          <div className="pb-4 text-center">
+          {/* Powered by footer. 6.7.1: it now names the licence as well as
+              linking the repository — guests reach this page without ever
+              seeing the public site, and AGPL §13 is about everyone who uses
+              the software over the network, reviewers included. */}
+          <div className="pb-4 text-center space-x-2">
             <a
               href="https://github.com/DragosOnisei/FrameComment"
               target="_blank"
@@ -1758,6 +1761,15 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
             >
               Powered by FrameComment
+            </a>
+            <span className="text-xs text-muted-foreground/40">·</span>
+            <a
+              href="https://www.gnu.org/licenses/agpl-3.0.html"
+              target="_blank"
+              rel="noopener noreferrer license"
+              className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+            >
+              AGPL-3.0
             </a>
           </div>
         </div>

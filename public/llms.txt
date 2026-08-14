@@ -9,6 +9,7 @@ Key facts:
 - Storage: managed hosting by FrameComment, or bring your own storage (your server/NAS, Cloudflare R2, AWS S3) with no per-GB fee on your own storage. Switching backends uses verified, size-checked transfers.
 - Security: per-company data isolation enforced at the database level with PostgreSQL row-level security; HTTPS/HSTS; role-based team permissions; 30-day Trash and deliberate deletion safety windows.
 - Pricing (USD): Free tier with 1 team member and 10 GB hosted storage, all features included. Beyond that: $25 per extra member per month, plus $0.10 per GB per month only on FrameComment-hosted storage. Prorated monthly, no contracts.
+- Licence: FrameComment is free software licensed under the AGPL-3.0. Source: https://github.com/DragosOnisei/FrameComment. It is a derivative work of ViTransfer (https://github.com/MansiVisuals/ViTransfer) by Mansi Visuals. The FrameComment name and logo are MINDQUB trademarks and are not covered by the software licence.
 - Honesty policy: no fake customer logos, no invented statistics, no ads, no selling of user data, and customer content is never used to train AI models.
 - Operator: MINDQUB S.R.L., Strada Vespasian nr. 47, Camera 2, Sector 1, București 011981, Romania. Contact: dragos.onisei@mindqub.eu.
 
@@ -18,6 +19,7 @@ Key facts:
 - [Request early access](https://framecomment.com/request-access): the private-beta access request form.
 - [Terms of Use](https://framecomment.com/terms): the terms that govern the service.
 - [Privacy Policy](https://framecomment.com/privacy): GDPR-oriented privacy policy (data controller: MINDQUB S.R.L.).
+- [Source code & licence](https://framecomment.com/source): FrameComment is free software under the AGPL-3.0; where to get the source for the running version, and its origin as a fork of ViTransfer by Mansi Visuals.
 
 ## Optional
 

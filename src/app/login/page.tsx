@@ -15,6 +15,7 @@ import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/brow
 import { logError, logMessage } from '@/lib/logging'
 import { setTokens, clearTokens } from '@/lib/token-store'
 import WordMark from '@/components/WordMark'
+import { LicenseNoticeCompact } from '@/components/LicenseNotice'
 
 function LoginForm() {
   const t = useTranslations('auth')
@@ -389,6 +390,11 @@ function LoginForm() {
             </form>
           </CardContent>
         </Card>
+
+        {/* 6.7.1: AGPL §13 — the offer of source has to reach everyone who
+            uses the software over the network, and plenty of people arrive
+            straight at /login without ever seeing the public site footer. */}
+        <LicenseNoticeCompact className="mt-4 text-center" />
       </div>
       </div>
     </div>

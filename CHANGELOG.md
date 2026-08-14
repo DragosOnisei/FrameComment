@@ -14,6 +14,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.7.1] - 2026-08-14
+
+### Oferta de cod sursă cerută de AGPL §13, pe site
+
+Repo-ul era în regulă — `LICENSE`, `NOTICE`, `LICENSING-NOTES.md`, creditul
+din README. Site-ul nu era. AGPL are o clauză pe care GPL n-o are:
+dacă lași oameni să folosească software-ul **prin rețea**, trebuie să le
+oferi vizibil codul sursă, chiar dacă nu le dai niciun fișier.
+framecomment.com e servit chiar de această aplicație, deci clauza se
+aplică fiecărui vizitator, iar oferta lipsea cu totul.
+
+- **Linie de licență în footer-ul site-ului public**, pe fiecare pagină:
+  AGPL-3.0, link către sursă, și originea din ViTransfer de la Mansi
+  Visuals.
+- **Pagină nouă `/source`** — oferta onorată în întregime: unde e sursa
+  pentru versiunea care rulează chiar acum (cu numărul de versiune citit
+  din `package.json` la build, nu dintr-o variabilă de mediu care poate
+  lipsi), imaginea Docker, o adresă de email ca alternativă dacă GitHub e
+  inaccesibil, ce ai voie să faci cu codul, și ce ține de marcă și nu e
+  acoperit de licență.
+- **Pagina de login** poartă și ea nota — mulți ajung direct acolo, fără
+  să vadă vreodată footer-ul site-ului.
+- **Pagina de share** numește acum licența lângă „Powered by FrameComment".
+  Clienții care revizuiesc un video folosesc software-ul prin rețea la fel
+  ca oricine altcineva, și nu văd niciodată site-ul public.
+- `/source` intră în sitemap, iar `llms.txt` menționează licența și originea.
+
+### „All rights reserved" a fost scos
+
+Footer-ul spunea `© 2026 MINDQUB S.R.L. All rights reserved.` fără să
+numească vreo licență. Pe o pagină generată de cod AGPL, asta comunica
+exact opusul realității. MINDQUB deține ce a adăugat și marca, nu codul
+moștenit — iar o rezervare generală de drepturi peste tot contrazice atât
+§5, cât și §10. Linia devine `© 2026 MINDQUB S.R.L. Brand and original
+additions.`, deasupra ei fiind licența numită explicit.
+
+Nicio schimbare funcțională în aplicație.
+
 ## [6.7.0] - 2026-08-12
 
 ### Fix: venitul recurent era greșit

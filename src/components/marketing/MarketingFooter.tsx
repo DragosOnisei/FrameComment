@@ -10,6 +10,7 @@
 
 import Link from 'next/link'
 import { WordMark } from '@/components/WordMark'
+import { LicenseNotice } from '@/components/LicenseNotice'
 
 export function MarketingFooter({ onLanding = false }: { onLanding?: boolean }) {
   const anchor = (id: string) => (onLanding ? `#${id}` : `/#${id}`)
@@ -57,18 +58,27 @@ export function MarketingFooter({ onLanding = false }: { onLanding?: boolean }) 
               <ul className="space-y-2 text-sm">
                 <li><Link href="/terms" className="text-white/65 hover:text-white transition-colors">Terms of Use</Link></li>
                 <li><Link href="/privacy" className="text-white/65 hover:text-white transition-colors">Privacy Policy</Link></li>
+                <li><Link href="/source" className="text-white/65 hover:text-white transition-colors">Source &amp; Licence</Link></li>
               </ul>
             </div>
           </div>
         </div>
 
-        <div className="mt-10 pt-6 border-t border-white/[0.06] flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-          <p className="text-xs text-white/55">
-            These Services are operated by MINDQUB S.R.L.
-          </p>
-          <p className="text-xs text-white/55">
-            © {year} MINDQUB S.R.L. All rights reserved.
-          </p>
+        {/* 6.7.1: the AGPL §13 source offer sits above the copyright line, on
+            every page of the public site. "All rights reserved" was dropped
+            from the copyright notice: MINDQUB owns its own additions and its
+            branding, not the inherited AGPL code, and a blanket reservation
+            next to no named licence told visitors the opposite. */}
+        <div className="mt-10 pt-6 border-t border-white/[0.06] space-y-3">
+          <LicenseNotice />
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+            <p className="text-xs text-white/55">
+              These Services are operated by MINDQUB S.R.L.
+            </p>
+            <p className="text-xs text-white/55">
+              © {year} MINDQUB S.R.L. Brand and original additions.
+            </p>
+          </div>
         </div>
       </div>
     </footer>
