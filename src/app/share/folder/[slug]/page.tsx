@@ -83,7 +83,6 @@ interface VideoRow {
   version: number
   versionLabel: string
   duration: number
-  approved: boolean
   status?: string
   thumbnailPath: string | null
   /** Signed `/api/content/{token}` URL minted server-side. Lets the
@@ -285,15 +284,10 @@ function PublicFolderSharePageInner() {
    */
   /**
    * 6.10.1: download a flat folder as FILES, returning false if the server
-   * refuses — the caller then falls back to the ZIP.
-   *
-   * Why the fallback matters: the per-video download endpoint refuses videos
-   * that are not approved yet, while the folder ZIP endpoint does not. So a
-   * folder a client CAN download as an archive could still have every
-   * individual file refused. 6.10.0 shipped without that fallback and blamed
-   * the browser for it, which was simply wrong — the server said no, and the
-   * page told the user to change a browser setting that had nothing to do
-   * with it.
+   * refuses — the caller then falls back to the ZIP. The fallback stays as a
+   * safety net for any per-file refusal (expired token, missing source),
+   * even though 6.11.0 removed the approval gate that caused the original
+   * blanket 403.
    */
   const downloadFilesIndividually = useCallback(
     async (files: Array<{ videoId: string; name: string }>): Promise<boolean> => {
@@ -563,7 +557,6 @@ function PublicFolderSharePageInner() {
       versionLabel: string
       duration?: number
       versionCount: number
-      approved: boolean
       thumbnailUrl?: string | null
       previewUrl?: string | null
       storyboardUrl?: string | null
@@ -587,7 +580,6 @@ function PublicFolderSharePageInner() {
         versionLabel: latest.versionLabel || `v${latest.version}`,
         duration: typeof latest.duration === 'number' ? latest.duration : undefined,
         versionCount: sorted.length,
-        approved: sorted.some((v) => v.approved),
         thumbnailUrl: latest.thumbnailUrl ?? null,
         previewUrl: latest.previewUrl ?? null,
         storyboardUrl: latest.storyboardUrl ?? null,
@@ -833,7 +825,6 @@ function PublicFolderSharePageInner() {
                   previewUrl={v.previewUrl}
                   storyboardUrl={v.storyboardUrl}
                   status={v.status}
-                  approved={v.approved}
                   commentCount={v.commentCount}
                   uploaderName={v.uploaderName}
                   createdAt={v.createdAt}

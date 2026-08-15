@@ -353,13 +353,6 @@ export async function createNotificationPayload(
         body: `${data.authorName || notificationsText.someone || auth.someoneLabel || 'Someone'} ${webPush.onLabel || 'on'} ${data.videoName || data.projectTitle || webPush.aVideo || 'a video'}${data.content ? `: "${data.content.slice(0, 50)}${data.content.length > 50 ? '...' : ''}"` : ''}`,
       }
 
-    case 'VIDEO_APPROVAL':
-      return {
-        ...basePayload,
-        title: webPush.videoApprovedTitle || 'Video Approved',
-        body: `${data.authorName || webPush.aClient || 'A client'} ${webPush.approvedLabel || 'approved'} ${data.videoName || webPush.aVideo || 'a video'} ${webPush.inLabel || 'in'} ${data.projectTitle || webPush.aProject || 'a project'}`,
-      }
-
     case 'SECURITY_ALERT':
       return {
         ...basePayload,

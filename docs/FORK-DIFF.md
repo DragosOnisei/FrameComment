@@ -115,7 +115,7 @@ To be explicit:
 - All HTTP API routes and request/response shapes are unchanged.
 - The environment variables consumed by the application are unchanged in
   name and meaning.
-- The runtime feature set (uploads, comments, approvals, sharing, S3, push,
+- The runtime feature set (uploads, comments, sharing, S3, push,
   email, calendar feeds, WebAuthn, etc.) is identical.
 
 If you spot a difference that is not listed here, please open an issue —

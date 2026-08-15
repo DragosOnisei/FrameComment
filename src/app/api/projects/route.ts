@@ -271,13 +271,11 @@ export async function POST(request: NextRequest) {
         defaultWatermarkOpacity: true,
         defaultWatermarkFontSize: true,
         defaultTimestampDisplay: true,
-        defaultUsePreviewForApprovedPlayback: true,
         defaultAllowClientAssetUpload: true,
         defaultApplyPreviewLut: true,
         defaultAllowReverseShare: true,
         defaultShowClientTutorial: true,
         defaultAllowAssetDownload: true,
-        defaultClientCanApprove: true,
       },
     })
 
@@ -306,7 +304,6 @@ export async function POST(request: NextRequest) {
           restrictCommentsToLatestVersion: isShareOnly ? false : (restrictCommentsToLatestVersion || false),
           status: isShareOnly ? 'SHARE_ONLY' : 'IN_REVIEW',
           hideFeedback: isShareOnly ? true : false,
-          approvedAt: isShareOnly ? new Date() : null,
           // 2.0.x+: default to "auto" (= match source) instead of
           // legacy "720p" cap. With the cap, a 1080×1920 vertical
           // source would only get 480p + 720p tiers from the worker
@@ -324,12 +321,10 @@ export async function POST(request: NextRequest) {
           watermarkOpacity: settings?.defaultWatermarkOpacity ?? 30,
           watermarkFontSize: settings?.defaultWatermarkFontSize || 'medium',
           timestampDisplay: settings?.defaultTimestampDisplay || 'TIMECODE',
-          usePreviewForApprovedPlayback: settings?.defaultUsePreviewForApprovedPlayback ?? false,
           allowClientAssetUpload: settings?.defaultAllowClientAssetUpload ?? false,
           allowReverseShare: settings?.defaultAllowReverseShare ?? false,
           showClientTutorial: settings?.defaultShowClientTutorial ?? false,
           allowAssetDownload: settings?.defaultAllowAssetDownload ?? true,
-          clientCanApprove: settings?.defaultClientCanApprove ?? true,
           applyPreviewLut: settings?.defaultApplyPreviewLut ?? true,
           dueDate: dueDate ? new Date(dueDate) : null,
           dueReminder: dueReminder || null,

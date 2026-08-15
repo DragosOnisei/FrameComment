@@ -6,14 +6,13 @@
 3. Upload videos.
 4. Share the client link.
 5. Collect timestamped feedback.
-6. Approve when the client accepts the final version.
+6. Upload a new version for each round of notes.
 
 ## Client workflow
 1. Open the share link.
 2. Enter password/OTP if required.
 3. Watch videos and leave timestamped feedback.
-4. Approve when satisfied.
-5. Download approved videos if enabled.
+4. Download the files if downloads are enabled.
 
 ## Drawing annotations on video
 1. Pause the video at the desired frame.
@@ -64,7 +63,6 @@
 
 **What appears in the feed:**
 - All projects with a due date are included, regardless of status or whether the date is in the past.
-- Approved projects show with a ✓ prefix (e.g. "✓ Summer Campaign").
 - Archived projects show with a ✗ prefix (e.g. "✗ Old Project").
 - Events are never removed — deadlines are preserved as historical records.
 - Each event links back to the project in the admin panel.

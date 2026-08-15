@@ -17,7 +17,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
- * Stream ZIP of all approved videos directly to browser.
+ * Stream ZIP of every ready video directly to browser.
  * Token-based authentication with automatic expiry.
  */
 export async function GET(
@@ -84,12 +84,11 @@ export async function GET(
 
     // 5.8.1 post-flip: arm the owning org (token-authorized download).
     await armOrgForProjectId(projectId)
-    // Fetch approved videos
+    // 6.11.0: no approval filter — approval no longer exists.
     const videos = await prisma.video.findMany({
       where: {
         id: { in: videoIds },
         projectId,
-        approved: true,
       },
       select: {
         id: true,
@@ -102,7 +101,7 @@ export async function GET(
     }) as any[]
 
     if (videos.length === 0) {
-      return NextResponse.json({ error: shareMessages.noApprovedVideos || 'No approved videos found' }, { status: 404 })
+      return NextResponse.json({ error: shareMessages.noVideosToDownload || 'No videos found' }, { status: 404 })
     }
 
     // Atomically consume token

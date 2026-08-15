@@ -34,7 +34,6 @@ interface CommentSectionProps {
   focusCommentId?: string | null
   clientName: string
   clientEmail?: string
-  isApproved: boolean
   restrictToLatestVersion?: boolean
   videos?: Video[]
   isAdminView?: boolean
@@ -161,7 +160,6 @@ export default function CommentSection({
   focusCommentId = null,
   clientName,
   clientEmail,
-  isApproved,
   restrictToLatestVersion = false,
   videos = [],
   isAdminView = false,
@@ -1015,7 +1013,7 @@ export default function CommentSection({
     return () => document.removeEventListener('mousedown', onPointerDown)
   }, [])
 
-  // Listen for immediate comment updates (delete, approve, post, etc.)
+  // Listen for immediate comment updates (delete, post, etc.)
   useEffect(() => {
     const handleCommentPosted = (e: CustomEvent) => {
       // Use the comments data from the event if available, otherwise refetch
@@ -1032,12 +1030,10 @@ export default function CommentSection({
 
     window.addEventListener('commentDeleted', handleCommentUpdate)
     window.addEventListener('commentPosted', handleCommentPosted as EventListener)
-    window.addEventListener('videoApprovalChanged', handleCommentUpdate)
 
     return () => {
       window.removeEventListener('commentDeleted', handleCommentUpdate)
       window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
-      window.removeEventListener('videoApprovalChanged', handleCommentUpdate)
     }
   }, [projectId, fetchComments])
 
@@ -1046,14 +1042,13 @@ export default function CommentSection({
     ? Math.max(...videos.map(v => v.version))
     : null
 
-  // Check if currently selected video is approved
   const currentVideo = videos.find(v => v.id === selectedVideoId)
   const currentVideoDuration = currentVideo?.duration ?? null
-  const isCurrentVideoApproved = currentVideo ? (currentVideo as any).approved === true : false
-  // Check if ANY video in the group is approved (for admin view with multiple versions)
-  const hasAnyApprovedVideo = videos.some(v => (v as any).approved === true)
-  const approvedVideo = videos.find(v => (v as any).approved === true)
-  const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo
+  // 6.11.0: comments are never switched off.
+  // Approval used to disable them — approve a cut and the conversation about
+  // it froze, which is backwards: that is exactly when people want to say
+  // "one more thing". Approval is gone, and with it this lock.
+  const commentsDisabled = false
 
   // Always use hook comments (includes optimistic updates)
   // Local comments only used as fallback if hook hasn't loaded
@@ -1616,27 +1611,6 @@ export default function CommentSection({
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
-        {/* Approval Status Banner */}
-        {commentsDisabled && (
-          <div className="bg-success-visible border-b-2 border-success-visible p-4 flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-8 h-8 text-success flex-shrink-0" />
-              <div>
-                <h3 className="text-foreground font-medium">
-                  {isApproved ? t('projectApproved') : t('videoApproved')}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {isApproved
-                    ? t('approvedDownloadReady')
-                    : approvedVideo
-                    ? t('versionApprovedDownload', { versionLabel: approvedVideo.versionLabel })
-                    : t('aVersionApprovedDownload')}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* 1.3.2+: Comment Input pinned at the BOTTOM of the device
             viewport via `fixed bottom-0`. The whole page on mobile is
             already a fixed-height flex column (`h-[100dvh]` with

@@ -55,7 +55,7 @@ export interface AnnotationData {
 }
 
 // FrameComment palette — only 3 colors for clarity and consistent meaning:
-// red = problem / blocker, orange = note / question, green = approved / good
+// red = problem / blocker, orange = note / question, green = looks good
 export const ANNOTATION_COLORS = [
   '#EF4444', // red
   '#F97316', // orange

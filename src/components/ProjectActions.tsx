@@ -21,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select'
-import { UnapproveModal } from './UnapproveModal'
 import { apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 import { computePopoverStyle } from '@/lib/popover-position'
 
@@ -30,7 +29,6 @@ interface Video {
   name: string
   versionLabel: string
   status: string
-  approved: boolean
 }
 
 interface ProjectActionsProps {
@@ -47,7 +45,6 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
   const locale = useLocale()
   const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
-  const [isTogglingApproval, setIsTogglingApproval] = useState(false)
   const [isArchiving, setIsArchiving] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
   // Kebab menu state — collapses the verbose action button list into
@@ -78,7 +75,6 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
   }, [menuOpen])
 
   // Unapprove modal state
-  const [showUnapproveModal, setShowUnapproveModal] = useState(false)
 
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
@@ -102,21 +98,6 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
 
   // Filter only ready videos
   const readyVideos = videos.filter(v => v.status === 'READY')
-
-  // Check if all unique videos have at least one approved version
-  const videosByNameForApproval = readyVideos.reduce((acc, video) => {
-    if (!acc[video.name]) {
-      acc[video.name] = []
-    }
-    acc[video.name].push(video)
-    return acc
-  }, {} as Record<string, Video[]>)
-
-  const allVideosHaveApprovedVersion = Object.values(videosByNameForApproval).every((versions: Video[]) =>
-    versions.some(v => v.approved)
-  )
-
-  const canApproveProject = readyVideos.length > 0 && allVideosHaveApprovedVersion
 
   // Group videos by name
   const videosByName = readyVideos.reduce((acc, video) => {
@@ -178,82 +159,6 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
 
   const handleViewSharePage = () => {
     router.push(`/admin/projects/${project.id}/share`)
-  }
-
-  const handleToggleApproval = async () => {
-    // Prevent double-clicks during approval toggle
-    if (isTogglingApproval) return
-
-    const isCurrentlyApproved = project.status === 'APPROVED'
-
-    if (isCurrentlyApproved) {
-      // Show the unapprove modal to let user choose
-      setShowUnapproveModal(true)
-    } else {
-      // For approval, just confirm and proceed
-      if (!confirm(t('confirmApproveProject'))) {
-        return
-      }
-
-      setIsTogglingApproval(true)
-
-      // Approve project in background without blocking UI
-      apiPatch(`/api/projects/${project.id}`, { status: 'APPROVED' })
-        .then(() => {
-          alert(t('approvedSuccessfully'))
-          // Refresh in background
-          onRefresh?.()
-          router.refresh()
-        })
-        .catch(() => {
-          alert(t('failedToApprove'))
-        })
-        .finally(() => {
-          setIsTogglingApproval(false)
-        })
-    }
-  }
-
-  const handleUnapprove = async (unapproveVideos: boolean) => {
-    // Prevent double-clicks during unapproval
-    if (isTogglingApproval) return
-
-    setIsTogglingApproval(true)
-    setShowUnapproveModal(false)
-
-    // Unapprove project in background without blocking UI
-    apiPost(`/api/projects/${project.id}/unapprove`, { unapproveVideos })
-      .then((data) => {
-        // Show appropriate success message
-        if (data.unapprovedVideos && data.unapprovedCount > 0) {
-          alert(`${t('unapprovedSuccessfully')} ${data.unapprovedCount} ${t('videosUnapproved')}`)
-        } else if (data.unapprovedVideos && data.unapprovedCount === 0) {
-          alert(`${t('unapprovedSuccessfully')} ${t('noVideosApproved')}`)
-        } else {
-          alert(`${t('unapprovedSuccessfully')} ${t('videosRemainApproved')}`)
-        }
-        // Refresh in background
-        onRefresh?.()
-        router.refresh()
-      })
-      .catch(() => {
-        alert(t('failedToUnapprove'))
-      })
-      .finally(() => {
-        setIsTogglingApproval(false)
-      })
-  }
-
-  const handleUnapproveProjectOnly = () => {
-    handleUnapprove(false)
-  }
-
-  const handleUnapproveAll = () => {
-    handleUnapprove(true)
-  }
-
-  const handleCancelUnapprove = () => {
-    setShowUnapproveModal(false)
   }
 
   const handleDelete = async () => {
@@ -387,8 +292,8 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
               </button>
             )}
             {/* 3.5.x: trimmed per request — Open, Send Notification,
-                View Admin Share Page, Project Settings, View Analytics
-                and Approve Project were removed from this menu. Only
+                View Admin Share Page, Project Settings and View Analytics
+                were removed from this menu. Only
                 Share Link, Archive and Delete remain. */}
             {shareUrl && (
               <div className="my-1 h-px bg-white/10" role="separator" />
@@ -571,14 +476,6 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
         </DialogContent>
       </Dialog>
 
-      {/* Unapprove Modal */}
-      <UnapproveModal
-        show={showUnapproveModal}
-        onCancel={handleCancelUnapprove}
-        onUnapproveProjectOnly={handleUnapproveProjectOnly}
-        onUnapproveAll={handleUnapproveAll}
-        processing={isTogglingApproval}
-      />
     </>
   )
 }

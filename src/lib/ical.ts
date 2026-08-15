@@ -18,11 +18,9 @@ export function generateICalFeed(projects: CalendarProject[], domain: string): s
     const dtstamp = formatICalDateTime(new Date(project.updatedAt))
     const lastModified = dtstamp
 
-    const summary = project.status === 'APPROVED'
-      ? `✓ ${project.title}`
-      : project.status === 'ARCHIVED'
-        ? `✗ ${project.title}`
-        : project.title
+    const summary = project.status === 'ARCHIVED'
+      ? `✗ ${project.title}`
+      : project.title
 
     return [
       'BEGIN:VEVENT',

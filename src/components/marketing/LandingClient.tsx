@@ -34,7 +34,7 @@ import {
   Paperclip,
   Lock,
   Timer,
-  ThumbsUp,
+  Download,
   UploadCloud,
   HardDrive,
   Server,
@@ -140,9 +140,9 @@ function HeroMock() {
           <span className="absolute top-3 right-3 px-2 py-1 rounded-md text-[11px] font-semibold bg-primary text-primary-foreground">
             v3
           </span>
-          {/* approved chip */}
-          <span className="absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40">
-            <Check className="w-3 h-3" /> Approved by client
+          {/* comment count chip */}
+          <span className="absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/10 text-white/85 ring-1 ring-white/20 backdrop-blur-md">
+            <MessageSquare className="w-3 h-3" /> 5 comments
           </span>
         </div>
         {/* timeline with comment markers */}
@@ -258,7 +258,7 @@ function ShareMock() {
           <Timer className="w-3.5 h-3.5 text-primary" /> Expires in 7 days
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.04] ring-1 ring-white/10 px-2.5 py-2 text-white/65">
-          <ThumbsUp className="w-3.5 h-3.5 text-primary" /> Client can approve
+          <Download className="w-3.5 h-3.5 text-primary" /> Client can download
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.04] ring-1 ring-white/10 px-2.5 py-2 text-white/65">
           <UploadCloud className="w-3.5 h-3.5 text-primary" /> Client can upload
@@ -309,14 +309,14 @@ function PhoneMock() {
                 ))}
               </div>
             </div>
-            {/* comment + approve */}
+            {/* comment + reply box */}
             <div className="p-3 space-y-2">
               <div className="rounded-lg bg-white/[0.05] ring-1 ring-white/10 px-2.5 py-1.5">
                 <p className="text-[9px] font-semibold text-white">Client · 00:41</p>
                 <p className="text-[9px] text-white/60 mt-0.5">Perfect, ship it! 🎉</p>
               </div>
-              <div className="flex items-center justify-center gap-1.5 h-8 rounded-lg bg-emerald-500/20 ring-1 ring-emerald-500/40 text-emerald-300 text-[11px] font-semibold">
-                <Check className="w-3 h-3" /> Approve
+              <div className="flex items-center gap-1.5 h-8 rounded-lg bg-white/[0.05] ring-1 ring-white/15 px-2.5 text-white/45 text-[10px]">
+                <MessageSquare className="w-3 h-3" /> Leave your comment…
               </div>
             </div>
           </div>
@@ -441,7 +441,7 @@ export function LandingClient() {
     {
       icon: Share2,
       title: 'Client-friendly sharing',
-      text: 'One link is all your client needs. No accounts, no downloads, they watch, comment and approve right in the browser.',
+      text: 'One link is all your client needs. No account, no install, they watch, comment and download right in the browser.',
     },
     {
       icon: Layers,
@@ -494,9 +494,9 @@ export function LandingClient() {
           </h1>
 
           <p className="fc-reveal fc-in mt-6 text-lg sm:text-xl text-white/60 max-w-2xl mx-auto leading-relaxed">
-            FrameComment keeps every cut, comment and approval between your
-            production team and your clients organized, so nothing gets lost
-            in email threads and WeTransfer links ever again.
+            FrameComment keeps every cut, every comment and every delivery
+            between your production team and your clients organized, so nothing
+            gets lost in email threads and WeTransfer links ever again.
           </p>
 
           {/* 5.14: mobile parity — the two CTAs are full-width, equal
@@ -521,9 +521,9 @@ export function LandingClient() {
           {/* 5.15 a11y: the mock is a decorative illustration of the
               product — screen readers get the description instead. */}
           <p className="sr-only">
-            Illustration of the FrameComment player: a video approved by the
-            client, at version 3, with color-coded comments pinned along the
-            timeline and a stack of previous versions ready to compare.
+            Illustration of the FrameComment player: a video at version 3,
+            with color-coded comments pinned along the timeline and a stack of
+            previous versions ready to compare.
           </p>
           <div className="fc-reveal mt-14 sm:mt-20" aria-hidden="true">
             <HeroMock />
@@ -538,7 +538,7 @@ export function LandingClient() {
           title={
             <>
               Everything between “first cut” and{' '}
-              <span className="text-primary">“approved”.</span>
+              <span className="text-primary">“final delivery”.</span>
             </>
           }
           sub="Built for YouTubers, agencies and production teams who deliver video to clients, and are tired of chasing feedback across five apps."
@@ -570,7 +570,7 @@ export function LandingClient() {
             <p>
               FrameComment started as an internal tool for a video production
               team that was drowning in feedback threads: exports in one app,
-              comments in another, approvals somewhere in an inbox. We built
+              comments in another, final files somewhere in an inbox. We built
               the tool we needed, then kept polishing it every single day,
               because we run our own client work through it, terabytes of it.
             </p>
@@ -615,7 +615,7 @@ export function LandingClient() {
       <section className="mx-auto max-w-6xl px-4 sm:px-6 py-16 grid gap-10 lg:grid-cols-2 lg:items-center">
         <div className="space-y-8">
           <SectionHeading
-            eyebrow="Review & approval"
+            eyebrow="Review & feedback"
             title="Feedback lands on the exact frame."
             sub="Your client clicks the moment, types (or speaks), and the note arrives time-stamped in the editor's queue."
           />
@@ -652,7 +652,7 @@ export function LandingClient() {
           <SectionHeading
             eyebrow="Sharing & presenting"
             title="Your client's job is one click."
-            sub="Send a link that carries your company's name, logo and colors. Everything else, passwords, expiry, download and approval rights, is your call."
+            sub="Send a link that carries your company's name, logo and colors. Everything else, passwords, expiry and download rights, is your call."
           />
           <div className="space-y-5">
             <Bullet
@@ -661,9 +661,9 @@ export function LandingClient() {
               text="Password-protect shares, set expiration dates, and share a single video or a whole folder."
             />
             <Bullet
-              icon={ThumbsUp}
-              title="Approvals without accounts"
-              text="Clients review and approve in the browser, no sign-up, no app install, no friction."
+              icon={MessageSquare}
+              title="Review without accounts"
+              text="Clients watch and comment right in the browser, no sign-up, no app install, no friction."
             />
             <Bullet
               icon={UploadCloud}
@@ -694,9 +694,9 @@ export function LandingClient() {
               text="On the phone it's easier to say it: voice notes record straight from the phone's microphone, pinned to the frame."
             />
             <Bullet
-              icon={ThumbsUp}
-              title="Approve on the go"
-              text="One tap to approve a cut. Your editor sees it instantly, no waiting for the client to get back to a desk."
+              icon={Download}
+              title="Deliver on the go"
+              text="Clients can pull the final file straight from their phone, so a delivery never waits for someone to get back to a desk."
             />
             <Bullet
               icon={Zap}

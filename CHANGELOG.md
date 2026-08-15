@@ -14,6 +14,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.11.0] - 2026-08-15
+
+### Aprobarea nu mai există
+
+Un video nu mai poate fi „aprobat" sau „neaprobat". Conceptul a dispărut din
+produs, nu doar din interfață: butoanele, rutele, notificările, emailurile,
+setările și sortările care depindeau de el au fost șterse.
+
+Motivul concret: descărcarea unui folder plat cerea aprobare per-video, în timp
+ce arhiva ZIP nu o cerea. Aceeași cerere primea două răspunsuri diferite în
+funcție de drum, iar clientul vedea „browserul a blocat descărcările" pentru
+ceva ce serverul refuzase. Regula unică — dacă proiectul permite descărcarea,
+fișierul se descarcă — face ca acel dezacord să nu mai poată exista.
+
+### Ce se schimbă vizibil
+
+- **Toate versiunile sunt vizibile în player.** Înainte, aprobarea unei
+  versiuni le ascundea pe celelalte. Acum reel-ul arată stiva completă.
+- **Comentariile nu se mai blochează niciodată.** Aprobarea îngheța firul de
+  discuție; nu mai are ce să-l înghețe.
+- **Descărcarea individuală funcționează pentru orice clip gata procesat**, deci
+  regula „sub 15 fișiere, fără subfoldere → fișiere individuale" chiar se aplică
+  în loc să cadă mereu pe ZIP.
+- **Numele fișierului descărcat este cel real**, fără ofuscarea care ascundea
+  titlurile de lucru înainte de aprobare.
+
+### Eliminat
+
+- Butoanele Approve / Unapprove, modalul de unapprove și badge-urile de status
+- `POST /api/projects/[id]/approve` și `/unapprove`
+- Emailurile `PROJECT_APPROVED` și `ADMIN_PROJECT_APPROVED`, plus evenimentul de
+  notificare externă / push `VIDEO_APPROVAL`
+- Setările „Allow client approval", „Auto-approve project" și „Use preview for
+  approved playback" (proiect + valori implicite)
+- Pasul „approve" din tutorialul clientului și permisiunea `approve`
+- Worker-ul `clean-preview` — watermark-urile sunt oprite la nivel de aplicație
+  din 1.0.8, deci previzualizarea „curată" era o copie identică a celei normale
+
+### Bază de date
+
+Coloanele rămân (ca să nu se piardă istoricul `approvedAt`), dar
+`Video.approved` are acum default `true` și toate rândurile existente sunt
+setate pe `true`. Proiectele blocate în statusul `APPROVED` — de negestionat
+acum că rutele au dispărut — revin la `IN_REVIEW`.
+
+### Site public, docs și metadate
+
+Landing page-ul, metadatele SEO/JSON-LD, imaginea OpenGraph, `llms.txt`,
+`llms-full.txt`, README, wiki-ul din `docs/`, manifestul PWA, catalogul TrueNAS
+și `package.json` nu mai promit aprobare. Nu e cosmetică: vindeai o funcție
+care nu mai există. Chip-ul „Approved by client" din hero a devenit numărul de
+comentarii, butonul „Approve" din mock-ul de telefon a devenit câmpul de
+comentariu, iar secțiunile „Approvals without accounts" / „Approve on the go"
+au devenit „Review without accounts" / „Deliver on the go".
+
+Ghidul de client din wiki a fost rescris acolo unde descria realitatea veche:
+capitolul „Approving videos" a dispărut, iar regulile de descărcare descriu
+acum comportamentul real (folder plat ≤ 15 fișiere → fișiere individuale, în
+rest ZIP). Screenshot-ul „Share Page - Approved" a fost șters.
+
+### Contabilitatea de fondator
+
+Metrica „Approvals" a fost scoasă din dashboard, din raportul PDF și din
+agentul de digest: ar fi rămas permanent 0, iar un zero pus într-un raport
+pentru investitori arată ca o problemă, nu ca o funcție ștearsă.
+
 ## [6.10.1] - 2026-08-15
 
 ### „Your browser blocked multiple downloads" era un diagnostic greșit

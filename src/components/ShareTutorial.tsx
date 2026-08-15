@@ -7,14 +7,13 @@ import 'driver.js/dist/driver.css'
 import { HelpCircle } from 'lucide-react'
 
 /** Steps that may appear after the main tutorial (conditional on video state) */
-const DEFERRED_STEPS = ['version-selector', 'download-btn', 'approve-btn'] as const
+const DEFERRED_STEPS = ['version-selector', 'download-btn'] as const
 
 interface ShareTutorialProps {
   projectId: string
   showTutorial: boolean
   watermarkEnabled?: boolean
   hideFeedback?: boolean
-  clientCanApprove?: boolean
   allowAssetDownload?: boolean
   allowReverseShare?: boolean
   isGuest?: boolean
@@ -27,7 +26,6 @@ export function ShareTutorial({
   showTutorial,
   watermarkEnabled = true,
   hideFeedback = false,
-  clientCanApprove = true,
   allowAssetDownload = true,
   allowReverseShare = false,
   isGuest = false,
@@ -51,7 +49,6 @@ export function ShareTutorial({
     const map: Record<string, { title: string; description: string }> = {
       'version-selector': { title: t('versionsTitle'), description: t('versionsDescription') },
       'download-btn': { title: t('downloadTitle'), description: t('downloadDescription') },
-      'approve-btn': { title: t('approveTitle'), description: t('approveDescription') },
     }
     const info = map[id]
     if (!info) return null
@@ -192,22 +189,7 @@ export function ShareTutorial({
         }
       }
 
-      // Approve button (only visible when video is not yet approved)
-      if (clientCanApprove && !isGuest) {
-        const approveBtn = document.querySelector('[data-tutorial="approve-btn"]')
-        if (approveBtn) {
-          steps.push({
-            element: '[data-tutorial="approve-btn"]',
-            popover: {
-              title: t('approveTitle'),
-              description: t('approveDescription'),
-            },
-          })
-          localStorage.setItem(stepKey('approve-btn'), 'done')
-        }
-      }
-
-      // Download button (only visible when video is approved)
+      // Download button
       if (allowAssetDownload && !isGuest) {
         const downloadBtn = document.querySelector('[data-tutorial="download-btn"]')
         if (downloadBtn) {
@@ -232,7 +214,7 @@ export function ShareTutorial({
     })
 
     return steps
-  }, [inPlayerView, watermarkEnabled, hideFeedback, clientCanApprove, allowAssetDownload, allowReverseShare, isGuest, t, stepKey])
+  }, [inPlayerView, watermarkEnabled, hideFeedback, allowAssetDownload, allowReverseShare, isGuest, t, stepKey])
 
   const runDriver = useCallback((steps: DriveStep[], onComplete?: () => void) => {
     if (steps.length === 0) return
@@ -282,7 +264,7 @@ export function ShareTutorial({
   }, [showTutorial, hasCompleted, inPlayerView, startTutorial])
 
   // Watch for deferred elements that appear after the main tutorial is done
-  // (e.g. version selector when v2 is uploaded, download button after approval)
+  // (e.g. version selector when v2 is uploaded)
   useEffect(() => {
     if (!showTutorial || !hasCompleted || !inPlayerView || isGuest) return
 
@@ -294,7 +276,6 @@ export function ShareTutorial({
         if (localStorage.getItem(stepKey(step)) === 'done') continue
 
         // Skip steps that don't apply to this project config
-        if (step === 'approve-btn' && !clientCanApprove) continue
         if (step === 'download-btn' && !allowAssetDownload) continue
 
         const el = document.querySelector(`[data-tutorial="${step}"]`)
@@ -325,7 +306,7 @@ export function ShareTutorial({
       clearTimeout(timer)
       observer.disconnect()
     }
-  }, [showTutorial, hasCompleted, inPlayerView, isGuest, clientCanApprove, allowAssetDownload, stepKey, buildStepForElement, runDriver])
+  }, [showTutorial, hasCompleted, inPlayerView, isGuest, allowAssetDownload, stepKey, buildStepForElement, runDriver])
 
   // Don't render button if tutorial disabled or guest
   if (!showTutorial || isGuest) return null

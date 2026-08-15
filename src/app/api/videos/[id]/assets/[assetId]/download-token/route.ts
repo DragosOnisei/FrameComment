@@ -63,7 +63,7 @@ export async function POST(
     }
 
     // Check download permissions for non-admins (non-client assets only)
-    // Client-uploaded comment attachments bypass approval/download checks
+    // Client-uploaded comment attachments bypass the download checks
     if (!accessCheck.isAdmin && !isClientAsset) {
       if (!project.allowAssetDownload) {
         return NextResponse.json(
@@ -72,12 +72,6 @@ export async function POST(
         )
       }
 
-      if (!asset.video.approved) {
-        return NextResponse.json(
-          { error: videoMessages.assetsApprovedOnly || 'Assets are only available for approved videos' },
-          { status: 403 }
-        )
-      }
     }
 
     // Generate video access token (we use video access tokens for assets too); tag admin sessions

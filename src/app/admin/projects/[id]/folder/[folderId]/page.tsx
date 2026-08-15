@@ -228,14 +228,12 @@ export default function ProjectFolderPage() {
   }, [videos, fetchFolder])
 
   // Listen for the same global events the project page uses so we
-  // stay in sync after comments are posted / videos approved.
+  // stay in sync after comments are posted.
   useEffect(() => {
     const handler = () => fetchFolder()
-    window.addEventListener('videoApprovalChanged', handler)
     window.addEventListener('commentDeleted', handler)
     window.addEventListener('commentPosted', handler)
     return () => {
-      window.removeEventListener('videoApprovalChanged', handler)
       window.removeEventListener('commentDeleted', handler)
       window.removeEventListener('commentPosted', handler)
     }
@@ -279,18 +277,16 @@ export default function ProjectFolderPage() {
         <div className="hidden md:block">
           <ViewModeToggle value={folderView} onChange={setFolderView} />
         </div>
-        {(!project || project.status !== 'APPROVED') && (
-          <Button
-            variant="default"
-            size="sm"
-            className="hidden md:inline-flex w-9 px-0 shrink-0"
-            onClick={() => videoManagerRef.current?.triggerUpload()}
-            aria-label={t('uploadVideos')}
-            title={t('uploadVideos')}
-          >
-            <Upload className="w-4 h-4" />
-          </Button>
-        )}
+        <Button
+          variant="default"
+          size="sm"
+          className="hidden md:inline-flex w-9 px-0 shrink-0"
+          onClick={() => videoManagerRef.current?.triggerUpload()}
+          aria-label={t('uploadVideos')}
+          title={t('uploadVideos')}
+        >
+          <Upload className="w-4 h-4" />
+        </Button>
         <Button
           variant="ghost"
           size="sm"

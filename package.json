@@ -1,7 +1,7 @@
 {
   "name": "framecomment",
-  "version": "6.10.1",
-  "description": "FrameComment — self-hosted video review and approval platform for filmmakers and video professionals.",
+  "version": "6.11.0",
+  "description": "FrameComment — self-hosted video review and delivery platform for filmmakers and video professionals.",
   "author": {
     "name": "Dragos Onisei",
     "email": "dragosonisei@gmail.com",
@@ -19,7 +19,7 @@
   "keywords": [
     "video",
     "review",
-    "approval",
+    "feedback",
     "filmmakers",
     "self-hosted",
     "framecomment",

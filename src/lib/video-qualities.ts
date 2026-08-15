@@ -24,8 +24,6 @@ export interface QualityOption {
   height: number | null
   /** Bytes, or null when we could not measure the file. */
   bytes: number | null
-  /** True when the file carries a watermark (no clean tier available yet). */
-  watermarked: boolean
 }
 
 /** Tier definitions, smallest first. `label` is the customer-facing name. */
@@ -40,24 +38,18 @@ const TIERS = [
 export const EXACT_DOWNLOAD_TIERS: string[] = TIERS.map((t) => t.quality)
 
 /**
- * The exact file for one tier. Clean (un-watermarked) is preferred when the
- * video is approved and a clean render exists; otherwise the watermarked one.
- * Returns null when that tier was never produced — the caller must not
- * substitute a different resolution.
+ * The exact file for one tier. Returns null when that tier was never
+ * produced — the caller must not substitute a different resolution.
  */
 export function exactPreviewPath(video: any, quality: string): string | null {
   const tier = TIERS.find((t) => t.quality === quality)
   if (!tier) return null
+  // 6.11.0: approval used to pick between the "clean" and the watermarked
+  // render. Both are gone as distinctions — watermarking was switched off
+  // app-wide in 1.0.8, so the two files are identical, and approval no
+  // longer exists at all. Take whichever render is present.
   const clean = tier.clean ? (video[tier.clean] as string | null | undefined) : null
-  if (video.approved && clean) return clean
   return (video[tier.wm] as string | null | undefined) || clean || null
-}
-
-function isWatermarked(video: any, quality: string): boolean {
-  const tier = TIERS.find((t) => t.quality === quality)
-  if (!tier) return false
-  const clean = tier.clean ? (video[tier.clean] as string | null | undefined) : null
-  return !(video.approved && clean)
 }
 
 /**
@@ -107,7 +99,6 @@ export async function listVideoQualities(
       label: tier.label,
       height: tier.height,
       bytes,
-      watermarked: isWatermarked(video, tier.quality),
     })
   }
 
@@ -123,7 +114,6 @@ export async function listVideoQualities(
       label: 'Original',
       height: null,
       bytes: video.originalFileSize != null ? Number(video.originalFileSize) : null,
-      watermarked: false,
     })
   }
 

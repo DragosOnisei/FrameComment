@@ -19,12 +19,10 @@ Configure in the admin panel under Settings.
 - Auto-sync: contacts are automatically created from project recipients.
 
 ## Email Templates
-- 12 template types: customize emails for different notification events.
+- 10 template types: customize emails for different notification events.
   - NEW_VERSION — sent to clients when a new video version is uploaded.
-  - PROJECT_APPROVED — sent to clients when their project is approved.
   - COMMENT_NOTIFICATION — sent to clients when a new comment is posted.
   - ADMIN_COMMENT_NOTIFICATION — sent to admins when a client comments.
-  - ADMIN_PROJECT_APPROVED — sent to admins when a project is approved.
   - PROJECT_GENERAL — general project notification.
   - PASSWORD — sent to clients with their share link password.
   - PASSWORD_RESET — sent to admins for password reset requests.
@@ -61,7 +59,6 @@ Configure in the admin panel under Settings.
 - Unauthorized OTP requests (project, email, method, link).
 - Successful share access (project, method, optional client email, link).
 - Client comments (project, video, timecode, client, comment preview, deep link).
-- Video approvals (project, action, client, video list, link).
 - Due date reminders (project, due date, reminder type).
 
 **Notes**
@@ -81,8 +78,6 @@ Configure in the admin panel under Settings.
 - Max comment attachments: 1-50 files per comment (default: 10).
 
 ## Project behavior
-- Auto-approve project when all videos approved (default: true).
-- Use preview quality for approved playback instead of original (default: false).
 - Allow client asset uploads on comments (default: false).
 - Show interactive client tutorial for first-time visitors (default: true).
 
@@ -143,7 +138,6 @@ Subscribe to project deadlines from any calendar app (Google Calendar, Apple Cal
 - The feed includes **all projects with a due date**, regardless of status or age.
 - Events are never removed from the feed — past deadlines persist as historical records.
 - All events use iCal `STATUS:CONFIRMED` so calendar apps always display them.
-- Approved projects are prefixed with a checkmark in the title (e.g. "✓ Summer Campaign").
 - Archived projects are prefixed with a cross (e.g. "✗ Old Project").
 - Active/in-review projects show the plain title.
 - Events are all-day events (date-only, no time component) — they appear in the top banner of calendar apps, not as time-blocked slots.
@@ -184,12 +178,10 @@ Subscribe to project deadlines from any calendar app (Google Calendar, Apple Cal
 - Allow downloads.
 - Allow client asset uploads.
 - Allow client file submissions (reverse share): clients can upload files directly to the project from the share page without attaching them to a comment. Uploaded files are visible in a "Client Uploads" block on the admin project page.
-- Client can approve (disable for admin-only approval).
 - Hide feedback from other clients.
 - Restrict comments to latest version only.
 - Timestamp display format.
 - Show client tutorial overlay.
-- Use preview for approved playback.
 
 **Due dates**
 - Due date: optional date picker for project deadline.

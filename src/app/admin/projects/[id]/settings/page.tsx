@@ -57,8 +57,6 @@ interface Project {
   allowAssetDownload: boolean
   allowClientAssetUpload: boolean
   allowReverseShare: boolean
-  clientCanApprove: boolean
-  usePreviewForApprovedPlayback: boolean
   showClientTutorial: boolean
   clientNotificationSchedule: string
   clientNotificationTime: string | null
@@ -109,8 +107,6 @@ export default function ProjectSettingsPage() {
   const [allowAssetDownload, setAllowAssetDownload] = useState(true)
   const [allowClientAssetUpload, setAllowClientAssetUpload] = useState(false)
   const [allowReverseShare, setAllowReverseShare] = useState(false)
-  const [clientCanApprove, setClientCanApprove] = useState(true)
-  const [usePreviewForApprovedPlayback, setUsePreviewForApprovedPlayback] = useState(false)
   const [showClientTutorial, setShowClientTutorial] = useState(true)
 
   // Notification settings state
@@ -445,8 +441,6 @@ export default function ProjectSettingsPage() {
         setAllowAssetDownload(data.allowAssetDownload ?? true)
         setAllowClientAssetUpload(data.allowClientAssetUpload ?? false)
         setAllowReverseShare(data.allowReverseShare ?? false)
-        setClientCanApprove(data.clientCanApprove ?? true)
-        setUsePreviewForApprovedPlayback(data.usePreviewForApprovedPlayback ?? false)
         setShowClientTutorial(data.showClientTutorial ?? true)
         setAuthMode(data.authMode || 'PASSWORD')
         setGuestMode(data.guestMode || false)
@@ -730,8 +724,6 @@ export default function ProjectSettingsPage() {
         allowAssetDownload,
         allowClientAssetUpload,
         allowReverseShare,
-        clientCanApprove,
-        usePreviewForApprovedPlayback,
         showClientTutorial,
         sharePassword: sharePassword || null,
         authMode,
@@ -1334,42 +1326,6 @@ export default function ProjectSettingsPage() {
           // Client Share Page content
           const clientShareContent = (
             <>
-              {/* ── Approval & Workflow ─────────────────────────────────── */}
-              <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="clientCanApprove">{t('allowClientApproval')}</Label>
-                    <p className="text-xs text-muted-foreground">
-                      {t('allowClientApprovalDescription')}
-                    </p>
-                  </div>
-                  <Switch
-                    id="clientCanApprove"
-                    checked={clientCanApprove}
-                    onCheckedChange={setClientCanApprove}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="usePreviewForApprovedPlayback">{t('usePreviewForApproved')}</Label>
-                    <p className="text-xs text-muted-foreground">
-                      {t('usePreviewForApprovedDescription')}
-                    </p>
-                  </div>
-                  <Switch
-                    id="usePreviewForApprovedPlayback"
-                    checked={usePreviewForApprovedPlayback}
-                    onCheckedChange={setUsePreviewForApprovedPlayback}
-                  />
-                </div>
-                {usePreviewForApprovedPlayback && watermarkEnabled && (
-                  <p className="text-xs text-muted-foreground italic">
-                    {t('cleanPreviewHint')}
-                  </p>
-                )}
-              </div>
-
               {/* ── Client Access ────────────────────────────────────────── */}
               <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
                 <div className="flex items-center justify-between gap-4">

@@ -93,7 +93,6 @@ export default function CalendarPage() {
   function getStatusColor(status: string): string {
     switch (status) {
       case 'IN_REVIEW': return 'bg-blue-500'
-      case 'APPROVED': return 'bg-green-500'
       case 'SHARE_ONLY': return 'bg-purple-500'
       case 'ARCHIVED': return 'bg-gray-400'
       default: return 'bg-blue-500'

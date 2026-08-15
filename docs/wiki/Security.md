@@ -26,7 +26,7 @@ FrameComment is designed with security as a core principle. All data is encrypte
 - **Hotlink protection**: Prevents unauthorized direct access to video files (configurable: disabled, log-only, or strict blocking).
 - **IP and domain blocking**: Block specific IPs or email domains from accessing the platform.
 - **File validation**: All uploads are validated against expected file types using content inspection (not just file extension).
-- **Guest restrictions**: Guest users cannot download, comment, or approve. Optional restriction to latest version only.
+- **Guest restrictions**: Guest users cannot download or comment. Optional restriction to latest version only.
 
 ## Privacy & GDPR
 

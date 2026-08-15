@@ -58,7 +58,7 @@ export default function OpengraphImage() {
             Client share links
           </span>
           <span style={{ padding: '10px 22px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)' }}>
-            Versions &amp; approvals
+            Versions &amp; compare
           </span>
         </div>
       </div>

@@ -173,7 +173,6 @@ async function duplicateVideoRow(
     processingProgress: isImage ? 100 : 0,
     thumbnailPath: isImage ? newOriginalPath : null,
     mediaType,
-    approved: false,
     storageBackend: srcBackend,
   } as any
 

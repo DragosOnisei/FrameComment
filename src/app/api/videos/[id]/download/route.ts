@@ -66,12 +66,9 @@ export async function GET(
         return NextResponse.json({ error: videoMessages.downloadsDisabledForProject || 'Downloads are disabled for this project' }, { status: 403 })
       }
 
-      if (!video.approved) {
-        return NextResponse.json({ error: videoMessages.downloadsAvailableAfterApproval || 'Downloads available after approval' }, { status: 403 })
-      }
     }
 
-    // Choose safest available file based on role/approval
+    // Choose the safest available file for this role
     let filePath: string | null = null
     if (accessCheck.isAdmin) {
       filePath = video.originalStoragePath || (video as any).preview2160Path || video.preview1080Path || video.preview720Path || null

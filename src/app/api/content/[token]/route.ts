@@ -29,10 +29,10 @@ const CONTENT_SESSION_WINDOW_SECONDS = 60
 // This route re-reads it on EVERY range request while a viewer
 // scrubs/seeks a clip — but for a given videoId the record is
 // effectively immutable during a viewing session (storage paths,
-// approval, and project flags don't change second-to-second). Collapsing
+// project flags don't change second-to-second). Collapsing
 // those identical `findUnique({ include: { project } })` joins into one
 // DB hit per TTL is the single biggest win for seek/scrub latency.
-// A change (e.g. approval) still propagates within VIDEO_CACHE_TTL_MS.
+// A change still propagates within VIDEO_CACHE_TTL_MS.
 const videoWithProjectCache = new Map<
   string,
   { value: any; expiresAt: number }
@@ -286,9 +286,6 @@ export async function GET(
           return NextResponse.json({ error: shareMessages.assetDownloadsNotAllowed || 'Asset downloads not allowed' }, { status: 403 })
         }
 
-        if (!video.approved) {
-          return NextResponse.json({ error: shareMessages.assetsOnlyAvailableForApprovedVideos || 'Assets only available for approved videos' }, { status: 403 })
-        }
       }
 
       filePath = asset.storagePath
@@ -318,7 +315,7 @@ export async function GET(
         }
         filePath = exact
       } else if (isDownload && isAdminRequest && originalPath) {
-        // Admin downloads should always use the original file, even before approval
+        // Admin downloads should always use the original file
         filePath = originalPath
       } else if (
         isDownload &&
@@ -327,19 +324,15 @@ export async function GET(
         video.project.allowAssetDownload
       ) {
         // 3.3.x: client download of the original source. The video-token
-        // route only mints an 'original' token when the video is
-        // approved OR the project allows asset downloads, so an
-        // 'original' download token reaching here is already authorised
-        // — serve the source even before approval.
+        // route only mints an 'original' token when the project allows
+        // asset downloads, so an 'original' download token reaching here
+        // is already authorised.
         filePath = originalPath
-      } else if (video.approved && originalPath) {
-        // Check if project prefers preview playback after approval (for streaming, not downloads)
-        if (!isDownload && video.project.usePreviewForApprovedPlayback) {
-          // Prefer requested clean preview quality, then requested watermarked preview quality, then original
-          filePath = getPreferredPreviewPath(true) || originalPath
-        } else {
-          filePath = originalPath
-        }
+      } else if (isDownload && originalPath) {
+        // 6.11.0: any download serves the source. Approval used to decide
+        // this; it no longer exists, and gating a download on it while the
+        // folder ZIP handed over the same bytes was never coherent anyway.
+        filePath = originalPath
       } else {
         // Fall back to original if no preview exists (e.g. skipTranscoding enabled)
         filePath = getPreferredPreviewPath(false) || originalPath
@@ -377,16 +370,12 @@ export async function GET(
       }
 
       if (isDownload) {
-        // 1.0.6+: ALWAYS preserve the original filename for admin
-        // downloads — that's the contract the studio agreed to when
-        // they uploaded the file. For unapproved client-facing
-        // downloads we keep the obfuscated "ProjectTitle_quality"
-        // form to avoid leaking working titles before approval.
-        const rawFilename = filename || (
-          isAdminRequest || video.approved
-            ? video.originalFileName
-            : `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}${(video.originalFileName || '.mp4').slice((video.originalFileName || '.mp4').lastIndexOf('.'))}`
-        )
+        // 1.0.6+: preserve the original filename — that's the contract the
+        // studio agreed to when they uploaded the file.
+        // 6.11.0: the obfuscated "ProjectTitle_quality" fallback existed to
+        // hide working titles BEFORE approval. With approval gone there is
+        // no "before", so everyone gets the real name.
+        const rawFilename = filename || video.originalFileName
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const ct = assetId ? contentType : getVideoContentType(video.originalFileName || '')
         const presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, ct, readTarget.config)
@@ -435,14 +424,8 @@ export async function GET(
       : 'public, max-age=3600'
 
     if (isDownload) {
-      // Same rule as the S3 branch above: keep the original filename
-      // for admins (and approved videos), obfuscate only for client
-      // share traffic on unapproved files. (1.0.6+)
-      const rawFilename = filename || (
-        isAdminRequest || video.approved
-          ? video.originalFileName
-          : `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}${(video.originalFileName || '.mp4').slice((video.originalFileName || '.mp4').lastIndexOf('.'))}`
-      )
+      // Same rule as the S3 branch above: the real filename, for everyone.
+      const rawFilename = filename || video.originalFileName
       const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
 
       // For non-asset downloads, use original file's content type

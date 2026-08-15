@@ -58,7 +58,7 @@ export async function armOrgForFolderSlug(slug: string): Promise<void> {
 
 // ─── 5.8 post-flip: BY-ID arming for the dual-auth routes ───────────────────
 //
-// The dual-auth routes (comments, markers, video assets/downloads, approve)
+// The dual-auth routes (comments, markers, video assets/downloads)
 // fetch the target entity BEFORE verifyProjectAccess — they need its
 // sharePassword/authMode to run the access check at all. Post-flip those
 // pre-auth lookups ran unarmed and RLS blanked them (admin comment lists

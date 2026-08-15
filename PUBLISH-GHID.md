@@ -28,7 +28,7 @@ Asigură-te că ai conturile create (toate sunt gratuite):
 1. Mergi la https://github.com/new
 2. Setări:
    * **Repository name:** `FrameComment`
-   * **Description:** `Self-hosted video review and approval platform.
+   * **Description:** `Self-hosted video review and delivery platform.
      Forked from ViTransfer.`
    * **Public** (recomandat — AGPL nu impune asta dar GitHub Releases
      publice sunt mult mai simple).

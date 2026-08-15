@@ -215,7 +215,6 @@ export async function GET(
           height: true,
           fps: true,
           status: true,
-          approved: true,
           thumbnailPath: true,
           // 1.9.4+ Phase A: 480p tier is the fastest progressive
           // preview and is preferred for hover-scrub fallback

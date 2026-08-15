@@ -1,7 +1,7 @@
 {
   "name": "FrameComment",
   "short_name": "FrameComment",
-  "description": "Professional video review and approval platform",
+  "description": "Professional video review and delivery platform",
   "start_url": "/admin",
   "display": "standalone",
   "background_color": "#121212",

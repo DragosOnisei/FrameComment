@@ -18,7 +18,7 @@ export const runtime = 'nodejs'
 /**
  * POST /api/share/[token]/guest
  *
- * Creates a guest session for limited access (videos only, no comments/approval)
+ * Creates a guest session for limited access (videos only, no comments)
  */
 export async function POST(
   request: NextRequest,

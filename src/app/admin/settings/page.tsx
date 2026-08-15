@@ -56,13 +56,10 @@ interface Settings {
   maxCommentAttachments: number | null
   maxReverseShareFiles: number | null
   defaultTimestampDisplay: string | null
-  autoApproveProject: boolean | null
-  defaultUsePreviewForApprovedPlayback: boolean | null
   defaultAllowClientAssetUpload: boolean | null
   defaultAllowReverseShare: boolean | null
   defaultShowClientTutorial: boolean | null
   defaultAllowAssetDownload: boolean | null
-  defaultClientCanApprove: boolean | null
   privacyDisclosureEnabled: boolean | null
   privacyDisclosureText: string | null
   adminNotificationSchedule: string | null
@@ -193,13 +190,10 @@ export default function GlobalSettingsPage() {
   const REVERSE_SHARE_UNLIMITED = '99999'
   const [maxReverseShareFiles, setMaxReverseShareFiles] = useState(REVERSE_SHARE_UNLIMITED)
   const [defaultTimestampDisplay, setDefaultTimestampDisplay] = useState('TIMECODE')
-  const [autoApproveProject, setAutoApproveProject] = useState(true)
-  const [defaultUsePreviewForApprovedPlayback, setDefaultUsePreviewForApprovedPlayback] = useState(false)
   const [defaultAllowClientAssetUpload, setDefaultAllowClientAssetUpload] = useState(false)
   const [defaultAllowReverseShare, setDefaultAllowReverseShare] = useState(false)
   const [defaultShowClientTutorial, setDefaultShowClientTutorial] = useState(true)
   const [defaultAllowAssetDownload, setDefaultAllowAssetDownload] = useState(true)
-  const [defaultClientCanApprove, setDefaultClientCanApprove] = useState(true)
 
   // Form state for privacy disclosure
   const [privacyDisclosureEnabled, setPrivacyDisclosureEnabled] = useState(false)
@@ -312,13 +306,10 @@ export default function GlobalSettingsPage() {
     // The save payload below also re-asserts the unlimited sentinel.
     setMaxReverseShareFiles(REVERSE_SHARE_UNLIMITED)
     setDefaultTimestampDisplay(data.defaultTimestampDisplay || 'TIMECODE')
-    setAutoApproveProject(data.autoApproveProject ?? true)
-    setDefaultUsePreviewForApprovedPlayback(data.defaultUsePreviewForApprovedPlayback ?? false)
     setDefaultAllowClientAssetUpload(data.defaultAllowClientAssetUpload ?? false)
     setDefaultAllowReverseShare(data.defaultAllowReverseShare ?? false)
     setDefaultShowClientTutorial(data.defaultShowClientTutorial ?? true)
     setDefaultAllowAssetDownload(data.defaultAllowAssetDownload ?? true)
-    setDefaultClientCanApprove(data.defaultClientCanApprove ?? true)
     setPrivacyDisclosureEnabled(data.privacyDisclosureEnabled ?? false)
     setPrivacyDisclosureText(data.privacyDisclosureText || '')
     setTestEmailAddress(data.smtpFromAddress || '')
@@ -642,13 +633,10 @@ export default function GlobalSettingsPage() {
         // refactored.
         maxReverseShareFiles: parseInt(REVERSE_SHARE_UNLIMITED, 10),
         defaultTimestampDisplay: defaultTimestampDisplay || 'TIMECODE',
-        autoApproveProject: autoApproveProject,
-        defaultUsePreviewForApprovedPlayback: defaultUsePreviewForApprovedPlayback,
         defaultAllowClientAssetUpload: defaultAllowClientAssetUpload,
         defaultAllowReverseShare: defaultAllowReverseShare,
         defaultShowClientTutorial: defaultShowClientTutorial,
         defaultAllowAssetDownload: defaultAllowAssetDownload,
-        defaultClientCanApprove: defaultClientCanApprove,
         privacyDisclosureEnabled: privacyDisclosureEnabled,
         privacyDisclosureText: privacyDisclosureText || null,
         adminNotificationSchedule: adminNotificationSchedule,
@@ -970,14 +958,10 @@ export default function GlobalSettingsPage() {
 
   const projectDefaultsProps = {
     defaultTimestampDisplay, setDefaultTimestampDisplay,
-    autoApproveProject, setAutoApproveProject,
-    defaultUsePreviewForApprovedPlayback, setDefaultUsePreviewForApprovedPlayback,
     defaultAllowClientAssetUpload, setDefaultAllowClientAssetUpload,
     defaultAllowReverseShare, setDefaultAllowReverseShare,
     defaultShowClientTutorial, setDefaultShowClientTutorial,
     defaultAllowAssetDownload, setDefaultAllowAssetDownload,
-    defaultClientCanApprove, setDefaultClientCanApprove,
-    defaultWatermarkEnabled,
   }
 
   const securityProps = {

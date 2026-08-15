@@ -7,10 +7,6 @@ import { useTranslations } from 'next-intl'
 interface ProjectDefaultsSectionProps {
   defaultTimestampDisplay: string
   setDefaultTimestampDisplay: (value: string) => void
-  autoApproveProject: boolean
-  setAutoApproveProject: (value: boolean) => void
-  defaultUsePreviewForApprovedPlayback: boolean
-  setDefaultUsePreviewForApprovedPlayback: (value: boolean) => void
   defaultAllowClientAssetUpload: boolean
   setDefaultAllowClientAssetUpload: (value: boolean) => void
   defaultAllowReverseShare: boolean
@@ -19,9 +15,6 @@ interface ProjectDefaultsSectionProps {
   setDefaultShowClientTutorial: (value: boolean) => void
   defaultAllowAssetDownload: boolean
   setDefaultAllowAssetDownload: (value: boolean) => void
-  defaultClientCanApprove: boolean
-  setDefaultClientCanApprove: (value: boolean) => void
-  defaultWatermarkEnabled: boolean
   show: boolean
   setShow: (value: boolean) => void
   collapsible?: boolean
@@ -30,10 +23,6 @@ interface ProjectDefaultsSectionProps {
 export function ProjectDefaultsSection({
   defaultTimestampDisplay,
   setDefaultTimestampDisplay,
-  autoApproveProject,
-  setAutoApproveProject,
-  defaultUsePreviewForApprovedPlayback,
-  setDefaultUsePreviewForApprovedPlayback,
   defaultAllowClientAssetUpload,
   setDefaultAllowClientAssetUpload,
   defaultAllowReverseShare,
@@ -42,9 +31,6 @@ export function ProjectDefaultsSection({
   setDefaultShowClientTutorial,
   defaultAllowAssetDownload,
   setDefaultAllowAssetDownload,
-  defaultClientCanApprove,
-  setDefaultClientCanApprove,
-  defaultWatermarkEnabled,
   show,
   setShow,
   collapsible,
@@ -61,53 +47,6 @@ export function ProjectDefaultsSection({
       contentClassName="space-y-4 border-t pt-4"
       collapsible={collapsible}
     >
-      {/* ── Approval & Workflow ────────────────────────────────────────────── */}
-      <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5 flex-1">
-            <Label htmlFor="defaultClientCanApprove">{t('projectDefaults.defaultClientCanApprove')}</Label>
-            <p className="text-xs text-white/55">
-              {t('projectDefaults.defaultClientCanApproveHint')}
-            </p>
-          </div>
-          <Switch
-            id="defaultClientCanApprove"
-            checked={defaultClientCanApprove}
-            onCheckedChange={setDefaultClientCanApprove}
-          />
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5 flex-1">
-            <Label htmlFor="autoApproveProject">{t('videoProcessing.autoApprove')}</Label>
-            <p className="text-xs text-white/55">
-              {t('videoProcessing.autoApproveHint')}
-            </p>
-            <p className="text-xs text-warning mt-2">
-              {t('videoProcessing.autoApproveDisableHint')}
-            </p>
-          </div>
-          <Switch id="autoApproveProject" checked={autoApproveProject} onCheckedChange={setAutoApproveProject} />
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5 flex-1">
-            <Label htmlFor="defaultUsePreviewForApprovedPlayback">{t('videoProcessing.usePreviewApproved')}</Label>
-            <p className="text-xs text-white/55">
-              {t('videoProcessing.usePreviewApprovedHint')}
-            </p>
-          </div>
-          <Switch
-            id="defaultUsePreviewForApprovedPlayback"
-            checked={defaultUsePreviewForApprovedPlayback}
-            onCheckedChange={setDefaultUsePreviewForApprovedPlayback}
-          />
-        </div>
-        {defaultUsePreviewForApprovedPlayback && defaultWatermarkEnabled && (
-          <p className="text-xs text-white/55 italic">
-            {t('videoProcessing.cleanPreviewNote')}
-          </p>
-        )}
-      </div>
-
       {/* ── Client Access ─────────────────────────────────────────────────── */}
       <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
         <div className="flex items-center justify-between gap-4">

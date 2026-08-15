@@ -12,7 +12,7 @@ import { logError } from '@/lib/logging'
 export const runtime = 'nodejs'
 
 /**
- * Generate a temporary download token for downloading all approved videos as ZIP.
+ * Generate a temporary download token for downloading every ready video as ZIP.
  * Used by share page "Download All" button.
  */
 export async function POST(
@@ -77,11 +77,10 @@ export async function POST(
       )
     }
 
-    // Find all approved videos with latest version per name
-    const approvedVideos = await prisma.video.findMany({
+    // 6.11.0: every ready clip, latest version per name — approval is gone.
+    const downloadableVideos = await prisma.video.findMany({
       where: {
         projectId: project.id,
-        approved: true,
         status: { in: ['READY', 'PROCESSING'] },
       },
       select: {
@@ -94,9 +93,9 @@ export async function POST(
       orderBy: { createdAt: 'desc' },
     })
 
-    if (approvedVideos.length === 0) {
+    if (downloadableVideos.length === 0) {
       return NextResponse.json(
-        { error: shareMessages.noApprovedVideos || 'No approved videos available for download' },
+        { error: shareMessages.noVideosToDownload || 'No videos available for download' },
         { status: 404 }
       )
     }
@@ -115,7 +114,7 @@ export async function POST(
     const tokenData = {
       projectId: project.id,
       projectTitle: project.title,
-      videoIds: approvedVideos.map((v) => v.id),
+      videoIds: downloadableVideos.map((v) => v.id),
       sessionId,
       ipAddress,
       userAgentHash,
@@ -131,7 +130,7 @@ export async function POST(
 
     return NextResponse.json({
       url: `/api/content/bulk-zip/${downloadToken}`,
-      videoCount: approvedVideos.length,
+      videoCount: downloadableVideos.length,
     })
   } catch (error) {
     logError('Bulk download token generation error:', error)

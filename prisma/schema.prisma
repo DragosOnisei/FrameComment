@@ -169,7 +169,7 @@ model Project {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   approvedAt      DateTime?
-  approvedVideoId String? // ID of the video that was approved (null if not approved)
+  approvedVideoId String? // 6.11.0: legacy, unused — approval was removed
 
   // Comment restrictions
   restrictCommentsToLatestVersion Boolean @default(false)
@@ -190,13 +190,13 @@ model Project {
   applyPreviewLut      Boolean @default(false) // 1.9.4+ Phase A: LUT off by default for ALL videos — the color-calibration filter ran at INPUT resolution before the downscale, adding 30-60 s per tier on a 40-min source for visual benefit the typical reviewer never asks for. Operators who actually want color-calibrated previews can opt in per-project.
 
   // Client share page settings
-  allowAssetDownload     Boolean @default(true) // Allow clients to download video assets when project is approved
+  allowAssetDownload     Boolean @default(true) // Allow clients to download video assets
   allowClientAssetUpload Boolean @default(true) // Allow clients to upload file attachments on comments (1.9.1+: default true; admin can disable per project)
-  clientCanApprove       Boolean @default(true) // Allow clients to approve videos (false = admin only)
+  clientCanApprove       Boolean @default(true) // 6.11.0: legacy, unused — approval was removed
   allowReverseShare      Boolean @default(false) // Allow clients to upload files directly to the project (reverse share)
 
-  // Approved playback settings
-  usePreviewForApprovedPlayback Boolean @default(false) // Use browser-compatible preview instead of original after approval
+  // 6.11.0: legacy, unused — approval was removed
+  usePreviewForApprovedPlayback Boolean @default(false)
 
   // Client tutorial
   showClientTutorial Boolean @default(true) // Show interactive tutorial overlay for first-time visitors
@@ -497,13 +497,15 @@ model Video {
   storyboardCols  Int?
   storyboardRows  Int?
 
-  // Clean (non-watermarked) previews for approved playback
+  // 6.11.0: legacy, unused — watermarking is off app-wide since 1.0.8
   cleanPreview2160Path String?
   cleanPreview1080Path String?
   cleanPreview720Path  String?
 
-  // Per-video approval
-  approved   Boolean   @default(false)
+  // 6.11.0: approval was removed from the product. The columns stay so the
+  // historical `approvedAt` timestamps are not destroyed, but `approved` is
+  // now true for every row and nothing in the app ever reads it.
+  approved   Boolean   @default(true)
   approvedAt DateTime?
 
   createdAt DateTime @default(now())
@@ -986,7 +988,7 @@ model Settings {
   defaultTimestampDisplay String @default("TIMECODE")
 
   // Default Approved Playback Setting
-  defaultUsePreviewForApprovedPlayback Boolean @default(false)
+  defaultUsePreviewForApprovedPlayback Boolean @default(false) // 6.11.0: legacy, unused
 
   // Default Client Asset Upload Setting
   defaultAllowClientAssetUpload Boolean @default(false)
@@ -994,11 +996,11 @@ model Settings {
   // Default Client Access Defaults
   defaultAllowReverseShare  Boolean @default(false) // Default: allow clients to submit files directly to project
   defaultShowClientTutorial Boolean @default(true)  // Default: show interactive tutorial for first-time visitors
-  defaultAllowAssetDownload Boolean @default(true)  // Default: allow clients to download approved assets
-  defaultClientCanApprove   Boolean @default(true)  // Default: allow clients to approve videos
+  defaultAllowAssetDownload Boolean @default(true)  // Default: allow clients to download assets
+  defaultClientCanApprove   Boolean @default(true)  // 6.11.0: legacy, unused
 
   // Project Behavior
-  autoApproveProject Boolean @default(true) // Auto-approve project when all videos approved
+  autoApproveProject Boolean @default(true) // 6.11.0: legacy, unused
 
   // Admin notification settings (global)
   // Note: Approval emails and manual admin notifications are always IMMEDIATE regardless of this setting

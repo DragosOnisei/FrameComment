@@ -285,20 +285,9 @@ export async function PATCH(
       updateData.clientCompanyId = validatedBody.clientCompanyId || null
     }
 
-    // Handle status update (for approval)
+    // 6.11.0: status is a plain workflow field now — approval is gone.
     if (validatedBody.status !== undefined) {
       updateData.status = validatedBody.status
-
-      // When approving project, just set the status and timestamp
-      // Video approvals are handled separately by the admin
-      if (validatedBody.status === 'APPROVED') {
-        updateData.approvedAt = new Date()
-      }
-
-      // When changing status away from APPROVED, clear approval metadata
-      if (validatedBody.status !== 'APPROVED') {
-        updateData.approvedAt = null
-      }
     }
 
     // Handle revision settings
@@ -392,14 +381,7 @@ export async function PATCH(
       updateData.allowReverseShare = validatedBody.allowReverseShare
     }
 
-    if (validatedBody.clientCanApprove !== undefined) {
-      updateData.clientCanApprove = validatedBody.clientCanApprove
-    }
 
-    // Handle approved playback setting
-    if (validatedBody.usePreviewForApprovedPlayback !== undefined) {
-      updateData.usePreviewForApprovedPlayback = validatedBody.usePreviewForApprovedPlayback
-    }
 
     // Handle client tutorial setting
     if (validatedBody.showClientTutorial !== undefined) {

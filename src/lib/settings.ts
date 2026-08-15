@@ -157,23 +157,6 @@ export async function getOpenAiApiKey(): Promise<string | null> {
   return envKey && envKey.trim() ? envKey.trim() : null
 }
 
-/**
- * Check if auto-approve project when all videos approved is enabled
- * Returns true as default if not set
- */
-export async function getAutoApproveProject(): Promise<boolean> {
-  try {
-    const settings = await prisma.settings.findUnique({
-      where: orgSettingsWhere(),
-      select: { autoApproveProject: true },
-    })
-
-    return settings?.autoApproveProject ?? true
-  } catch (error) {
-    logError('Error fetching auto-approve setting:', error)
-    return true // Default to enabled on error
-  }
-}
 
 /**
  * Get client session timeout in seconds from security settings

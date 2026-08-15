@@ -15,8 +15,8 @@ selection (yellow OUT handle), voice comments, annotations (linie/săgeată/
 rect/culori/undo), version stacking drag-to-stack, foldere cu sharing
 (password/OTP/expiration), reactions, edit/delete propriile comment-uri,
 hover-scrub + storyboard sprite-sheets, Quick Look pe Space, grid + table
-view, search global, drag-and-drop uploads cu TUS resumable, approve/
-in-review/archived workflow, trash cu 30-day recovery, WebAuthn passkeys,
+view, search global, drag-and-drop uploads cu TUS resumable, in-review/
+share-only/archived workflow, trash cu 30-day recovery, WebAuthn passkeys,
 mobile responsive, multi-language.
 
 **Argumente diferențiatoare (ce Frame.io NU oferă)**:

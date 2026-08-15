@@ -11,8 +11,8 @@ FrameComment (https://framecomment.com) is a web-based video review,
 feedback and delivery platform. It sits between a video production team and
 its clients: the team uploads cuts, the client watches in the browser and
 leaves feedback pinned to exact moments, the team ships new versions, and the
-client approves — all in one organized place instead of scattered email
-threads, chat messages and file-transfer links.
+final files are delivered through the same link — all in one organized place
+instead of scattered email threads, chat messages and file-transfer links.
 
 It is built and operated by MINDQUB S.R.L., a Romanian limited liability
 company (Strada Vespasian nr. 47, Camera 2, Sector 1, București 011981,
@@ -30,12 +30,11 @@ client work, at terabyte scale.
 
 ## Core features (all real, all shipped)
 
-Review and approval:
+Review and feedback:
 - Comments pinned to the exact frame (timestamped), with colored timeline
   markers and keyboard navigation between markers
 - Voice comments recorded directly on the frame
 - Comment attachments (reference images, files)
-- Client approval flow: one click, no client account required
 - Version stacking: v1…vN grouped on one card; per-version original names
   are preserved and shown when browsing older versions
 - Side-by-side version comparison with synced playback and audio focus
@@ -44,7 +43,7 @@ Review and approval:
 Sharing and presenting:
 - Share a whole project, a folder or a single video with one link
 - Optional passwords and expiration dates per link
-- Per-link permissions: comments, downloads, approvals, client uploads
+- Per-link permissions: comments, downloads, client uploads
 - Clients can upload raw footage or assets through the same link
 - Company branding (name, logo, accent colors) on the review experience
 

@@ -84,13 +84,6 @@ export async function GET(
       )
     }
 
-    if (!accessCheck.isAdmin && !video.approved) {
-      return NextResponse.json(
-        { error: videoMessages.assetsApprovedOnly || 'Assets are only available for approved videos' },
-        { status: 403 }
-      )
-    }
-
     // Get all assets for this video
     const assets = await prisma.videoAsset.findMany({
       where: { videoId, uploadCompletedAt: { not: null } },

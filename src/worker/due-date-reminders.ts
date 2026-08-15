@@ -45,7 +45,7 @@ export async function processDueDateReminders() {
         lt: new Date(tomorrow.getTime() + 86400000),
       },
       dueReminder: 'DAY_BEFORE',
-      status: { notIn: ['APPROVED', 'ARCHIVED'] },
+      status: { notIn: ['ARCHIVED'] },
     },
     select: { id: true, title: true, dueDate: true },
   })
@@ -58,7 +58,7 @@ export async function processDueDateReminders() {
         lt: new Date(nextWeek.getTime() + 86400000),
       },
       dueReminder: 'WEEK_BEFORE',
-      status: { notIn: ['APPROVED', 'ARCHIVED'] },
+      status: { notIn: ['ARCHIVED'] },
     },
     select: { id: true, title: true, dueDate: true },
   })

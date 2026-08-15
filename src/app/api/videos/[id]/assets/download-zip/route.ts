@@ -74,7 +74,7 @@ export async function POST(
   return NextResponse.json({ error: videoMessages.unauthorizedApi || 'Unauthorized' }, { status: 403 })
     }
 
-    // For non-admins, verify asset download settings and video approval
+    // For non-admins, verify asset download settings
     if (!accessCheck.isAdmin) {
       // Check if project allows asset downloads
       if (!project.allowAssetDownload) {
@@ -84,13 +84,6 @@ export async function POST(
         )
       }
 
-      // Check if video is approved (assets only available for approved videos)
-      if (!video.approved) {
-        return NextResponse.json(
-          { error: videoMessages.assetsApprovedOnly || 'Assets are only available for approved videos' },
-          { status: 403 }
-        )
-      }
     }
 
     // Get all requested assets

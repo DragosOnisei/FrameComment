@@ -1,6 +1,6 @@
 # FrameComment
 
-Self-hosted video review and approval platform for filmmakers and video
+Self-hosted video review and delivery platform for filmmakers and video
 professionals.
 
 ## Versions

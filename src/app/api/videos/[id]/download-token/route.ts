@@ -61,12 +61,6 @@ export async function POST(
         )
       }
 
-      if (!video.approved) {
-        return NextResponse.json(
-          { error: videoMessages.downloadsAvailableAfterApproval || 'Downloads available after approval' },
-          { status: 403 }
-        )
-      }
     }
 
     // 6.9.0: an explicit resolution may be requested. Anything else — including

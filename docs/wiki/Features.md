@@ -7,7 +7,6 @@
 - Timestamped comments with threaded replies and version tracking.
 - Annotation drawing on video frames (freehand, color picker, opacity control, undo/redo).
 - Comment file attachments with TUS resumable uploads (multiple files, drag-and-drop).
-- Approval workflow per video; optional auto-approve project when all videos approved.
 - Project archiving to hide completed work while preserving data.
 - Share links with password, email OTP, both methods, or guest access.
 - Due dates with calendar view (day/week/month/year), Gantt chart, and iCal feed.
@@ -51,11 +50,10 @@
 - Asset management: images, audio, subtitles, project files, and documents with content validation.
 - Per-version thumbnails from uploaded image assets.
 - Client uploads block: view, download, and delete files submitted by clients via reverse share, with multi-select bulk actions.
-- Configurable global defaults for new projects (resolution, watermark, downloads, comments, approval).
+- Configurable global defaults for new projects (resolution, watermark, downloads, comments).
 - Per-project overrides for global settings.
 - Video reprocessing: re-transcode videos when settings change (resolution, watermark).
 - Configurable max upload size and max comment attachments.
-- Option to use preview quality for approved playback (instead of original).
 - Privacy disclosure with custom text and GDPR consent tracking.
 - Share token TTL override for fine-grained session control.
 

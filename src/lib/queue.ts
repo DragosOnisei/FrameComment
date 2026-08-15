@@ -6,7 +6,6 @@ let videoQueueInstance: Queue<VideoQueueJobData> | null = null
 let assetQueueInstance: Queue<AssetProcessingJob> | null = null
 let projectUploadQueueInstance: Queue<ProjectUploadProcessingJob> | null = null
 let externalNotificationQueueInstance: Queue<ExternalNotificationJob> | null = null
-let cleanPreviewQueueInstance: Queue<CleanPreviewJob> | null = null
 let storageTransferQueueInstance: Queue<StorageTransferJob> | null = null
 
 // 2.2.0+: legacy single-shot job payload. Kept exported (not
@@ -236,12 +235,6 @@ export interface ExternalNotificationJob {
   notifyType?: 'info' | 'success' | 'warning' | 'failure'
 }
 
-export interface CleanPreviewJob {
-  videoId: string
-  projectId: string
-  originalStoragePath: string
-  resolution: string // "720p", "1080p", or "2160p"
-}
 
 export function getVideoQueue(): Queue<VideoQueueJobData> {
   // Don't create queue during build phase
@@ -359,33 +352,6 @@ export function getExternalNotificationQueue(): Queue<ExternalNotificationJob> {
   return externalNotificationQueueInstance
 }
 
-export function getCleanPreviewQueue(): Queue<CleanPreviewJob> {
-  // Don't create queue during build phase
-  if (process.env.NEXT_PHASE === 'phase-production-build') {
-    throw new Error('Queue not available during build phase')
-  }
-
-  if (!cleanPreviewQueueInstance) {
-    cleanPreviewQueueInstance = new Queue<CleanPreviewJob>('clean-preview-processing', {
-      connection: getRedisForQueue(),
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
-        },
-        removeOnComplete: {
-          age: 3600, // keep completed jobs for 1 hour
-        },
-        removeOnFail: {
-          age: 86400, // keep failed jobs for 24 hours
-        },
-      },
-    })
-  }
-
-  return cleanPreviewQueueInstance
-}
 
 // 4.2.0+ (Phase 2): storage transfer. One-shot job that migrates every file
 // off non-active backends onto the active one. Payload is empty — the worker

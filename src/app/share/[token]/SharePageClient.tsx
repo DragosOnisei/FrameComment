@@ -220,13 +220,13 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // 2.2.3+: thumbnail URL cache (videoId → /api/content/<token>).
   // Mirrors the admin share page fix — see the long comment above the
   // thumbnails effect there. The public share page doesn't have a 3.5s
-  // poll, but `fetchProjectData` (called on approve / OTP / password
+  // poll, but `fetchProjectData` (called on OTP / password
   // success) wipes `tokenCacheRef` and triggers a fresh `setProject`,
   // which re-fires the thumbnails effect with a new `videosByName`
-  // reference. Without per-videoId thumbnail caching every approval
+  // reference. Without per-videoId thumbnail caching every refetch
   // burst-fires N thumbnail token requests at the same endpoint —
   // small N today, but the public path has no rate-limit headroom and
-  // a project with many approved versions would hit the same wall.
+  // a project with many versions would hit the same wall.
   const thumbnailUrlCacheRef = useRef<Map<string, string>>(new Map())
   // 2.2.3+: stable fingerprint of the last thumbnails sweep so the
   // effect can no-op on identical-content re-runs.
@@ -371,7 +371,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     }
   }, [fetchComments])
 
-  // Fetch project data function (for refresh after approval)
+  // Fetch project data function
   const fetchProjectData = async (tokenOverride?: string | null) => {
     try {
       const authToken = tokenOverride || shareToken
@@ -416,7 +416,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         }
         setProject(projectData)
 
-        // Clear token cache to force re-fetch of video tokens with updated approval status
+        // Clear token cache to force a re-fetch of the video tokens
         tokenCacheRef.current.clear()
 
         // Fetch comments after project loads (if not hidden)
@@ -570,7 +570,6 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         v?.preview1080Path ? 1 : 0,
         v?.preview2160Path ? 1 : 0,
         Array.isArray(v?.hlsQualities) ? v.hlsQualities.length : 0,
-        v?.approved ? 1 : 0,
       ].join('|'))
       .join('::')
   }, [])
@@ -596,18 +595,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         if (urlVideoName && effectiveVideosByName[urlVideoName]) {
           videoNameToUse = urlVideoName
         }
-        // Priority 2: Saved video name from recent approval
-        else {
-          const savedVideoName = sessionStorage.getItem('approvedVideoName')
-          if (savedVideoName) {
-            sessionStorage.removeItem('approvedVideoName')
-            if (effectiveVideosByName[savedVideoName]) {
-              videoNameToUse = savedVideoName
-            }
-          }
-        }
-
-        // Priority 3: First video
+        // Priority 2: First video
         if (!videoNameToUse) {
           videoNameToUse = videoNames[0]
         }
@@ -634,7 +622,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           setInitialSeekTime(urlTimestamp)
         }
       } else {
-        // Keep activeVideos in sync when project data refreshes (ensures updated approval status/thumbnails/tokens)
+        // Keep activeVideos in sync when project data refreshes (thumbnails / tokens)
         const videos = effectiveVideosByName[activeVideoName]
         // 2.2.0+: same fingerprint-based no-op suppression as the
         // admin share page — avoids re-tokenizing every refresh
@@ -742,51 +730,23 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           let streamToken2160p = ''
           let downloadToken = null
 
-          if (video.approved) {
-            // Check if project uses preview for approved playback
-            if (project?.usePreviewForApprovedPlayback) {
-              // Use preview tokens for streaming, original for download
-              const [token480, token720, token1080, token2160, originalToken] = await Promise.all([
-                fetchVideoTokenWithRetry(video.id, '480p'),
-                fetchVideoTokenWithRetry(video.id, '720p'),
-                fetchVideoTokenWithRetry(video.id, '1080p'),
-                fetchVideoTokenWithRetry(video.id, '2160p'),
-                fetchVideoTokenWithRetry(video.id, 'original'),
-              ])
-              streamToken480p = token480
-              streamToken720p = token720
-              streamToken1080p = token1080
-              streamToken2160p = token2160
-              downloadToken = originalToken
-            } else {
-              // Default: original for everything
-              const originalToken = await fetchVideoTokenWithRetry(video.id, 'original')
-              streamToken480p = originalToken
-              streamToken720p = originalToken
-              streamToken1080p = originalToken
-              streamToken2160p = originalToken
-              downloadToken = originalToken
-            }
-          } else {
-            const [token480, token720, token1080, token2160] = await Promise.all([
-              fetchVideoTokenWithRetry(video.id, '480p'),
-              fetchVideoTokenWithRetry(video.id, '720p'),
-              fetchVideoTokenWithRetry(video.id, '1080p'),
-              fetchVideoTokenWithRetry(video.id, '2160p'),
-            ])
-            streamToken480p = token480
-            streamToken720p = token720
-            streamToken1080p = token1080
-            streamToken2160p = token2160
-            // 3.3.x: when the project allows downloads, also mint an
-            // original download token for not-yet-approved videos so the
-            // client gets the top-right Download button (e.g. on a
-            // single-video share). The share video-token + content
-            // routes permit the original under the same
-            // `allowAssetDownload` rule.
-            if (project?.allowAssetDownload) {
-              downloadToken = await fetchVideoTokenWithRetry(video.id, 'original')
-            }
+          // 6.11.0: one token plan for every video. Approval used to switch
+          // between "stream the original" and "stream the preview ladder";
+          // it no longer exists, so we always mint the ladder for playback
+          // and, when the project allows downloads, an original for the
+          // download button.
+          const [token480, token720, token1080, token2160] = await Promise.all([
+            fetchVideoTokenWithRetry(video.id, '480p'),
+            fetchVideoTokenWithRetry(video.id, '720p'),
+            fetchVideoTokenWithRetry(video.id, '1080p'),
+            fetchVideoTokenWithRetry(video.id, '2160p'),
+          ])
+          streamToken480p = token480
+          streamToken720p = token720
+          streamToken1080p = token1080
+          streamToken2160p = token2160
+          if (project?.allowAssetDownload) {
+            downloadToken = await fetchVideoTokenWithRetry(video.id, 'original')
           }
 
           let thumbnailUrl = null
@@ -830,7 +790,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         }
       })
     )
-  }, [shareToken, fetchVideoTokenWithRetry, project?.usePreviewForApprovedPlayback])
+  }, [shareToken, fetchVideoTokenWithRetry, project?.allowAssetDownload])
 
   // 2.2.0+: Match the admin share page's "usable tokenized clip"
   // predicate so the same defensive guard works here. A clip needs at
@@ -902,7 +862,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // 2.2.3+: same root-cause fix as the admin share page — guard the
   // effect with a (name → videoIdWithThumb) fingerprint and a per-
   // videoId thumbnail URL cache so re-runs triggered by a fresh
-  // `project.videosByName` reference (post-approve refetch, OTP /
+  // `project.videosByName` reference (refetch, OTP /
   // password success seeding `fetchProjectData`, etc.) don't re-mint
   // thumbnail tokens that haven't changed. See the matching comment on
   // the admin share page for the full rationale.
@@ -1607,13 +1567,9 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   }
 
   // Filter to READY videos first
-  let readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
+  const readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
 
-  // If any video is approved, show ONLY approved videos (for both admin and client)
-  const hasApprovedVideo = readyVideos.some((v: any) => v.approved)
-  if (hasApprovedVideo) {
-    readyVideos = readyVideos.filter((v: any) => v.approved)
-  }
+  // 6.11.0: no approval filter — every ready version is listed.
 
   // 3.2.x: active version's signed download URL for the top-right
   // download button in the player toolbar. `downloadUrl` is only set on
@@ -1698,12 +1654,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           <div className="flex items-center gap-2" data-tutorial="grid-actions">
             {(() => {
               if (isGuest) return null
-              const approvedCount = project.videosByName
-                ? Object.values(project.videosByName as Record<string, any[]>)
-                    .filter((versions) => versions.some((v: any) => v.approved))
-                    .length
+              // 6.11.0: counts clips, not approved clips.
+              const downloadableCount = project.videosByName
+                ? Object.keys(project.videosByName as Record<string, any[]>).length
                 : 0
-              const showDownloadAll = project.allowAssetDownload && approvedCount >= 2
+              const showDownloadAll = project.allowAssetDownload && downloadableCount >= 2
               const showUpload = project.allowReverseShare && shareToken
               if (!showDownloadAll && !showUpload) return null
               return (
@@ -1715,7 +1670,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                       className="p-2 rounded-lg border border-border bg-background hover:bg-accent transition-colors flex items-center gap-1.5 disabled:opacity-50"
                     >
                       {downloadingAll ? <Loader2 className="h-5 w-5 text-foreground animate-spin" /> : <Download className="h-5 w-5 text-foreground" />}
-                      <span className="hidden sm:inline text-sm font-medium text-foreground">{t('downloadAllVideos', { count: approvedCount })}</span>
+                      <span className="hidden sm:inline text-sm font-medium text-foreground">{t('downloadAllVideos', { count: downloadableCount })}</span>
                     </button>
                   )}
                   {showUpload && (
@@ -1972,7 +1927,6 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 isPasswordProtected={isPasswordProtected || false}
                 watermarkEnabled={project.watermarkEnabled}
                 activeVideoName={activeVideoName}
-                onApprove={isGuest ? undefined : fetchProjectData}
                 authenticatedEmail={authenticatedEmail}
                 authenticatedName={authenticatedName}
                 initialSeekTime={initialSeekTime}
@@ -1980,12 +1934,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 isAdmin={false}
                 isGuest={isGuest}
                 allowAssetDownload={project.allowAssetDownload}
-                clientCanApprove={project.clientCanApprove}
                 shareToken={shareToken}
                 comments={!project.hideFeedback && !isGuest ? filteredComments : []}
                 timestampDisplayMode={project.timestampDisplay || 'TIMECODE'}
                 onCommentFocus={(commentId) => setFocusCommentId(commentId)}
-                usePreviewForApprovedPlayback={project.usePreviewForApprovedPlayback}
                 fillContainer={true}
                 onVideoStateChange={(state) => {
                   // Surface the currently-playing video id so the title-bar
@@ -2043,7 +1995,6 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                   focusCommentId={focusCommentId}
                   clientName={project.clientName}
                   clientEmail={project.clientEmail}
-                  isApproved={project.status === 'APPROVED' || project.status === 'SHARE_ONLY'}
                   restrictToLatestVersion={project.restrictCommentsToLatestVersion}
                   videos={readyVideos}
                   isAdminView={false}

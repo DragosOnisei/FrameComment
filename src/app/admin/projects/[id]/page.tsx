@@ -215,7 +215,7 @@ export default function ProjectPage() {
     [project?.id, fetchProject],
   )
 
-  // Listen for immediate updates (approval changes, comment deletes/posts, etc.)
+  // Listen for immediate updates (comment deletes / posts, etc.)
   useEffect(() => {
     const handleUpdate = () => fetchProject()
 
@@ -228,12 +228,10 @@ export default function ProjectPage() {
       }
     }
 
-    window.addEventListener('videoApprovalChanged', handleUpdate)
     window.addEventListener('commentDeleted', handleUpdate)
     window.addEventListener('commentPosted', handleCommentPosted as EventListener)
 
     return () => {
-      window.removeEventListener('videoApprovalChanged', handleUpdate)
       window.removeEventListener('commentDeleted', handleUpdate)
       window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
     }
@@ -326,18 +324,16 @@ export default function ProjectPage() {
         <div className="hidden md:block">
           <ViewModeToggle value={folderView} onChange={setFolderView} />
         </div>
-        {(!project || project.status !== 'APPROVED') && (
-          <Button
-            variant="default"
-            size="sm"
-            className="hidden md:inline-flex w-9 px-0 shrink-0"
-            onClick={() => videoManagerRef.current?.triggerUpload()}
-            aria-label={t('uploadVideos')}
-            title={t('uploadVideos')}
-          >
-            <Upload className="w-4 h-4" />
-          </Button>
-        )}
+        <Button
+          variant="default"
+          size="sm"
+          className="hidden md:inline-flex w-9 px-0 shrink-0"
+          onClick={() => videoManagerRef.current?.triggerUpload()}
+          aria-label={t('uploadVideos')}
+          title={t('uploadVideos')}
+        >
+          <Upload className="w-4 h-4" />
+        </Button>
         <Button
           variant="ghost"
           size="sm"

@@ -278,7 +278,6 @@ interface VideoRow {
    *  Size column. */
   originalFileSize?: string | number | null
   duration?: number | null
-  approved?: boolean
   thumbnailPath?: string | null
   /** Signed `/api/content/{token}` URL produced server-side. The
    *  server mints these on every folder GET so they stay fresh. */
@@ -315,7 +314,6 @@ interface VideoGroup {
   versionLabel?: string
   duration?: number
   versionCount: number
-  approved: boolean
   thumbnailPath?: string | null
   thumbnailUrl?: string | null
   previewUrl?: string | null
@@ -1153,7 +1151,6 @@ function FolderBrowserInner(
         versionLabel: latest.versionLabel || `v${latest.version}`,
         duration: typeof latest.duration === 'number' ? latest.duration : undefined,
         versionCount: sorted.length,
-        approved: sorted.some((v) => v.approved),
         thumbnailPath: latest.thumbnailPath ?? null,
         thumbnailUrl: latest.thumbnailUrl ?? null,
         previewUrl: latest.previewUrl ?? null,
@@ -2122,7 +2119,7 @@ function FolderBrowserInner(
             const delivered = await downloadVideos(shape.files.map((x) => x.videoId))
             // 6.10.1: if not a single file came through, the per-video
             // endpoint refused them (it is stricter than the folder ZIP —
-            // it requires approval). Fall back to the archive rather than
+            // it refuses a file). Fall back to the archive rather than
             // leaving the user with nothing.
             if (delivered > 0) continue
           }
@@ -3912,7 +3909,6 @@ function FolderBrowserInner(
               processingProgress={v.processingProgress ?? null}
               plannedTiers={(v as any).plannedTiers ?? null}
               completedTiers={(v as any).completedTiers ?? null}
-              approved={v.approved}
               commentCount={v.commentCount}
               uploaderName={v.uploaderName ?? null}
               createdAt={v.createdAt}

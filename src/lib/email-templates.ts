@@ -9,7 +9,7 @@ import { processTemplateContent } from './email'
 import { loadEmailMessages } from './email-template-system'
 
 interface NotificationData {
-  type: 'CLIENT_COMMENT' | 'ADMIN_REPLY' | 'VIDEO_APPROVED' | 'VIDEO_UNAPPROVED' | 'PROJECT_APPROVED'
+  type: 'CLIENT_COMMENT' | 'ADMIN_REPLY'
   videoName: string
   videoLabel?: string
   authorName: string
@@ -19,8 +19,6 @@ interface NotificationData {
   fps?: number | null
   commentId?: string
   isReply?: boolean
-  approved?: boolean
-  approvedVideos?: Array<{ id: string; name: string }>
   parentComment?: {
     authorName: string
     content: string
@@ -71,9 +69,6 @@ export async function generateNotificationSummaryEmail(data: NotificationSummary
 
   // Count notification types
   const commentCount = data.notifications.filter(n => n.type === 'CLIENT_COMMENT' || n.type === 'ADMIN_REPLY').length
-  const approvedCount = data.notifications.filter(n => n.type === 'VIDEO_APPROVED' || n.type === 'PROJECT_APPROVED').length
-  const unapprovedCount = data.notifications.filter(n => n.type === 'VIDEO_UNAPPROVED').length
-
   const summaryParts = []
   if (commentCount > 0) {
     summaryParts.push(
@@ -82,36 +77,9 @@ export async function generateNotificationSummaryEmail(data: NotificationSummary
         : (summaryMessages.newCommentPlural || 'new comments')}`
     )
   }
-  if (approvedCount > 0) {
-    summaryParts.push(
-      `${approvedCount} ${approvedCount === 1
-        ? (summaryMessages.approvalSingular || 'approval')
-        : (summaryMessages.approvalPlural || 'approvals')}`
-    )
-  }
-  if (unapprovedCount > 0) summaryParts.push(`${unapprovedCount} ${summaryMessages.unapprovedLabel || 'unapproved'}`)
   const summaryText = summaryParts.join(', ') || (summaryMessages.latestActivity || 'Latest activity')
 
   const itemsHtmlContent = data.notifications.map((n) => {
-    if (n.type === 'PROJECT_APPROVED') {
-      return `
-        <div style="padding:10px 0;">
-          <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${brand.muted}; margin-bottom:6px; font-weight:700;">Project approved</div>
-          <div style="font-size:14px; color:${brand.text};">All deliverables are ready for download.</div>
-        </div>
-      `
-    }
-
-    if (n.type === 'VIDEO_APPROVED' || n.type === 'VIDEO_UNAPPROVED') {
-      const approved = n.type === 'VIDEO_APPROVED'
-      return `
-        <div style="padding:10px 0;">
-          <div style="font-size:14px; font-weight:700; color:${brand.text}; margin-bottom:4px;">${escapeHtml(n.videoName)}${n.videoLabel ? ` ${escapeHtml(n.videoLabel)}` : ''}</div>
-          <div style="font-size:13px; color:${approved ? brand.accent : brand.muted}; font-weight:600;">${approved ? 'Approved' : 'Approval removed'}</div>
-        </div>
-      `
-    }
-
     const isReply = n.isReply && n.parentComment
     const tcLink = buildTimecodeDeepLink(data.shareUrl, { videoName: n.videoName, commentId: n.commentId, timecode: n.timecode, fps: n.fps })
     const tcPill = renderTimecodePill(n.timecode, tcLink, brand)

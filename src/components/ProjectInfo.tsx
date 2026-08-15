@@ -19,9 +19,8 @@ import { getAccessToken } from '@/lib/token-store'
 import { cn } from '@/lib/utils'
 
 interface ProjectInfoProps {
-  selectedVideo: Video & { name?: string; approved?: boolean; downloadUrl?: string; cleanPreview720Path?: string | null; cleanPreview1080Path?: string | null; cleanPreview2160Path?: string | null }
+  selectedVideo: Video & { name?: string; downloadUrl?: string; cleanPreview720Path?: string | null; cleanPreview1080Path?: string | null; cleanPreview2160Path?: string | null }
   displayLabel: string
-  isVideoApproved: boolean
   projectId: string
   projectTitle?: string
   projectDescription?: string
@@ -29,9 +28,7 @@ interface ProjectInfoProps {
   isPasswordProtected?: boolean
   watermarkEnabled?: boolean
   defaultQuality: '720p' | '1080p' | '2160p'
-  onApprove?: () => Promise<void>
   isAdmin?: boolean
-  clientCanApprove?: boolean
   isGuest?: boolean
   onDownload?: () => void
   hideDownloadButton?: boolean
@@ -41,14 +38,12 @@ interface ProjectInfoProps {
   authenticatedEmail?: string | null
   authenticatedName?: string | null
   className?: string
-  usePreviewForApprovedPlayback?: boolean
   playbackQuality?: '720p' | '1080p' | '2160p'
 }
 
 export default function ProjectInfo({
   selectedVideo,
   displayLabel: _displayLabel,
-  isVideoApproved,
   projectId,
   projectTitle,
   projectDescription,
@@ -56,9 +51,7 @@ export default function ProjectInfo({
   isPasswordProtected,
   watermarkEnabled = true,
   defaultQuality,
-  onApprove,
   isAdmin = false,
-  clientCanApprove = true,
   isGuest = false,
   hideDownloadButton = false,
   allowAssetDownload = true,
@@ -67,11 +60,9 @@ export default function ProjectInfo({
   authenticatedEmail = null,
   authenticatedName = null,
   className,
-  usePreviewForApprovedPlayback = false,
   playbackQuality,
 }: ProjectInfoProps) {
   const [showInfoDialog, setShowInfoDialog] = useState(false)
-  const [showApprovalConfirm, setShowApprovalConfirm] = useState(false)
   const [loading, setLoading] = useState(false)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
   const [hasAssets, setHasAssets] = useState(false)
@@ -104,7 +95,7 @@ export default function ProjectInfo({
   const handleDownload = async () => {
     const downloadUrl = (selectedVideo as any).downloadUrl
     if (!downloadUrl) {
-      alert(t('downloadApprovedOnly'))
+      alert(t('downloadNotAvailable'))
       return
     }
 
@@ -140,41 +131,6 @@ export default function ProjectInfo({
     }
 
     triggerDownload(downloadUrl)
-  }
-
-  const handleApprove = async () => {
-    setLoading(true)
-
-    const authHeaders = buildAuthHeaders(shareToken)
-
-    try {
-      const response = await fetch(`/api/projects/${projectId}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({
-          selectedVideoId: selectedVideo.id,
-          authorName: authenticatedName || undefined,
-          authorEmail: authenticatedEmail || undefined,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to approve project')
-      }
-
-      // Store the current video group name in sessionStorage to restore after reload
-      if (activeVideoName) {
-        sessionStorage.setItem('approvedVideoName', activeVideoName)
-      }
-
-      // Reload the page to show updated approval status
-      window.location.reload()
-    } catch (error) {
-      alert(error instanceof Error ? error.message : t('failedToApproveVideo'))
-      setLoading(false)
-      setShowApprovalConfirm(false)
-    }
   }
 
   // Listen for shortcuts dialog open request from CommentSection
@@ -245,20 +201,6 @@ export default function ProjectInfo({
 
         {/* Right: Action Buttons */}
         <div className="flex gap-2 flex-shrink-0">
-          {/* Approve Button - Only show when not approved and approval is allowed */}
-          {!isVideoApproved && onApprove && (isAdmin || clientCanApprove) && (
-            <Button
-              data-tutorial="approve-btn"
-              onClick={() => setShowApprovalConfirm(true)}
-              variant="success"
-              size="sm"
-              title={t('approveVideoVersion')}
-            >
-              <CheckCircle2 className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">{t('approve')}</span>
-            </Button>
-          )}
-
           {/* Info Dialog Button - Hide in guest mode */}
           {!isGuest && (
             <Dialog open={showInfoDialog} onOpenChange={setShowInfoDialog}>
@@ -347,11 +289,6 @@ export default function ProjectInfo({
                           const hasPreviewStreams = !!(videoAny.streamUrl720p || videoAny.streamUrl1080p || videoAny.streamUrl2160p)
                           const hasPreview = hasPreviewPaths || hasPreviewStreams
                           const qualityLabel = playbackQuality || defaultQuality
-                          if (isVideoApproved) {
-                            return usePreviewForApprovedPlayback
-                              ? t('approvedPreview', { quality: qualityLabel })
-                              : t('approvedOriginal')
-                          }
                           if (!hasPreview) {
                             return t('originalQuality')
                           }
@@ -365,8 +302,8 @@ export default function ProjectInfo({
             </Dialog>
           )}
 
-          {/* Download Button - Only show when video is approved and not in guest mode */}
-          {isVideoApproved && !isGuest && !hideDownloadButton && (
+          {/* 6.11.0: Download no longer waits on approval. */}
+          {!isGuest && !hideDownloadButton && (
             <Button data-tutorial="download-btn" onClick={handleDownload} variant="default" size="sm" title={t('downloadOriginal')}>
               <Download className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">{tc('download')}</span>
@@ -375,54 +312,6 @@ export default function ProjectInfo({
         </div>
       </div>
 
-      {/* Approval Confirmation Modal */}
-      <Dialog open={showApprovalConfirm} onOpenChange={setShowApprovalConfirm}>
-        <DialogContent className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-success" />
-              {t('approveVideo')}
-            </DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              {t('confirmApprovalDescription')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2 text-sm">
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">{t('videoLabel')}:</span>
-                <span className="font-medium">{(selectedVideo as any).name}</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">{tc('version')}:</span>
-                <span className="font-medium">{selectedVideo.versionLabel}</span>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t('approvalDownloadHint')}
-            </p>
-            <div className="flex gap-2 pt-2">
-              <Button
-                onClick={handleApprove}
-                disabled={loading}
-                variant="success"
-                size="default"
-                className="flex-1 font-semibold"
-              >
-                {loading ? t('approving') : t('approve')}
-              </Button>
-              <Button
-                onClick={() => setShowApprovalConfirm(false)}
-                variant="outline"
-                disabled={loading}
-                size="default"
-              >
-                {tc('cancel')}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
 
       {/* Download Modal - Only for clients with assets */}

@@ -43,7 +43,7 @@ interface Metrics {
     }
   }
   storage: { totalBytes: number; billableBytes: number }
-  activity: { uploads: number; comments: number; approvals: number; projectsCreated: number }
+  activity: { uploads: number; comments: number; projectsCreated: number }
   series: Array<{ day: string; users: number; storageBytes: number; mrrCents: number }>
   companiesTable: Array<{
     id: string
@@ -325,7 +325,6 @@ export default function FounderDashboardPage() {
             {[
               ['Uploads', data?.activity.uploads],
               ['Comments', data?.activity.comments],
-              ['Approvals', data?.activity.approvals],
               ['Projects created', data?.activity.projectsCreated],
               ['New companies', data?.companies.newInRange],
               ['Suspended', data?.companies.suspended],

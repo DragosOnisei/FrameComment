@@ -65,8 +65,8 @@ export default function TermsPage() {
           <H2>2. The Service, and its private beta status</H2>
           <p>
             FrameComment is a video review and collaboration platform: teams upload video
-            and related files, collect time-coded feedback, manage versions and approvals,
-            and share work with their clients through links. The Service is currently in{' '}
+            and related files, collect time-coded feedback, manage versions, and share
+            work with their clients through links. The Service is currently in{' '}
             <strong className="text-white">private beta</strong>: creating a company requires an
             invite, features evolve quickly, and functionality may change, be added, or be
             removed as the product matures. We work hard to keep the Service stable, but
@@ -117,7 +117,7 @@ export default function TermsPage() {
           <p>
             The Service lets you create share links that give people outside your company
             access to selected Content, optionally protected by passwords and expiration
-            dates, and optionally allowing comments, downloads, approvals or uploads.
+            dates, and optionally allowing comments, downloads or uploads.
             Anyone with a valid link (and password, where set) can access what you chose
             to share; you are responsible for deciding what you share, with whom, and
             with what protections.

@@ -49,9 +49,6 @@ export async function GET(
       if (!video.project.allowAssetDownload) {
         return NextResponse.json({ qualities: [], reason: 'downloads-disabled' })
       }
-      if (!video.approved) {
-        return NextResponse.json({ qualities: [], reason: 'not-approved' })
-      }
     }
 
     const qualities = await listVideoQualities(videoId, {

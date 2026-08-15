@@ -90,7 +90,7 @@ Email templates use `{{DOUBLE_BRACES}}` and HTML tags — keep those exactly as-
 | Context | Who sees it | Tone |
 |---------|-------------|------|
 | Admin pages (settings, projects, users) | Admins | Casual / informal |
-| Client pages (share, comments, approval) | Clients | Professional / polite |
+| Client pages (share, comments) | Clients | Professional / polite |
 | Email templates | Clients | Formal |
 
 For languages with formal/informal forms (e.g., German Sie/du, French vous/tu, Dutch u/je): use informal for admin, formal for client-facing content.
@@ -120,7 +120,6 @@ The file is organized by section. Here's what each one covers:
 | `controls` | Video player and drawing tools |
 | `email` | All email notification templates |
 | `reprocess` | Video reprocessing dialogs |
-| `unapprove` | Project unapproval dialogs |
 | `device` | Workflow integration (DaVinci Resolve, Premiere Pro) |
 | `unsubscribe` | Email unsubscribe page |
 | `notFound` | 404 page |

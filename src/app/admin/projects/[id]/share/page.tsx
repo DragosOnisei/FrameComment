@@ -449,8 +449,8 @@ function AdminSharePageInner() {
           // Always fetch the original as a fallback for admin preview.
           // Without this, videos uploaded with "Skip transcoding" (which
           // never produce 720p/1080p/2160p variants) couldn't be played
-          // in the admin share page until they were approved — making it
-          // impossible to actually review them before approval. The
+          // in the admin share page until they were approved — a gate that
+          // 6.11.0 removed entirely. The
           // /api/admin/video-token endpoint enforces admin auth, so the
           // original isn't exposed beyond the studio.
           //
@@ -687,7 +687,6 @@ function AdminSharePageInner() {
         v?.preview1080Path ? 1 : 0,
         v?.preview2160Path ? 1 : 0,
         Array.isArray(v?.hlsQualities) ? v.hlsQualities.length : 0,
-        v?.approved ? 1 : 0,
       ].join('|'))
       .join('::')
   }, [])
@@ -721,27 +720,11 @@ function AdminSharePageInner() {
 
         if (!videoNameToUse && urlVideoName && project.videosByName[urlVideoName]) {
           videoNameToUse = urlVideoName
-        } else if (!videoNameToUse) {
-          const savedVideoName = sessionStorage.getItem('approvedVideoName')
-          if (savedVideoName) {
-            sessionStorage.removeItem('approvedVideoName')
-            if (project.videosByName[savedVideoName]) {
-              videoNameToUse = savedVideoName
-            }
-          }
         }
 
         if (!videoNameToUse) {
-          const sortedVideoNames = videoNames.sort((nameA, nameB) => {
-            const hasApprovedA = project.videosByName[nameA].some((v: any) => v.approved)
-            const hasApprovedB = project.videosByName[nameB].some((v: any) => v.approved)
-
-            if (hasApprovedA !== hasApprovedB) {
-              return hasApprovedA ? 1 : -1
-            }
-            return 0
-          })
-          videoNameToUse = sortedVideoNames[0]
+          // 6.11.0: no approval ranking — first group by name.
+          videoNameToUse = [...videoNames].sort((a, b) => a.localeCompare(b))[0]
         }
 
         setActiveVideoName(videoNameToUse)
@@ -1306,12 +1289,9 @@ function AdminSharePageInner() {
   }
 
   // Filter to READY videos
-  let readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
+  const readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
 
-  const hasApprovedVideo = readyVideos.some((v: any) => v.approved)
-  if (hasApprovedVideo) {
-    readyVideos = readyVideos.filter((v: any) => v.approved)
-  }
+  // 6.11.0: no approval filter — every ready version is listed.
 
   const activeVideoIds = new Set(activeVideos.map((v: any) => v.id))
   const filteredComments = comments.filter((comment: any) => {
@@ -1639,7 +1619,6 @@ function AdminSharePageInner() {
                 isGuest={false}
                 allowAssetDownload={project.allowAssetDownload}
                 shareToken={null}
-                onApprove={undefined}
                 hideDownloadButton={true}
                 comments={!project.hideFeedback ? filteredComments : []}
                 timestampDisplayMode={project.timestampDisplay || 'TIMECODE'}
@@ -1677,7 +1656,6 @@ function AdminSharePageInner() {
                   focusCommentId={focusCommentId}
                   clientName={clientDisplayName}
                   clientEmail={project.recipients?.[0]?.email}
-                  isApproved={project.status === 'APPROVED' || project.status === 'SHARE_ONLY'}
                   restrictToLatestVersion={project.restrictCommentsToLatestVersion}
                   videos={readyVideos}
                   isAdminView={true}

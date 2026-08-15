@@ -170,14 +170,11 @@ function generateSampleValues(
   const videoName = ex.VIDEO_NAME || 'Main Commercial'
   const clientName = ex.CLIENT_NAME || 'Jane Doe'
   const authorName = ex.AUTHOR_NAME || 'John Smith'
-  const approvalStatus = ex.APPROVAL_STATUS || 'Approved'
-  const approvalAction = ex.APPROVAL_ACTION || 'approved'
   const projectDescription = ex.PROJECT_DESCRIPTION || 'Final deliverables for the summer marketing campaign.'
   const commentContent = ex.COMMENT_CONTENT || 'Great work on the intro!'
   const expiryTime = ex.EXPIRY_TIME || '30 minutes'
   const dueDate = ex.DUE_DATE || 'March 15, 2026'
   const reminderType = ex.REMINDER_TYPE || 'tomorrow'
-  const approvalMessage = ex.APPROVAL_MESSAGE || `All deliverables for ${projectTitle} have been approved. The final files are now ready for download.`
 
   const base = {
     COMPANY_NAME: companyName,
@@ -206,14 +203,6 @@ function generateSampleValues(
       PASSWORD_NOTICE: `<div class="protected-note"><strong>${protectedLabel}</strong> ${protectedNotice}</div>`,
       UNSUBSCRIBE_SECTION: unsubscribePreview,
     },
-    PROJECT_APPROVED: {
-      ...base,
-      PROJECT_TITLE: projectTitle,
-      VIDEO_NAME: videoName,
-      SHARE_URL: `${appDomain}/share/abc123`,
-      APPROVAL_MESSAGE: `<strong>${clientName}</strong> ${approvalMessage}`,
-      UNSUBSCRIBE_SECTION: unsubscribePreview,
-    },
     COMMENT_NOTIFICATION: {
       ...base,
       PROJECT_TITLE: projectTitle,
@@ -236,15 +225,6 @@ function generateSampleValues(
       COMMENT_CONTENT: commentContent,
       TIMECODE: sampleTcPill2,
       ATTACHMENTS: `<div style="margin-top: 12px; padding: 10px 14px; border-radius: 8px; border: 1px solid ${brand.border}; background: ${brand.surfaceAlt};"><div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: ${brand.muted}; margin-bottom: 6px; font-weight: 700;">${attachmentLabel}</div><div style="font-size: 13px; color: ${brand.text}; line-height: 1.8;">Client-reference.mov</div></div>`,
-      ADMIN_URL: `${appDomain}/admin`,
-    },
-    ADMIN_PROJECT_APPROVED: {
-      ...base,
-      CLIENT_NAME: clientName,
-      PROJECT_TITLE: projectTitle,
-      VIDEO_NAME: videoName,
-      APPROVAL_STATUS: approvalStatus,
-      APPROVAL_ACTION: approvalAction,
       ADMIN_URL: `${appDomain}/admin`,
     },
     PROJECT_GENERAL: {
@@ -288,7 +268,7 @@ function generateSampleValues(
     CLIENT_ACTIVITY_SUMMARY: {
       ...base,
       PROJECT_TITLE: projectTitle,
-      SUMMARY_TEXT: '3 new comments, 1 approval',
+      SUMMARY_TEXT: '3 new comments, 2 uploads',
       PERIOD: 'today',
       SUMMARY_ITEMS: '<div class="secondary-box"><div style="font-size:14px;">• Main Commercial v2 — New comment</div></div>',
       SHARE_URL: `${appDomain}/share/abc123`,
@@ -323,10 +303,8 @@ function getEmailTitle(type: EmailTemplateType, messages?: Record<string, any>):
 
   const defaultTitles: Record<EmailTemplateType, string> = {
     NEW_VERSION: 'New Version Available',
-    PROJECT_APPROVED: 'Project Approved',
     COMMENT_NOTIFICATION: 'New Comment',
     ADMIN_COMMENT_NOTIFICATION: 'New Comment',
-    ADMIN_PROJECT_APPROVED: 'Client Approved',
     PROJECT_GENERAL: 'Ready for Review',
     PASSWORD: 'Project Password',
     PASSWORD_RESET: 'Password Reset',
@@ -350,10 +328,8 @@ function getEmailSubtitle(type: EmailTemplateType, values: Record<string, string
 
   const subtitles: Record<EmailTemplateType, string> = {
     NEW_VERSION: localizedSubtitles.NEW_VERSION || 'Ready for your review',
-    PROJECT_APPROVED: localizedSubtitles.PROJECT_APPROVED || 'Ready for download',
     COMMENT_NOTIFICATION: `${videoName} in ${projectTitle}`,
     ADMIN_COMMENT_NOTIFICATION: `${clientName} on ${videoName} in ${projectTitle}`,
-    ADMIN_PROJECT_APPROVED: `${projectTitle}`,
     PROJECT_GENERAL: projectTitle,
     PASSWORD: projectTitle,
     PASSWORD_RESET: localizedSubtitles.PASSWORD_RESET || 'Reset your admin account password',

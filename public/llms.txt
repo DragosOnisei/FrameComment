@@ -1,11 +1,11 @@
 # FrameComment
 
-> FrameComment is a video review and collaboration platform for production teams, agencies, YouTubers and anyone who delivers video to clients. It keeps every cut, comment and approval between a production team and its clients in one place: frame-accurate timestamped feedback, client-friendly share links that need no account, version stacks with side-by-side comparison, AI transcripts, and a choice of storage backends. Operated by MINDQUB S.R.L., a Romanian software company. Currently in private beta (access by invite or request form).
+> FrameComment is a video review and collaboration platform for production teams, agencies, YouTubers and anyone who delivers video to clients. It keeps every cut, every comment and every delivery between a production team and its clients in one place: frame-accurate timestamped feedback, client-friendly share links that need no account, version stacks with side-by-side comparison, AI transcripts, and a choice of storage backends. Operated by MINDQUB S.R.L., a Romanian software company. Currently in private beta (access by invite or request form).
 
 Key facts:
 - Purpose: video review, feedback and delivery between production teams and their clients.
 - Who it is for: video editors, directors, YouTubers, agencies, entrepreneurs, and production companies.
-- Core features: frame-accurate timestamped comments with colored timeline markers; voice comments and attachments; version stacking (v1…vN on one card) with synced side-by-side compare; password-protected, expiring share links; client approvals and client uploads without a client account; AI-generated searchable transcripts; adaptive streaming up to 4K; watermarked previews.
+- Core features: frame-accurate timestamped comments with colored timeline markers; voice comments and attachments; version stacking (v1…vN on one card) with synced side-by-side compare; password-protected, expiring share links; client uploads without a client account; AI-generated searchable transcripts; adaptive streaming up to 4K; watermarked previews.
 - Storage: managed hosting by FrameComment, or bring your own storage (your server/NAS, Cloudflare R2, AWS S3) with no per-GB fee on your own storage. Switching backends uses verified, size-checked transfers.
 - Security: per-company data isolation enforced at the database level with PostgreSQL row-level security; HTTPS/HSTS; role-based team permissions; 30-day Trash and deliberate deletion safety windows.
 - Pricing (USD): Free tier with 1 team member and 10 GB hosted storage, all features included. Beyond that: $25 per extra member per month, plus $0.10 per GB per month only on FrameComment-hosted storage. Prorated monthly, no contracts.

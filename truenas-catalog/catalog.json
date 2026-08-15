@@ -2,12 +2,12 @@
   "trains": {
     "community": {
       "framecomment": {
-        "app_readme": "FrameComment — Self-hosted Video Review & Approval Platform",
+        "app_readme": "FrameComment — Self-hosted Video Review & Delivery Platform",
         "categories": [
           "productivity",
           "media"
         ],
-        "description": "Self-hosted video review and approval platform for filmmakers and video professionals.",
+        "description": "Self-hosted video review and delivery platform for filmmakers and video professionals.",
         "healthy": true,
         "healthy_error": null,
         "home": "https://github.com/DragosOnisei/FrameComment",
@@ -27,7 +27,7 @@
         "tags": [
           "video",
           "review",
-          "approval",
+          "feedback",
           "filmmakers",
           "self-hosted"
         ],

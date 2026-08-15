@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   // machine-readable metadata only, zero UI impact.
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://framecomment.com'),
   title: "FrameComment",
-  description: "Professional video review and approval platform",
+  description: "Professional video review and delivery platform",
   manifest: '/manifest.json',
   icons: {
     icon: [

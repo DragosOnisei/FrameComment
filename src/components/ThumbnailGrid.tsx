@@ -28,31 +28,13 @@ export default function ThumbnailGrid({
   const t = useTranslations('share')
   const tv = useTranslations('videos')
 
-  // Sort videos: For review (not approved) first, then approved, both alphabetically
-  const videoNames = useMemo(() => {
-    const names = Object.keys(videosByName)
-
-    // Separate into review and approved
-    const forReview: string[] = []
-    const approved: string[] = []
-
-    names.forEach(name => {
-      const videos = videosByName[name]
-      const hasApprovedVideo = videos.some((v: any) => v.approved === true)
-      if (hasApprovedVideo) {
-        approved.push(name)
-      } else {
-        forReview.push(name)
-      }
-    })
-
-    // Sort each group alphabetically
-    forReview.sort((a, b) => a.localeCompare(b))
-    approved.sort((a, b) => a.localeCompare(b))
-
-    // Return: review first, then approved
-    return [...forReview, ...approved]
-  }, [videosByName])
+  // 6.11.0: plain alphabetical. The list used to put "for review" before
+  // "approved", which meant approving a clip moved it — the order shifted
+  // under you as a side effect of an unrelated action.
+  const videoNames = useMemo(
+    () => Object.keys(videosByName).sort((a, b) => a.localeCompare(b)),
+    [videosByName],
+  )
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -103,7 +85,6 @@ export default function ThumbnailGrid({
       <div className="grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3 lg:gap-6 xl:grid-cols-4 2xl:grid-cols-5">
         {videoNames.map((name) => {
           const videos = videosByName[name]
-          const hasApprovedVideo = videos.some((v: any) => v.approved === true)
           const versionCount = videos.length
           const thumbnailUrl = thumbnailsByName.get(name)
 
@@ -147,13 +128,6 @@ export default function ThumbnailGrid({
 
                 {/* Hover overlay */}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200" />
-
-                {/* Approved badge */}
-                {hasApprovedVideo && (
-                  <div className="absolute top-2 right-2 bg-success text-success-foreground rounded-full p-1">
-                    <CheckCircle2 className="w-3 h-3 sm:w-4 sm:h-4" />
-                  </div>
-                )}
 
                 {/* Version count badge */}
                 {versionCount > 1 && (

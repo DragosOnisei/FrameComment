@@ -49,7 +49,6 @@ interface VideoPlayerProps {
   projectId: string
   projectStatus: ProjectStatus
   defaultQuality?: '480p' | '720p' | '1080p' | '2160p' // Default quality from settings
-  onApprove?: () => void // Optional approval callback
   authenticatedEmail?: string | null // Email of OTP-authenticated user
   authenticatedName?: string | null // Name of OTP-authenticated user
   projectTitle?: string
@@ -68,7 +67,6 @@ interface VideoPlayerProps {
   autoPlayOnInitialSeek?: boolean
   initialVideoIndex?: number // Initial video index to select (from URL params)
   allowAssetDownload?: boolean // Allow clients to download assets
-  clientCanApprove?: boolean // Allow clients to approve videos (false = admin only)
   shareToken?: string | null
   hideDownloadButton?: boolean // Hide download button completely (for admin share view)
   comments?: CommentWithReplies[] // Comments for timeline markers
@@ -77,11 +75,9 @@ interface VideoPlayerProps {
   onVideoStateChange?: (state: {
     selectedVideo: any
     selectedVideoIndex: number
-    isVideoApproved: boolean
     displayVideos: any[]
     displayLabel: string
   }) => void // Callback to expose video state for mobile layout
-  usePreviewForApprovedPlayback?: boolean // Use preview for approved playback instead of original
   fillContainer?: boolean // Fill parent container height (for full-viewport layouts)
   // 4.x: fired once the real media duration is known (loadedmetadata). The
   // parent uses it to heal a stale stored `duration` — some source containers
@@ -201,7 +197,6 @@ export default function VideoPlayer({
   projectId,
   projectStatus: _projectStatus,
   defaultQuality = '720p',
-  onApprove,
   projectTitle,
   projectDescription,
   clientName,
@@ -214,14 +209,12 @@ export default function VideoPlayer({
   autoPlayOnInitialSeek = false,
   initialVideoIndex = 0,
   allowAssetDownload = true,
-  clientCanApprove = true, // Default to true (clients can approve)
   shareToken = null,
   hideDownloadButton = false, // Default to false (show download button)
   comments = [], // Default to empty array
   timestampDisplayMode = 'TIMECODE', // Default to TIMECODE format
   onCommentFocus, // Callback when timeline marker is clicked
   onVideoStateChange, // Callback to expose video state for mobile layout
-  usePreviewForApprovedPlayback = false, // Default to false (use original)
   fillContainer = false, // Default to false (standard aspect ratio)
   authenticatedEmail = null,
   authenticatedName = null,
@@ -632,14 +625,11 @@ export default function VideoPlayer({
   const pendingInTimeRef = useRef<number | null>(null)
   const pendingOutTimeRef = useRef<number | null>(null)
 
-  // If ANY video is approved, only show approved videos (for both admin and client)
-  // Memoize to prevent infinite loops with onVideoStateChange callback
-  const displayVideos = useMemo(() => {
-    const hasAnyApprovedVideo = videos.some((v: any) => v.approved === true)
-    return hasAnyApprovedVideo
-      ? videos.filter((v: any) => v.approved === true)
-      : videos
-  }, [videos])
+  // 6.11.0: every version is shown.
+  // This used to hide all other versions the moment one was approved — which
+  // meant approving a cut silently deleted the review history from view.
+  // Approval is gone; the reel shows what exists.
+  const displayVideos = useMemo(() => videos, [videos])
 
   // Safety check: ensure index is valid
   const safeIndex = Math.min(selectedVideoIndex, displayVideos.length - 1)
@@ -1132,9 +1122,6 @@ export default function VideoPlayer({
       window.removeEventListener('openVersionComparison', handleOpenComparison as EventListener)
     }
   }, [displayVideos])
-
-  // Safety check: ensure selectedVideo exists before accessing properties
-  const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
 
   // 1.9.4+ Phase B: prefer the HLS master URL when the worker has
   // produced HLS variants. Falls through to the MP4 ladder below
@@ -1680,7 +1667,7 @@ export default function VideoPlayer({
     }
   }, [])
 
-  // Expose selected video ID for approval
+  // Expose selected video ID
   useEffect(() => {
     const handleGetSelectedVideoId = (e: CustomEvent) => {
       if (e.detail.callback) {
@@ -2507,13 +2494,12 @@ export default function VideoPlayer({
       onVideoStateChange({
         selectedVideo,
         selectedVideoIndex,
-        isVideoApproved,
         displayVideos,
-        displayLabel: isVideoApproved ? t('approvedVersion') : selectedVideo.versionLabel,
+        displayLabel: selectedVideo.versionLabel,
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedVideo?.id, selectedVideoIndex, isVideoApproved])
+  }, [selectedVideo?.id, selectedVideoIndex])
 
   // Safety check: if no videos available, show message
   if (!selectedVideo || displayVideos.length === 0) {
@@ -2524,18 +2510,7 @@ export default function VideoPlayer({
     )
   }
 
-  // Get display label - if video approved, show "Approved Version"
-  const displayLabel = isVideoApproved ? t('approvedVersion') : selectedVideo.versionLabel
-
-  // Handle approval - stores video name in session storage and calls parent callback
-  const handleApprove = async () => {
-    if (activeVideoName) {
-      sessionStorage.setItem('approvedVideoName', activeVideoName)
-    }
-    if (onApprove) {
-      await onApprove()
-    }
-  }
+  const displayLabel = selectedVideo.versionLabel
 
   return (
     <div className={`flex flex-col ${fillContainer ? 'h-full' : 'space-y-4 max-h-full'}`}>
@@ -2887,7 +2862,6 @@ export default function VideoPlayer({
         <ProjectInfo
           selectedVideo={selectedVideo}
           displayLabel={displayLabel}
-          isVideoApproved={isVideoApproved}
           projectId={projectId}
           projectTitle={projectTitle}
           projectDescription={projectDescription}
@@ -2895,9 +2869,7 @@ export default function VideoPlayer({
           isPasswordProtected={isPasswordProtected}
           watermarkEnabled={watermarkEnabled}
           defaultQuality={defaultQuality as any}
-          onApprove={onApprove ? handleApprove : undefined}
           isAdmin={isAdmin}
-          clientCanApprove={clientCanApprove}
           isGuest={isGuest}
           hideDownloadButton={hideDownloadButton}
           allowAssetDownload={allowAssetDownload}
@@ -2906,7 +2878,6 @@ export default function VideoPlayer({
           authenticatedEmail={authenticatedEmail}
           authenticatedName={authenticatedName}
           className="mt-3 lg:order-3"
-          usePreviewForApprovedPlayback={usePreviewForApprovedPlayback}
           playbackQuality={resolvedPlaybackQuality as any}
         />
       )}

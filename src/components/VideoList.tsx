@@ -7,7 +7,7 @@ import { formatDuration, formatFileSize } from '@/lib/utils'
 import { Button } from './ui/button'
 import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Download, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react'
+import { Trash2, Pencil, Upload, Download, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -23,7 +23,6 @@ interface VideoListProps {
 export default function VideoList({ videos: initialVideos, isAdmin = true, onRefresh }: VideoListProps) {
   const t = useTranslations('videos')
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [approvingId, setApprovingId] = useState<string | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [videos, setVideos] = useState<Video[]>(initialVideos)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -89,42 +88,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
       })
       .finally(() => {
         setDeletingId(null)
-      })
-  }
-
-  const handleToggleApproval = async (videoId: string, currentlyApproved: boolean) => {
-    // Prevent double-clicks during approval toggle
-    if (approvingId) return
-
-    if (!confirm(currentlyApproved ? t('confirmUnapproveVideo') : t('confirmApproveVideo'))) {
-      return
-    }
-
-    setApprovingId(videoId)
-
-    // Optimistically update UI immediately
-    setVideos(prev => prev.map(v =>
-      v.id === videoId ? { ...v, approved: !currentlyApproved } as Video : v
-    ))
-
-    // Trigger immediate UI update for comment section approval banner
-    window.dispatchEvent(new CustomEvent('videoApprovalChanged'))
-
-    // Perform approval in background without blocking UI
-    apiPatch(`/api/videos/${videoId}`, { approved: !currentlyApproved })
-      .then(() => {
-        // Refresh in background
-        onRefresh?.()
-      })
-      .catch(() => {
-        // Revert optimistic update on error
-        setVideos(prev => prev.map(v =>
-          v.id === videoId ? { ...v, approved: currentlyApproved } as Video : v
-        ))
-        alert(currentlyApproved ? t('failedToUnapproveVideo') : t('failedToApproveVideo'))
-      })
-      .finally(() => {
-        setApprovingId(null)
       })
   }
 
@@ -269,9 +232,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
       className="flex items-center gap-3 py-2 px-3 bg-muted/50 rounded-md hover:bg-muted/70 transition-colors"
     >
       <span className="font-mono text-sm font-medium">{video.versionLabel}</span>
-      {(video as any).approved && (
-        <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
-      )}
       {video.status === 'PROCESSING' && (
         <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-primary-visible text-primary flex items-center gap-1">
           <div className="animate-spin rounded-full h-2 w-2 border-b border-primary"></div>
@@ -296,25 +256,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
         >
           <ChevronDown className="w-4 h-4" />
         </Button>
-        {isAdmin && video.status === 'READY' && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => handleToggleApproval(video.id, (video as any).approved || false)}
-            disabled={approvingId === video.id}
-            className={(video as any).approved
-              ? "h-7 w-7 text-warning hover:text-warning hover:bg-warning-visible"
-              : "h-7 w-7 text-success hover:text-success hover:bg-success-visible"
-            }
-            title={(video as any).approved ? t('unapprove') : t('approve')}
-          >
-            {(video as any).approved ? (
-              <XCircle className="w-3.5 h-3.5" />
-            ) : (
-              <CheckCircle2 className="w-3.5 h-3.5" />
-            )}
-          </Button>
-        )}
         {isAdmin && (
           <Button
             variant="ghost"
@@ -350,9 +291,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
           ) : (
             <>
               <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                {(video as any).approved && (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />
-                )}
                 <span className="font-medium text-sm truncate min-w-0">{video.versionLabel}</span>
                 {isLatest && videos.length > 1 && (
                   <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary flex-shrink-0">
@@ -402,25 +340,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
                 title={t('collapseVersion')}
               >
                 <ChevronUp className="w-3.5 h-3.5" />
-              </Button>
-            )}
-            {isAdmin && video.status === 'READY' && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleToggleApproval(video.id, (video as any).approved || false)}
-                disabled={approvingId === video.id}
-                className={`h-7 w-7 ${(video as any).approved
-                  ? "text-warning hover:text-warning hover:bg-warning-visible"
-                  : "text-success hover:text-success hover:bg-success-visible"
-                }`}
-                title={(video as any).approved ? t('unapproveVideo') : t('approveVideo')}
-              >
-                {(video as any).approved ? (
-                  <XCircle className="w-3.5 h-3.5" />
-                ) : (
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                )}
               </Button>
             )}
             {isAdmin && video.status === 'READY' && (

@@ -136,7 +136,7 @@ The allocation is intentionally conservative, targeting 25-50% CPU utilization s
 | 9-16        | 1               | 2                  | fast     | 4 (~25-33%)      |
 | 17+         | 2               | 2                  | medium   | 6 (~25%)         |
 
-"Max threads used" includes both the video processing worker and the clean preview worker (generates non-watermarked versions on approval).
+"Max threads used" is used by the video processing worker.
 
 ### Preset tradeoff
 

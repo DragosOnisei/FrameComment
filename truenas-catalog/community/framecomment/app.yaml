@@ -1,13 +1,13 @@
 name: framecomment
 title: FrameComment
-description: Self-hosted video review and approval platform for filmmakers and video professionals. Share work with clients, collect frame-accurate feedback, and manage approvals on your own infrastructure.
+description: Self-hosted video review and delivery platform for filmmakers and video professionals. Share work with clients, collect frame-accurate feedback, and deliver the final files on your own infrastructure.
 categories:
   - productivity
   - media
 keywords:
   - video
   - review
-  - approval
+  - feedback
   - filmmakers
   - self-hosted
   - framecomment

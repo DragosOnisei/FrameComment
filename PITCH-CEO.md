@@ -25,7 +25,7 @@ Reviewer-i interni descarcă/redau **direct** de pe storage-ul nostru. Nu mai tr
 Master files, footage unreleased, conținut sub NDA — tot stă în casă, în spatele firewall-ului nostru. Niciun terț nu poate fi breach-uit, subpoena-uit, sau să-și schimbe ToS-ul. **Argument important pentru clienți enterprise care cer DPA-uri stricte.**
 
 ### 4. Customizare 100% pe workflow-ul nostru
-Frame.io ne dictează un workflow generic (Approve / Reject / statusuri fixate). În FrameComment fiecare buton/flux îl facem exact cum cere echipa. Feature/bug fix într-o zi, nu "vedem la Q4 roadmap." Și nu plătim consultanți Adobe să configureze.
+Frame.io ne dictează un workflow generic (statusuri fixate, pași impuși). În FrameComment fiecare buton/flux îl facem exact cum cere echipa. Feature/bug fix într-o zi, nu "vedem la Q4 roadmap." Și nu plătim consultanți Adobe să configureze.
 
 ### 5. Vendor risk = zero
 Adobe a cumpărat Frame.io în 2021. De atunci pricing-ul s-a schimbat de câteva ori, tier-urile s-au reorganizat, totul s-a împachetat în Creative Cloud. Dacă mâine sunset-uiesc un feature sau pun prețul x2 — suntem captivi. FrameComment = source-ul e al nostru (AGPL). Continuă să ruleze indiferent.
@@ -48,7 +48,7 @@ Tot ce e mai jos e deja în producție, identic cu Frame.io ca UX (folosit ca No
 - **Grid + Table view**, sort A–Z / Z–A persistent per user
 - **Drag-and-drop uploads** cu TUS resumable (supraviețuiește la network drops, nu trebuie reluat de la 0%)
 - **Global search** prin proiecte/foldere/videos
-- **Approve / In Review / Archived** workflow
+- **In Review / Share only / Archived** workflow
 - **Mobile responsive** — review pe telefon de oriunde
 - **Trash cu 30-day recovery**, soft delete
 - **WebAuthn** (passkey login) + JWT

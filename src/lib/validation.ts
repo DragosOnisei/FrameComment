@@ -92,7 +92,6 @@ export const notificationEventTypeSchema = z.enum([
   'SHARE_ACCESS',
   'ADMIN_ACCESS',
   'CLIENT_COMMENT',
-  'VIDEO_APPROVAL',
   'SECURITY_ALERT',
   'TEST',
 ])
@@ -303,7 +302,7 @@ export const updateProjectSchema = z.object({
     .nullable()
     .optional(),
   clientCompanyId: z.string().cuid().optional().nullable(), // Optional link to client directory
-  status: z.enum(['IN_REVIEW', 'APPROVED', 'SHARE_ONLY', 'ARCHIVED']).optional(),
+  status: z.enum(['IN_REVIEW', 'SHARE_ONLY', 'ARCHIVED']).optional(),
 
   // Revision settings
   enableRevisions: z.boolean().optional(),
@@ -340,11 +339,7 @@ export const updateProjectSchema = z.object({
   // Reverse share
   allowReverseShare: z.boolean().optional(),
 
-  // Approval settings
-  clientCanApprove: z.boolean().optional(),
 
-  // Approved playback settings
-  usePreviewForApprovedPlayback: z.boolean().optional(),
 
   // Client tutorial
   showClientTutorial: z.boolean().optional(),

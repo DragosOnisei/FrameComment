@@ -5,6 +5,7 @@ import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { ArrowLeft, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Film, GitCompareArrows, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
+import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
 import LanguageToggle from '@/components/LanguageToggle'
@@ -127,9 +128,6 @@ export default function ThumbnailReel({
   // CSS `background-position`. State is per-versionId so multiple
   // adjacent thumbs can be hovered without trampling each other
   // (eg quick mouse-through).
-  const STORY_COLS = 10
-  const STORY_ROWS = 10
-  const STORY_CELLS = STORY_COLS * STORY_ROWS
   const [hoverScrubByVersionId, setHoverScrubByVersionId] = useState<Map<string, number>>(new Map())
 
   const setVersionScrub = (versionId: string, fraction: number | null) => {
@@ -141,19 +139,16 @@ export default function ThumbnailReel({
     })
   }
 
-  const storyboardStyleFor = (storyboardUrl: string | null | undefined, fraction: number | undefined) => {
+  // 6.11.0: uses the shared per-video geometry. This was still hardcoded to
+  // 10×10 after 6.9.3 made the sprite grid scale with duration — so the
+  // version-reel hover-scrub read the wrong cells on any new upload.
+  const storyboardStyleFor = (
+    storyboardUrl: string | null | undefined,
+    fraction: number | undefined,
+    version?: { storyboardCols?: number | null; storyboardRows?: number | null },
+  ) => {
     if (!storyboardUrl || fraction === undefined) return undefined
-    const idx = Math.max(0, Math.min(STORY_CELLS - 1, Math.floor(fraction * STORY_CELLS)))
-    const col = idx % STORY_COLS
-    const row = Math.floor(idx / STORY_COLS)
-    const xPct = (col / (STORY_COLS - 1)) * 100
-    const yPct = (row / (STORY_ROWS - 1)) * 100
-    return {
-      backgroundImage: `url(${storyboardUrl})`,
-      backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
-      backgroundPosition: `${xPct}% ${yPct}%`,
-      backgroundRepeat: 'no-repeat' as const,
-    }
+    return storyboardCellStyle(storyboardUrl, fraction, storyboardGridOf(version))
   }
 
   const scrollVersionReel = (direction: 'left' | 'right') => {
@@ -223,31 +218,13 @@ export default function ThumbnailReel({
     setIsExpanded(!isExpanded)
   }
 
-  // Sort videos: For review (not approved) first, then approved, both alphabetically
-  const videoNames = useMemo(() => {
-    const names = Object.keys(videosByName)
-
-    // Separate into review and approved
-    const forReview: string[] = []
-    const approved: string[] = []
-
-    names.forEach(name => {
-      const videos = videosByName[name]
-      const hasApprovedVideo = videos.some((v: any) => v.approved === true)
-      if (hasApprovedVideo) {
-        approved.push(name)
-      } else {
-        forReview.push(name)
-      }
-    })
-
-    // Sort each group alphabetically
-    forReview.sort((a, b) => a.localeCompare(b))
-    approved.sort((a, b) => a.localeCompare(b))
-
-    // Return: review first, then approved
-    return [...forReview, ...approved]
-  }, [videosByName])
+  // 6.11.0: plain alphabetical. The list used to put "for review" before
+  // "approved", which meant approving a clip moved it — the order shifted
+  // under you as a side effect of an unrelated action.
+  const videoNames = useMemo(
+    () => Object.keys(videosByName).sort((a, b) => a.localeCompare(b)),
+    [videosByName],
+  )
 
   // Used by the expanded thumbnail grid below the bar to highlight the
   // active row. The previous "1/N" counter + prev/next arrows have been
@@ -281,7 +258,6 @@ export default function ThumbnailReel({
 
   // Get current video info
   const currentVideos = activeVideoName ? videosByName[activeVideoName] : []
-  const hasApprovedCurrent = currentVideos.some((v: any) => v.approved === true)
 
   // 2.2.4+: Versions of the active video, sorted ASCENDING so the
   // reel reads left-to-right v1 → v2 → v3 → … This matches a
@@ -654,7 +630,6 @@ export default function ThumbnailReel({
                     const isActive = activeVideoId
                       ? video.id === activeVideoId
                       : video === currentVersions[currentVersions.length - 1]
-                    const isApproved = video.approved === true
                     return (
                       <button
                         key={video.id}
@@ -689,9 +664,6 @@ export default function ThumbnailReel({
                         <span className="flex-1 text-sm truncate" title={video.originalFileName || video.name}>
                           {video.originalFileName || video.name}
                         </span>
-                        {isApproved && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
-                        )}
                       </button>
                     )
                   })}
@@ -829,11 +801,10 @@ export default function ThumbnailReel({
                     : version === currentVersions[currentVersions.length - 1]
                   const versionThumb: string | undefined = version.thumbnailUrl
                   const versionStoryboard: string | undefined = version.storyboardUrl
-                  const versionApproved = version.approved === true
                   const versionLabel = version.versionLabel || `v${version.version}`
                   const scrubFraction = hoverScrubByVersionId.get(version.id)
                   const isScrubbing = scrubFraction !== undefined
-                  const scrubStyle = storyboardStyleFor(versionStoryboard, scrubFraction)
+                  const scrubStyle = storyboardStyleFor(versionStoryboard, scrubFraction, version)
 
                   const handleScrub = (e: React.MouseEvent<HTMLButtonElement>) => {
                     if (!versionStoryboard) return
@@ -931,12 +902,6 @@ export default function ThumbnailReel({
                             style={scrubStyle}
                             aria-hidden
                           />
-                        )}
-
-                        {versionApproved && (
-                          <div className="absolute top-1 right-1 bg-success text-success-foreground rounded-full p-0.5">
-                            <CheckCircle2 className="w-3 h-3" />
-                          </div>
                         )}
 
                         {/* 2.5.1+: dropped the `bg-primary/10`

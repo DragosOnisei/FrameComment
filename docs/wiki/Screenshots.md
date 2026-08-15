@@ -57,8 +57,6 @@
 ## Share Page - Guest Access
 ![Share Page - Guest Access](../screenshots/Share%20Page%20-%20Guest%20Access.png)
 
-## Share Page - Approved
-![Share Page - Approved](../screenshots/Share%20Page%20-%20Approved.png)
 
 ---
 Navigation: [Home](Home) | [Features](Features) | [Installation](Installation) | [Platform Guides](Platform-Guides) | [Configuration](Configuration) | [Admin Settings](Admin-Settings) | [Usage Guide](Usage-Guide) | [Client Guide](Client-Guide) | [Security](Security) | [Maintenance](Maintenance) | [Troubleshooting](Troubleshooting) | [Screenshots](Screenshots) | [Contributing](Contributing) | [License](License)

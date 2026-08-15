@@ -61,7 +61,6 @@ self.addEventListener('notificationclick', (event) => {
   } else {
     switch (data.type) {
       case 'CLIENT_COMMENT':
-      case 'VIDEO_APPROVAL':
       case 'CLIENT_UPLOAD':
       case 'SHARE_ACCESS':
         if (data.projectId) {

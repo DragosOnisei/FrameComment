@@ -98,7 +98,6 @@ export function buildPlatformReportPdf(m: FounderMetrics): Promise<Buffer> {
       row('Storage billable', bytes(m.storage.billableBytes))
       row('Uploads in period', String(m.activity.uploads))
       row('Comments in period', String(m.activity.comments))
-      row('Approvals in period', String(m.activity.approvals))
       row('Projects created', String(m.activity.projectsCreated))
       doc.moveDown(0.8)
 

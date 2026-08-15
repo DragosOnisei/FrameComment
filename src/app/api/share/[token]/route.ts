@@ -209,8 +209,6 @@ export async function GET(
       fps: video.fps,
       codec: video.codec,
       status: video.status,
-      approved: video.approved,
-      approvedAt: video.approvedAt,
       thumbnailPath: video.thumbnailPath,
       // 3.8.x: storyboard sprite path — lets SharePageClient mint a
       // storyboard token so the player timeline gets the same
@@ -293,15 +291,8 @@ export async function GET(
     }
 
     const sortedVideosByName: Record<string, any[]> = {}
-    const sortedKeys = Object.keys(videosByName).sort((nameA, nameB) => {
-      const hasApprovedA = videosByName[nameA].some((v: any) => v.approved)
-      const hasApprovedB = videosByName[nameB].some((v: any) => v.approved)
-
-      if (hasApprovedA !== hasApprovedB) {
-        return hasApprovedA ? 1 : -1
-      }
-      return 0
-    })
+    // 6.11.0: approval is gone, so groups are simply listed by name.
+    const sortedKeys = Object.keys(videosByName).sort((a, b) => a.localeCompare(b))
 
     sortedKeys.forEach(key => {
       sortedVideosByName[key] = videosByName[key]
@@ -422,13 +413,11 @@ export async function GET(
         hideFeedback: project.hideFeedback,
         previewResolution: project.previewResolution,
         watermarkEnabled: project.watermarkEnabled,
-        usePreviewForApprovedPlayback: project.usePreviewForApprovedPlayback,
       }),
 
       allowAssetDownload: project.allowAssetDownload,
       allowClientAssetUpload: project.allowClientAssetUpload,
       allowReverseShare: project.allowReverseShare,
-      clientCanApprove: project.clientCanApprove,
       showClientTutorial: project.showClientTutorial ?? true,
 
       // 1.4.x+: expose the share-link expiration so the public share

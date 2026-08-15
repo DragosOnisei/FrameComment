@@ -3,7 +3,6 @@ import { prisma, setOrgContextOn, currentOrgId } from '@/lib/db'
 import { deleteFile } from '@/lib/storage'
 import { allFileLocations } from '@/lib/storage-backends'
 import { requireApiAdmin } from '@/lib/auth'
-import { getAutoApproveProject } from '@/lib/settings'
 import { rateLimit } from '@/lib/rate-limit'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
@@ -68,61 +67,6 @@ export async function GET(
   }
 }
 
-// Helper: Check if all videos have at least one approved version
-async function checkAllVideosApproved(projectId: string): Promise<boolean> {
-  const allVideos = await prisma.video.findMany({
-    where: { projectId },
-    select: { approved: true, name: true }
-  })
-
-  // Group by video name
-  const videosByName = allVideos.reduce((acc: Record<string, any[]>, video) => {
-    if (!acc[video.name]) acc[video.name] = []
-    acc[video.name].push(video)
-    return acc
-  }, {})
-
-  // Check if each unique video has at least one approved version
-  return Object.values(videosByName).every((versions: any[]) =>
-    versions.some(v => v.approved)
-  )
-}
-
-// Helper: Update project status based on approval changes
-async function updateProjectStatus(
-  projectId: string,
-  videoId: string,
-  approved: boolean,
-  currentStatus: string
-): Promise<void> {
-  const allApproved = await checkAllVideosApproved(projectId)
-
-  // Check if auto-approve is enabled
-  const autoApprove = await getAutoApproveProject()
-
-  if (allApproved && approved && autoApprove) {
-    // All videos approved AND auto-approve enabled → mark project as approved
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        status: 'APPROVED',
-        approvedAt: new Date(),
-        approvedVideoId: videoId
-      }
-    })
-  } else if (!approved && currentStatus === 'APPROVED') {
-    // Unapproving when project was approved → revert to IN_REVIEW
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        status: 'IN_REVIEW',
-        approvedAt: null,
-        approvedVideoId: null
-      }
-    })
-  }
-}
-
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -148,16 +92,9 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, name, versionLabel, duration } = body
+    const { name, versionLabel, duration } = body
 
     // Validate inputs
-    if (approved !== undefined && typeof approved !== 'boolean') {
-      return NextResponse.json(
-        { error: videoMessages.invalidApprovedBoolean || 'Invalid request: approved must be a boolean' },
-        { status: 400 }
-      )
-    }
-
     // 4.x: `duration` reconciliation. The player reports the TRUE media
     // duration on load; some source containers store a wrong value that the
     // folder card would otherwise show. Accept a finite, non-negative,
@@ -190,7 +127,7 @@ export async function PATCH(
     }
 
     // At least one field must be provided
-    if (approved === undefined && name === undefined && versionLabel === undefined && duration === undefined) {
+    if (name === undefined && versionLabel === undefined && duration === undefined) {
       return NextResponse.json(
         { error: videoMessages.invalidUpdateRequest || 'Invalid request: at least one field must be provided' },
         { status: 400 }
@@ -207,33 +144,10 @@ export async function PATCH(
   return NextResponse.json({ error: videoMessages.videoNotFoundApi || 'Video not found' }, { status: 404 })
     }
 
-    // If approving this video, unapprove all other versions of the SAME video
-    if (approved) {
-      await prisma.video.updateMany({
-        where: {
-          projectId: video.projectId,
-          name: video.name, // Same video name
-          id: { not: id }, // But different version
-          // 5.12.1: never touch soft-deleted rows — a trashed video that
-          // happens to share the name is NOT part of this live stack.
-          deletedAt: null,
-        } as any,
-        data: {
-          approved: false,
-          approvedAt: null,
-        },
-      })
-    }
-
-    // Per-ROW fields (approval + version label) apply only to THIS
-    // version. Name is handled separately below because it's the
-    // GROUP's identity, not a single row's.
+    // Per-ROW fields (version label) apply only to THIS version. Name is
+    // handled separately below because it's the GROUP's identity, not a
+    // single row's.
     const rowUpdate: any = {}
-
-    if (approved !== undefined) {
-      rowUpdate.approved = approved
-      rowUpdate.approvedAt = approved ? new Date() : null
-    }
 
     if (versionLabel !== undefined) {
       rowUpdate.versionLabel = versionLabel.trim()
@@ -280,21 +194,10 @@ export async function PATCH(
       }
     })
 
-    // Update project status if approval changed
-    if (approved !== undefined) {
-      logMessage(`[VIDEO-APPROVAL] Admin toggled approval for video ${id} to ${approved}`)
-      await updateProjectStatus(video.projectId, id, approved, video.project.status)
-
-      // NOTE: Admin-toggled approvals/unapprovals do NOT send email notifications
-      // Only client-initiated approvals (via /approve route) send emails immediately
-      // This prevents spam when admins are managing multiple videos
-      logMessage('[VIDEO-APPROVAL] Admin approval - emails NOT sent (by design)')
-    }
-
     return NextResponse.json({ success: true })
   } catch (error) {
     return NextResponse.json(
-      { error: videoMessages.failedToUpdateVideoApproval || 'Failed to update video approval' },
+      { error: videoMessages.failedToUpdateVideo || 'Failed to update video' },
       { status: 500 }
     )
   }

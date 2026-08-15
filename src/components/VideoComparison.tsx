@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect, type CSSProperties } from 'react'
 import { useTranslations } from 'next-intl'
 import { Video } from '@prisma/client'
-import { X, ChevronDown, GitCompareArrows, Volume2, VolumeX, Film, CheckCircle2 } from 'lucide-react'
+import { X, ChevronDown, GitCompareArrows, Volume2, VolumeX, Film } from 'lucide-react'
 import VideoComparisonControls from './VideoComparisonControls'
 import VideoComparisonSlider from './VideoComparisonSlider'
 
@@ -481,9 +481,6 @@ export default function VideoComparison({
                       <span className="flex-1 text-xs font-semibold uppercase tracking-wider tabular-nums text-white">
                         {ver.versionLabel}
                       </span>
-                      {(ver as any).approved && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
-                      )}
                     </button>
                   )
                 })}

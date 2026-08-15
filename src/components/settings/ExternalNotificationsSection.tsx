@@ -36,7 +36,6 @@ const EVENT_LABEL_KEYS: Record<NotificationEventType, string> = {
   SHARE_ACCESS: 'sharePageAccess',
   ADMIN_ACCESS: 'adminLogin',
   CLIENT_COMMENT: 'newComments',
-  VIDEO_APPROVAL: 'videoApprovals',
   CLIENT_UPLOAD: 'clientUploads',
   SECURITY_ALERT: 'securityAlerts',
   DUE_DATE_REMINDER: 'dueDateReminders',

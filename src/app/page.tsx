@@ -79,12 +79,12 @@ const jsonLd = {
       applicationSubCategory: 'Video review and collaboration',
       operatingSystem: 'Web browser',
       description:
-        'Video review and collaboration platform for production teams, agencies and creators: frame-accurate timestamped comments, voice notes, version stacks with side-by-side compare, password-protected client share links with approvals, AI transcripts, and your choice of storage (managed hosting, your own NAS, Cloudflare R2 or AWS S3).',
+        'Video review and collaboration platform for production teams, agencies and creators: frame-accurate timestamped comments, voice notes, version stacks with side-by-side compare, password-protected client share links, AI transcripts, and your choice of storage (managed hosting, your own NAS, Cloudflare R2 or AWS S3).',
       featureList: [
         'Frame-accurate timestamped comments and colored timeline markers',
         'Voice comments and comment attachments',
         'Version stacking with synced side-by-side comparison',
-        'Client share links with passwords, expiration dates and approvals — no client account needed',
+        'Client share links with passwords and expiration dates — no client account needed',
         'Client uploads through the same share link',
         'AI-generated searchable transcripts',
         'Adaptive streaming up to 4K',

@@ -109,8 +109,8 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
   // the useAdminSortMode hook. Nothing to do here.
 
   function getDueDateColor(dueDate: string, status: string): string {
-    // Completed projects (approved, archived, share-only) should never show overdue styling
-    if (status === 'APPROVED' || status === 'ARCHIVED' || status === 'SHARE_ONLY') {
+    // Completed projects (archived, share-only) should never show overdue styling
+    if (status === 'ARCHIVED' || status === 'SHARE_ONLY') {
       return 'text-muted-foreground'
     }
     const due = new Date(dueDate)
@@ -145,7 +145,7 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
       return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
     } else {
       // Status sorting
-      const statusPriority: Record<string, number> = { IN_REVIEW: 1, SHARE_ONLY: 2, APPROVED: 3, ARCHIVED: 4 }
+      const statusPriority: Record<string, number> = { IN_REVIEW: 1, SHARE_ONLY: 2, ARCHIVED: 3 }
       const priorityDiff = (statusPriority[a.status] || 99) - (statusPriority[b.status] || 99)
       if (priorityDiff !== 0) return priorityDiff
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()

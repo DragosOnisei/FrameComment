@@ -1,9 +1,9 @@
 # FrameComment
 
-**Self-hosted Video Review & Approval Platform for Filmmakers**
+**Self-hosted Video Review & Delivery Platform for Filmmakers**
 
 FrameComment is a self-hosted web app for video teams to share work with
-clients, collect feedback, and manage approvals.
+clients, collect feedback, and deliver the final files.
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/dragosonisei/framecomment)](https://hub.docker.com/r/dragosonisei/framecomment)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -71,8 +71,8 @@ The full documentation is mirrored under [`docs/wiki`](docs/wiki/).
 | <img src="docs/screenshots/Login Page.png" alt="Login Page" width="400"> | <img src="docs/screenshots/Dashboard.png" alt="Dashboard" width="400"> |
 | **Project View** | **Video Review** |
 | <img src="docs/screenshots/Project View.png" alt="Project View" width="400"> | <img src="docs/screenshots/Share Page - Player View.png" alt="Share Page - Player View" width="400"> |
-| **Version Compare** | **Approved Project** |
-| <img src="docs/screenshots/Share Page - Slider Compare.png" alt="Share Page - Slider Compare" width="400"> | <img src="docs/screenshots/Share Page - Approved.png" alt="Share Page - Approved" width="400"> |
+| **Version Compare** | **Project Analytics** |
+| <img src="docs/screenshots/Share Page - Slider Compare.png" alt="Share Page - Slider Compare" width="400"> | <img src="docs/screenshots/Project Analytics.png" alt="Project Analytics" width="400"> |
 
 ## Contributing
 

@@ -47,7 +47,6 @@ export async function GET(
     select: {
       id: true,
       projectId: true,
-      approved: true,
       thumbnailPath: true,
       storyboardPath: true,
       preview480Path: true,
@@ -61,12 +60,10 @@ export async function GET(
     return NextResponse.json({ error: shareMessages?.videoNotFound || 'Video not found' }, { status: 404 })
   }
 
-  // 3.3.x: the original source is available once the video is approved
-  // OR when the project opts into client downloads (`allowAssetDownload`)
-  // — the latter lets a client download the source of a single-video
-  // share before approval. Without `allowAssetDownload` the original
-  // stays gated behind approval as before.
-  if (quality === 'original' && !video.approved && !project.allowAssetDownload) {
+  // 6.11.0: approval no longer exists. The original is available whenever
+  // the project allows client downloads — one rule instead of two that
+  // disagreed with each other.
+  if (quality === 'original' && !project.allowAssetDownload) {
     return NextResponse.json({ error: shareMessages?.originalQualityUnavailable || 'Original quality unavailable' }, { status: 403 })
   }
 

@@ -29,7 +29,6 @@ import { processProjectUpload } from './project-upload-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processExternalNotificationJob } from './external-notifications/processExternalNotificationJob'
-import { createCleanPreviewWorker } from './clean-preview-processor'
 import { createStorageTransferWorker } from './storage-transfer-processor'
 import { processDueDateReminders } from './due-date-reminders'
 import { processBillingCycle } from './billing-cycle'
@@ -304,19 +303,6 @@ async function main() {
 
   logMessage('External notification worker started')
 
-  // Create clean preview worker for generating non-watermarked previews on approval
-  const cleanPreviewWorker = createCleanPreviewWorker()
-
-  cleanPreviewWorker.on('completed', (job) => {
-    logMessage(`[WORKER] Clean preview completed for video ${job.data.videoId}`)
-  })
-
-  cleanPreviewWorker.on('failed', (job, err) => {
-    logError(`[WORKER ERROR] Clean preview failed for video ${job?.data.videoId}`, err)
-  })
-
-  logMessage('[WORKER] Clean preview worker started')
-
   // 4.2.0+ (Phase 2): storage transfer worker — migrates files between
   // backends on admin request. Concurrency 1; progress lives in Redis.
   const storageTransferWorker = createStorageTransferWorker()
@@ -402,7 +388,6 @@ async function main() {
       assetWorker.close(),
       notificationWorker.close(),
       externalNotificationWorker.close(),
-      cleanPreviewWorker.close(),
       storageTransferWorker.close(),
       notificationQueue.close(),
     ])
@@ -422,7 +407,6 @@ async function main() {
       assetWorker.close(),
       notificationWorker.close(),
       externalNotificationWorker.close(),
-      cleanPreviewWorker.close(),
       storageTransferWorker.close(),
       notificationQueue.close(),
     ])

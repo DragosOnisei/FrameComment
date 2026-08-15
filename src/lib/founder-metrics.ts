@@ -56,7 +56,6 @@ export interface FounderMetrics {
   activity: {
     uploads: number
     comments: number
-    approvals: number
     projectsCreated: number
   }
   /** History for the chart, from the daily billing snapshots. Sparse by
@@ -289,15 +288,12 @@ export async function computeFounderMetrics(
   }, 0)
 
   // ── Activity in range ────────────────────────────────────────────────────
-  const [uploads, comments, approvals, projectsCreated, newCompanies] = await Promise.all([
+  const [uploads, comments, projectsCreated, newCompanies] = await Promise.all([
     (prismaPrivileged as any).video.count({
       where: { organizationId: { in: orgIds }, createdAt: { gte: from, lte: to } },
     }),
     (prismaPrivileged as any).comment.count({
       where: { organizationId: { in: orgIds }, createdAt: { gte: from, lte: to } },
-    }),
-    (prismaPrivileged as any).video.count({
-      where: { organizationId: { in: orgIds }, approvedAt: { gte: from, lte: to } },
     }),
     (prismaPrivileged as any).project.count({
       where: { organizationId: { in: orgIds }, createdAt: { gte: from, lte: to } },
@@ -362,7 +358,7 @@ export async function computeFounderMetrics(
       },
     },
     storage: { totalBytes, billableBytes },
-    activity: { uploads, comments, approvals, projectsCreated },
+    activity: { uploads, comments, projectsCreated },
     series,
     companiesTable: companiesTable.sort(
       (a, b) => b.estimatedMonthlyCents - a.estimatedMonthlyCents,

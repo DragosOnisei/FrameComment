@@ -24,10 +24,8 @@ function getEmailTemplateLocaleDefaults(messages: Record<string, any>) {
       dueDateLabel: common.dueDateLabel || 'Due Date',
     },
     newVersion: messages.newVersion || {},
-    projectApproved: messages.projectApproved || {},
     commentNotification: messages.commentNotification || {},
     adminCommentNotification: messages.adminCommentNotification || {},
-    adminProjectApproved: messages.adminProjectApproved || {},
     projectGeneral: messages.projectGeneral || {},
     password: messages.password || {},
     passwordReset: messages.passwordReset || {},
@@ -42,10 +40,8 @@ function getEmailTemplateLocaleDefaults(messages: Record<string, any>) {
 // Template type constants
 export const EMAIL_TEMPLATE_TYPES = {
   NEW_VERSION: 'NEW_VERSION',
-  PROJECT_APPROVED: 'PROJECT_APPROVED',
   COMMENT_NOTIFICATION: 'COMMENT_NOTIFICATION',
   ADMIN_COMMENT_NOTIFICATION: 'ADMIN_COMMENT_NOTIFICATION',
-  ADMIN_PROJECT_APPROVED: 'ADMIN_PROJECT_APPROVED',
   PROJECT_GENERAL: 'PROJECT_GENERAL',
   PASSWORD: 'PASSWORD',
   PASSWORD_RESET: 'PASSWORD_RESET',
@@ -84,14 +80,6 @@ export const TEMPLATE_PLACEHOLDERS: Record<EmailTemplateType, PlaceholderDefinit
     { key: '{{PASSWORD_NOTICE}}', description: 'Password protection notice (shown only if protected)', example: '' },
     { key: '{{UNSUBSCRIBE_SECTION}}', description: 'Unsubscribe section HTML (optional)', example: '' },
   ],
-  PROJECT_APPROVED: [
-    ...COMMON_PLACEHOLDERS,
-    { key: '{{PROJECT_TITLE}}', description: 'Title of the project', example: 'Summer Campaign 2026' },
-    { key: '{{VIDEO_NAME}}', description: 'Name of the approved deliverable', example: 'Main Video' },
-    { key: '{{SHARE_URL}}', description: 'Link to view/download the project', example: 'https://review.acme.com/share/abc123' },
-    { key: '{{APPROVAL_MESSAGE}}', description: 'Dynamic approval message (includes who approved and download info)', example: 'All deliverables for Summer Campaign 2026 have been approved. The final files are now ready for download.' },
-    { key: '{{UNSUBSCRIBE_SECTION}}', description: 'Unsubscribe section HTML (optional)', example: '' },
-  ],
   COMMENT_NOTIFICATION: [
     ...COMMON_PLACEHOLDERS,
     { key: '{{PROJECT_TITLE}}', description: 'Title of the project', example: 'Summer Campaign 2026' },
@@ -114,15 +102,6 @@ export const TEMPLATE_PLACEHOLDERS: Record<EmailTemplateType, PlaceholderDefinit
     { key: '{{COMMENT_CONTENT}}', description: 'The comment text', example: 'Could we adjust the color grading?' },
     { key: '{{TIMECODE}}', description: 'Clickable timecode pill linking to the comment (if any)', example: '00:01:23:15' },
     { key: '{{ATTACHMENTS}}', description: 'List of attached files (shown only if files were uploaded)', example: '' },
-    { key: '{{ADMIN_URL}}', description: 'Link to admin panel', example: 'https://review.acme.com/admin' },
-  ],
-  ADMIN_PROJECT_APPROVED: [
-    ...COMMON_PLACEHOLDERS,
-    { key: '{{CLIENT_NAME}}', description: 'Name of the client who approved', example: 'John Doe' },
-    { key: '{{PROJECT_TITLE}}', description: 'Title of the project', example: 'Summer Campaign 2026' },
-    { key: '{{VIDEO_NAME}}', description: 'Name of approved deliverable (for partial approvals)', example: 'Main Video' },
-    { key: '{{APPROVAL_STATUS}}', description: 'Approval status (capitalized, for subject lines)', example: 'Approved' },
-    { key: '{{APPROVAL_ACTION}}', description: 'Approval action (lowercase, for body text)', example: 'approved' },
     { key: '{{ADMIN_URL}}', description: 'Link to admin panel', example: 'https://review.acme.com/admin' },
   ],
   PROJECT_GENERAL: [
@@ -162,7 +141,7 @@ export const TEMPLATE_PLACEHOLDERS: Record<EmailTemplateType, PlaceholderDefinit
   CLIENT_ACTIVITY_SUMMARY: [
     ...COMMON_PLACEHOLDERS,
     { key: '{{PROJECT_TITLE}}', description: 'Title of the project', example: 'Summer Campaign 2026' },
-    { key: '{{SUMMARY_TEXT}}', description: 'Summary counts text', example: '3 new comments, 1 approval' },
+    { key: '{{SUMMARY_TEXT}}', description: 'Summary counts text', example: '3 new comments, 2 uploads' },
     { key: '{{PERIOD}}', description: 'Schedule period text', example: 'today' },
     { key: '{{SUMMARY_ITEMS}}', description: 'Rendered summary items HTML', example: '' },
     { key: '{{SHARE_URL}}', description: 'Link to view project', example: 'https://review.acme.com/share/abc123' },
@@ -201,12 +180,6 @@ export const TEMPLATE_METADATA: TemplateMetadata[] = [
     category: 'client',
   },
   {
-    type: 'PROJECT_APPROVED',
-    name: 'Project/Deliverable Approved',
-    description: 'Sent to clients when a project or deliverable is approved',
-    category: 'client',
-  },
-  {
     type: 'COMMENT_NOTIFICATION',
     name: 'Comment Notification (to Client)',
     description: 'Sent to clients when admin leaves a comment on a project',
@@ -216,12 +189,6 @@ export const TEMPLATE_METADATA: TemplateMetadata[] = [
     type: 'ADMIN_COMMENT_NOTIFICATION',
     name: 'Comment Notification (to Admin)',
     description: 'Sent to admins when a client leaves a comment',
-    category: 'admin',
-  },
-  {
-    type: 'ADMIN_PROJECT_APPROVED',
-    name: 'Approval Notification (to Admin)',
-    description: 'Sent to admins when a client approves a project or deliverable',
     category: 'admin',
   },
   {
@@ -422,39 +389,6 @@ export function buildLocalizedDefaultTemplate(
 {{UNSUBSCRIBE_SECTION}}`,
       }
     }
-    case 'PROJECT_APPROVED': {
-      const t = defaults.projectApproved
-      return {
-        type: 'PROJECT_APPROVED',
-        name: meta.name,
-        description: meta.description,
-        subject: t.subject || '{{PROJECT_TITLE}} - Approved and Ready for Download',
-        bodyContent: `<p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.5;">
-  ${greeting}
-</p>
-
-<p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6;">
-  {{APPROVAL_MESSAGE}}
-</p>
-
-<div class="secondary-box" style="text-align: center;">
-  <div class="info-label">${projectLabel}</div>
-  <div style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">{{PROJECT_TITLE}}</div>
-  <div class="info-label">${deliverableLabel}</div>
-  <div style="font-size: 14px; line-height: 1.8;">{{VIDEO_NAME}}</div>
-</div>
-
-<div style="margin: 28px 0; text-align: center;">
-  {{BUTTON:${t.button || 'Download Files'}:{{SHARE_URL}}}}
-</div>
-
-<p style="margin: 24px 0 0 0; font-size: 13px; text-align: center; line-height: 1.5;">
-  ${questionsFooter}
-</p>
-
-{{UNSUBSCRIBE_SECTION}}`,
-      }
-    }
     case 'COMMENT_NOTIFICATION': {
       const t = defaults.commentNotification
       return {
@@ -505,29 +439,6 @@ export function buildLocalizedDefaultTemplate(
 </div>
 
 {{ATTACHMENTS}}
-
-<div style="margin: 28px 0; text-align: center;">
-  {{BUTTON:${t.button || 'View in Admin Panel'}:{{ADMIN_URL}}}}
-</div>`,
-      }
-    }
-    case 'ADMIN_PROJECT_APPROVED': {
-      const t = defaults.adminProjectApproved
-      return {
-        type: 'ADMIN_PROJECT_APPROVED',
-        name: meta.name,
-        description: meta.description,
-        subject: t.subject || '{{CLIENT_NAME}} {{APPROVAL_STATUS}}: {{PROJECT_TITLE}}',
-        bodyContent: `<p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6;">
-  ${t.body || '<strong>{{CLIENT_NAME}}</strong> has {{APPROVAL_ACTION}} {{VIDEO_NAME}} in {{PROJECT_TITLE}}.'}
-</p>
-
-<div class="secondary-box" style="text-align: center;">
-  <div class="info-label">${projectLabel}</div>
-  <div style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">{{PROJECT_TITLE}}</div>
-  <div class="info-label">${deliverableLabel}</div>
-  <div style="font-size: 14px; line-height: 1.8;">{{VIDEO_NAME}}</div>
-</div>
 
 <div style="margin: 28px 0; text-align: center;">
   {{BUTTON:${t.button || 'View in Admin Panel'}:{{ADMIN_URL}}}}

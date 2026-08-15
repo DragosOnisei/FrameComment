@@ -1,6 +1,6 @@
 # Client Guide
 
-This guide is for clients and reviewers who receive a FrameComment share link to watch videos, leave feedback, and approve deliverables.
+This guide is for clients and reviewers who receive a FrameComment share link to watch videos, leave feedback, and download deliverables.
 
 ## Opening a share link
 
@@ -20,7 +20,7 @@ Enter your email address and click **Send Code**. Check your inbox for a 6-digit
 Both options are shown. You can use either one.
 
 **Guest access**
-Some projects allow guest viewing. Click **Continue as Guest** to enter without credentials. Guest access is view-only — you cannot comment, approve, or download. Depending on the project settings, guests may only see the latest version of each video.
+Some projects allow guest viewing. Click **Continue as Guest** to enter without credentials. Guest access is view-only — you cannot comment or download. Depending on the project settings, guests may only see the latest version of each video.
 
 After logging in, your session is saved so you can refresh the page without re-entering credentials.
 
@@ -33,15 +33,13 @@ Some projects display a privacy disclosure banner on first visit. You can read t
 After authentication you see a thumbnail grid of all videos in the project:
 
 - Each card shows a thumbnail, the video name, and a version count badge.
-- Approved videos show a checkmark overlay.
-- Videos needing review appear first, followed by approved videos.
 - Click any thumbnail to open the video player.
 
 Above the grid you can see the project title, your name, and an optional project description.
 
 In the top-left corner of the grid, depending on what the project admin has enabled, you may see:
 
-- **Download All Videos** — downloads all approved videos as a single ZIP file.
+- **Download All Videos** — downloads every video in the project. A flat folder of 15 files or fewer is delivered as individual files; anything larger, or a folder with subfolders, arrives as a single ZIP.
 - **Submit Files** — opens an upload panel to send files directly to the project (see [Submitting files](#submitting-files-to-the-project) below).
 
 If this is your first visit, an interactive tutorial overlay may guide you through the main features of the review page.
@@ -89,8 +87,7 @@ All shortcuts use **Ctrl** (or **Cmd** on Mac):
 If the video has multiple versions (revisions), version buttons appear above the player. Click a version to switch.
 
 - The current version is highlighted.
-- Approved versions show a checkmark icon.
-- Once any version is approved, only approved versions are visible.
+- Every version stays visible — nothing is hidden as the project progresses.
 
 ### Comparing versions
 
@@ -142,23 +139,6 @@ If enabled by the project, you can attach files to your comments using the attac
 - Click any timestamp in a comment to jump the video to that moment.
 - If the project has "hide feedback" enabled, you will only see your own comments.
 
-## Approving videos
-
-If the project allows client approval, an **Approve** button appears in the action area.
-
-1. Click **Approve**.
-2. A confirmation dialog shows the video name and version.
-3. Click **Approve** to confirm.
-
-After approval:
-- The video shows a checkmark and the label "Approved Version".
-- Only approved versions remain visible.
-- The original unwatermarked file becomes available for download (if enabled).
-- The watermark is removed from playback.
-- Your video team is notified of the approval.
-
-If the project has auto-approve enabled, the entire project is automatically marked as approved once all videos are approved.
-
 ## Submitting files to the project
 
 If the project admin has enabled file submissions, a **Submit Files** button appears in the top-left corner of the video grid.
@@ -173,13 +153,11 @@ Files you submit are visible to the project admin but are not attached to any sp
 
 ## Downloading
 
-Download options appear after a video has been approved (not available in guest mode):
+Downloads are available whenever the project admin has enabled them (not in guest mode):
 
-- Click the **Download** button to download the original file.
+- Click the **Download** button and pick a quality, or the original file.
 - If the project has additional assets (images, audio, project files), a download dialog lets you select which files to download.
-- If the project has multiple approved videos and downloads are enabled, a **Download All Videos** button appears in the top-left corner of the grid to download everything as a single ZIP.
-
-Unapproved videos cannot be downloaded — only the watermarked preview is shown for review.
+- With downloads enabled, a **Download All Videos** button appears in the top-left corner of the grid.
 
 ## Theme and language
 
@@ -211,20 +189,17 @@ These can be combined, e.g. `https://example.com/share/token?video=Hero%20Reel&t
 
 ## FAQ
 
-**Q: The video looks blurry or has a watermark.**
-A: Unapproved videos are shown as watermarked previews at 720p or 1080p. Once you approve the video, the original quality becomes available.
+**Q: The video looks blurry.**
+A: Playback starts on the fastest available quality tier and climbs as higher tiers finish encoding. You can pick a quality manually from the player's settings menu.
 
 **Q: I can't see the comment section.**
 A: On mobile, comments are collapsed by default — tap the comment header to expand. If you entered as a guest, comments are hidden.
-
-**Q: I approved the wrong video.**
-A: Contact your video team. Only admins can revoke an approval.
 
 **Q: My session expired.**
 A: Refresh the page and re-enter your password or request a new email code.
 
 **Q: I can't download the video.**
-A: Downloads are only available for approved videos and when the project admin has enabled downloads.
+A: Downloads have to be enabled by the project admin, and they are never available in guest mode.
 
 ---
 Navigation: [Home](Home) | [Features](Features) | [Installation](Installation) | [Platform Guides](Platform-Guides) | [Configuration](Configuration) | [Admin Settings](Admin-Settings) | [Usage Guide](Usage-Guide) | [Client Guide](Client-Guide) | [Security](Security) | [Maintenance](Maintenance) | [Troubleshooting](Troubleshooting) | [Screenshots](Screenshots) | [Contributing](Contributing) | [License](License)

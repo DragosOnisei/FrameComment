@@ -1,11 +1,10 @@
 import { Comment } from '@prisma/client'
 import { prisma, orgSettingsWhere, currentOrgId } from './db'
-import { sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendProjectApprovedEmail, sendAdminProjectApprovedEmail, getEmailSettings, sendEmail, getRecipientLocale } from './email'
+import { sendCommentNotificationEmail, sendAdminCommentNotificationEmail, getEmailSettings, sendEmail, getRecipientLocale } from './email'
 import { generateNotificationSummaryEmail, generateAdminSummaryEmail } from './email-templates'
 import { getProjectRecipients } from './recipients'
 import { generateShareUrl } from './url'
 import { getRedis } from './redis'
-import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
 import { buildUnsubscribeUrl, generateRecipientUnsubscribeToken } from './unsubscribe'
 import { normalizeNotificationDataTimecode } from '@/worker/notification-helpers'
 import { logError, logMessage } from '@/lib/logging'
@@ -18,15 +17,6 @@ interface NotificationContext {
   attachmentNames?: string[]
 }
 
-interface ApprovalNotificationContext {
-  project: { id: string; title: string; slug: string; clientNotificationSchedule: string; watermarkEnabled?: boolean }
-  video?: { id: string; name: string; versionLabel?: string | null }
-  approvedVideos?: Array<{ id: string; name: string }>
-  approved: boolean // true = approved, false = unapproved
-  authorName?: string | null
-  authorEmail?: string | null
-  isComplete?: boolean // true = all videos approved, false = partial approval
-}
 
 /**
  * Send immediate notification (when schedule is IMMEDIATE)
@@ -225,152 +215,6 @@ export async function queueNotification(
   })
 
   logMessage(`[QUEUE]   Queued successfully`)
-}
-
-/**
- * Handle approval notification (video or project)
- * IMPORTANT: Approvals are ALWAYS sent immediately, regardless of schedule settings
- */
-export async function handleApprovalNotification(context: ApprovalNotificationContext) {
-  const { project, video, approved, isComplete = false } = context
-
-  // Determine notification type based on whether ALL videos are approved
-  const type = isComplete ? 'PROJECT_APPROVED' : (approved ? 'VIDEO_APPROVED' : 'VIDEO_UNAPPROVED')
-
-  logMessage(`[APPROVAL] Handling ${type} for "${project.title}"`)
-  if (video) {
-    logMessage(`[APPROVAL]   Video: ${video.name}`)
-  }
-
-  // ALWAYS send approval notifications immediately, regardless of schedule
-  logMessage(`[APPROVAL]   Sending immediately (approvals always bypass schedule)...`)
-  await sendApprovalImmediately(context)
-}
-
-/**
- * Send approval notification immediately
- */
-async function sendApprovalImmediately(context: ApprovalNotificationContext) {
-  const { project, video, approvedVideos, approved, authorName, authorEmail, isComplete = false } = context
-
-  const shareUrl = await generateShareUrl(project.slug)
-  let adminShareUrl = ''
-  try {
-    const origin = new URL(shareUrl).origin
-    const returnUrl = `/admin/projects/${project.id}/share`
-    adminShareUrl = `${origin}/login?returnUrl=${encodeURIComponent(returnUrl)}`
-  } catch {
-    adminShareUrl = ''
-  }
-  const allRecipients = await getProjectRecipients(project.id)
-  const recipients = allRecipients.filter(r => r.receiveNotifications && r.email)
-
-  // Get all admins
-  const admins = await prisma.user.findMany({
-    where: {}, /* 4.3.0: all internal roles (User table is staff-only) */
-    select: { email: true, name: true }
-  })
-
-  // Send to clients ONLY if complete project approval (all videos approved)
-  // Don't send for partial approvals - client knows they just clicked approve
-  if (recipients.length > 0 && isComplete && approved) {
-    logMessage(`[IMMEDIATE→CLIENT] Sending complete project approval to ${recipients.length} recipient(s)`)
-
-    const emailPromises = recipients.map(async (recipient) => {
-      let unsubscribeUrl: string | undefined
-      try {
-        const token = generateRecipientUnsubscribeToken({
-          recipientId: recipient.id!,
-          projectId: project.id,
-          recipientEmail: recipient.email!,
-        })
-        unsubscribeUrl = buildUnsubscribeUrl(new URL(shareUrl).origin, token)
-      } catch {
-        unsubscribeUrl = undefined
-      }
-
-      // Check if this recipient is the one who approved
-      const isApprover = authorEmail && recipient.email?.toLowerCase() === authorEmail.toLowerCase()
-
-      // Resolve per-recipient locale
-      const recipientLocale = await getRecipientLocale(recipient.email!)
-
-      return sendProjectApprovedEmail({
-        clientEmail: recipient.email!,
-        clientName: recipient.name || 'Client',
-        projectTitle: project.title,
-        approvedVideos: approvedVideos || (video ? [{ id: video.id, name: video.name }] : []),
-        shareUrl,
-        isComplete: true, // Only send when complete
-        unsubscribeUrl,
-        approverName: authorName || undefined,
-        isApprover: isApprover || false,
-        watermarkEnabled: project.watermarkEnabled ?? true,
-        locale: recipientLocale,
-      }).then(result => {
-        if (result.success) {
-          logMessage(`[IMMEDIATE→CLIENT]   Sent to ${recipient.email}`)
-        } else {
-          logError(`[IMMEDIATE→CLIENT]   Failed to ${recipient.email}: ${result.error}`)
-        }
-        return result
-      })
-    })
-
-    await Promise.allSettled(emailPromises)
-  } else if (recipients.length > 0 && !isComplete) {
-    logMessage(`[IMMEDIATE→CLIENT] Skipped - partial approval (${approvedVideos?.length || 0} videos), not sending to client`)
-  }
-
-  // Send to admins - notify them when client approves OR unapproves ANY video
-  if (admins.length > 0) {
-    const action = approved ? 'approval' : 'unapproval'
-    logMessage(`[IMMEDIATE→ADMIN] Sending ${action} notice to ${admins.length} admin(s)`)
-
-    const result = await sendAdminProjectApprovedEmail({
-      adminEmails: admins.map(a => a.email),
-      clientName: authorName || 'Client',
-      projectTitle: project.title,
-      approvedVideos: approvedVideos || (video ? [{ id: video.id, name: video.name }] : []),
-      isApproval: approved, // Pass whether this is approval or unapproval
-      isComplete, // Pass whether this is complete project or partial
-    })
-
-    if (result.success) {
-      logMessage(`[IMMEDIATE→ADMIN]   ${result.message}`)
-    } else {
-      logError(`[IMMEDIATE→ADMIN]   Failed: ${result.message}`)
-    }
-  }
-
-  const videoNames =
-    approvedVideos?.map(v => v.name).join(', ') ||
-    video?.name ||
-    'Unknown'
-
-  void enqueueExternalNotification({
-    eventType: 'VIDEO_APPROVAL',
-    title: `${authorName || 'Client'} ${approved ? 'Approved' : 'Unapproved'}: ${project.title}`,
-    body: [
-      `${authorName || 'A client'}${authorEmail ? ` (${authorEmail})` : ''} ${approved ? 'approved' : 'unapproved'} ${videoNames}`,
-      `Project: ${project.title}`,
-      isComplete ? 'All videos are now approved' : null,
-      adminShareUrl ? `Link: ${adminShareUrl}` : shareUrl ? `Link: ${shareUrl}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n'),
-    notifyType: approved ? 'success' : 'warning',
-    pushData: {
-      projectTitle: project.title,
-      projectId: project.id,
-      videoName: videoNames,
-      authorName: authorName || undefined,
-      email: authorEmail || undefined,
-      url: adminShareUrl || undefined,
-    },
-  }).catch((notificationError) => {
-    logError('[APPROVAL] Failed to enqueue external notification', notificationError)
-  })
 }
 
 /**

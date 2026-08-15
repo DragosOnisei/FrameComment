@@ -167,7 +167,7 @@ async function buildFacts(
       `Companies: ${m.companies.total} total, ${m.companies.active} active, ${m.companies.onPaidTier} on a paid tier, ${m.companies.newInRange} new this week, ${m.companies.suspended} suspended.`,
       `Users: ${m.users.total} total, ${m.users.newInRange} new this week, ${m.revenue.billableUsers} billable.`,
       `Storage: ${bytes(m.storage.totalBytes)} stored, ${bytes(m.storage.billableBytes)} billable.`,
-      `Activity this week: ${m.activity.uploads} uploads, ${m.activity.comments} comments, ${m.activity.approvals} approvals, ${m.activity.projectsCreated} projects created.`,
+      `Activity this week: ${m.activity.uploads} uploads, ${m.activity.comments} comments, ${m.activity.projectsCreated} projects created.`,
     ].join('\n')
 
     const body = [
@@ -177,7 +177,7 @@ async function buildFacts(
       `- **Companies** — ${m.companies.total} total · ${m.companies.active} active · ${m.companies.onPaidTier} paid · ${m.companies.newInRange} new`,
       `- **Users** — ${m.users.total} total · ${m.users.newInRange} new`,
       `- **Storage** — ${bytes(m.storage.totalBytes)} stored · ${bytes(m.storage.billableBytes)} billable`,
-      `- **Activity** — ${m.activity.uploads} uploads · ${m.activity.comments} comments · ${m.activity.approvals} approvals`,
+      `- **Activity** — ${m.activity.uploads} uploads · ${m.activity.comments} comments · ${m.activity.projectsCreated} projects`,
       '',
       '## Companies',
       '',

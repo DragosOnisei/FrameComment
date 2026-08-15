@@ -85,7 +85,7 @@ export default function PrivacyPage() {
           <p>
             <strong className="text-white">Content you upload.</strong> Videos, images,
             documents, comments (including voice comments and attachments), project and
-            folder names, and approval decisions. Guest reviewers on share links may
+            and folder names. Guest reviewers on share links may
             leave a display name with their comments.
           </p>
           <p>

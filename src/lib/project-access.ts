@@ -52,7 +52,7 @@ export async function verifyProjectAccess(
       authorized: true,
       isAdmin: true,
       isAuthenticated: true,
-      permissions: ['view', 'comment', 'download', 'approve'],
+      permissions: ['view', 'comment', 'download'],
       shareTokenSessionId: `admin:${currentUser.id}`,
     }
   }
@@ -65,7 +65,7 @@ export async function verifyProjectAccess(
       isAdmin: false,
       isAuthenticated: true,
       isGuest: false,
-      permissions: ['view', 'comment', 'download', 'approve'],
+      permissions: ['view', 'comment', 'download'],
       shareTokenSessionId: sessionId,
     }
   }

@@ -83,7 +83,6 @@ export interface VideoCardProps {
    *  playable but still climbing the ladder — that's the trigger
    *  for the "Encoding HD…" badge in the corner. */
   completedTiers?: string[] | null
-  approved?: boolean
   commentCount?: number
   uploaderName?: string | null
   createdAt?: string | Date
@@ -312,7 +311,6 @@ export default function VideoCard({
   processingProgress,
   plannedTiers,
   completedTiers,
-  approved,
   commentCount = 0,
   uploaderName,
   createdAt,
@@ -822,7 +820,7 @@ export default function VideoCard({
             }`}
           />
         )}
-        {/* Approved tick (bottom-left), version tag (top-right) and
+        {/* Version tag (top-right) and
             duration badge (bottom-right) overlay the cover. 2.5.0+:
             version tag picks up the v2.5 frosted-glass vocabulary
             so it visually composes with the rest of the chrome
@@ -874,15 +872,6 @@ export default function VideoCard({
           >
             {isSelected && <Check className="w-3.5 h-3.5" />}
           </button>
-        )}
-        {approved && (
-          <span
-            className="absolute top-2 left-9 inline-flex items-center justify-center w-5 h-5 rounded-full bg-success text-white text-[10px] leading-none ring-2 ring-card"
-            title="Approved"
-            aria-label="Approved"
-          >
-            ✓
-          </span>
         )}
         {/* Comment count + duration row sits along the bottom of the
             cover, like Frame.io. */}
