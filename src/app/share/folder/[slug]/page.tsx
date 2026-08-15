@@ -270,9 +270,9 @@ function PublicFolderSharePageInner() {
   // The local `downloadingAll` flag is kept for the button disabled
   // state — the manager tracks the underlying job + cancellation.
   const [downloadingAll, setDownloadingAll] = useState(false)
-  // 6.10.0: set when every individual download was refused — almost always
-  // the browser's multi-download permission being denied.
-  const [multiDownloadBlocked, setMultiDownloadBlocked] = useState(false)
+  // 6.10.1: how many files were handed to the browser, so the page can say
+  // what happened instead of guessing why nothing appeared.
+  const [filesStarted, setFilesStarted] = useState(0)
   const { startStreamDownload } = useDownloadManager()
   /**
    * 6.10.0: a flat shared folder downloads as FILES, not a ZIP.
@@ -283,8 +283,20 @@ function PublicFolderSharePageInner() {
    * does. A folder WITH subfolders still zips: handing someone forty loose
    * files when they asked for a tree is a worse answer, not a simpler one.
    */
+  /**
+   * 6.10.1: download a flat folder as FILES, returning false if the server
+   * refuses — the caller then falls back to the ZIP.
+   *
+   * Why the fallback matters: the per-video download endpoint refuses videos
+   * that are not approved yet, while the folder ZIP endpoint does not. So a
+   * folder a client CAN download as an archive could still have every
+   * individual file refused. 6.10.0 shipped without that fallback and blamed
+   * the browser for it, which was simply wrong — the server said no, and the
+   * page told the user to change a browser setting that had nothing to do
+   * with it.
+   */
   const downloadFilesIndividually = useCallback(
-    async (files: Array<{ videoId: string; name: string }>) => {
+    async (files: Array<{ videoId: string; name: string }>): Promise<boolean> => {
       let delivered = 0
       for (const f of files) {
         try {
@@ -292,9 +304,18 @@ function PublicFolderSharePageInner() {
             method: 'POST',
             headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
           })
-          if (!res.ok) continue
+          if (!res.ok) {
+            // First one refused → this whole route is unavailable for this
+            // folder. Give up immediately so the archive can take over
+            // instead of firing a dozen doomed requests.
+            if (delivered === 0) return false
+            continue
+          }
           const data = await res.json()
-          if (!data?.url) continue
+          if (!data?.url) {
+            if (delivered === 0) return false
+            continue
+          }
           const a = document.createElement('a')
           a.href = data.url
           a.download = ''
@@ -303,18 +324,14 @@ function PublicFolderSharePageInner() {
           a.click()
           a.remove()
           delivered++
-          // Spaced out: browsers throttle a burst of downloads, and Chrome
-          // asks permission on the first multi-file download from a site.
+          setFilesStarted(delivered)
+          // Spaced out: browsers throttle a burst of downloads.
           await new Promise((r) => setTimeout(r, 400))
         } catch {
-          /* one failed file must not stop the rest */
+          if (delivered === 0) return false
         }
       }
-      if (delivered === 0 && files.length > 0) {
-        // Almost always the browser refusing multiple downloads. Say so —
-        // a button that silently does nothing reads as broken.
-        setMultiDownloadBlocked(true)
-      }
+      return delivered > 0
     },
     [bearer],
   )
@@ -345,7 +362,7 @@ function PublicFolderSharePageInner() {
   const handleDownloadAll = useCallback(() => {
     if (downloadingAll) return
     setDownloadingAll(true)
-    setMultiDownloadBlocked(false)
+    setFilesStarted(0)
 
     void (async () => {
       try {
@@ -363,9 +380,13 @@ function PublicFolderSharePageInner() {
             Array.isArray(shape.files) &&
             shape.files.length > 0
           ) {
-            await downloadFilesIndividually(shape.files)
-            setTimeout(() => setDownloadingAll(false), 400)
-            return
+            const ok = await downloadFilesIndividually(shape.files)
+            if (ok) {
+              setTimeout(() => setDownloadingAll(false), 400)
+              return
+            }
+            // Refused per file — fall through to the archive, which has its
+            // own (looser) permission rules and is what worked before.
           }
         }
       } catch {
@@ -734,14 +755,13 @@ function PublicFolderSharePageInner() {
                 <span>Download All</span>
               </Button>
             )}
-            {/* 6.10.0: a flat folder downloads as separate files, and browsers
-                ask permission the first time a site does that. If every file
-                was refused, say so — a button that appears to do nothing is
-                the worst possible outcome. */}
-            {multiDownloadBlocked && (
-              <p className="text-xs text-amber-300 max-w-xs">
-                Your browser blocked multiple downloads. Allow them for this
-                site and press Download All again.
+            {/* 6.10.1: a flat folder arrives as separate files. Say what was
+                started — no claim about WHY something might be missing, since
+                the page cannot actually tell. */}
+            {filesStarted > 0 && (
+              <p className="text-xs text-muted-foreground max-w-xs">
+                {filesStarted} file{filesStarted === 1 ? '' : 's'} sent to your
+                browser&apos;s downloads.
               </p>
             )}
             {/* 1.4.x+: item count next to Download All counts UNIQUE

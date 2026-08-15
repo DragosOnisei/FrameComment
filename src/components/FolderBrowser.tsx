@@ -1946,8 +1946,9 @@ function FolderBrowserInner(
    * they're one anchor click, fast, no value in chrome around them.
    */
   const { startManualDownload } = useDownloadManager()
-  const downloadVideos = useCallback(async (ids: string[]) => {
-    if (ids.length === 0) return
+  const downloadVideos = useCallback(async (ids: string[]): Promise<number> => {
+    if (ids.length === 0) return 0
+    let delivered = 0
     setBulkBusy(true)
     const useBanner = ids.length > 1
     const job = useBanner
@@ -1964,6 +1965,7 @@ function FolderBrowserInner(
           job?.bumpItem()
           continue
         }
+        delivered++
         const a = document.createElement('a')
         a.href = url
         // The /api/content endpoint already sets a Content-Disposition
@@ -1981,6 +1983,7 @@ function FolderBrowserInner(
         job.finish(job.signal.aborted ? 'error' : 'success',
           job.signal.aborted ? 'Cancelled' : undefined)
       }
+      return delivered
     } finally {
       setBulkBusy(false)
     }
@@ -2116,8 +2119,12 @@ function FolderBrowserInner(
           // throw the structure away.
           const shape = await fetchFolderShape(`/api/folders/${f.id}/download/stat`)
           if (shape && shouldDownloadAsFiles(shape) && shape.files.length > 0) {
-            await downloadVideos(shape.files.map((x) => x.videoId))
-            continue
+            const delivered = await downloadVideos(shape.files.map((x) => x.videoId))
+            // 6.10.1: if not a single file came through, the per-video
+            // endpoint refused them (it is stricter than the folder ZIP —
+            // it requires approval). Fall back to the archive rather than
+            // leaving the user with nothing.
+            if (delivered > 0) continue
           }
           startStreamDownload({
             label: 'Folder.zip', // overwritten by stat with the real name

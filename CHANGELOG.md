@@ -14,6 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.10.1] - 2026-08-15
+
+### „Your browser blocked multiple downloads" era un diagnostic greșit
+
+Browserul nu bloca nimic. **Serverul refuza**: ruta de download per video
+cere ca videoul să fie **aprobat**, în timp ce ruta de ZIP pe folder nu
+cere asta. Deci un folder pe care clientul îl poate descărca ca arhivă
+avea, fișier cu fișier, toate cererile respinse cu 403 — iar pagina îi
+spunea utilizatorului să schimbe o setare de browser care n-avea nicio
+legătură.
+
+Două lucruri reparate:
+
+1. **Fallback automat.** Dacă primul fișier e refuzat, calea individuală
+   se abandonează imediat și se descarcă arhiva — care era oricum
+   autorizată pentru acel folder. Fără mesaje, fără intervenția
+   utilizatorului.
+2. **Mesajul nu mai ghicește.** Spune doar ce s-a întâmplat efectiv —
+   „4 files sent to your browser's downloads" — pentru că pagina chiar
+   nu poate ști de ce n-a apărut un fișier.
+
+**Rămâne o inconsecvență reală**, semnalată dar neatinsă: ZIP-ul pe folder
+permite videouri neaprobate, iar descărcarea per video nu. Una dintre cele
+două reguli e greșită. N-am relaxat un gate de permisiuni de capul meu.
+
 ## [6.10.0] - 2026-08-15
 
 ### Folder plat → fișiere, nu arhivă
