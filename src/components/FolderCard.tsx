@@ -15,6 +15,7 @@ import {
   UploadCloud,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
+import { storyboardGridOf } from '@/lib/storyboard-grid'
 import { formatBytes } from '@/lib/project-gradient'
 
 /**
@@ -57,6 +58,8 @@ export interface FolderCardProps {
         videoId: string
         thumbnailUrl: string
         storyboardUrl?: string
+        storyboardCols?: number | null
+        storyboardRows?: number | null
       }
     | { kind: 'folder'; folderId: string }
   >
@@ -816,6 +819,8 @@ function FolderCover({
         <ScrubTile
           thumbnailUrl={t.thumbnailUrl}
           storyboardUrl={t.storyboardUrl}
+          storyboardCols={t.storyboardCols}
+          storyboardRows={t.storyboardRows}
         />
       )
     }
@@ -883,22 +888,26 @@ function FolderCover({
 // tile exactly like the static thumbnail. Result: the scrub frame is
 // framed identically to the thumbnail and never flips aspect ratio —
 // and it works on existing videos too (no re-processing needed).
-const STORY_COLS = 10
-const STORY_ROWS = 10
-const STORY_CELLS = STORY_COLS * STORY_ROWS
 // Worker cell geometry — keep in sync with generateStoryboard().
+// 6.9.3: the GRID is per video now (see lib/storyboard-grid); only the cell
+// size is fixed.
 const CELL_W = 192
 const CELL_H = 108
-const SHEET_W = CELL_W * STORY_COLS
-const SHEET_H = CELL_H * STORY_ROWS
 
 export function ScrubTile({
   thumbnailUrl,
   storyboardUrl,
+  storyboardCols,
+  storyboardRows,
 }: {
   thumbnailUrl: string
   storyboardUrl?: string
+  storyboardCols?: number | null
+  storyboardRows?: number | null
 }) {
+  const grid = storyboardGridOf({ storyboardCols, storyboardRows })
+  const SHEET_W = CELL_W * grid.cols
+  const SHEET_H = CELL_H * grid.rows
   const ref = useRef<HTMLDivElement>(null)
   // 0…1 while hovering, null otherwise (overlay hidden → static thumb).
   const [scrubFraction, setScrubFraction] = useState<number | null>(null)
@@ -925,10 +934,10 @@ export function ScrubTile({
     if (!canScrub || scrubFraction === null || !tileSize) return null
     const idx = Math.max(
       0,
-      Math.min(STORY_CELLS - 1, Math.floor(scrubFraction * STORY_CELLS)),
+      Math.min(grid.cells - 1, Math.round(scrubFraction * grid.cells)),
     )
-    const col = idx % STORY_COLS
-    const row = Math.floor(idx / STORY_COLS)
+    const col = idx % grid.cols
+    const row = Math.floor(idx / grid.cols)
 
     const cellAspect = CELL_W / CELL_H // 16:9
     const av = nativeAspect ?? cellAspect // clip's true aspect (w/h)

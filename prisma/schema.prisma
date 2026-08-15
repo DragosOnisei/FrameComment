@@ -489,6 +489,13 @@ model Video {
   // background-position on this sprite for instant frame-accurate
   // scrubbing — same approach Frame.io uses.
   storyboardPath  String?
+  // 6.9.3: sprite geometry. The grid used to be a fixed 10x10 for every
+  // video, which on a long clip meant one frame every few seconds and a
+  // hover preview that could be seconds away from where a click landed.
+  // The grid now scales with duration, so the reader has to know the shape
+  // that was actually produced. NULL = the legacy 10x10.
+  storyboardCols  Int?
+  storyboardRows  Int?
 
   // Clean (non-watermarked) previews for approved playback
   cleanPreview2160Path String?

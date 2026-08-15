@@ -216,6 +216,10 @@ export async function GET(
       // storyboard token so the player timeline gets the same
       // hover-scrub frame preview the folder/version thumbnails have.
       storyboardPath: video.storyboardPath ?? null,
+      // 6.9.3: sprite geometry travels with the path — the reader can no
+      // longer assume 10x10.
+      storyboardCols: (video as any).storyboardCols ?? null,
+      storyboardRows: (video as any).storyboardRows ?? null,
       // folderId surfaced (1.0.6+) so the share page can scope the
       // title-flyout to videos from one folder when arriving via a
       // folder share link.
@@ -350,6 +354,10 @@ export async function GET(
       thumbnailUrl: video.thumbnailUrl,
       thumbnailPath: video.thumbnailPath,
       storyboardPath: video.storyboardPath ?? null,
+      // 6.9.3: sprite geometry travels with the path — the reader can no
+      // longer assume 10x10.
+      storyboardCols: (video as any).storyboardCols ?? null,
+      storyboardRows: (video as any).storyboardRows ?? null,
     })) : videosSanitizedBase
 
     const sanitizedVideosByName = isGuest ? Object.keys(sortedVideosByName).reduce((acc: any, name: string) => {
@@ -374,6 +382,10 @@ export async function GET(
         thumbnailUrl: video.thumbnailUrl,
         thumbnailPath: video.thumbnailPath,
         storyboardPath: video.storyboardPath ?? null,
+        // 6.9.3: sprite geometry travels with the path — the reader can no
+        // longer assume 10x10.
+        storyboardCols: (video as any).storyboardCols ?? null,
+        storyboardRows: (video as any).storyboardRows ?? null,
       }))
       return acc
     }, {}) : sortedVideosByName

@@ -7,6 +7,7 @@ import path from 'path'
 import { pipeline } from 'stream/promises'
 import { TEMP_DIR } from './cleanup'
 import { logError, logMessage } from '../lib/logging'
+import { planStoryboardGrid } from '../lib/storyboard-grid'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -555,9 +556,27 @@ export async function processStoryboard(
     const tempStoryboardPath = path.join(TEMP_DIR, `${videoId}-storyboard.jpg`)
     tempFiles.storyboard = tempStoryboardPath
 
+    // 6.9.3: the grid scales with duration (~1 frame/second) instead of a
+    // fixed 10x10. On a 7-minute clip the old grid sampled one frame every
+    // 4.2s, so the hover preview could sit seconds away from where a click
+    // landed. The shape is recorded on the row because the reader can no
+    // longer assume 10x10.
+    const grid = planStoryboardGrid(duration)
+
     const t0 = Date.now()
-    await generateStoryboard(inputPath, tempStoryboardPath, duration)
-    logMessage(`[WORKER] Generated storyboard for video ${videoId} in ${((Date.now() - t0) / 1000).toFixed(2)}s`)
+    await generateStoryboard(inputPath, tempStoryboardPath, duration, grid.cols, grid.rows)
+    logMessage(
+      `[WORKER] Generated storyboard for video ${videoId} (${grid.cols}x${grid.rows}, ~${(duration / grid.cells).toFixed(2)}s/frame) in ${((Date.now() - t0) / 1000).toFixed(2)}s`,
+    )
+
+    await prisma.video
+      .update({
+        where: { id: videoId },
+        data: { storyboardCols: grid.cols, storyboardRows: grid.rows } as any,
+      })
+      .catch((err: unknown) =>
+        logError(`[WORKER] Could not record storyboard grid for ${videoId}:`, err),
+      )
 
     const storyboardPath = `projects/${projectId}/videos/${videoId}/storyboard.jpg`
     const stats = fs.statSync(tempStoryboardPath)

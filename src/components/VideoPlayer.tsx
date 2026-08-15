@@ -2808,6 +2808,8 @@ export default function VideoPlayer({
                   videoFps={selectedVideo?.fps || 24}
                   videoId={selectedVideo?.id}
                   storyboardUrl={(selectedVideo as any)?.storyboardUrl || null}
+                  storyboardCols={(selectedVideo as any)?.storyboardCols ?? null}
+                  storyboardRows={(selectedVideo as any)?.storyboardRows ?? null}
                   isAdmin={isAdmin}
                   timestampDisplayMode={timestampDisplayMode}
                   onMarkerClick={onCommentFocus}

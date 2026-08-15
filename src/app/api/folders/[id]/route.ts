@@ -197,6 +197,9 @@ export async function GET(
           thumbnailUrl,
           previewUrl,
           storyboardUrl,
+          // 6.9.3: sprite geometry travels with the URL.
+          storyboardCols: (v as any).storyboardCols ?? null,
+          storyboardRows: (v as any).storyboardRows ?? null,
           commentCount: v._count?.comments ?? 0,
           // Attach uploader info from the side query when available.
           createdBy: uploadersByVideoId.get(v.id) ?? null,

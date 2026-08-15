@@ -12,6 +12,7 @@ import { TEMP_DIR } from './cleanup'
 import {
   TempFiles,
   processThumbnail,
+  processStoryboard,
   cleanupTempFiles,
 } from './video-processor-helpers'
 
@@ -95,10 +96,30 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
       backend,
     )
 
+    // 6.9.3: rebuild the hover-scrub sprite too, at the new density.
+    //
+    // Sprites made before 6.9.3 are a fixed 10x10 no matter how long the clip
+    // is — on a 7-minute video that's one frame every 4.2 seconds, and the
+    // preview under your cursor can be seconds away from where a click lands.
+    // Re-encoding isn't needed; the sprite is a cheap second pass over the
+    // source we already have open. Soft failure: a thumbnail refresh must not
+    // fail because the sprite didn't.
+    const newStoryboardPath = await processStoryboard(
+      videoId,
+      projectId,
+      sourcePath,
+      metadata.duration,
+      tempFiles,
+      backend,
+    )
+
     try {
       await prisma.video.update({
         where: { id: videoId },
-        data: { thumbnailPath: newThumbnailPath },
+        data: {
+          thumbnailPath: newThumbnailPath,
+          ...(newStoryboardPath ? { storyboardPath: newStoryboardPath } : {}),
+        },
       })
     } catch (err: any) {
       if (err?.code === 'P2025') {

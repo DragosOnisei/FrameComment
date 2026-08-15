@@ -14,6 +14,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.9.3] - 2026-08-15
+
+### Preview-ul de pe timeline nu corespundea cu locul unde ajungea click-ul
+
+Cauza, exact: sprite-ul de hover era un grid **fix 10×10 = 100 cadre**,
+indiferent de lungimea clipului. Pe un video de 7:02 asta înseamnă **un
+cadru la 4,2 secunde** — deci cadrul de sub cursor putea fi la ±2 secunde
+de unde ajungea click-ul. Preview-ul nu mințea despre timp; arăta cel mai
+apropiat cadru **pe care îl avea**. Ai fixat momentul în care actorul
+întoarce capul, ai dat click și ai aterizat în altă parte.
+
+Acum grid-ul **crește cu durata**, țintind ~1 cadru pe secundă (100–400
+celule), iar geometria se salvează per video — un cititor care presupune
+10×10 ar citi greșit orice sprite nou. Pe clipul tău de 7 minute:
+**1,05 s/cadru în loc de 4,2 s**, adică eroarea scade de la ±2 s la
+±0,5 s. Fixat și maparea în `FolderCard` și `QuickPreviewOverlay`, care
+aveau același 10×10 hardcodat.
+
+**Limita, spusă direct:** un sprite e un **eșantion**. Nici la un cadru pe
+secundă preview-ul nu e cadrul exact în care aterizezi — e cel mai
+apropiat cadru eșantionat. Preview frame-exact ar cere un seek video real
+la fiecare mișcare de mouse, adică o cerere și o decodare de fiecare dată.
+Asta e diferența dintre „alt cadru" și „același moment", nu identitate
+perfectă.
+
+**Videourile deja încărcate** păstrează sprite-ul vechi de 10×10 (citit
+corect, ca legacy) până la regenerare. De aceea „Regenerate thumbnail"
+reface acum **și** sprite-ul, la noua densitate — fără re-encodare, e o
+singură trecere ieftină peste sursă.
+
+## [6.9.2] - 2026-08-15
+
+### Submeniul de rezoluții arăta transparent
+
+Cauza: era randat **în interiorul** popover-ului părinte, care are el
+însuși `backdrop-filter`. Un `backdrop-filter` imbricat filtrează un
+fundal deja filtrat și tentat, așa că aceeași rețetă de sticlă ieșea
+spălată. Acum e portat în `<body>`, ca sibling al meniului părinte,
+poziționat din dreptunghiul rândului „Download" — amândouă eșantionează
+pagina reală și arată identic.
+
+### Badge-ul de notificări numără doar ziua de azi
+
+Un număr permanent în colț încetează să mai fie semnal: după o săptămână
+de „17" înveți să-l ignori, adică exact opusul scopului unui badge.
+Clopoțelul arată acum doar **necitite de azi** — dacă azi n-a venit
+nimic, nu apare niciun număr. Restanța întreagă a rămas la un click
+distanță, în roșu, pe tabul **Unread**.
+
 ## [6.9.1] - 2026-08-15
 
 ### Fix urgent: un proiect nu se mai deschidea („Do not know how to serialize a BigInt")

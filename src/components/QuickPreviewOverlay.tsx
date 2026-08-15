@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api-client'
 import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { ScrubTile } from './FolderCard'
+import { storyboardGridOf } from '@/lib/storyboard-grid'
 
 /**
  * 1.7.0+: macOS Quick Look-style preview overlay. Opens when the
@@ -382,9 +383,8 @@ interface FolderContents {
  *    images) we keep the plain thumbnail / icon.
  */
 function ScrubThumbnail({ video: v }: { video: FolderContents['videos'][number] }) {
-  const STORY_COLS = 10
-  const STORY_ROWS = 10
-  const STORY_CELLS = STORY_COLS * STORY_ROWS
+  // 6.9.3: geometry comes from the video row; absent = the legacy 10×10.
+  const grid = storyboardGridOf(v as any)
 
   const [scrubFraction, setScrubFraction] = useState<number | null>(null)
   const [thumbErrored, setThumbErrored] = useState(false)
@@ -431,16 +431,16 @@ function ScrubThumbnail({ video: v }: { video: FolderContents['videos'][number] 
     if (!hasStoryboard || scrubFraction === null) return undefined
     const idx = Math.max(
       0,
-      Math.min(STORY_CELLS - 1, Math.floor(scrubFraction * STORY_CELLS)),
+      Math.min(grid.cells - 1, Math.round(scrubFraction * grid.cells)),
     )
-    const col = idx % STORY_COLS
-    const row = Math.floor(idx / STORY_COLS)
-    const xPct = (col / (STORY_COLS - 1)) * 100
-    const yPct = (row / (STORY_ROWS - 1)) * 100
+    const col = idx % grid.cols
+    const row = Math.floor(idx / grid.cols)
+    const xPct = (col / (grid.cols - 1)) * 100
+    const yPct = (row / (grid.rows - 1)) * 100
     return {
       backgroundImage: `url(${v.storyboardUrl})`,
       backgroundRepeat: 'no-repeat' as const,
-      backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
+      backgroundSize: `${grid.cols * 100}% ${grid.rows * 100}%`,
       backgroundPosition: `${xPct}% ${yPct}%`,
     }
   })()

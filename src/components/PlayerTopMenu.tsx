@@ -105,6 +105,8 @@ export default function PlayerTopMenu({
   const [qualitiesLoading, setQualitiesLoading] = useState(false)
   const qualitiesForVideoRef = useRef<string | null>(null)
   const closeQualitiesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const downloadRowRef = useRef<HTMLDivElement>(null)
+  const [qualitiesAnchor, setQualitiesAnchor] = useState<{ top: number; left: number } | null>(null)
 
   const loadQualities = useCallback(async () => {
     if (!currentVideoId) return
@@ -136,6 +138,18 @@ export default function PlayerTopMenu({
     if (closeQualitiesTimerRef.current) {
       clearTimeout(closeQualitiesTimerRef.current)
       closeQualitiesTimerRef.current = null
+    }
+    // Measure from the trigger row: the panel is portalled, so it needs
+    // viewport coordinates rather than a CSS offset from its parent.
+    const row = downloadRowRef.current
+    if (row) {
+      const r = row.getBoundingClientRect()
+      const width = 230
+      const margin = 8
+      // Opens to the LEFT of the menu, flipping to the right only if there
+      // isn't room — the kebab lives in the top-right corner.
+      const left = r.left - width - margin >= margin ? r.left - width - margin : r.right + margin
+      setQualitiesAnchor({ top: Math.max(margin, r.top - 4), left })
     }
     setQualitiesOpen(true)
     void loadQualities()
@@ -598,6 +612,7 @@ export default function PlayerTopMenu({
               even seen the options. Now Download opens the list, and Original
               is simply the last item in it. */}
           <div
+            ref={downloadRowRef}
             className="relative"
             onMouseEnter={openQualities}
             onMouseLeave={scheduleCloseQualities}
@@ -622,22 +637,27 @@ export default function PlayerTopMenu({
               <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-60" />
             </button>
 
-            {qualitiesOpen && (
+            {qualitiesOpen && qualitiesAnchor && typeof document !== 'undefined' &&
+              createPortal(
               <div
                 role="menu"
-                // 6.9.1: same glass recipe as the parent popover — the earlier
-                // near-opaque navy read as a different component bolted on.
-                // The negative top offset lines the first row up with the
-                // trigger, so the pointer travels straight across.
+                /* 6.9.2: portalled to <body>, exactly like the parent popover.
+                   Nested inside it, this panel's backdrop-filter sampled a
+                   backdrop the parent had ALREADY blurred and tinted — so the
+                   same recipe came out washed out and see-through. Rendered as
+                   a sibling at body level, both sample the real page and look
+                   identical, which is the whole point. */
                 onMouseEnter={openQualities}
                 onMouseLeave={scheduleCloseQualities}
                 className="
-                  absolute right-full -top-1 mr-1 min-w-[230px] text-white
+                  fixed z-[110] min-w-[230px] text-white
                   ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)]
-                  rounded-xl p-1 z-50
+                  rounded-xl p-1
                   animate-in fade-in-0 duration-150
                 "
                 style={{
+                  top: qualitiesAnchor.top,
+                  left: qualitiesAnchor.left,
                   backgroundColor: 'rgba(22, 37, 51, 0.35)',
                   backgroundImage:
                     'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
@@ -679,7 +699,8 @@ export default function PlayerTopMenu({
                       </span>
                     </button>
                   ))}
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
           <button

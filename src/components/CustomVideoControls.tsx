@@ -9,6 +9,7 @@ import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
 import { isRangeEditActive } from '@/lib/comment-range-edit'
+import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
 import { AttachmentPreviewStrip, AudioAttachment } from './CommentAttachments'
@@ -41,6 +42,9 @@ interface CustomVideoControlsProps {
    *  thumbnails use. Null on clips without a sprite (older / still
    *  processing) → the timeline falls back to a plain timecode badge. */
   storyboardUrl?: string | null
+  /** 6.9.3: sprite geometry for THIS video. Absent = the legacy 10×10. */
+  storyboardCols?: number | null
+  storyboardRows?: number | null
   isAdmin?: boolean
   timestampDisplayMode?: 'TIMECODE' | 'AUTO'
   onMarkerClick?: (commentId: string) => void // Callback when a timeline marker is clicked
@@ -189,36 +193,13 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-// 3.8.x: storyboard sprite-scrub. Same 10×10 (=100 frames) grid the
-// worker produces (192×108 letterboxed cells) and the same math
-// FolderCard / ThumbnailReel use — map a 0…1 timeline fraction to the
-// matching sprite cell and shift `background-position`. No video seek,
-// no extra request: instant frame preview on hover.
-const STORY_COLS = 10
-const STORY_ROWS = 10
-const STORY_CELLS = STORY_COLS * STORY_ROWS
-function storyboardCellStyle(
-  url: string,
-  fraction: number,
-): React.CSSProperties {
-  // The worker samples exactly STORY_CELLS evenly-spaced frames, so
-  // sprite frame `i` represents video time `i * duration / STORY_CELLS`.
-  // To line the preview up with where a *seek* to the hovered time
-  // lands, pick the NEAREST frame (round), not the start of the 1%
-  // bucket (floor) — floor lagged the preview by up to a full bucket
-  // (~duration/100), which on a long clip is many seconds off.
-  const idx = Math.max(0, Math.min(STORY_CELLS - 1, Math.round(fraction * STORY_CELLS)))
-  const col = idx % STORY_COLS
-  const row = Math.floor(idx / STORY_COLS)
-  const xPct = (col / (STORY_COLS - 1)) * 100
-  const yPct = (row / (STORY_ROWS - 1)) * 100
-  return {
-    backgroundImage: `url(${url})`,
-    backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
-    backgroundPosition: `${xPct}% ${yPct}%`,
-    backgroundRepeat: 'no-repeat',
-  }
-}
+// 3.8.x: storyboard sprite-scrub — map a 0…1 timeline fraction to the
+// matching sprite cell and shift `background-position`. No video seek, no
+// extra request: instant frame preview on hover.
+//
+// 6.9.3: the geometry moved to lib/storyboard-grid and is now PER VIDEO. It
+// used to be hardcoded 10×10 here, which was fine while every sprite was
+// 10×10 — and silently wrong the moment they weren't.
 
 function formatTimeWithMode(
   seconds: number,
@@ -294,6 +275,8 @@ export default function CustomVideoControls({
   videoFps = 24,
   videoId = '',
   storyboardUrl = null,
+  storyboardCols = null,
+  storyboardRows = null,
   isAdmin: _isAdmin = false,
   timestampDisplayMode = 'TIMECODE',
   onMarkerClick,
@@ -1718,7 +1701,7 @@ export default function CustomVideoControls({
                   <div className="rounded-lg overflow-hidden ring-1 ring-white/20 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.85)] bg-black">
                     <div
                       className="w-[160px] aspect-video bg-black"
-                      style={storyboardCellStyle(storyboardUrl, frac)}
+                      style={storyboardCellStyle(storyboardUrl, frac, storyboardGridOf({ storyboardCols, storyboardRows }))}
                       aria-hidden
                     />
                     <div className="px-2 py-1 text-center text-[11px] font-mono text-white bg-black/85 border-t border-white/10 tabular-nums whitespace-nowrap">

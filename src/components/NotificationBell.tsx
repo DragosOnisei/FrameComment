@@ -155,7 +155,20 @@ export default function NotificationBell() {
     }
   }
 
-  const badge = unreadCount > 99 ? '99+' : String(unreadCount)
+  /**
+   * 6.9.2: the bell counts TODAY's unread, not every unread there has ever
+   * been.
+   *
+   * A permanent number in the corner stops being a signal — after a week of
+   * "17" you learn to ignore it, which is the opposite of what a badge is
+   * for. Today-and-unread is the set that actually wants something from you
+   * now. The full backlog is still one click away, in red, on the Unread tab.
+   */
+  const todayUnreadCount = useMemo(
+    () => notifications.filter((n) => !n.isRead && (daysAgo(n.createdAt) ?? 99) <= 0).length,
+    [notifications],
+  )
+  const badge = todayUnreadCount > 99 ? '99+' : String(todayUnreadCount)
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'today', label: 'Today' },
@@ -176,15 +189,17 @@ export default function NotificationBell() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={
-          unreadCount > 0
-            ? `Notifications (${unreadCount} unread)`
-            : 'Notifications'
+          todayUnreadCount > 0
+            ? `Notifications (${todayUnreadCount} unread today)`
+            : unreadCount > 0
+              ? `Notifications (${unreadCount} unread, none today)`
+              : 'Notifications'
         }
         title="Notifications"
         className="relative flex items-center justify-center h-9 w-9 rounded-lg bg-white/[0.06] ring-1 ring-white/10 hover:bg-white/[0.12] hover:ring-white/20 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] transition-colors text-white/70 hover:text-white"
       >
         <Bell className="w-4 h-4" />
-        {unreadCount > 0 && (
+        {todayUnreadCount > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none ring-2 ring-[#0b1622]">
             {badge}
           </span>
@@ -252,7 +267,13 @@ export default function NotificationBell() {
                   }`}
                 >
                   {t.label}
-                  {t.key === 'unread' && unreadCount > 0 ? ` (${unreadCount})` : ''}
+                  {/* 6.9.2: the whole unread backlog lives here, in red — the
+                      bell only carries today's. */}
+                  {t.key === 'unread' && unreadCount > 0 && (
+                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none align-middle">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
                 </button>
               )
             })}
