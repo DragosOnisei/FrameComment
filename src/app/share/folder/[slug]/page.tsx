@@ -18,6 +18,7 @@ import { logError } from '@/lib/logging'
 import { detectLoggedInAdmin } from '@/lib/share-auth'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useDownloadManager } from '@/contexts/DownloadManager'
+import { shouldDownloadAsFiles } from '@/lib/download-mode'
 
 /**
  * Public folder share page (1.0.6+).
@@ -269,10 +270,56 @@ function PublicFolderSharePageInner() {
   // The local `downloadingAll` flag is kept for the button disabled
   // state — the manager tracks the underlying job + cancellation.
   const [downloadingAll, setDownloadingAll] = useState(false)
+  // 6.10.0: set when every individual download was refused — almost always
+  // the browser's multi-download permission being denied.
+  const [multiDownloadBlocked, setMultiDownloadBlocked] = useState(false)
   const { startStreamDownload } = useDownloadManager()
-  const handleDownloadAll = useCallback(() => {
-    if (downloadingAll) return
-    setDownloadingAll(true)
+  /**
+   * 6.10.0: a flat shared folder downloads as FILES, not a ZIP.
+   *
+   * This is the common case for a client link — one folder, a few cuts. The
+   * browser then shows real per-file progress, can resume a broken download,
+   * and nothing has to be buffered whole in memory the way the archive path
+   * does. A folder WITH subfolders still zips: handing someone forty loose
+   * files when they asked for a tree is a worse answer, not a simpler one.
+   */
+  const downloadFilesIndividually = useCallback(
+    async (files: Array<{ videoId: string; name: string }>) => {
+      let delivered = 0
+      for (const f of files) {
+        try {
+          const res = await fetch(`/api/videos/${f.videoId}/download-token`, {
+            method: 'POST',
+            headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
+          })
+          if (!res.ok) continue
+          const data = await res.json()
+          if (!data?.url) continue
+          const a = document.createElement('a')
+          a.href = data.url
+          a.download = ''
+          a.rel = 'noopener'
+          document.body.appendChild(a)
+          a.click()
+          a.remove()
+          delivered++
+          // Spaced out: browsers throttle a burst of downloads, and Chrome
+          // asks permission on the first multi-file download from a site.
+          await new Promise((r) => setTimeout(r, 400))
+        } catch {
+          /* one failed file must not stop the rest */
+        }
+      }
+      if (delivered === 0 && files.length > 0) {
+        // Almost always the browser refusing multiple downloads. Say so —
+        // a button that silently does nothing reads as broken.
+        setMultiDownloadBlocked(true)
+      }
+    },
+    [bearer],
+  )
+
+  const startZipDownload = useCallback(() => {
     startStreamDownload({
       label: `${data?.folder?.name || 'Folder'}.zip`,
       url: `/api/share/folder/${slug}/download`,
@@ -293,7 +340,40 @@ function PublicFolderSharePageInner() {
     // want the button to feel responsive again so the user can
     // retry if they cancelled the previous one.
     setTimeout(() => setDownloadingAll(false), 800)
-  }, [slug, bearer, data, downloadingAll, startStreamDownload])
+  }, [slug, bearer, data, startStreamDownload])
+
+  const handleDownloadAll = useCallback(() => {
+    if (downloadingAll) return
+    setDownloadingAll(true)
+    setMultiDownloadBlocked(false)
+
+    void (async () => {
+      try {
+        const statRes = await fetch(`/api/share/folder/${slug}/download/stat`, {
+          headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
+        })
+        if (statRes.ok) {
+          const shape = await statRes.json()
+          if (
+            typeof shape?.hasSubfolders === 'boolean' &&
+            shouldDownloadAsFiles({
+              hasSubfolders: shape.hasSubfolders,
+              fileCount: Number(shape.fileCount) || 0,
+            }) &&
+            Array.isArray(shape.files) &&
+            shape.files.length > 0
+          ) {
+            await downloadFilesIndividually(shape.files)
+            setTimeout(() => setDownloadingAll(false), 400)
+            return
+          }
+        }
+      } catch {
+        // Fall through to the archive — the path that always worked.
+      }
+      startZipDownload()
+    })()
+  }, [slug, bearer, downloadingAll, downloadFilesIndividually, startZipDownload])
 
   const handleSubmitPassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -355,7 +435,7 @@ function PublicFolderSharePageInner() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <div className="max-w-md text-center space-y-3">
-          <h1 className="text-xl font-semibold">Can't open this folder</h1>
+          <h1 className="text-xl font-semibold">Can&apos;t open this folder</h1>
           <p className="text-sm text-muted-foreground">{fatalError}</p>
         </div>
       </div>
@@ -653,6 +733,16 @@ function PublicFolderSharePageInner() {
                 )}
                 <span>Download All</span>
               </Button>
+            )}
+            {/* 6.10.0: a flat folder downloads as separate files, and browsers
+                ask permission the first time a site does that. If every file
+                was refused, say so — a button that appears to do nothing is
+                the worst possible outcome. */}
+            {multiDownloadBlocked && (
+              <p className="text-xs text-amber-300 max-w-xs">
+                Your browser blocked multiple downloads. Allow them for this
+                site and press Download All again.
+              </p>
             )}
             {/* 1.4.x+: item count next to Download All counts UNIQUE
                 video cards (grouped by name) instead of raw version

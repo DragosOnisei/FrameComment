@@ -108,7 +108,7 @@ export async function POST(
 
     // Create zip archive
     const archive = archiver('zip', {
-      zlib: { level: 6 }, // Compression level
+      store: true,
     })
 
     // Handle archive errors

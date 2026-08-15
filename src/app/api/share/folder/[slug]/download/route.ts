@@ -205,7 +205,7 @@ export async function GET(
       )
     }
 
-    const archive = archiver('zip', { zlib: { level: 6 } })
+    const archive = archiver('zip', { store: true })
     archive.on('error', (err) => {
       logError('Share folder ZIP archive error:', err)
     })

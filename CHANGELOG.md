@@ -14,6 +14,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.10.0] - 2026-08-15
+
+### Folder plat → fișiere, nu arhivă
+
+Un folder partajat **fără subfoldere** și cu cel mult **15 fișiere** se
+descarcă acum ca fișiere separate, nu ca ZIP. Cu subfoldere, sau peste 15
+fișiere, rămâne arhiva.
+
+Nu e doar mai curat — sunt trei câștiguri concrete: progres nativ per
+fișier, reluare de către browser dacă pică unul, și dispare plafonul de
+memorie. Managerul de descărcări acumulează **toată arhiva în memoria
+browserului** înainte s-o salveze, deci un folder de 20 GB pur și simplu
+nu se putea descărca. Ca fișiere separate, se poate.
+
+Regulile sunt în `lib/download-mode.ts`, ca să nu se rătăcească: cu
+subfoldere se face ZIP obligatoriu (patruzeci de fișiere aruncate în
+Downloads în locul unui arbore e un răspuns mai prost, nu mai simplu), iar
+peste 15 fișiere șiragul de descărcări e mai enervant decât o arhivă.
+
+Decizia se ia pe server, în ruta de `/stat` care oricum era apelată
+înainte de descărcare — acolo se cunoaște structura, nu se ghicește în
+client. Dacă ceva eșuează, se cade înapoi pe ZIP, calea care a funcționat
+mereu.
+
+**Browserele cer permisiune** la prima descărcare multiplă de pe un site.
+Dacă toate fișierele sunt refuzate, pagina spune asta explicit — un buton
+care pare că nu face nimic e cel mai prost rezultat posibil.
+
+### ZIP-ul nu mai comprimă degeaba
+
+Arhivele treceau prin deflate nivel 6. Conținutul e video și imagini deja
+comprimate: câștigul era ~0%, dar CPU-ul și timpul se consumau la fiecare
+descărcare. Acum e `store` — același ZIP, aceeași mărime, sensibil mai
+repede.
+
+**Ce rămâne deschis:** un folder **cu** subfoldere și zeci de GB tot nu se
+poate descărca, din cauza plafonului de memorie din browser. Pentru ăla e
+nevoie de scriere directă în folder (File System Access API, doar pe
+Chromium). Nu s-a făcut aici.
+
 ## [6.9.3] - 2026-08-15
 
 ### Preview-ul de pe timeline nu corespundea cu locul unde ajungea click-ul

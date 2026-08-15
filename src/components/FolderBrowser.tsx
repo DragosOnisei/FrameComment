@@ -46,6 +46,7 @@ import FolderBrowserTable from './FolderBrowserTable'
 import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import { useIsMobile } from '@/lib/use-is-mobile'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
+import { shouldDownloadAsFiles } from '@/lib/download-mode'
 import {
   snapshotDataTransferEntries,
   walkSnapshotEntries,
@@ -1898,6 +1899,29 @@ function FolderBrowserInner(
   // Mint a one-shot signed download URL for a single video. Uses the
   // existing POST /api/videos/[id]/download-token endpoint which
   // handles admin auth + permission checks server-side.
+  /**
+   * 6.10.0: read a folder's download shape from its /stat endpoint.
+   * Returns null on any failure — the caller then falls back to the ZIP,
+   * which is the behaviour that always worked.
+   */
+  const fetchFolderShape = async (
+    statUrl: string,
+  ): Promise<{ hasSubfolders: boolean; fileCount: number; files: Array<{ videoId: string; name: string }> } | null> => {
+    try {
+      const res = await apiFetch(statUrl)
+      if (!res.ok) return null
+      const d = await res.json()
+      if (typeof d?.hasSubfolders !== 'boolean') return null
+      return {
+        hasSubfolders: d.hasSubfolders,
+        fileCount: Number(d.fileCount) || 0,
+        files: Array.isArray(d.files) ? d.files : [],
+      }
+    } catch {
+      return null
+    }
+  }
+
   const fetchDownloadUrl = async (videoId: string): Promise<string | null> => {
     try {
       const res = await apiFetch(`/api/videos/${videoId}/download-token`, {
@@ -2083,18 +2107,30 @@ function FolderBrowserInner(
       0,
     )
     guardLargeDownload(folderBytes + videoBytes, () => {
-      for (const f of folders) {
-        startStreamDownload({
-          label: 'Folder.zip', // overwritten by stat with the real name
-          url: `/api/folders/${f.id}/download`,
-          statUrl: `/api/folders/${f.id}/download/stat`,
-          fetcher: apiFetch as any,
-          fallbackFilename: 'folder.zip',
-        })
-      }
-      if (looseVideoIds.length > 0) {
-        downloadVideos(looseVideoIds)
-      }
+      void (async () => {
+        for (const f of folders) {
+          // 6.10.0: ask the folder what shape it is before deciding. A flat
+          // folder with a handful of clips is better delivered as files —
+          // native progress, resumable, and no archive buffered in memory.
+          // Anything with subfolders stays a ZIP, because loose files would
+          // throw the structure away.
+          const shape = await fetchFolderShape(`/api/folders/${f.id}/download/stat`)
+          if (shape && shouldDownloadAsFiles(shape) && shape.files.length > 0) {
+            await downloadVideos(shape.files.map((x) => x.videoId))
+            continue
+          }
+          startStreamDownload({
+            label: 'Folder.zip', // overwritten by stat with the real name
+            url: `/api/folders/${f.id}/download`,
+            statUrl: `/api/folders/${f.id}/download/stat`,
+            fetcher: apiFetch as any,
+            fallbackFilename: 'folder.zip',
+          })
+        }
+        if (looseVideoIds.length > 0) {
+          await downloadVideos(looseVideoIds)
+        }
+      })()
     })
   }, [
     videoGroups,

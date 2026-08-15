@@ -128,7 +128,7 @@ export async function GET(
 
     // Create ZIP archive with streaming
     const archive = archiver('zip', {
-      zlib: { level: 6 },
+      store: true,
     })
 
     archive.on('error', (err) => {

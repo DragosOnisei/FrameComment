@@ -131,7 +131,7 @@ export async function GET(
 
     // Create ZIP archive with streaming (no memory buffer)
     const archive = archiver('zip', {
-      zlib: { level: 6 }, // Compression level (0-9)
+      store: true,
     })
 
     archive.on('error', (err) => {

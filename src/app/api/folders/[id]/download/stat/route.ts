@@ -41,6 +41,9 @@ export async function GET(
     const visited = new Set<string>()
     let totalBytes = BigInt(0)
     let fileCount = 0
+    const ROOT_ID = rootFolder.id
+    let hasSubfolders = false
+    const rootFiles: Array<{ videoId: string; name: string }> = []
 
     while (queue.length > 0) {
       const folderId = queue.shift()!
@@ -57,6 +60,7 @@ export async function GET(
           videos: {
             where: { deletedAt: null } as any,
             select: {
+              id: true,
               name: true,
               version: true,
               originalFileSize: true,
@@ -70,7 +74,7 @@ export async function GET(
       // Latest-version-per-name dedup — same rule the streaming
       // ZIP route uses, so the byte total matches what'll be added
       // to the archive.
-      const byKey = new Map<string, { version: number; size: bigint }>()
+      const byKey = new Map<string, { version: number; size: bigint; id: string; label: string }>()
       for (const v of folder.videos as any[]) {
         if (!v.originalStoragePath) continue
         const size = typeof v.originalFileSize === 'bigint'
@@ -78,14 +82,19 @@ export async function GET(
           : BigInt(v.originalFileSize || 0)
         const prev = byKey.get(v.name)
         if (!prev || (v.version ?? 0) > prev.version) {
-          byKey.set(v.name, { version: v.version ?? 0, size })
+          byKey.set(v.name, { version: v.version ?? 0, size, id: v.id, label: v.name })
         }
       }
       for (const v of byKey.values()) {
         fileCount += 1
         totalBytes += v.size
+        // 6.10.0: a flat folder can be delivered as plain files instead of a
+        // ZIP, so the caller needs the ids. Collected for the ROOT level only —
+        // the moment there are subfolders the answer is an archive anyway.
+        if (folderId === ROOT_ID) rootFiles.push({ videoId: v.id, name: v.label })
       }
       for (const sub of folder.subfolders as any[]) {
+        if (folderId === ROOT_ID) hasSubfolders = true
         queue.push(sub.id)
       }
     }
@@ -93,6 +102,11 @@ export async function GET(
     return NextResponse.json({
       folderName: rootFolder.name,
       fileCount,
+      // 6.10.0: enough for the client to decide between files and an archive.
+      // `files` is only useful when the folder is flat, so it is only sent
+      // then — a 500-video tree has no business shipping its whole index here.
+      hasSubfolders,
+      files: hasSubfolders ? [] : rootFiles,
       // BigInt isn't JSON-serializable directly; ship as string and
       // let the client parseInt — values can exceed Number.MAX_SAFE_INTEGER
       // for large libraries.
