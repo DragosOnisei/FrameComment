@@ -117,8 +117,12 @@ export async function createOrBumpNotification(params: {
 
   const delegate = notificationDelegate()
 
+  // 6.9.0: dedupe within a TYPE. Without this, a reply notification would
+  // swallow an unread "new comments" row for the same video and relabel it —
+  // two different things collapsing into one, with the older one silently
+  // losing its meaning.
   const existing = await delegate.findFirst({
-    where: { recipientId, videoId, isRead: false },
+    where: { recipientId, videoId, isRead: false, type },
     orderBy: { createdAt: 'desc' },
   })
 
@@ -256,6 +260,68 @@ export async function maybeNotifyEditorForComment(params: {
     }
   } catch (err) {
     logError('[maybeNotifyEditorForComment] failed (non-fatal):', err)
+  }
+}
+
+/**
+ * 6.9.0 — someone replied to your comment.
+ *
+ * Separate from `maybeNotifyEditorForComment` on purpose. That one fires once
+ * per version and goes to the uploader plus the Project Managers; it is about
+ * "this video has feedback". A reply is about YOU: someone answered something
+ * you wrote, and you should hear about it every time, not only on the first
+ * comment of the round.
+ *
+ * Only in-app: a reply from a client to another client's comment has no
+ * account to deliver to (guest comments carry an `editorSessionId`, not a
+ * user), so those are skipped rather than pretended.
+ *
+ * Never throws — a failed notification must not fail the reply.
+ */
+export async function notifyCommentReply(params: {
+  parentCommentId: string
+  actorUserId: string | null
+  actorName: string | null
+}): Promise<void> {
+  try {
+    const parent = (await prisma.comment.findUnique({
+      where: { id: params.parentCommentId },
+      select: {
+        id: true,
+        userId: true,
+        videoId: true,
+        video: {
+          select: {
+            id: true,
+            name: true,
+            projectId: true,
+            folderId: true,
+            deletedAt: true,
+            organizationId: true,
+          },
+        },
+      } as any,
+    })) as any
+
+    if (!parent?.userId) return // guest author — no account to notify
+    if (params.actorUserId && parent.userId === params.actorUserId) return // replying to yourself
+
+    const video = parent.video
+    if (!video || video.deletedAt) return
+
+    const notification = await createOrBumpNotification({
+      recipientId: parent.userId,
+      projectId: video.projectId,
+      videoId: video.id,
+      videoName: video.name,
+      folderId: video.folderId,
+      actorName: params.actorName,
+      type: 'COMMENT_REPLY',
+      organizationId: video.organizationId ?? null,
+    })
+    await publishNotification(parent.userId, notification)
+  } catch (err) {
+    logError('[notifyCommentReply] failed (non-fatal):', err)
   }
 }
 

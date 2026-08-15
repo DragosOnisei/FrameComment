@@ -11,11 +11,13 @@ import {
   Check,
   Loader2,
   Download,
+  ChevronRight,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
 import { copyToClipboard } from '@/lib/clipboard'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
+import { formatBytes } from '@/lib/video-qualities-format'
 import { hasClippedComments } from '@/lib/comments-clipboard'
 import { ConfirmModal } from './ConfirmModal'
 import { ShareModal } from './ShareModal'
@@ -93,6 +95,33 @@ export default function PlayerTopMenu({
   const [open, setOpen] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
   const [busy, setBusy] = useState<null | 'share' | 'delete' | 'copy' | 'paste' | 'download'>(null)
+
+  // 6.9.0: download-resolution submenu. Fetched lazily on hover/click so the
+  // menu costs nothing until someone actually wants a specific size.
+  const [qualitiesOpen, setQualitiesOpen] = useState(false)
+  const [qualities, setQualities] = useState<
+    Array<{ quality: string; label: string; height: number | null; bytes: number | null; watermarked: boolean }>
+  >([])
+  const [qualitiesLoading, setQualitiesLoading] = useState(false)
+  const qualitiesForVideoRef = useRef<string | null>(null)
+
+  const loadQualities = useCallback(async () => {
+    if (!currentVideoId) return
+    // Already have them for this video — don't re-measure on every hover.
+    if (qualitiesForVideoRef.current === currentVideoId) return
+    try {
+      setQualitiesLoading(true)
+      const res = await apiFetch(`/api/videos/${currentVideoId}/qualities`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setQualities(Array.isArray(data?.qualities) ? data.qualities : [])
+      qualitiesForVideoRef.current = currentVideoId
+    } catch {
+      setQualities([])
+    } finally {
+      setQualitiesLoading(false)
+    }
+  }, [currentVideoId])
   // 1.3.2+: viewport-anchored position for the portalled popover. We
   // render the popover at document.body level (escaping the toolbar's
   // backdrop-root so backdrop-blur actually samples the video pixels
@@ -322,7 +351,7 @@ export default function PlayerTopMenu({
   // pattern as the search overlay's Download button — mint a one-
   // shot signed token then open the URL in a new tab. Admins skip
   // the project-level "allowAssetDownload" gate (we trust them).
-  const handleDownload = async () => {
+  const handleDownload = async (quality?: string) => {
     if (busy) return
     if (!currentVideoId) {
       setToast({ kind: 'error', message: 'No video selected' })
@@ -333,6 +362,8 @@ export default function PlayerTopMenu({
     try {
       const res = await apiFetch(`/api/videos/${currentVideoId}/download-token`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quality ? { quality } : {}),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as { url?: string }
@@ -530,7 +561,7 @@ export default function PlayerTopMenu({
           <button
             role="menuitem"
             type="button"
-            onClick={handleDownload}
+            onClick={() => handleDownload()}
             disabled={!currentVideoId || busy === 'download'}
             className="
               w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
@@ -545,6 +576,84 @@ export default function PlayerTopMenu({
             )}
             <span className="flex-1 whitespace-nowrap">Download</span>
           </button>
+
+          {/* 6.9.0: the encoded ladder, with the size of each file. Hovering
+              measures once and remembers — the sizes are recorded at encode
+              time from now on, and older videos are measured on first ask. */}
+          <div
+            className="relative"
+            onMouseEnter={() => {
+              setQualitiesOpen(true)
+              void loadQualities()
+            }}
+            onMouseLeave={() => setQualitiesOpen(false)}
+          >
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                setQualitiesOpen((v) => !v)
+                void loadQualities()
+              }}
+              disabled={!currentVideoId}
+              className="
+                w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
+                hover:bg-white/[0.08] transition-colors text-left whitespace-nowrap
+                disabled:opacity-40 disabled:cursor-not-allowed
+              "
+            >
+              <Download className="w-4 h-4 shrink-0 opacity-70" />
+              <span className="flex-1 whitespace-nowrap">Download resolution</span>
+              <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-60" />
+            </button>
+
+            {qualitiesOpen && (
+              <div
+                role="menu"
+                className="absolute right-full top-0 mr-1 min-w-[220px] rounded-lg p-1 ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] z-50"
+                style={{
+                  backgroundColor: 'rgba(28, 44, 64, 0.97)',
+                  backdropFilter: 'blur(20px) saturate(150%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+                }}
+              >
+                {qualitiesLoading && (
+                  <div className="px-2 py-1.5 text-xs text-white/60 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Measuring files…
+                  </div>
+                )}
+                {!qualitiesLoading && qualities.length === 0 && (
+                  <div className="px-2 py-1.5 text-xs text-white/60">
+                    No encoded versions yet.
+                  </div>
+                )}
+                {!qualitiesLoading &&
+                  qualities.map((q) => (
+                    <button
+                      key={q.quality}
+                      role="menuitem"
+                      type="button"
+                      onClick={() => handleDownload(q.quality === 'original' ? undefined : q.quality)}
+                      className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left"
+                    >
+                      <span className="flex-1">
+                        {q.label}
+                        {q.height ? (
+                          <span className="text-white/45 text-xs"> · {q.height}p</span>
+                        ) : null}
+                        {q.watermarked ? (
+                          <span className="text-white/45 text-xs"> · watermarked</span>
+                        ) : null}
+                      </span>
+                      <span className="text-xs tabular-nums text-white/60">
+                        {formatBytes(q.bytes)}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
           <button
             role="menuitem"
             type="button"

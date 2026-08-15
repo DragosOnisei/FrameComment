@@ -6,6 +6,7 @@ import { Video, ProjectStatus, Comment } from '@prisma/client'
 import { Button } from './ui/button'
 import { CheckCircle2, GitCompareArrows } from 'lucide-react'
 import CustomVideoControls from './CustomVideoControls'
+import { PLAYBACK_SPEEDS, nearestSpeedIndex } from './PlaybackSpeedMenu'
 import VideoComparison from './VideoComparison'
 import ProjectInfo from './ProjectInfo'
 import AnnotationOverlay from './AnnotationOverlay'
@@ -1080,6 +1081,13 @@ export default function VideoPlayer({
     selectedVideoIdRef.current = selectedVideo?.id ?? null
   }, [selectedVideo?.id])
 
+  // 6.9.0: every new clip starts at 1×. Playback rate is a property of how
+  // you were watching THAT clip, not a setting — carrying 8× into the next
+  // video meant the arrows appeared to fast-forward the whole folder.
+  useEffect(() => {
+    setPlaybackSpeed(1)
+  }, [selectedVideo?.id])
+
   useEffect(() => {
     if (!activeVideoName) return
     if (previousVideoNameRef.current && previousVideoNameRef.current !== activeVideoName) {
@@ -2127,7 +2135,11 @@ export default function VideoPlayer({
       const video = videoRef.current
       if (!video) return
 
-      // K or Space → play / pause
+      // K or Space → play / pause.
+      //
+      // 6.9.0: pausing also returns to 1×. Scrubbing at 8× and hitting K used
+      // to leave the rate parked, so the next press resumed at 8× — you had to
+      // press twice and wonder why. Stopping means "back to normal".
       if (e.code === 'Space' || e.key === ' ' || e.code === 'KeyK') {
         e.preventDefault()
         if (video.paused) {
@@ -2136,21 +2148,23 @@ export default function VideoPlayer({
         } else {
           video.pause()
           setIsPlaying(false)
+          setPlaybackSpeed(1)
         }
         return
       }
 
-      // J → slower
-      if (e.code === 'KeyJ') {
+      // J → one step slower, L → one step faster, both along the SAME ladder
+      // the speed menu shows. 6.9.0: L used to add 0.25 and stop dead at 2×,
+      // so 4× and 8× existed in the menu but were unreachable by keyboard.
+      // Now both walk the real list and stop at its ends.
+      if (e.code === 'KeyJ' || e.code === 'KeyL') {
         e.preventDefault()
-        setPlaybackSpeed((prev) => Math.max(0.25, Math.round((prev - 0.25) * 100) / 100))
-        return
-      }
-
-      // L → faster
-      if (e.code === 'KeyL') {
-        e.preventDefault()
-        setPlaybackSpeed((prev) => Math.min(2.0, Math.round((prev + 0.25) * 100) / 100))
+        const dir = e.code === 'KeyL' ? 1 : -1
+        setPlaybackSpeed((prev) => {
+          const i = nearestSpeedIndex(prev)
+          const next = Math.max(0, Math.min(PLAYBACK_SPEEDS.length - 1, i + dir))
+          return PLAYBACK_SPEEDS[next]
+        })
         return
       }
     }
@@ -2337,7 +2351,12 @@ export default function VideoPlayer({
       clearTimeout(controlsTimeoutRef.current)
     }
     setShowControls(true)
-    if (isPlaying) {
+    // 6.9.0: in fullscreen the bar hides on a still mouse even while PAUSED.
+    // Fullscreen is for watching, and a paused frame with a control bar
+    // pinned across it is still an obstructed frame. Windowed keeps the old
+    // rule — the bar is part of the layout there, so hiding it while paused
+    // would just leave a hole.
+    if (isPlaying || isFullscreenRef.current) {
       const delay = isFullscreenRef.current ? 500 : 2000
       controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false)
@@ -2347,10 +2366,10 @@ export default function VideoPlayer({
 
   // Start auto-hide timer when video starts playing
   useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying || isFullscreenRef.current) {
       resetControlsTimeout()
     } else {
-      // Show controls when paused
+      // Windowed + paused: the bar is part of the layout, so it stays.
       setShowControls(true)
       if (controlsTimeoutRef.current) {
         clearTimeout(controlsTimeoutRef.current)
@@ -2452,11 +2471,19 @@ export default function VideoPlayer({
       }
     }
 
+    // 6.9.0: a keypress brings the bar back too. In fullscreen the mouse is
+    // often parked while you drive with the keyboard (space, J/K/L, arrows) —
+    // without this, every shortcut fired into an invisible interface.
+    const handleKeyInteraction = () => {
+      if (isFullscreenRef.current) resetControlsTimeout()
+    }
+
     if (container) {
       container.addEventListener('mousemove', handleInteraction)
       container.addEventListener('touchstart', handleInteraction)
       container.addEventListener('mouseleave', handleMouseLeave)
     }
+    document.addEventListener('keydown', handleKeyInteraction)
 
     return () => {
       if (container) {
@@ -2464,6 +2491,7 @@ export default function VideoPlayer({
         container.removeEventListener('touchstart', handleInteraction)
         container.removeEventListener('mouseleave', handleMouseLeave)
       }
+      document.removeEventListener('keydown', handleKeyInteraction)
       if (controlsTimeoutRef.current) {
         clearTimeout(controlsTimeoutRef.current)
       }
@@ -2531,7 +2559,12 @@ export default function VideoPlayer({
         ref={containerRef}
         className={`relative w-full flex flex-col ${
           fillContainer ? 'flex-1 min-h-0' : 'flex-shrink min-h-0 lg:order-1'
-        } ${isPlaying && !showControls ? 'cursor-none' : ''}`}
+        } ${
+          // 6.9.0: the cursor goes with the bar. In fullscreen that means
+          // whenever the controls are hidden, playing or paused — the old rule
+          // left a mouse pointer floating over a paused frame.
+          !showControls && (isPlaying || isFullscreen) ? 'cursor-none' : ''
+        }`}
       >
         {hasDisplayableSource ? (
           <>
@@ -2746,8 +2779,13 @@ export default function VideoPlayer({
               <div
                 className={
                   isFullscreen
-                    ? `absolute bottom-0 left-0 right-0 z-40 pt-16 bg-gradient-to-t from-black/80 via-black/40 to-transparent transition-opacity duration-300 ${
-                        showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                    ? // 6.9.0: it slides down as it fades, and back up when it
+                      // returns. A bar that only fades looks like a rendering
+                      // glitch; one that leaves downwards reads as "put away".
+                      `absolute bottom-0 left-0 right-0 z-40 pt-16 bg-gradient-to-t from-black/80 via-black/40 to-transparent transition-[opacity,transform] duration-300 ease-out will-change-transform ${
+                        showControls
+                          ? 'opacity-100 translate-y-0'
+                          : 'opacity-0 translate-y-full pointer-events-none'
                       }`
                     : 'bg-black border-t border-white/10 flex-shrink-0'
                 }

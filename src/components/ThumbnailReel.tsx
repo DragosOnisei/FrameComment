@@ -255,12 +255,19 @@ export default function ThumbnailReel({
   // filename + version dropdown — see the JSX below.
   const activeIndex = videoNames.indexOf(activeVideoName)
   // 6.3.0: step between the videos of THIS folder without going back to the
-  // grid. The arrows sit on the title line and wrap around, so a long review
-  // pass never needs the mouse to leave the player.
+  // grid.
+  //
+  // 6.9.0: no more wrap-around. Looping from the last clip back to the first
+  // made the arrows lie about where you are — pressing "next" on the last
+  // video silently restarted the folder. Each arrow now only exists when
+  // there is somewhere to go, so the ends of the list are visible.
   const canStepVideos = videoNames.length > 1 && activeIndex >= 0
+  const canStepPrev = canStepVideos && activeIndex > 0
+  const canStepNext = canStepVideos && activeIndex < videoNames.length - 1
   const stepVideo = (delta: 1 | -1) => {
     if (!canStepVideos) return
-    const next = (activeIndex + delta + videoNames.length) % videoNames.length
+    const next = activeIndex + delta
+    if (next < 0 || next >= videoNames.length) return
     const name = videoNames[next]
     if (name && name !== activeVideoName) onVideoSelect(name)
   }
@@ -471,7 +478,7 @@ export default function ThumbnailReel({
           <div className="flex-1 flex items-center justify-center min-w-0">
             <div ref={versionMenuRef} className="relative flex items-center gap-2 min-w-0">
               {/* 6.3.0: previous video in this folder. */}
-              {canStepVideos && (
+              {canStepPrev && (
                 <button
                   type="button"
                   onClick={() => stepVideo(-1)}
@@ -586,7 +593,7 @@ export default function ThumbnailReel({
               )}
 
               {/* 6.3.0: next video in this folder. */}
-              {canStepVideos && (
+              {canStepNext && (
                 <button
                   type="button"
                   onClick={() => stepVideo(1)}

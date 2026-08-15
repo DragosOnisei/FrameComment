@@ -10,6 +10,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { EXACT_DOWNLOAD_TIERS, exactPreviewPath } from '@/lib/video-qualities'
 import { logError } from '@/lib/logging'
 import {
   DOWNLOAD_CHUNK_SIZE_BYTES,
@@ -220,6 +221,8 @@ export async function GET(
 
     const originalPath = video.originalStoragePath
     const requestedQuality = verifiedToken.quality
+    // 6.9.0: EXACT_DOWNLOAD_TIERS / exactPreviewPath live in lib/video-qualities
+    // so the download menu and this route resolve the same file.
 
     const getPreferredPreviewPath = (preferClean: boolean): string | null => {
       const clean2160 = (video as any).cleanPreview2160Path as string | null | undefined
@@ -300,6 +303,20 @@ export async function GET(
         // Hover-scrub sprite-sheet (1.0.6+). Single static JPEG —
         // same delivery path as the thumbnail.
         filePath = (video as any).storyboardPath || null
+      } else if (isDownload && EXACT_DOWNLOAD_TIERS.includes(requestedQuality)) {
+        // 6.9.0: the viewer picked a specific resolution to download.
+        //
+        // Deliberately EXACT, with no fallback ladder: the menu told them how
+        // many MB that file is, so quietly handing over a different tier would
+        // make the size a lie. If the file isn't there, we say so.
+        const exact = exactPreviewPath(video, requestedQuality)
+        if (!exact) {
+          return NextResponse.json(
+            { error: 'That resolution is not available for this video.' },
+            { status: 404 },
+          )
+        }
+        filePath = exact
       } else if (isDownload && isAdminRequest && originalPath) {
         // Admin downloads should always use the original file, even before approval
         filePath = originalPath

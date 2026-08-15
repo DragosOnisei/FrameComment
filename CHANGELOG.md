@@ -14,6 +14,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.9.0] - 2026-08-15
+
+### Player: 12 lucruri reparate sau adăugate
+
+**Meniul de viteză nu mai iese din ecran.** Era `absolute` în bara de
+control, care are backdrop-filter și trăiește în containere cu scroll —
+cu opt viteze, panoul de ~290px se desena în afara zonei vizibile. Acum
+se randează într-un portal, poziționat din dreptunghiul butonului și
+limitat la viewport, deci funcționează la fel în pagină, în fullscreen și
+în share.
+
+**Săgețile prev/next nu mai fac buclă.** „Next" pe ultimul clip
+reporrnea tăcut folderul de la început. Fiecare săgeată există acum doar
+dacă există unde să te duci, deci capetele listei se văd.
+
+**`L` și `J` merg pe scara reală de viteze.** `L` adăuga 0.25 și se
+oprea la 2×, deși meniul afișa 4× și 8× — de neatins din tastatură. Acum
+ambele parcurg exact lista din meniu (0.5×…8×) și se opresc la capete.
+**`K` (și space) readuc viteza la 1× când pun pauză**: rămâneai parcat pe
+8× și următoarea apăsare pornea tot pe 8×. **Fiecare clip nou începe la
+1×** — viteza e felul în care te uitai la ACEL clip, nu o setare.
+
+**Click pe timeline în timpul redării pune pauză.** Trăgeai playhead-ul
+înapoi două secunde, dar videoul continua de acolo, așa că până te uitai,
+cadrul dorit trecuse deja. Scrubbing-ul e un act de inspecție.
+
+**Click în caseta de comentariu NU mai pune pauză.** Punctul IN se
+capturează în continuare la focus — asta era partea utilă. Dacă vrei
+pauză, apeși K, și atunci e decizia ta, nu a aplicației.
+
+**Fullscreen:** bara alunecă în jos când dispare și urcă la loc când
+miști mouse-ul sau apeși o tastă (înainte doar se stingea, ceea ce arăta
+a defect de randare). Cursorul dispare odată cu ea, inclusiv pe pauză. O
+tastă apăsată readuce bara — înainte scurtăturile intrau într-o interfață
+invizibilă. Și liniuța galbenă rămasă suspendată sub bara de progres a
+dispărut: barele de interval erau poziționate să treacă prin avatarele
+comentariilor, iar rândul de avatare e ascuns în fullscreen — barele nu
+erau.
+
+**Download pe rezoluții.** Meniul are acum „Download resolution": SD /
+HD / HD+ / 4K, fiecare cu mărimea fișierului. Mărimile se înregistrează
+la encoding de acum înainte; videourile mai vechi se măsoară o singură
+dată, la prima deschidere a meniului, și se rețin. Descărcarea servește
+**exact** tierul ales — fără scară de rezervă, pentru că altfel mărimea
+afișată ar fi o minciună.
+
+### Notificări
+
+**Reply-urile ajung la autorul comentariului.** Până acum notificarea
+pleca o singură dată pe versiune, către cel care a încărcat videoul și
+către Project Manageri — despre „videoul are feedback". Un răspuns e
+altceva: cineva ți-a răspuns ȚIE, și trebuie să afli de fiecare dată.
+
+Tabul **All** devine **Today**, urmat de **Unread** (cu badge) și
+**Read**. O listă plată cu tot răspunde la o întrebare pe care n-o pune
+nimeni. Grupele pe zile numără acum în zile prima săptămână — „acum 4
+zile" te orientează mai bine decât o dată seacă.
+
 ## [6.8.0] - 2026-08-14
 
 ### Founder Dashboard, Faza 5: pachetul pentru investitori

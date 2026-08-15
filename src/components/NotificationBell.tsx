@@ -23,7 +23,15 @@ import {
   type InAppNotification,
 } from '@/contexts/NotificationsContext'
 
-type Tab = 'all' | 'unread' | 'read'
+/**
+ * 6.9.0: "All" became "Today".
+ *
+ * A flat list of everything answers a question nobody asks. What you want
+ * when you open the bell is "what happened today", then "what have I not
+ * dealt with", then "what did I already see" — so those are the three tabs,
+ * each still grouped by day underneath.
+ */
+type Tab = 'today' | 'unread' | 'read'
 
 /** Compact relative time: "now", "5m", "3h", "2d", else a date. */
 function relativeTime(iso: string): string {
@@ -44,17 +52,24 @@ function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
-/** "Today" / "Yesterday" / "Jul 20, 2026". */
-function dateGroupLabel(iso: string): string {
+/** Whole days between a date and today. 0 = today, 1 = yesterday. */
+function daysAgo(iso: string): number | null {
   const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return 'Earlier'
-  const today = startOfDay(new Date())
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  const day = startOfDay(d).getTime()
-  if (day === today.getTime()) return 'Today'
-  if (day === yesterday.getTime()) return 'Yesterday'
-  return d.toLocaleDateString(undefined, {
+  if (Number.isNaN(d.getTime())) return null
+  const diff = startOfDay(new Date()).getTime() - startOfDay(d).getTime()
+  return Math.round(diff / 86_400_000)
+}
+
+/** "Today" / "Yesterday" / "3 days ago" / "Jul 20, 2026". */
+function dateGroupLabel(iso: string): string {
+  const n = daysAgo(iso)
+  if (n === null) return 'Earlier'
+  if (n <= 0) return 'Today'
+  if (n === 1) return 'Yesterday'
+  // 6.9.0: keep counting in days for the first week — "4 days ago" places an
+  // item in your week far better than a bare date does.
+  if (n < 7) return `${n} days ago`
+  return new Date(iso).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -86,7 +101,7 @@ export default function NotificationBell() {
     markAllUnread,
   } = useNotifications()
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<Tab>('all')
+  const [tab, setTab] = useState<Tab>('today')
   const wrapRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click + Escape.
@@ -111,7 +126,11 @@ export default function NotificationBell() {
   // Filter by tab, sort newest-first, then split into day sections.
   const groups = useMemo(() => {
     const filtered = notifications.filter((n) =>
-      tab === 'all' ? true : tab === 'unread' ? !n.isRead : n.isRead,
+      tab === 'today'
+        ? (daysAgo(n.createdAt) ?? 99) <= 0
+        : tab === 'unread'
+          ? !n.isRead
+          : n.isRead,
     )
     const sorted = [...filtered].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -139,7 +158,7 @@ export default function NotificationBell() {
   const badge = unreadCount > 99 ? '99+' : String(unreadCount)
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'all', label: 'All' },
+    { key: 'today', label: 'Today' },
     { key: 'unread', label: 'Unread' },
     { key: 'read', label: 'Read' },
   ]
@@ -149,7 +168,7 @@ export default function NotificationBell() {
       ? 'Nothing unread.'
       : tab === 'read'
         ? 'Nothing read yet.'
-        : 'No notifications yet.'
+        : 'Nothing today. Check Unread for anything still waiting.'
 
   return (
     <div ref={wrapRef} className="relative shrink-0">
@@ -289,7 +308,12 @@ export default function NotificationBell() {
                           ) : (
                             <>
                               <div className="text-sm leading-snug text-white/80">
-                                New comments on
+                                {/* 6.9.0: a reply to YOUR comment says so. It
+                                    is a different event from "this video has
+                                    feedback" and reads as one. */}
+                                {n.type === 'COMMENT_REPLY'
+                                  ? `${n.actorName || 'Someone'} replied to your comment on`
+                                  : 'New comments on'}
                               </div>
                               <div className="text-sm font-medium truncate">
                                 {n.videoName}

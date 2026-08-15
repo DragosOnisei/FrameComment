@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { armOrgForVideoId } from '@/lib/share-org'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { EXACT_DOWNLOAD_TIERS, exactPreviewPath } from '@/lib/video-qualities'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -68,12 +69,28 @@ export async function POST(
       }
     }
 
+    // 6.9.0: an explicit resolution may be requested. Anything else — including
+    // no body at all — keeps the old behaviour and downloads the source, so
+    // every existing caller is unaffected.
+    let requestedQuality = 'original'
+    try {
+      const body = await request.json().catch(() => null)
+      const q = typeof body?.quality === 'string' ? body.quality : null
+      if (q && EXACT_DOWNLOAD_TIERS.includes(q)) {
+        // Verify the tier actually exists before minting a token for it, so a
+        // stale menu can't produce a link that 404s at the last moment.
+        if (exactPreviewPath(video, q)) requestedQuality = q
+      }
+    } catch {
+      // No body / malformed body → original.
+    }
+
     // Generate video access token; tag admin sessions to avoid analytics inflation
     const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `guest:${Date.now()}`)
     const token = await generateVideoAccessToken(
       videoId,
       video.project.id,
-      'original',
+      requestedQuality,
       request,
       sessionId
     )

@@ -5,7 +5,7 @@ import { pipeline } from 'stream/promises'
 import { EncodeTierJob, getVideoQueue } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
-import { downloadFile, getLocalSourcePath } from '../lib/storage'
+import { downloadFile, getLocalSourcePath, getStorageFileSize } from '../lib/storage'
 import { getVideoBackend } from '../lib/storage-backends'
 import { rewriteHlsMaster } from '../lib/ffmpeg'
 import { TEMP_DIR } from './cleanup'
@@ -304,6 +304,27 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
     else if (tier === '720p') updateData.preview720Path = previewPath
     else if (tier === '1080p') updateData.preview1080Path = previewPath
     else if (tier === '2160p') updateData.preview2160Path = previewPath
+
+    // 6.9.0: record how big this tier turned out, so the download menu can
+    // tell a viewer what they're about to pull before they start it. Measured
+    // here because it's free — the file was just written and we know exactly
+    // where. Failure is non-fatal: the menu falls back to measuring on demand.
+    try {
+      const tierBytes = await getStorageFileSize(previewPath, backend)
+      if (Number.isFinite(tierBytes) && tierBytes > 0) {
+        const sizeField =
+          tier === '480p'
+            ? 'preview480Size'
+            : tier === '720p'
+              ? 'preview720Size'
+              : tier === '1080p'
+                ? 'preview1080Size'
+                : 'preview2160Size'
+        updateData[sizeField] = BigInt(Math.round(tierBytes))
+      }
+    } catch (err) {
+      logMessage(`[WORKER] encode-tier ${tier} for ${videoId}: size probe failed (non-fatal): ${err}`)
+    }
 
     if (shouldFlipReady) {
       updateData.status = 'READY'

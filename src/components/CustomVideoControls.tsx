@@ -890,8 +890,19 @@ export default function CustomVideoControls({
         detail: { inTime: null, outTime: null, videoId },
       }),
     )
+
+    // 6.9.0: touching the timeline during playback pauses.
+    // Dragging the playhead back a couple of seconds used to seek and then
+    // keep rolling from there, so by the time you looked, the frame you
+    // wanted had already gone past. Scrubbing is an act of inspection — it
+    // should leave you parked on the frame you chose.
+    const video = _videoRef?.current
+    if (video && !video.paused) {
+      video.pause()
+    }
+
     onSeek(time)
-  }, [videoDuration, onSeek, videoId])
+  }, [videoDuration, onSeek, videoId, _videoRef])
 
   const handleTimelineMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // 1.9.0+: same guard as handleTimelineClick — no scrubbing
@@ -1288,7 +1299,12 @@ export default function CustomVideoControls({
 
               Uniformly yellow (warning), thin idle + slight
               thicken on group hover for symmetry with the track. */}
-          {rangeBars.map((bar) => {
+          {/* 6.9.0: hidden in fullscreen, like the avatars they belong to.
+              These bars are positioned to run through the centre of the
+              comment avatars in the row below the timeline — and that row is
+              hidden in fullscreen. The bars were not, so a stray yellow dash
+              hung under the progress bar with nothing to explain it. */}
+          {!isFullscreen && rangeBars.map((bar) => {
             const width = bar.endPosition - bar.startPosition
             return (
               <div

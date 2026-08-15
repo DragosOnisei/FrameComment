@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 /**
  * Frame.io-style playback speed selector.
@@ -14,7 +15,21 @@ import { useEffect, useRef, useState } from 'react'
  * — Chrome and Safari typically clamp at ~16x — but 8x is a sensible
  * upper bound that matches what Frame.io exposes for review playback.
  */
-const DEFAULT_SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0] as const
+/** The one ladder. The J/L keyboard shortcuts walk this same list, so the menu
+ *  and the keyboard can never disagree about which speeds exist. */
+export const PLAYBACK_SPEEDS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0] as const
+
+/** Index of the ladder entry closest to `speed` — so a rate set from anywhere
+ *  else (an old session, the comparison view) still steps sensibly. */
+export function nearestSpeedIndex(speed: number): number {
+  let best = 0
+  for (let i = 1; i < PLAYBACK_SPEEDS.length; i++) {
+    if (Math.abs(PLAYBACK_SPEEDS[i] - speed) < Math.abs(PLAYBACK_SPEEDS[best] - speed)) best = i
+  }
+  return best
+}
+
+const DEFAULT_SPEED_OPTIONS = PLAYBACK_SPEEDS
 
 interface PlaybackSpeedMenuProps {
   value: number
@@ -40,15 +55,66 @@ export default function PlaybackSpeedMenu({
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
+
+  /**
+   * 6.9.0: the menu is rendered in a portal on document.body and positioned
+   * from the trigger's own rectangle.
+   *
+   * It used to be `absolute bottom-full` inside the control bar. That bar sits
+   * at the bottom of the player, has a backdrop-filter (its own stacking
+   * context) and lives inside scrollable containers — so with eight speeds the
+   * ~290px panel opened straight off the top of the visible area. Measuring
+   * and clamping to the viewport is the only thing that survives every place
+   * this player is embedded: page, fullscreen, share view.
+   */
+  const place = useCallback(() => {
+    const trigger = triggerRef.current
+    const menu = menuRef.current
+    if (!trigger) return
+    const t = trigger.getBoundingClientRect()
+    const menuW = menu?.offsetWidth ?? 180
+    const menuH = menu?.offsetHeight ?? 300
+    const margin = 8
+
+    // Prefer opening upwards, the way it always has. Flip below only when
+    // there genuinely isn't room, and clamp either way so it never leaves
+    // the viewport.
+    const spaceAbove = t.top
+    const openUp = spaceAbove >= menuH + margin || spaceAbove >= window.innerHeight - t.bottom
+    const rawTop = openUp ? t.top - menuH - margin : t.bottom + margin
+    const top = Math.max(margin, Math.min(rawTop, window.innerHeight - menuH - margin))
+
+    const rawLeft = t.left + t.width / 2 - menuW / 2
+    const left = Math.max(margin, Math.min(rawLeft, window.innerWidth - menuW - margin))
+
+    setCoords({ left, top })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    place()
+    // Two frames: the first paints the menu so offsetHeight is real, the
+    // second re-places it with the measured size.
+    const raf = requestAnimationFrame(place)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open, place])
 
   // Close on outside click + Escape.
   useEffect(() => {
     if (!open) return
     const onPointerDown = (e: MouseEvent | TouchEvent) => {
-      if (!wrapperRef.current) return
-      if (!wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      const target = e.target as Node
+      if (wrapperRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setOpen(false)
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -89,11 +155,16 @@ export default function PlaybackSpeedMenu({
         {formatSpeed(value)}
       </button>
 
-      {open && (
+      {open && typeof document !== 'undefined' && createPortal(
         <div
+          ref={menuRef}
           role="menu"
-          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 min-w-[180px] ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] rounded-lg p-1 text-white animate-in fade-in-0 slide-in-from-bottom-1 duration-150"
+          className="fixed z-[70] min-w-[180px] max-h-[calc(100vh-16px)] overflow-y-auto ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] rounded-lg p-1 text-white animate-in fade-in-0 duration-150"
           style={{
+            left: coords?.left ?? -9999,
+            top: coords?.top ?? -9999,
+            // Hidden until measured, so it never flashes in the wrong place.
+            visibility: coords ? 'visible' : 'hidden',
             backgroundColor: 'rgba(28, 44, 64, 0.95)',
             backgroundImage:
               'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.18) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
@@ -155,7 +226,8 @@ export default function PlaybackSpeedMenu({
               )
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

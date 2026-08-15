@@ -489,7 +489,12 @@ export function useCommentManagement({
     // selection the user had just made.
     if (selectedTimestamp !== null) return
     setSelectedTimecodeEnd(null)
-    window.dispatchEvent(new CustomEvent('pauseVideoForComment'))
+    // 6.9.0: focusing the comment box no longer pauses.
+    // It used to, so clicking into the field mid-playback stopped the video —
+    // but people click there to get ready, not to stop. The IN point is still
+    // captured on focus, which is the part that actually matters; if you want
+    // the video stopped you press K or space, and that reads as your decision
+    // rather than the app's.
     window.dispatchEvent(
       new CustomEvent('getCurrentTime', {
         detail: { callback: captureTimestamp },

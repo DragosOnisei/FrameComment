@@ -436,6 +436,15 @@ model Video {
   preview720Path  String?
   preview480Path  String?
 
+  // 6.9.0: byte size of each encoded tier, recorded when the tier finishes.
+  // The download menu shows these, so a viewer knows what a resolution costs
+  // before they start it. Nullable: rows encoded before 6.9.0 are measured
+  // from storage the first time the menu asks, then written back here.
+  preview2160Size BigInt?
+  preview1080Size BigInt?
+  preview720Size  BigInt?
+  preview480Size  BigInt?
+
   // 1.9.4+ Phase B: HLS adaptive-streaming variants. The worker
   // remuxes each MP4 tier into HLS segments + playlist after the
   // tier completes — zero re-encoding penalty, just splits the

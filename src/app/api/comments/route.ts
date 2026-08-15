@@ -8,7 +8,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
-import { maybeNotifyEditorForComment } from '@/lib/inapp-notifications'
+import { maybeNotifyEditorForComment, notifyCommentReply } from '@/lib/inapp-notifications'
 import {
 
   validateCommentPermissions,
@@ -482,6 +482,20 @@ export async function POST(request: NextRequest) {
     if (videoId) {
       await maybeNotifyEditorForComment({
         videoId,
+        actorUserId: authContext.user?.id ?? null,
+        actorName:
+          contentValidation.sanitizedAuthorName ?? authContext.user?.name ?? null,
+      })
+    }
+
+    // 6.9.0: a reply pings the person it answers, every time.
+    // The helper above fires once per version and targets the uploader + the
+    // Project Managers — it is about the video having feedback. This is about
+    // a specific person being answered, which is a different event and should
+    // not be swallowed by the once-per-version rule.
+    if (parentId) {
+      await notifyCommentReply({
+        parentCommentId: parentId,
         actorUserId: authContext.user?.id ?? null,
         actorName:
           contentValidation.sanitizedAuthorName ?? authContext.user?.name ?? null,
