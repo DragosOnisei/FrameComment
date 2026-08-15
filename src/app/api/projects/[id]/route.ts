@@ -32,6 +32,7 @@ import {
   PROJECT_TRASH_LOCK_MS,
 } from '@/lib/danger-zone'
 import { logError, logMessage } from '@/lib/logging'
+import { jsonSafe } from '@/lib/json-safe'
 
 export const runtime = 'nodejs'
 
@@ -197,7 +198,10 @@ export async function GET(
       smtpConfigured,
     }
 
-    return NextResponse.json(projectData)
+    // 6.9.1: jsonSafe() converts EVERY BigInt on the way out. The per-field
+    // conversion above missed the tier-size columns added in 6.9.0, and a
+    // single video with a recorded size took its whole project offline.
+    return NextResponse.json(jsonSafe(projectData))
   } catch (error) {
     return NextResponse.json(
       { error: projectMessages.unableToProcessRequest || 'Unable to process request' },

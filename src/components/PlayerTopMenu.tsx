@@ -100,10 +100,11 @@ export default function PlayerTopMenu({
   // menu costs nothing until someone actually wants a specific size.
   const [qualitiesOpen, setQualitiesOpen] = useState(false)
   const [qualities, setQualities] = useState<
-    Array<{ quality: string; label: string; height: number | null; bytes: number | null; watermarked: boolean }>
+    Array<{ quality: string; label: string; height: number | null; bytes: number | null }>
   >([])
   const [qualitiesLoading, setQualitiesLoading] = useState(false)
   const qualitiesForVideoRef = useRef<string | null>(null)
+  const closeQualitiesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadQualities = useCallback(async () => {
     if (!currentVideoId) return
@@ -122,6 +123,39 @@ export default function PlayerTopMenu({
       setQualitiesLoading(false)
     }
   }, [currentVideoId])
+
+  /**
+   * 6.9.1: opens instantly, closes on a 1-second delay.
+   *
+   * The submenu sits to the LEFT of its trigger, so the pointer has to cross a
+   * gap to reach it. With an immediate close, that journey had to be pixel
+   * perfect or the list vanished mid-reach. A grace period costs nothing and
+   * removes the precision requirement entirely.
+   */
+  const openQualities = useCallback(() => {
+    if (closeQualitiesTimerRef.current) {
+      clearTimeout(closeQualitiesTimerRef.current)
+      closeQualitiesTimerRef.current = null
+    }
+    setQualitiesOpen(true)
+    void loadQualities()
+  }, [loadQualities])
+
+  const scheduleCloseQualities = useCallback(() => {
+    if (closeQualitiesTimerRef.current) clearTimeout(closeQualitiesTimerRef.current)
+    closeQualitiesTimerRef.current = setTimeout(() => {
+      setQualitiesOpen(false)
+      closeQualitiesTimerRef.current = null
+    }, 1000)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (closeQualitiesTimerRef.current) clearTimeout(closeQualitiesTimerRef.current)
+    },
+    [],
+  )
+
   // 1.3.2+: viewport-anchored position for the portalled popover. We
   // render the popover at document.body level (escaping the toolbar's
   // backdrop-root so backdrop-blur actually samples the video pixels
@@ -558,63 +592,60 @@ export default function PlayerTopMenu({
           {/* 1.7.0+: download the active version's original file.
               Disabled while a request is in flight; the spinner
               swaps in so the user knows the click registered. */}
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => handleDownload()}
-            disabled={!currentVideoId || busy === 'download'}
-            className="
-              w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
-              hover:bg-white/[0.08] transition-colors text-left whitespace-nowrap
-              disabled:opacity-40 disabled:cursor-not-allowed
-            "
-          >
-            {busy === 'download' ? (
-              <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
-            ) : (
-              <Download className="w-4 h-4 shrink-0" />
-            )}
-            <span className="flex-1 whitespace-nowrap">Download</span>
-          </button>
-
-          {/* 6.9.0: the encoded ladder, with the size of each file. Hovering
-              measures once and remembers — the sizes are recorded at encode
-              time from now on, and older videos are measured on first ask. */}
+          {/* 6.9.1: ONE Download entry. It used to be two — a plain
+              "Download" plus a separate "Download resolution" — which made the
+              user pick between a verb and a verb-with-a-noun before they'd
+              even seen the options. Now Download opens the list, and Original
+              is simply the last item in it. */}
           <div
             className="relative"
-            onMouseEnter={() => {
-              setQualitiesOpen(true)
-              void loadQualities()
-            }}
-            onMouseLeave={() => setQualitiesOpen(false)}
+            onMouseEnter={openQualities}
+            onMouseLeave={scheduleCloseQualities}
           >
             <button
               role="menuitem"
               type="button"
-              onClick={() => {
-                setQualitiesOpen((v) => !v)
-                void loadQualities()
-              }}
-              disabled={!currentVideoId}
+              onClick={openQualities}
+              disabled={!currentVideoId || busy === 'download'}
               className="
                 w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
                 hover:bg-white/[0.08] transition-colors text-left whitespace-nowrap
                 disabled:opacity-40 disabled:cursor-not-allowed
               "
             >
-              <Download className="w-4 h-4 shrink-0 opacity-70" />
-              <span className="flex-1 whitespace-nowrap">Download resolution</span>
+              {busy === 'download' ? (
+                <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4 shrink-0" />
+              )}
+              <span className="flex-1 whitespace-nowrap">Download</span>
               <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-60" />
             </button>
 
             {qualitiesOpen && (
               <div
                 role="menu"
-                className="absolute right-full top-0 mr-1 min-w-[220px] rounded-lg p-1 ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] z-50"
+                // 6.9.1: same glass recipe as the parent popover — the earlier
+                // near-opaque navy read as a different component bolted on.
+                // The negative top offset lines the first row up with the
+                // trigger, so the pointer travels straight across.
+                onMouseEnter={openQualities}
+                onMouseLeave={scheduleCloseQualities}
+                className="
+                  absolute right-full -top-1 mr-1 min-w-[230px] text-white
+                  ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)]
+                  rounded-xl p-1 z-50
+                  animate-in fade-in-0 duration-150
+                "
                 style={{
-                  backgroundColor: 'rgba(28, 44, 64, 0.97)',
-                  backdropFilter: 'blur(20px) saturate(150%)',
-                  WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+                  backgroundColor: 'rgba(22, 37, 51, 0.35)',
+                  backgroundImage:
+                    'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
+                  backdropFilter: 'blur(40px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                  transform: 'translate3d(0, 0, 0)',
+                  willChange: 'backdrop-filter, transform',
+                  isolation: 'isolate',
                 }}
               >
                 {qualitiesLoading && (
@@ -637,13 +668,10 @@ export default function PlayerTopMenu({
                       onClick={() => handleDownload(q.quality === 'original' ? undefined : q.quality)}
                       className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left"
                     >
-                      <span className="flex-1">
+                      <span className="flex-1 whitespace-nowrap">
                         {q.label}
                         {q.height ? (
                           <span className="text-white/45 text-xs"> · {q.height}p</span>
-                        ) : null}
-                        {q.watermarked ? (
-                          <span className="text-white/45 text-xs"> · watermarked</span>
                         ) : null}
                       </span>
                       <span className="text-xs tabular-nums text-white/60">

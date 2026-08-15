@@ -8,6 +8,7 @@ import {
   wouldCreateFolderCycle,
 } from '@/lib/folder-helpers'
 import { encrypt } from '@/lib/encryption'
+import { jsonSafe } from '@/lib/json-safe'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { legacyBackend } from '@/lib/storage-backends'
@@ -245,7 +246,8 @@ export async function GET(
       videos: videosWithExtras,
       subfolders: subfoldersWithPreviews,
     }
-    return NextResponse.json({ folder: safeFolder, breadcrumb })
+    // 6.9.1: see lib/json-safe — convert BigInt by TYPE, not field by field.
+    return NextResponse.json(jsonSafe({ folder: safeFolder, breadcrumb }))
   } catch (error) {
     logError('[GET /api/folders/[id]] failed:', error)
     // Surface the real error in the response body during 1.0.6

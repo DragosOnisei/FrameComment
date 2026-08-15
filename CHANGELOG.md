@@ -14,6 +14,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.9.1] - 2026-08-15
+
+### Fix urgent: un proiect nu se mai deschidea („Do not know how to serialize a BigInt")
+
+Coloanele de mărime per rezoluție adăugate în 6.9.0 sunt `BIGINT`, iar
+`JSON.stringify` aruncă pe BigInt. Ruta de proiect returna rândurile de
+video prin spread, convertind **manual doar** `originalFileSize` — singura
+coloană BigInt care exista atunci. În clipa în care un video primea o
+mărime înregistrată, proiectul lui pica întreg. De aceea doar DFT era
+afectat: acolo se deschisese meniul de download.
+
+Fix-ul nu e încă o conversie pe câmp, ci `lib/json-safe.ts`: convertește
+**după tip**, recursiv, la ieșire. Conversia câmp cu câmp e o regulă pe
+care trebuie s-o ții minte; asta face imposibilă repetarea aceleiași
+avarii la următoarea coloană BigInt. Aplicat pe rutele de proiect și de
+folder (share și search construiau deja obiecte explicite, deci erau
+în regulă).
+
+### Meniul de download
+
+- **Un singur buton.** Erau două — „Download" și „Download resolution" —
+  ceea ce te punea să alegi între un verb și un verb-cu-substantiv
+  înainte să fi văzut opțiunile. Acum „Download" deschide lista, iar
+  **Original** e ultima intrare din ea.
+- **Se închide după o secundă**, nu instant. Submeniul se deschide spre
+  stânga, deci cursorul are de traversat un spațiu gol; cu închidere
+  imediată, drumul trebuia făcut la pixel. Deschiderea rămâne instantă.
+- **Aceeași sticlă ca meniul părinte** — înainte era un navy aproape opac
+  care arăta ca o altă componentă lipită alături.
+- **Scos textul „watermarked"** — niciun video nu mai are watermark.
+
 ## [6.9.0] - 2026-08-15
 
 ### Player: 12 lucruri reparate sau adăugate
