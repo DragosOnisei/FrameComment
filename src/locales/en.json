@@ -1355,7 +1355,7 @@
       "maxReverseShareFiles": "Max File Submissions per Session",
       "maxReverseShareFilesHint": "Maximum files a client can submit per session (1-500, default: 10)",
       "adminSessionTimeout": "Admin Session Timeout",
-      "adminSessionTimeoutHint": "Controls inactivity logout in the admin dashboard. Maximum is 24 hours.",
+      "adminSessionTimeoutHint": "Controls inactivity logout in the admin dashboard. Maximum is 720 hours (30 days).",
       "timeoutValue": "Timeout Value",
       "timeoutUnit": "Timeout Unit",
       "minutes": "Minutes",

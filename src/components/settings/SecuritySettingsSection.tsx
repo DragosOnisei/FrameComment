@@ -305,7 +305,7 @@ export function SecuritySettingsSection({
                   id="adminSessionTimeoutValue"
                   type="number"
                   min="1"
-                  max={adminSessionTimeoutUnit === 'HOURS' ? '24' : '1440'}
+                  max={adminSessionTimeoutUnit === 'HOURS' ? '720' : '1440'}
                   value={adminSessionTimeoutValue}
                   onChange={(e) => setAdminSessionTimeoutValue(e.target.value)}
                   placeholder="15"

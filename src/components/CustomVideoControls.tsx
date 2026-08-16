@@ -9,7 +9,7 @@ import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
 import { isRangeEditActive } from '@/lib/comment-range-edit'
-import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
+import { storyboardCellStyle, storyboardFraction, storyboardGridOf } from '@/lib/storyboard-grid'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
 import { AttachmentPreviewStrip, AudioAttachment } from './CommentAttachments'
@@ -45,6 +45,10 @@ interface CustomVideoControlsProps {
   /** 6.9.3: sprite geometry for THIS video. Absent = the legacy 10×10. */
   storyboardCols?: number | null
   storyboardRows?: number | null
+  /** 6.12.0: the duration the sprite was generated from (`Video.duration`).
+   *  The cursor is measured against the PLAYER's duration, which can differ
+   *  from the original's — see `storyboardFraction`. */
+  storyboardDuration?: number | null
   isAdmin?: boolean
   timestampDisplayMode?: 'TIMECODE' | 'AUTO'
   onMarkerClick?: (commentId: string) => void // Callback when a timeline marker is clicked
@@ -277,6 +281,7 @@ export default function CustomVideoControls({
   storyboardUrl = null,
   storyboardCols = null,
   storyboardRows = null,
+  storyboardDuration = null,
   isAdmin: _isAdmin = false,
   timestampDisplayMode = 'TIMECODE',
   onMarkerClick,
@@ -1675,8 +1680,11 @@ export default function CustomVideoControls({
               serves doesn't translate to touch anyway, so we just
               hide it below `sm:`. */}
           {hoveredTime !== null && !isDragging && videoDuration > 0 && (() => {
-            const frac = Math.max(0, Math.min(1, hoveredTime / videoDuration))
-            const leftPct = frac * 100
+            // Position follows the PLAYER's timeline; the sprite lookup uses
+            // the sprite's own timebase. Conflating the two is what made the
+            // preview drift towards the end of a clip.
+            const leftPct = Math.max(0, Math.min(1, hoveredTime / videoDuration)) * 100
+            const spriteFrac = storyboardFraction(hoveredTime, videoDuration, storyboardDuration)
             const tc = formatTimeWithMode(
               hoveredTime,
               videoFps && videoFps > 0 ? videoFps : 24,
@@ -1701,7 +1709,7 @@ export default function CustomVideoControls({
                   <div className="rounded-lg overflow-hidden ring-1 ring-white/20 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.85)] bg-black">
                     <div
                       className="w-[160px] aspect-video bg-black"
-                      style={storyboardCellStyle(storyboardUrl, frac, storyboardGridOf({ storyboardCols, storyboardRows }))}
+                      style={storyboardCellStyle(storyboardUrl, spriteFrac, storyboardGridOf({ storyboardCols, storyboardRows }))}
                       aria-hidden
                     />
                     <div className="px-2 py-1 text-center text-[11px] font-mono text-white bg-black/85 border-t border-white/10 tabular-nums whitespace-nowrap">

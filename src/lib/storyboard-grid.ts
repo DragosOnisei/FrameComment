@@ -73,6 +73,9 @@ export function storyboardGridOf(video: {
  * so the nearest cell to a fraction is `round(fraction * cells)` — rounding,
  * not flooring, because flooring always shows a frame from BEFORE the cursor
  * and reads as lag.
+ *
+ * The fraction must be measured against the SAME duration the sprite was
+ * built from — see `storyboardFraction`.
  */
 export function storyboardCellStyle(
   url: string,
@@ -89,4 +92,37 @@ export function storyboardCellStyle(
     backgroundPosition: `${(col / (grid.cols - 1)) * 100}% ${(row / (grid.rows - 1)) * 100}%`,
     backgroundRepeat: 'no-repeat',
   }
+}
+
+/**
+ * 6.12.0 — the fraction to look up, measured on the sprite's own timebase.
+ *
+ * The sprite is generated in the worker from the ORIGINAL file, with
+ * `fps = cells / probedDuration`. The player, meanwhile, measures the cursor
+ * against `videoElement.duration` — the duration of the TRANSCODED preview.
+ * Those two numbers are usually equal, and when they are not (variable frame
+ * rate exports, an audio track longer than the picture, a container whose
+ * header rounds up) the sprite is effectively stretched against the timeline:
+ * dead-on at the start, and further out the closer you get to the end.
+ *
+ * That is the drift 6.9.3 did not fix. Denser sampling made each cell shorter
+ * but left the scale wrong, so hovering at 93% of a clip could still show the
+ * end card. Mapping through the recorded duration fixes every sprite already
+ * on disk, with no re-encode.
+ *
+ * `recordedDuration` is `Video.duration` — the exact value the worker passed
+ * to ffmpeg. When it is missing or nonsense we fall back to the player's own
+ * duration, which is what the code did before.
+ */
+export function storyboardFraction(
+  timeSeconds: number,
+  playerDuration: number,
+  recordedDuration?: number | null,
+): number {
+  const base =
+    typeof recordedDuration === 'number' && Number.isFinite(recordedDuration) && recordedDuration > 0
+      ? recordedDuration
+      : playerDuration
+  if (!Number.isFinite(base) || base <= 0) return 0
+  return Math.max(0, Math.min(1, timeSeconds / base))
 }

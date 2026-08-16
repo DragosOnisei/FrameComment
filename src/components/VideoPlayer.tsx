@@ -2785,6 +2785,7 @@ export default function VideoPlayer({
                   storyboardUrl={(selectedVideo as any)?.storyboardUrl || null}
                   storyboardCols={(selectedVideo as any)?.storyboardCols ?? null}
                   storyboardRows={(selectedVideo as any)?.storyboardRows ?? null}
+                  storyboardDuration={(selectedVideo as any)?.duration ?? null}
                   isAdmin={isAdmin}
                   timestampDisplayMode={timestampDisplayMode}
                   onMarkerClick={onCommentFocus}

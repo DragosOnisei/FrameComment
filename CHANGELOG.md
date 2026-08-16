@@ -14,6 +14,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.12.0] - 2026-08-17
+
+### Preview-ul din scrub arăta alt moment decât cel de sub cursor
+
+6.9.3 a tratat simptomul. Sprite-ul e generat în worker din fișierul
+**original**, cu `fps = celule / durata_probată`, în timp ce player-ul măsoară
+cursorul față de durata **fișierului transcodat**. Când cele două durate diferă
+— export cu frame rate variabil, pistă audio mai lungă decât imaginea, un
+container care rotunjește în sus — sprite-ul e întins față de timeline: exact
+la început, tot mai greșit spre final. Pe un clip de 82 s, hover la 01:16 putea
+arăta deja cartonul de final.
+
+Densitatea nu avea cum să repare asta: celule mai scurte pe o scară greșită
+înseamnă tot cadrul greșit. Acum căutarea în sprite se face pe **durata cu care
+a fost generat** (`Video.duration`), nu pe cea a player-ului. Se repară toate
+sprite-urile existente, fără re-encodare.
+
+Rămâne limita reală, spusă direct: un sprite este un eșantion. La ~1 cadru/
+secundă preview-ul e cel mai apropiat cadru eșantionat, nu exact cadrul unde
+ajunge click-ul. Pentru cadru identic garantat ar fi nevoie de un seek video
+real la fiecare mișcare de mouse.
+
+### Limita de inactivitate urcă la 720 de ore
+
+Plafonul pentru logout-ul din inactivitate era 24 h — și era impus în trei
+locuri, dintre care unul (`Math.min(seconds, 24h)` din `SessionMonitor`)
+tăia în tăcere orice valoare mai mare setată din interfață. Acum maximul e
+720 h (30 de zile), adică exact durata refresh token-ului: peste ea sesiunea
+oricum nu poate supraviețui, deci un număr mai mare ar fi o promisiune pe care
+stratul de autentificare nu o ține.
+
+### Eliminat
+
+- Textul „N files sent to your browser's downloads." de lângă Download All pe
+  pagina publică de folder. Contorul de fișiere nu spunea nimic ce utilizatorul
+  să nu vadă deja în bara de descărcări a browserului.
+
+
 ## [6.11.0] - 2026-08-15
 
 ### Aprobarea nu mai există

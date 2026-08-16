@@ -271,7 +271,6 @@ function PublicFolderSharePageInner() {
   const [downloadingAll, setDownloadingAll] = useState(false)
   // 6.10.1: how many files were handed to the browser, so the page can say
   // what happened instead of guessing why nothing appeared.
-  const [filesStarted, setFilesStarted] = useState(0)
   const { startStreamDownload } = useDownloadManager()
   /**
    * 6.10.0: a flat shared folder downloads as FILES, not a ZIP.
@@ -318,7 +317,6 @@ function PublicFolderSharePageInner() {
           a.click()
           a.remove()
           delivered++
-          setFilesStarted(delivered)
           // Spaced out: browsers throttle a burst of downloads.
           await new Promise((r) => setTimeout(r, 400))
         } catch {
@@ -356,7 +354,6 @@ function PublicFolderSharePageInner() {
   const handleDownloadAll = useCallback(() => {
     if (downloadingAll) return
     setDownloadingAll(true)
-    setFilesStarted(0)
 
     void (async () => {
       try {
@@ -746,15 +743,6 @@ function PublicFolderSharePageInner() {
                 )}
                 <span>Download All</span>
               </Button>
-            )}
-            {/* 6.10.1: a flat folder arrives as separate files. Say what was
-                started — no claim about WHY something might be missing, since
-                the page cannot actually tell. */}
-            {filesStarted > 0 && (
-              <p className="text-xs text-muted-foreground max-w-xs">
-                {filesStarted} file{filesStarted === 1 ? '' : 's'} sent to your
-                browser&apos;s downloads.
-              </p>
             )}
             {/* 1.4.x+: item count next to Download All counts UNIQUE
                 video cards (grouped by name) instead of raw version

@@ -14,6 +14,8 @@ import { getAccessToken, getRefreshToken, clearTokens, subscribe } from '@/lib/t
 // page of the day.
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 12 * 60 * 60 * 1000 // 12 hours
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
+// 6.12.0: raised from 24 h. Matches ADMIN_REFRESH_TTL_SECONDS (30 days).
+const MAX_INACTIVITY_SECONDS = 720 * 60 * 60
 
 export default function SessionMonitor() {
   const router = useRouter()
@@ -48,7 +50,11 @@ export default function SessionMonitor() {
         if (!seconds || seconds <= 0) return
 
         if (cancelled) return
-        inactivityTimeoutRef.current = Math.min(seconds, 24 * 60 * 60) * 1000
+        // 6.12.0: the ceiling is 720 h (30 days), which is exactly the
+        // refresh-token lifetime — past that the session cannot survive
+        // anyway, so a higher number here would be a promise the auth
+        // layer does not keep.
+        inactivityTimeoutRef.current = Math.min(seconds, MAX_INACTIVITY_SECONDS) * 1000
         loaded = true
       } catch {
         // ignore and keep defaults
