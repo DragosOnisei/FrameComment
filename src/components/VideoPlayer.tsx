@@ -2202,6 +2202,30 @@ export default function VideoPlayer({
     }
   }
 
+  /**
+   * Leave fullscreen, whichever way we got in.
+   *
+   * Three exits, because there are three entrances: element fullscreen
+   * (desktop, the usual path), the webkit-prefixed variant, and iPhone
+   * Safari's native <video> fullscreen — which `document.exitFullscreen`
+   * does not know about at all, so it has to be dismissed on the element.
+   */
+  const exitFullscreenIfActive = useCallback(() => {
+    const video = videoRef.current as any
+    if (document.exitFullscreen && document.fullscreenElement) {
+      Promise.resolve(document.exitFullscreen()).catch(() => {})
+    } else if ((document as any).webkitExitFullscreen && (document as any).webkitFullscreenElement) {
+      ;(document as any).webkitExitFullscreen()
+    } else if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+      try {
+        video.webkitExitFullscreen()
+      } catch {
+        /* already gone */
+      }
+    }
+    setIsFullscreen(false)
+  }, [])
+
   const handleToggleFullscreen = () => {
     if (!containerRef.current || !videoRef.current) return
 
@@ -2272,12 +2296,7 @@ export default function VideoPlayer({
         setIsFullscreen(true)
       }
     } else {
-      if (document.exitFullscreen) {
-        Promise.resolve(document.exitFullscreen()).catch(() => {})
-      } else if ((document as any).webkitExitFullscreen) {
-        ;(document as any).webkitExitFullscreen()
-      }
-      setIsFullscreen(false)
+      exitFullscreenIfActive()
     }
   }
 
@@ -2344,6 +2363,18 @@ export default function VideoPlayer({
     }))
   }
 
+  /**
+   * 6.9.0: the cursor goes with the bar. In fullscreen that means whenever the
+   * controls are hidden, playing or paused — a mouse pointer floating over a
+   * paused frame is as much of an obstruction as the bar was.
+   *
+   * 6.15.0: this has to be applied to the <video> too, not just the container.
+   * Cursor is inherited, so any descendant that names its own wins, and the
+   * video element is `cursor-pointer` for click-to-play — it covers the entire
+   * stage, so it was always the cursor you saw.
+   */
+  const hideCursor = !showControls && (isPlaying || isFullscreen)
+
   // Keep the fullscreen ref in sync so the callback below reads it live.
   // Entering fullscreen mid-playback re-arms the fast (0.5s) auto-hide;
   // leaving it brings the bar back immediately.
@@ -2399,6 +2430,21 @@ export default function VideoPlayer({
       resetControlsTimeout()
     }
     const handlePause = () => setIsPlaying(false)
+    // 6.15.0: the clip is over, so the reason for being fullscreen is over.
+    // Staying in it left a black screen with a frozen last frame and no
+    // obvious way back except Escape — and the comments, versions and
+    // everything else you'd want the moment a review finishes are all in the
+    // windowed layout. Note this is 'ended', not "currentTime hit duration":
+    // seeking to the end by dragging the playhead does not fire it, so
+    // scrubbing to the last frame in fullscreen still keeps you there.
+    const handleEnded = () => {
+      // Not every browser fires 'pause' alongside 'ended', and without this the
+      // player would still believe it was playing — so the bar would auto-hide
+      // over a finished clip and the cursor would stay gone.
+      setIsPlaying(false)
+      if (!isFullscreenRef.current) return
+      exitFullscreenIfActive()
+    }
     const handleVolumeChangeEvent = () => {
       setVolume(video.volume)
       setIsMuted(video.muted)
@@ -2406,14 +2452,16 @@ export default function VideoPlayer({
 
     video.addEventListener('play', handlePlay)
     video.addEventListener('pause', handlePause)
+    video.addEventListener('ended', handleEnded)
     video.addEventListener('volumechange', handleVolumeChangeEvent)
 
     return () => {
       video.removeEventListener('play', handlePlay)
       video.removeEventListener('pause', handlePause)
+      video.removeEventListener('ended', handleEnded)
       video.removeEventListener('volumechange', handleVolumeChangeEvent)
     }
-  }, [resetControlsTimeout])
+  }, [resetControlsTimeout, exitFullscreenIfActive])
 
   // Fullscreen change events (desktop). 4.7.x FIX: these DOCUMENT-level
   // listeners must ALWAYS be attached — the old code gated them behind
@@ -2559,12 +2607,7 @@ export default function VideoPlayer({
         ref={containerRef}
         className={`relative w-full flex flex-col ${
           fillContainer ? 'flex-1 min-h-0' : 'flex-shrink min-h-0 lg:order-1'
-        } ${
-          // 6.9.0: the cursor goes with the bar. In fullscreen that means
-          // whenever the controls are hidden, playing or paused — the old rule
-          // left a mouse pointer floating over a paused frame.
-          !showControls && (isPlaying || isFullscreen) ? 'cursor-none' : ''
-        }`}
+        } ${hideCursor ? 'cursor-none' : ''}`}
       >
         {hasDisplayableSource ? (
           <>
@@ -2658,7 +2701,18 @@ export default function VideoPlayer({
                         : videoUrl
                     }
                     poster={(selectedVideo as any).thumbnailUrl || undefined}
-                    className={`w-full h-full object-contain ${isDrawingMode ? 'pointer-events-none' : 'cursor-pointer'}`}
+                    className={`w-full h-full object-contain ${
+                      isDrawingMode
+                        ? 'pointer-events-none'
+                        : // The <video> fills the stage, so its own cursor is
+                          // the one you actually see — `cursor-none` on the
+                          // container never won against `cursor-pointer` here.
+                          // That was the whole reason the pointer stayed on
+                          // screen after the bar had gone.
+                          hideCursor
+                          ? 'cursor-none'
+                          : 'cursor-pointer'
+                    }`}
                     // 1.4.x: belt-and-suspenders inline `object-fit:
                     // contain`. Some iOS Safari builds drop the
                     // Tailwind `object-contain` class after a seek on

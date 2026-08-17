@@ -14,6 +14,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.15.0] - 2026-08-18
+
+### În fullscreen dispare și cursorul, nu doar bara
+
+Regula exista din 6.9.0 — „cursorul pleacă odată cu bara" — și era scrisă pe
+containerul player-ului. Doar că `cursor` se moștenește, iar orice descendent
+care își declară propriul cursor câștigă: elementul `<video>` e `cursor-pointer`
+pentru click-to-play și acoperă tot ecranul în fullscreen. Deci cursorul pe care
+îl vedeai era mereu al lui, iar `cursor-none` de pe părinte n-a avut niciodată
+ce să suprascrie.
+
+Acum regula se aplică și pe `<video>`, nu doar pe container.
+
+### Când se termină clipul, ieși din fullscreen
+
+Motivul pentru care erai în fullscreen s-a încheiat odată cu clipul. Înainte
+rămâneai pe un ecran negru cu ultimul frame înghețat, fără o ieșire evidentă în
+afară de Escape — iar comentariile, versiunile și tot ce vrei fix în momentul în
+care s-a terminat un review sunt în layout-ul normal.
+
+Se declanșează pe evenimentul `ended`, nu pe „currentTime a ajuns la durată":
+dacă tragi playhead-ul până la capăt, `ended` nu se emite, deci scrub până la
+ultimul frame în fullscreen te lasă acolo. Ieșirea acoperă toate cele trei
+moduri de intrare, inclusiv fullscreen-ul nativ de `<video>` de pe iPhone
+Safari, pe care `document.exitFullscreen` nu îl cunoaște deloc.
+
+Pe lângă asta, `ended` marchează acum explicit player-ul ca oprit — nu toate
+browserele emit `pause` împreună cu `ended`, iar fără asta bara s-ar fi ascuns
+peste un clip terminat.
+
 ## [6.14.0] - 2026-08-17
 
 ### Bannerul de upload spune cât de repede merge, și te lasă să-l oprești
