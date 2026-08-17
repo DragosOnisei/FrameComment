@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit } from '@/lib/rate-limit'
 import crypto from 'crypto'
 import { parseBearerToken, refreshAdminTokens, revokePresentedTokens } from '@/lib/auth'
+import { clearRefreshCookie, readRefreshCookie, setRefreshCookie } from '@/lib/auth-cookies'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -45,7 +46,10 @@ export async function POST(request: NextRequest) {
   const authMessages = messages?.auth || {}
 
   try {
-    const presentedToken = parseBearerToken(request)
+    // 6.13.0: the browser sends the refresh token as an HttpOnly cookie. The
+    // Bearer header is still accepted for the OAuth device flow, whose client
+    // is not a browser and has no cookie jar of ours.
+    const presentedToken = readRefreshCookie(request) || parseBearerToken(request)
     if (!presentedToken) {
       return NextResponse.json(
         { error: authMessages.noRefreshTokenProvided || 'No refresh token provided' },
@@ -68,18 +72,26 @@ export async function POST(request: NextRequest) {
 
     if (!tokens) {
       await revokePresentedTokens({ refreshToken: presentedToken })
-      return NextResponse.json({ error: authMessages.invalidOrExpiredRefreshToken || 'Invalid or expired refresh token' }, { status: 401 })
+      // Drop the cookie too — leaving a dead token in the jar means every
+      // page load retries a refresh that can never succeed.
+      const refused = NextResponse.json(
+        { error: authMessages.invalidOrExpiredRefreshToken || 'Invalid or expired refresh token' },
+        { status: 401 },
+      )
+      return clearRefreshCookie(refused, request)
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       tokens: {
         accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
         accessExpiresAt: tokens.accessExpiresAt,
         refreshExpiresAt: tokens.refreshExpiresAt,
+        // 6.13.0: when this session ends no matter how active it stays.
+        absoluteExpiresAt: tokens.absoluteExpiresAt,
       }
     })
+    return setRefreshCookie(response, request, tokens.refreshToken, tokens.refreshMaxAgeSeconds)
   } catch (error) {
     logError('[AUTH] Token refresh error:', error)
     return NextResponse.json(

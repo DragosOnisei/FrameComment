@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { clearEncodeStopped } from '@/lib/encode-cancel'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import {
@@ -176,6 +177,10 @@ export async function POST(
           } as any,
         })
 
+        // 6.14.0: a video whose encode was stopped earlier carries a stop
+        // flag. Reprocessing is an explicit "do it again" — clear it, or the
+        // fresh ladder would abandon its own tiers.
+        await clearEncodeStopped(video.id)
         await queue.add(
           'prepare-video',
           {

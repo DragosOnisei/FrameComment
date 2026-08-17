@@ -220,6 +220,12 @@ export async function getClientSessionTimeoutSeconds(): Promise<number> {
   }
 }
 
+/** 6.13.0: matches the schema default of 720 HOURS. Used when a company has
+ *  no SecuritySettings row yet, or stored an unrecognised unit — in both cases
+ *  the honest answer is "the product default", not a stricter number the user
+ *  never chose. */
+const ADMIN_SESSION_TIMEOUT_FALLBACK_SECONDS = 720 * 60 * 60
+
 /**
  * Get admin session timeout in seconds from security settings
  * Used for admin access token TTL.
@@ -233,7 +239,7 @@ export async function getAdminSessionTimeoutSeconds(): Promise<number> {
     if (Number.isFinite(parsed) && parsed > 0) return parsed
   }
 
-  const cachedAdminSessionTimeout = orgSlot(adminSessionTimeoutCache, 12 * 60 * 60)
+  const cachedAdminSessionTimeout = orgSlot(adminSessionTimeoutCache, ADMIN_SESSION_TIMEOUT_FALLBACK_SECONDS)
   const now = Date.now()
   if (cachedAdminSessionTimeout.expiresAt > now) {
     return cachedAdminSessionTimeout.value
@@ -250,8 +256,7 @@ export async function getAdminSessionTimeoutSeconds(): Promise<number> {
     })
 
     if (!settings) {
-      // 2.4.2+: match the new schema default of 12 HOURS.
-      cachedAdminSessionTimeout.value = 12 * 60 * 60
+      cachedAdminSessionTimeout.value = ADMIN_SESSION_TIMEOUT_FALLBACK_SECONDS
       cachedAdminSessionTimeout.expiresAt = now + SETTINGS_CACHE_TTL_MS
       return cachedAdminSessionTimeout.value
     }
@@ -273,8 +278,7 @@ export async function getAdminSessionTimeoutSeconds(): Promise<number> {
         cachedAdminSessionTimeout.value = value * 7 * 24 * 60 * 60
         break
       default:
-        // 2.4.2+: match the new schema default of 12 HOURS.
-        cachedAdminSessionTimeout.value = 12 * 60 * 60
+        cachedAdminSessionTimeout.value = ADMIN_SESSION_TIMEOUT_FALLBACK_SECONDS
         break
     }
 

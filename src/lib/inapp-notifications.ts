@@ -48,6 +48,8 @@ export interface InAppNotification {
   folderId: string | null
   actorName: string | null
   message: string | null
+  /** 6.14.0: the comment to scroll to, when the row is about exactly one. */
+  commentId: string | null
   isRead: boolean
   createdAt: string
 }
@@ -61,6 +63,7 @@ interface NotificationRow {
   folderId: string | null
   actorName: string | null
   message?: string | null
+  commentId?: string | null
   isRead: boolean
   createdAt: Date | string
 }
@@ -75,6 +78,7 @@ export function serializeNotification(row: NotificationRow): InAppNotification {
     folderId: row.folderId ?? null,
     actorName: row.actorName ?? null,
     message: row.message ?? null,
+    commentId: row.commentId ?? null,
     isRead: row.isRead,
     createdAt:
       row.createdAt instanceof Date
@@ -100,6 +104,8 @@ export async function createOrBumpNotification(params: {
   folderId?: string | null
   actorName?: string | null
   type?: string
+  /** 6.14.0: the specific comment, when there is exactly one. */
+  commentId?: string | null
   /** 5.0 multi-tenant: explicit owning org (worker paths run outside a
    *  request context). Defaults to 'org-1' when omitted. */
   organizationId?: string | null
@@ -112,6 +118,7 @@ export async function createOrBumpNotification(params: {
     folderId = null,
     actorName = null,
     type = 'NEW_COMMENTS',
+    commentId = null,
     organizationId = null,
   } = params
 
@@ -138,7 +145,10 @@ export async function createOrBumpNotification(params: {
         videoName,
         folderId,
         type,
-      },
+        // Point at the NEWEST comment — that is the one the user wants to
+        // land on when a bumped row finally gets clicked.
+        commentId,
+      } as any,
     })
   } else {
     row = await delegate.create({
@@ -150,8 +160,9 @@ export async function createOrBumpNotification(params: {
         folderId,
         actorName,
         type,
+        commentId,
         organizationId: organizationId ?? 'org-1',
-      },
+      } as any,
     })
   }
 
@@ -280,6 +291,8 @@ export async function maybeNotifyEditorForComment(params: {
  */
 export async function notifyCommentReply(params: {
   parentCommentId: string
+  /** 6.14.0: the reply itself — what the bell row should scroll to. */
+  replyCommentId?: string | null
   actorUserId: string | null
   actorName: string | null
 }): Promise<void> {
@@ -317,6 +330,7 @@ export async function notifyCommentReply(params: {
       folderId: video.folderId,
       actorName: params.actorName,
       type: 'COMMENT_REPLY',
+      commentId: params.replyCommentId ?? params.parentCommentId,
       organizationId: video.organizationId ?? null,
     })
     await publishNotification(parent.userId, notification)

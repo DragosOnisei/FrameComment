@@ -5,6 +5,7 @@ import { getVideoQueue } from '@/lib/queue'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { isS3Mode } from '@/lib/storage'
 import { logError, logMessage } from '@/lib/logging'
+import { filterStoppedVideoIds } from '@/lib/encode-cancel'
 
 // 4.2.3+: reap ABANDONED uploads so the bottom-right "Uploading videos"
 // banner (and the per-card spinner) can't be pinned forever by an upload
@@ -157,6 +158,16 @@ export async function GET(request: NextRequest) {
       activeVideoIds = new Set(
         encodingJobs.map((j) => (j.data as any)?.videoId).filter(Boolean)
       )
+      // 6.14.0: a video the user explicitly STOPPED is not "still being
+      // worked on", even though the tier that was already inside ffmpeg
+      // keeps BullMQ's active list warm until it finishes. Without this, the
+      // banner kept the row — at 100%, with nothing left to do — for the rest
+      // of that encode, and there was no way to dismiss it.
+      if (activeVideoIds.size > 0) {
+        const stopped = await filterStoppedVideoIds([...activeVideoIds])
+        for (const id of stopped) activeVideoIds.delete(id)
+        activeJobCount = Math.max(0, activeJobCount - stopped.size)
+      }
       // `getWorkers()` lists every BullMQ Worker connected to
       // this queue. With our single-process worker container
       // each `npm run worker` spawns one BullMQ Worker (with
@@ -211,6 +222,11 @@ export async function GET(request: NextRequest) {
           folderId: true,
           uploadProgress: true,
           processingProgress: true,
+          // 6.14.0: the banner turns `uploadProgress` deltas into MB/s, which
+          // needs the total. Works for ANY uploader — including a
+          // bulk-upload.mjs run on another machine, where the browser has no
+          // client-side transfer to measure.
+          originalFileSize: true,
           width: true,
           height: true,
           // 2.2.6+: surface the tier ladder so the banner pip can
@@ -267,6 +283,7 @@ export async function GET(request: NextRequest) {
           folderId: true,
           uploadProgress: true,
           processingProgress: true,
+          originalFileSize: true,
           width: true,
           height: true,
           // 2.2.6+: see UPLOADING select above.
@@ -371,6 +388,10 @@ export async function GET(request: NextRequest) {
         folderId: v.folderId,
         uploadProgress: v.uploadProgress,
         processingProgress: v.processingProgress,
+        // BigInt → number. File sizes here are at most terabytes, far inside
+        // the safe-integer range, and the client only does arithmetic on it.
+        originalFileSize:
+          (v as any).originalFileSize != null ? Number((v as any).originalFileSize) : null,
         // 2.2.6+: forward the tier ladder so the banner can show
         // SD/HD/HD+/4K labels for the currently-encoding tier.
         // Pass-through as `string[] | null` — the Video schema

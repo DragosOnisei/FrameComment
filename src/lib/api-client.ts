@@ -1,4 +1,4 @@
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './token-store'
+import { clearTokens, getAccessToken, setTokens } from './token-store'
 import { logError } from './logging'
 
 let isRedirecting = false
@@ -178,16 +178,15 @@ function withAuthHeader(init?: RequestInit): RequestInit {
 export async function attemptRefresh(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight
 
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) return false
-
   refreshInFlight = (async () => {
     try {
+      // 6.13.0: no token to attach. The refresh token is an HttpOnly cookie
+      // scoped to /api/auth — the browser sends it, this code cannot read it.
+      // `credentials: 'same-origin'` is the default, but say it out loud: the
+      // whole call depends on the cookie riding along.
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${refreshToken}`,
-        },
+        credentials: 'same-origin',
       })
 
       if (!response.ok) {
@@ -196,11 +195,8 @@ export async function attemptRefresh(): Promise<boolean> {
       }
 
       const data = await response.json()
-      if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
-        setTokens({
-          accessToken: data.tokens.accessToken,
-          refreshToken: data.tokens.refreshToken,
-        })
+      if (data?.tokens?.accessToken) {
+        setTokens({ accessToken: data.tokens.accessToken })
         return true
       }
 

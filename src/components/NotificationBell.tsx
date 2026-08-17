@@ -86,6 +86,11 @@ function deepLink(n: InAppNotification): string | null {
   const params = new URLSearchParams({ video: n.videoName })
   if (n.videoId) params.set('videoId', n.videoId)
   if (n.folderId) params.set('folderId', n.folderId)
+  // 6.14.0: land ON the comment. The review page already knows how to read
+  // `?comment=` — it scrolls the thread to that card and lifts it — but the
+  // bell never told it which one, so a reply notification dropped you at the
+  // top of the thread to go hunting.
+  if (n.commentId) params.set('comment', n.commentId)
   return `/admin/projects/${n.projectId}/share?${params.toString()}`
 }
 

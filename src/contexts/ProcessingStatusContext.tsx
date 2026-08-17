@@ -53,6 +53,9 @@ export type ProcessingVideo = {
   uploadProgress: number
   /** 0..100. Overall transcode progress across all tiers for PROCESSING rows. */
   processingProgress: number
+  /** 6.14.0: source size in bytes, so the banner can turn a percentage delta
+   *  into MB/s. null on rows whose size wasn't recorded yet. */
+  originalFileSize: number | null
   /**
    * 2.2.6+: tier ladder snapshot.
    *
@@ -108,7 +111,21 @@ const ProcessingStatusCtx = createContext<StatusValue | null>(null)
 
 const ACTIVE_INTERVAL_MS = 3_000
 const IDLE_INTERVAL_MS = 15_000
-const HWM_RESET_DELAY_MS = 5_000
+/**
+ * How long the "All uploads complete" / "All processing complete" state stays
+ * on screen before the banner dismisses itself.
+ *
+ * This used to be 5s, but it was evaluated on the polling tick rather than on a
+ * timer: the poll that first saw `count === 0` only noted the timestamp, and
+ * the comparison ran on the NEXT poll 3s later, which was still under 5s, so
+ * the banner actually lived 6–9s depending on how the ticks lined up. Real
+ * elapsed time from "encode finished" to "banner gone" was 6–12s once you add
+ * the poll latency that detects completion in the first place. It felt like it
+ * was hanging around.
+ *
+ * Now it is a real timer, so the number here is the number you get.
+ */
+const HWM_RESET_DELAY_MS = 2_000
 
 export function ProcessingStatusProvider({ children }: { children: ReactNode }) {
   const [uploadingCount, setUploadingCount] = useState(0)
@@ -129,9 +146,33 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
   // file batch, the "All uploads complete" banner stuck around
   // for the next 5+ minutes of NVENC encoding. Splitting the
   // clocks lets each banner dismiss independently.
-  const uploadingIdleSinceRef = useRef<number | null>(null)
-  const processingIdleSinceRef = useRef<number | null>(null)
+  const uploadingResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const processingResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const aliveRef = useRef(true)
+
+  /**
+   * Arm the dismissal, once. Re-arming on every poll while the count sits at
+   * zero would push the deadline forward forever and the banner would never
+   * leave — which is the trap the timestamp-on-poll version was avoiding, and
+   * the reason it drifted past its own delay.
+   */
+  const armHwmReset = (
+    timerRef: typeof uploadingResetTimerRef,
+    setHwm: (v: number) => void,
+  ) => {
+    if (timerRef.current !== null) return
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      if (aliveRef.current) setHwm(0)
+    }, HWM_RESET_DELAY_MS)
+  }
+
+  /** Work showed up again inside the grace window — call off the dismissal. */
+  const cancelHwmReset = (timerRef: typeof uploadingResetTimerRef) => {
+    if (timerRef.current === null) return
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
 
   const fetchStatus = async () => {
     const seq = ++fetchSeqRef.current
@@ -178,26 +219,17 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
       // HWM bookkeeping (2.1.7+). Per-banner clocks so each
       // surface dismisses independently — the upload banner
       // doesn't wait for processing to finish before fading out.
-      const now = Date.now()
       if (uc > 0) {
-        uploadingIdleSinceRef.current = null
+        cancelHwmReset(uploadingResetTimerRef)
         setUploadingHwm((prev) => Math.max(prev, uc))
       } else {
-        if (uploadingIdleSinceRef.current === null) {
-          uploadingIdleSinceRef.current = now
-        } else if (now - uploadingIdleSinceRef.current > HWM_RESET_DELAY_MS) {
-          setUploadingHwm(0)
-        }
+        armHwmReset(uploadingResetTimerRef, setUploadingHwm)
       }
       if (pc > 0) {
-        processingIdleSinceRef.current = null
+        cancelHwmReset(processingResetTimerRef)
         setProcessingHwm((prev) => Math.max(prev, pc))
       } else {
-        if (processingIdleSinceRef.current === null) {
-          processingIdleSinceRef.current = now
-        } else if (now - processingIdleSinceRef.current > HWM_RESET_DELAY_MS) {
-          setProcessingHwm(0)
-        }
+        armHwmReset(processingResetTimerRef, setProcessingHwm)
       }
     } catch (err) {
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
@@ -212,6 +244,8 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
     fetchStatus()
     return () => {
       aliveRef.current = false
+      cancelHwmReset(uploadingResetTimerRef)
+      cancelHwmReset(processingResetTimerRef)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

@@ -856,6 +856,12 @@ model Notification {
   // stale name is better than a broken bell row.
   videoName String?
   folderId  String?
+  // 6.14.0: the comment this notification is about, so clicking the bell row
+  // can scroll straight to it instead of dropping you at the top of a long
+  // thread. Nullable: "new comments" rows summarise several, and older rows
+  // predate the column. No FK — the notification stays meaningful (and
+  // clickable, minus the scroll) if the comment is later deleted.
+  commentId String?
 
   // Display name of whoever clicked "Send to editor" (client guest
   // name or admin name). Nullable for anonymous reviewers.
@@ -1170,8 +1176,12 @@ model SecuritySettings {
   // (long edit + upload + review sessions). The hard cap at 24 HOURS
   // is unchanged. Existing installs keep their stored value — only
   // freshly-seeded SecuritySettings rows pick this up.
-  adminSessionTimeoutValue Int    @default(12) // Numeric value (e.g., 15, 30, 1, 2, etc.)
-  adminSessionTimeoutUnit  String @default("HOURS") // MINUTES, HOURS (max 24 hours)
+  // 6.13.0: 720 h (30 days) by default. The Security pane is hidden from
+  // tenants, so this default IS the product behaviour — see the migration for
+  // why raising it is safe (refresh token moved to an httpOnly cookie, and an
+  // absolute 30-day session cap now exists regardless of activity).
+  adminSessionTimeoutValue Int    @default(720) // Numeric value (e.g., 15, 30, 720)
+  adminSessionTimeoutUnit  String @default("HOURS") // MINUTES, HOURS (max 720 hours)
 
   // HTTPS Enforcement (HTTPS_ENABLED env var always takes precedence if set)
   httpsEnabled Boolean @default(true) // Enable HSTS (default: true for production security)

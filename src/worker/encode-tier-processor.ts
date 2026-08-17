@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
 import { EncodeTierJob, getVideoQueue } from '../lib/queue'
+import { isEncodeStopped } from '../lib/encode-cancel'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
 import { downloadFile, getLocalSourcePath, getStorageFileSize } from '../lib/storage'
@@ -247,7 +248,10 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
       )
     } catch (err: any) {
       if (err?.message === 'TranscodeAborted') {
-        logMessage(`[WORKER] encode-tier ${tier} for ${videoId} aborted (row deleted mid-encode)`)
+        // Two things abort a transcode: the row vanished (delete during
+        // encode) or the user pressed stop. Both land here; saying only the
+        // first made a perfectly normal stop read like data loss in the log.
+        logMessage(`[WORKER] encode-tier ${tier} for ${videoId} aborted (stopped by the user, or the row was deleted mid-encode)`)
         return
       }
       throw err
@@ -269,6 +273,20 @@ export async function processEncodeTier(job: Job<EncodeTierJob>) {
     })) as any
     if (!refreshed) {
       logMessage(`[WORKER] encode-tier ${tier} for ${videoId}: row deleted during encode, skipping DB write`)
+      return
+    }
+
+    // 6.14.0: someone pressed stop while this tier was encoding.
+    //
+    // Checked HERE, right before the tier would be persisted, rather than at
+    // job start: the click can land at any point during a ten-minute encode,
+    // and the promise made in the UI was "keep the qualities that are already
+    // done". Recording this one would quietly hand back a quality the person
+    // just declined. The file it produced is left for the delete path or the
+    // cleanup sweep — no next tier is queued either, so the ladder stops
+    // exactly where it was.
+    if (await isEncodeStopped(videoId)) {
+      logMessage(`[WORKER] encode-tier ${tier} for ${videoId}: stop requested — abandoning this tier`)
       return
     }
     const completedSet = new Set<string>(

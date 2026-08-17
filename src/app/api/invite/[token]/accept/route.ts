@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { prisma, prismaPrivileged, setOrgContextOn } from '@/lib/db'
 import { enterOrgContext } from '@/lib/org-context'
 import { issueAdminTokens, type AuthUser } from '@/lib/auth'
+import { setRefreshCookie } from '@/lib/auth-cookies'
 import { hashPassword } from '@/lib/encryption'
 import { acceptInviteSchema } from '@/lib/validation'
 import { rateLimit } from '@/lib/rate-limit'
@@ -153,16 +154,16 @@ export async function POST(
     }).catch(() => {})
     logMessage(`[INVITE] ${user.email} joined ${orgId} ("${org.name}") as ${user.role}`)
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
       tokens: {
         accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
         accessExpiresAt: tokens.accessExpiresAt,
         refreshExpiresAt: tokens.refreshExpiresAt,
       },
     })
+    return setRefreshCookie(response, request, tokens.refreshToken, tokens.refreshMaxAgeSeconds)
   } catch (error) {
     if (error instanceof Error && error.message === 'INVITE_ALREADY_USED') {
       return NextResponse.json({ error: 'This invite has already been used.' }, { status: 410 })

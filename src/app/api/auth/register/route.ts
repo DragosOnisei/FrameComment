@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { prisma, prismaPrivileged, setOrgContextOn } from '@/lib/db'
 import { enterOrgContext } from '@/lib/org-context'
 import { issueAdminTokens, type AuthUser } from '@/lib/auth'
+import { setRefreshCookie } from '@/lib/auth-cookies'
 import { hashPassword } from '@/lib/encryption'
 import { registerSchema } from '@/lib/validation'
 import { rateLimit } from '@/lib/rate-limit'
@@ -238,7 +239,7 @@ export async function POST(request: NextRequest) {
 
     // Same response shape as /api/auth/login so the client can reuse the
     // token-store flow.
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: {
         id: user.id,
@@ -248,11 +249,11 @@ export async function POST(request: NextRequest) {
       },
       tokens: {
         accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
         accessExpiresAt: tokens.accessExpiresAt,
         refreshExpiresAt: tokens.refreshExpiresAt,
       },
     })
+    return setRefreshCookie(response, request, tokens.refreshToken, tokens.refreshMaxAgeSeconds)
   } catch (error) {
     logError('[REGISTER] failed:', error)
     return NextResponse.json(

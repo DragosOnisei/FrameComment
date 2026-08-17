@@ -71,12 +71,15 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    const permanent =
-      new URL(request.url).searchParams.get('permanent') === 'true'
+    // 6.13.0: accept both spellings. This route wanted `permanent=true` while
+    // videos/folders/projects wanted `permanent=1`, so a caller using the
+    // other one silently got a soft delete AND skipped the password gate.
+    const permanentParam = new URL(request.url).searchParams.get('permanent')
+    const permanent = permanentParam === 'true' || permanentParam === '1'
 
     const doc = await (prisma as any).folderDocument.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, deletedAt: true },
     })
     if (!doc) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })

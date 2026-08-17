@@ -950,7 +950,19 @@ export default function CommentSection({
           .querySelectorAll('.comment-card.is-selected')
           .forEach((el) => el.classList.remove('is-selected'))
         const card = element.querySelector<HTMLElement>('.comment-card')
-        if (card) card.classList.add('is-selected')
+        if (card) {
+          card.classList.add('is-selected')
+          // 6.14.0: a one-shot scale beat so the eye lands on the right card
+          // at the end of the scroll. Removed when it finishes so re-focusing
+          // the same comment later plays it again.
+          card.classList.remove('is-focus-pulse')
+          // Force a reflow between remove and add, otherwise the browser
+          // coalesces the two and the animation never restarts.
+          void card.offsetWidth
+          card.classList.add('is-focus-pulse')
+          const clear = () => card.classList.remove('is-focus-pulse')
+          card.addEventListener('animationend', clear, { once: true })
+        }
         return
       }
 

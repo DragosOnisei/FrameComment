@@ -55,6 +55,12 @@ interface AdminRefreshPayload extends jwt.JwtPayload {
   sessionId: string
   rotationId: string
   organizationId?: string | null
+  /** 6.13.0 — when the SESSION started (epoch seconds), carried unchanged
+   *  through every rotation. Rotation refreshes the token, not the session:
+   *  without this the 30-day window slid forward forever and a session that
+   *  an attacker kept alive would never expire on its own. Absent on tokens
+   *  minted before 6.13.0 — those fall back to `iat`. */
+  sat?: number
 }
 
 interface SharePayload extends jwt.JwtPayload {
@@ -100,6 +106,21 @@ const ACCESS_TOKEN_DURATION = safeParseInt(process.env.ADMIN_ACCESS_TTL_SECONDS,
 // ADMIN_REFRESH_TTL_SECONDS.
 const REFRESH_TOKEN_DURATION = safeParseInt(process.env.ADMIN_REFRESH_TTL_SECONDS, 30 * 24 * 60 * 60) // 30 days
 const SHARE_TOKEN_DURATION = safeParseInt(process.env.SHARE_TOKEN_TTL_SECONDS, 45 * 60) // 45 minutes
+// 6.13.0: the hard ceiling on a session, activity or not. OWASP is explicit
+// that every session needs an absolute timeout on top of the idle one —
+// "still logged in" must eventually stop being true. 30 days matches the
+// refresh window, so in practice this is the boundary the user will meet.
+const ABSOLUTE_SESSION_DURATION = safeParseInt(
+  process.env.ADMIN_ABSOLUTE_SESSION_SECONDS,
+  30 * 24 * 60 * 60,
+) // 30 days
+// 6.13.0: rotation leeway. Two tabs waking up together both present the same
+// refresh token; the second one is not a thief, it is a race with itself.
+// Within this window a replayed token replays its OWN successor instead of
+// being treated as theft — the same call answers twice, which is what the
+// client actually meant. Long enough for a slow mobile network, short enough
+// that a stolen token is useless by the time it is copied out.
+const ROTATION_LEEWAY_SECONDS = safeParseInt(process.env.ADMIN_ROTATION_LEEWAY_SECONDS, 20)
 const DUMMY_BCRYPT_HASH = '$2a$14$aoLibk0GEJrzo6fSqPoQIONMGynUKWEoQhkCrFcEapn6I.WzXXdki'
 
 if (process.env.SKIP_ENV_VALIDATION !== '1') {
@@ -125,7 +146,13 @@ function signAdminAccess(user: AuthUser, sessionId: string, ttlSeconds?: number)
   return jwt.sign(payload, ADMIN_ACCESS_SECRET, { expiresIn: ttlSeconds || ACCESS_TOKEN_DURATION, algorithm: 'HS256' })
 }
 
-function signAdminRefresh(user: AuthUser, sessionId: string, rotationId: string): string {
+function signAdminRefresh(
+  user: AuthUser,
+  sessionId: string,
+  rotationId: string,
+  sessionStartedAt: number,
+  ttlSeconds: number,
+): string {
   if (!ADMIN_REFRESH_SECRET) throw new Error('JWT_REFRESH_SECRET missing')
   const payload: AdminRefreshPayload = {
     userId: user.id,
@@ -135,8 +162,15 @@ function signAdminRefresh(user: AuthUser, sessionId: string, rotationId: string)
     rotationId,
     organizationId: user.organizationId ?? null,
     type: 'admin_refresh',
+    sat: sessionStartedAt,
   }
-  return jwt.sign(payload, ADMIN_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_DURATION, algorithm: 'HS256' })
+  return jwt.sign(payload, ADMIN_REFRESH_SECRET, { expiresIn: ttlSeconds, algorithm: 'HS256' })
+}
+
+/** Seconds left in the absolute window that started at `sessionStartedAt`. */
+function absoluteSecondsLeft(sessionStartedAt: number): number {
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  return sessionStartedAt + ABSOLUTE_SESSION_DURATION - nowSeconds
 }
 
 export function signShareToken(params: {
@@ -269,9 +303,17 @@ export function parseBearerToken(request: NextRequest, headerName: string = 'aut
 export async function issueAdminTokens(user: AuthUser, fingerprintHash?: string) {
   const sessionId = crypto.randomUUID()
   const rotationId = crypto.randomUUID()
-  const adminTtl = await getAdminSessionTimeoutSeconds()
-  const accessToken = signAdminAccess(user, sessionId, adminTtl)
-  const refreshToken = signAdminRefresh(user, sessionId, rotationId)
+  const sessionStartedAt = Math.floor(Date.now() / 1000)
+  // 6.13.0: the access token is SHORT-lived and always has been meant to be.
+  // It used to be signed with the admin session timeout, which was 12 hours
+  // and is now 720 — that would have made the bearer token every API route
+  // accepts valid for a month, and moving the refresh token into an HttpOnly
+  // cookie would have bought almost nothing. The long number governs how long
+  // you may stay signed IN; this one governs how long a single leaked
+  // credential is worth anything.
+  const refreshTtl = Math.min(REFRESH_TOKEN_DURATION, ABSOLUTE_SESSION_DURATION)
+  const accessToken = signAdminAccess(user, sessionId, ACCESS_TOKEN_DURATION)
+  const refreshToken = signAdminRefresh(user, sessionId, rotationId, sessionStartedAt, refreshTtl)
 
   if (fingerprintHash) {
     await storeTokenFingerprint(user.id, refreshToken, fingerprintHash)
@@ -280,8 +322,10 @@ export async function issueAdminTokens(user: AuthUser, fingerprintHash?: string)
   return {
     accessToken,
     refreshToken,
-    accessExpiresAt: Date.now() + adminTtl * 1000,
-    refreshExpiresAt: Date.now() + REFRESH_TOKEN_DURATION * 1000,
+    accessExpiresAt: Date.now() + ACCESS_TOKEN_DURATION * 1000,
+    refreshExpiresAt: Date.now() + refreshTtl * 1000,
+    /** 6.13.0: how long the cookie carrying the refresh token may live. */
+    refreshMaxAgeSeconds: refreshTtl,
     sessionId,
   }
 }
@@ -291,16 +335,71 @@ export async function refreshAdminTokens(params: {
   fingerprintHash?: string
 }) {
   const { refreshToken, fingerprintHash } = params
+
+  // 6.13.0 — device binding is checked FIRST, before the leeway cache can
+  // hand anything back. Otherwise a token stolen and replayed from another
+  // machine inside the 20-second window would be served a live successor with
+  // both the fingerprint check and theft detection skipped.
+  if (fingerprintHash) {
+    const presentedFingerprint = await getTokenFingerprint(
+      (decodeRefreshTokenUnsafely(refreshToken)?.userId as string) || '',
+      refreshToken,
+    )
+    if (presentedFingerprint && presentedFingerprint !== fingerprintHash) {
+      const owner = decodeRefreshTokenUnsafely(refreshToken)
+      if (owner?.userId) {
+        logError(`[AUTH] Refresh token presented from a different device for user ${owner.userId}`)
+        await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
+        await revokeTokenFamily(owner.userId)
+      }
+      return null
+    }
+  }
+
+  // 6.13.0 — did this exact token just get exchanged? Replay its successor.
+  const successor = await readRotationSuccessor(refreshToken)
+  if (successor) return successor
+
+  // 6.13.0 — reuse detection, before anything else.
+  //
+  // Rotation revokes the old refresh token. If a revoked-but-otherwise-valid
+  // token comes back, someone is replaying a copy: either the legitimate
+  // client raced itself, or a stolen token is in play. We cannot tell them
+  // apart, and the safe reading of an ambiguous signal is theft — so the whole
+  // family dies and everyone re-authenticates. Without this the rotation is
+  // theatre: a thief with a copy just keeps rotating alongside the victim.
+  if (await isReplayedRefreshToken(refreshToken)) {
+    const replayed = decodeRefreshTokenUnsafely(refreshToken)
+    if (replayed?.userId) {
+      logError(`[AUTH] Refresh token replay for user ${replayed.userId} — revoking the session family`)
+      await revokeTokenFamily(replayed.userId)
+    }
+    return null
+  }
+
   const payload = await verifyAdminRefreshToken(refreshToken)
   if (!payload) return null
 
-  if (fingerprintHash) {
-    const storedFingerprint = await getTokenFingerprint(payload.userId, refreshToken)
-    if (storedFingerprint && storedFingerprint !== fingerprintHash) {
-      await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
-      await revokeTokenFamily(payload.userId)
-      return null
-    }
+  // 6.13.0 — refuse every refresh token minted before this release.
+  //
+  // Those tokens were handed to `localStorage`, carry a 30-day TTL, and any
+  // copy an XSS or a malicious extension took before today would otherwise
+  // stay a working session for another month — the cleanup in token-store.ts
+  // only removes the victim's own copy. `sat` is the marker: no `sat` means
+  // pre-cookie, so it dies here and the person signs in once. That one login
+  // is the entire migration cost, and it is the point of doing this at all.
+  if (typeof payload.sat !== 'number') {
+    await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
+    return null
+  }
+
+  // 6.13.0 — absolute session cap. `sat` rides through every rotation, so
+  // this is measured from the original login, not from the last refresh.
+  const sessionStartedAt = payload.sat
+  const secondsLeft = absoluteSecondsLeft(sessionStartedAt)
+  if (secondsLeft <= 0) {
+    await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
+    return null
   }
 
   const user = (await prismaPrivileged.user.findUnique({
@@ -319,9 +418,17 @@ export async function refreshAdminTokens(params: {
   }
 
   const rotationId = crypto.randomUUID()
-  const adminTtl = await getAdminSessionTimeoutSeconds()
-  const accessToken = signAdminAccess(user, payload.sessionId, adminTtl)
-  const newRefreshToken = signAdminRefresh(user, payload.sessionId, rotationId)
+  // The renewed tokens never outlive the absolute window they were born into.
+  const refreshTtl = Math.min(REFRESH_TOKEN_DURATION, secondsLeft)
+  const accessTtl = Math.min(ACCESS_TOKEN_DURATION, secondsLeft)
+  const accessToken = signAdminAccess(user, payload.sessionId, accessTtl)
+  const newRefreshToken = signAdminRefresh(
+    user,
+    payload.sessionId,
+    rotationId,
+    sessionStartedAt,
+    refreshTtl,
+  )
 
   // Revoke old refresh token on rotation
   await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
@@ -329,12 +436,77 @@ export async function refreshAdminTokens(params: {
     await storeTokenFingerprint(user.id, newRefreshToken, fingerprintHash)
   }
 
-  return {
+  const rotated: RotationSuccessor = {
     accessToken,
     refreshToken: newRefreshToken,
-    accessExpiresAt: Date.now() + adminTtl * 1000,
-    refreshExpiresAt: Date.now() + REFRESH_TOKEN_DURATION * 1000,
+    accessExpiresAt: Date.now() + accessTtl * 1000,
+    refreshExpiresAt: Date.now() + refreshTtl * 1000,
+    refreshMaxAgeSeconds: refreshTtl,
     sessionId: payload.sessionId,
+    /** Epoch ms when this session dies no matter what. */
+    absoluteExpiresAt: (sessionStartedAt + ABSOLUTE_SESSION_DURATION) * 1000,
+  }
+
+  await rememberRotationSuccessor(refreshToken, rotated)
+
+  return rotated
+}
+
+interface RotationSuccessor {
+  accessToken: string
+  refreshToken: string
+  accessExpiresAt: number
+  refreshExpiresAt: number
+  refreshMaxAgeSeconds: number
+  sessionId: string
+  absoluteExpiresAt: number
+}
+
+function rotationCacheKey(token: string): string {
+  return `rt:rotated:${crypto.createHash('sha256').update(token).digest('base64url')}`
+}
+
+/** What this token was exchanged for, if that happened moments ago. */
+async function readRotationSuccessor(token: string): Promise<RotationSuccessor | null> {
+  try {
+    const raw = await getRedis().get(rotationCacheKey(token))
+    return raw ? (JSON.parse(raw) as RotationSuccessor) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Remember the successor for a few seconds. This holds a live refresh token in
+ * Redis briefly — a deliberate trade: Redis is internal and already holds the
+ * revocation list and device fingerprints, and the alternative is logging
+ * people out for the crime of having two tabs open.
+ */
+async function rememberRotationSuccessor(token: string, successor: RotationSuccessor): Promise<void> {
+  try {
+    await getRedis().setex(rotationCacheKey(token), ROTATION_LEEWAY_SECONDS, JSON.stringify(successor))
+  } catch {
+    // A Redis hiccup costs a race-losing tab its session, not correctness.
+  }
+}
+
+/** Signature + expiry are fine, but the token has already been rotated away. */
+async function isReplayedRefreshToken(token: string): Promise<boolean> {
+  try {
+    if (!ADMIN_REFRESH_SECRET) return false
+    jwt.verify(token, ADMIN_REFRESH_SECRET, { algorithms: ['HS256'] })
+  } catch {
+    // Forged or expired — not a replay, just invalid. The normal path 401s.
+    return false
+  }
+  return await isTokenRevoked(token)
+}
+
+function decodeRefreshTokenUnsafely(token: string): AdminRefreshPayload | null {
+  try {
+    return jwt.decode(token) as AdminRefreshPayload | null
+  } catch {
+    return null
   }
 }
 

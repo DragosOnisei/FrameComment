@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeftRight,
@@ -24,6 +24,34 @@ import {
 import { computePopoverStyle } from '@/lib/popover-position'
 import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
 import { storageLocationLabels } from '@/lib/storage-labels'
+import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
+
+/**
+ * 6.14.0 — highest quality this version can actually be played at.
+ *
+ * Reads `completedTiers`, not `plannedTiers`: the plan is an intention, and
+ * after 6.14.0 a person can stop the ladder halfway on purpose. The chip has
+ * to say what exists, otherwise a video stopped at SD would advertise 4K.
+ * Same vocabulary as the player's quality menu and the encoding banner, so
+ * the three places agree.
+ */
+const TIER_CHIP: Record<string, string> = {
+  '480p': 'SD',
+  '720p': 'HD',
+  '1080p': 'HD+',
+  '2160p': '4K',
+}
+const TIER_RANK = ['480p', '720p', '1080p', '2160p']
+
+function highestTierLabel(completedTiers?: string[] | null): string | null {
+  if (!Array.isArray(completedTiers) || completedTiers.length === 0) return null
+  let best = -1
+  for (const tier of completedTiers) {
+    const idx = TIER_RANK.indexOf(tier)
+    if (idx > best) best = idx
+  }
+  return best >= 0 ? TIER_CHIP[TIER_RANK[best]] : null
+}
 import { fetchActiveBackendInfo, type ActiveBackendInfo } from '@/lib/active-backend-client'
 import { apiPost } from '@/lib/api-client'
 
@@ -76,12 +104,15 @@ export interface VideoCardProps {
    *  forward-looking tier info, fall back to the preview*Path
    *  columns to know what's playable". Only populated by the
    *  prepare-video job. */
+  /** 6.9.3: sprite geometry for THIS version. Absent = the legacy 10×10. */
+  storyboardCols?: number | null
+  storyboardRows?: number | null
   plannedTiers?: string[] | null
   /** 2.2.0+: tiers the encode-tier jobs have actually landed so
    *  far. NULL on legacy rows. When status===READY but this is
    *  strictly shorter than plannedTiers we know the video is
    *  playable but still climbing the ladder — that's the trigger
-   *  for the "Encoding HD…" badge in the corner. */
+   *  for the quality chip under the name. */
   completedTiers?: string[] | null
   commentCount?: number
   uploaderName?: string | null
@@ -309,6 +340,8 @@ export default function VideoCard({
   status,
   uploadProgress,
   processingProgress,
+  storyboardCols,
+  storyboardRows,
   plannedTiers,
   completedTiers,
   commentCount = 0,
@@ -376,6 +409,7 @@ export default function VideoCard({
   const [titleTip, setTitleTip] = useState<{ x: number; y: number } | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [thumbErrored, setThumbErrored] = useState(false)
+  const qualityLabel = highestTierLabel(completedTiers)
   const menuRef = useRef<HTMLDivElement>(null)
   // 1.3.1+: kebab popover uses smart fixed-positioning (Frame.io
   // style) — we anchor the menu to the kebab button via viewport
@@ -479,9 +513,16 @@ export default function VideoCard({
   // Storyboard grid constants — match the worker's
   // generateStoryboard defaults. Keep these in sync if you change
   // the FFmpeg tile dimensions.
-  const STORY_COLS = 10
-  const STORY_ROWS = 10
-  const STORY_CELLS = STORY_COLS * STORY_ROWS
+  // 6.14.0: read the sprite with the geometry it was actually made with.
+  //
+  // This was still hardcoded to 10×10 — the pre-6.9.3 shape — while the worker
+  // has been sizing the sheet by duration since then (roughly one frame per
+  // second, up to 20×20). On anything under ~100 seconds the two agree and
+  // nothing looked wrong, which is why this survived: it only breaks on long
+  // clips, where a 20×20 sheet read as 10×10 shows a 2×2 mosaic of cells
+  // instead of one frame. 6.9.3 fixed the player and the version reel and
+  // missed the card.
+  const storyGrid = storyboardGridOf({ storyboardCols, storyboardRows })
 
   // Surface "thumbnail is on the way" inside the cover box (in place
   // of the plain Film icon) when the worker hasn't finished yet.
@@ -505,36 +546,38 @@ export default function VideoCard({
   const showProgressBar = isUploadingInQueue || isProcessingInQueue
   const progressBarColour = isUploadingInQueue ? 'bg-primary' : 'bg-amber-500'
 
-  // 2.2.0+: derive "still climbing the encode ladder" state for the
-  // corner badge. The breadth-first pipeline writes plannedTiers
-  // up front and appends to completedTiers per tier; status flips
-  // to READY at the very first tier landing. So "READY but still
-  // encoding HD" is the case where:
-  //   - plannedTiers exists (post-2.2.0 row, NOT a legacy one)
-  //   - completedTiers length is strictly less than plannedTiers
+  // 6.14.0: the "Encoding HD…" corner badge is gone.
   //
-  // Legacy rows produced before 2.2.0 will have plannedTiers ===
-  // null and never trigger this badge — they retain their original
-  // "tier badges from preview*Path columns" behaviour, controlled
-  // elsewhere in the player's quality menu. This is the
-  // backwards-compat invariant called out in the release plan.
-  const planned: string[] = Array.isArray(plannedTiers) ? plannedTiers : []
-  const completed: string[] = Array.isArray(completedTiers) ? completedTiers : []
-  const stillClimbingTiers =
-    status === 'READY' &&
-    planned.length > 0 &&
-    completed.length < planned.length
+  // It said the same thing the bottom-right encoding banner says, in a place
+  // where it competed with the version tag and the duration, and it was
+  // derived from `plannedTiers` — a stored intention that a stopped encode
+  // leaves stale. Two surfaces reporting the same fact, one of them from a
+  // worse source, is one surface too many. The banner is live (it reads
+  // BullMQ), it is where the Stop control lives, and it is the only place
+  // that now claims a video is encoding.
 
   // Push the new scrub fraction into the preview <video> (legacy
   // fallback). When a storyboard sprite is available we skip this
   // entirely — scrubbing is pure CSS background-position there.
-  const applyScrub = (fraction: number) => {
-    if (hasStoryboard) return // sprite scrub handles it
+  //
+  // 6.14.0: coalesced to ONE seek per animation frame.
+  //
+  // Every `mousemove` used to seek, and every seek makes the browser fetch
+  // another byte range. A 120 Hz trackpad crossing one card produced ~120
+  // authenticated requests per second, each verifying a token and reading the
+  // file; a few people browsing a grid could keep the server busy doing
+  // nothing but rewinding the same clip. The eye cannot tell the difference
+  // between 120 and 60 seeks a second — the decoder certainly can't, it drops
+  // most of them anyway — so we keep the newest position and act on it once
+  // per frame.
+  const pendingScrubRef = useRef<number | null>(null)
+  const scrubFrameRef = useRef<number | null>(null)
+
+  const seekPreviewTo = useCallback((fraction: number) => {
     const v = videoRef.current
     if (!v || !duration) return
-    const clamped = Math.max(0, Math.min(1, fraction))
     try {
-      const target = duration * clamped
+      const target = duration * Math.max(0, Math.min(1, fraction))
       if (typeof (v as any).fastSeek === 'function') {
         ;(v as any).fastSeek(target)
       } else {
@@ -544,30 +587,35 @@ export default function VideoCard({
       // Ignore — happens during the brief window between metadata
       // load and the first seek being accepted.
     }
-  }
+  }, [duration])
+
+  const applyScrub = useCallback((fraction: number) => {
+    if (hasStoryboard) return // sprite scrub handles it
+    pendingScrubRef.current = fraction
+    if (scrubFrameRef.current !== null) return
+    scrubFrameRef.current = requestAnimationFrame(() => {
+      scrubFrameRef.current = null
+      const next = pendingScrubRef.current
+      pendingScrubRef.current = null
+      if (next !== null) seekPreviewTo(next)
+    })
+  }, [hasStoryboard, seekPreviewTo])
+
+  // Drop a queued seek when the card unmounts mid-scrub.
+  useEffect(() => {
+    return () => {
+      if (scrubFrameRef.current !== null) cancelAnimationFrame(scrubFrameRef.current)
+    }
+  }, [])
 
   // Compute the sprite-sheet background-position for the current
   // scrub fraction. Each cell is 1/STORY_COLS wide and 1/STORY_ROWS
   // tall; with background-size 1000%×1000% the cell that should be
   // visible is selected by negative-percentage offsets.
-  const storyboardStyle = (() => {
-    if (!hasStoryboard || scrubFraction === null) return undefined
-    const idx = Math.max(
-      0,
-      Math.min(STORY_CELLS - 1, Math.floor(scrubFraction * STORY_CELLS)),
-    )
-    const col = idx % STORY_COLS
-    const row = Math.floor(idx / STORY_COLS)
-    // Each step is 100 / (cols - 1) % so percentages span 0..100.
-    const xPct = (col / (STORY_COLS - 1)) * 100
-    const yPct = (row / (STORY_ROWS - 1)) * 100
-    return {
-      backgroundImage: `url(${storyboardUrl})`,
-      backgroundRepeat: 'no-repeat' as const,
-      backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
-      backgroundPosition: `${xPct}% ${yPct}%`,
-    }
-  })()
+  const storyboardStyle =
+    hasStoryboard && scrubFraction !== null && storyboardUrl
+      ? storyboardCellStyle(storyboardUrl, scrubFraction, storyGrid)
+      : undefined
 
   const handleScrub = (e: React.MouseEvent | React.PointerEvent) => {
     if (!canScrub || !coverRef.current) return
@@ -830,24 +878,6 @@ export default function VideoCard({
             {versionTag}
           </span>
         )}
-        {/* 2.2.0+: "Encoding HD…" pill — replaces the static quality
-            badge for the small window between "video became playable
-            at 480p" and "every higher tier (720p / 1080p / 2160p)
-            also landed". We anchor right below the version tag, so
-            both pieces of metadata are visible at once on the card.
-            Backwards compat: legacy rows have plannedTiers === null
-            and never trigger this branch — they keep their pre-2.2.0
-            look. */}
-        {stillClimbingTiers && !versionTag && (
-          <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-amber-500/85 text-white text-[10px] font-semibold tracking-wide uppercase backdrop-blur-sm">
-            Encoding HD…
-          </span>
-        )}
-        {stillClimbingTiers && versionTag && (
-          <span className="absolute top-9 right-2 px-2 py-0.5 rounded bg-amber-500/85 text-white text-[10px] font-semibold tracking-wide uppercase backdrop-blur-sm">
-            Encoding HD…
-          </span>
-        )}
         {/* Multi-select checkbox (1.0.6+). 2.5.0+: glass when idle
             (transparent + hairline ring + backdrop-blur), brand
             blue when active — matches the FolderCard checkbox so
@@ -906,7 +936,8 @@ export default function VideoCard({
           so the footer reads as one continuous surface with the
           cover above. Text steps to the v2.5 white hierarchy
           (`text-white` primary / `text-white/55` meta). */}
-      <div className="flex items-start gap-2 p-4 rounded-b-xl">
+      <div className="p-4 rounded-b-xl">
+        <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           {/* 2.5.0+: footer recipe sincronizat cu FolderCard —
               `p-4` peste tot + `text-base font-semibold` name +
@@ -962,24 +993,6 @@ export default function VideoCard({
               by the storage backend tag(s). The type chip shows for EVERY card
               (images included); storage chips stay video-only (NULL/legacy
               resolves to the default backend). */}
-          {(typeLabel || !isImage) && (
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {typeLabel && (
-                <span className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
-                  {typeLabel}
-                </span>
-              )}
-              {!isImage &&
-                storageLocationLabels(storageBackend, storageLocations).map((lbl, i) => (
-                  <span
-                    key={i}
-                    className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10"
-                  >
-                    {lbl}
-                  </span>
-                ))}
-            </div>
-          )}
         </div>
         {/* Kebab — only renders when at least one action is wired.
             On the public client share we omit Rename/Delete entirely,
@@ -1218,6 +1231,44 @@ export default function VideoCard({
             </div>
           )}
         </div>
+        )}
+        </div>
+
+        {/* 6.14.0: one line, always. Three chips ("HD+", "Video 9:16",
+            "Personal Server") used to wrap onto a second row, so an
+            HD+ card stood a row taller than its neighbours and the grid
+            looked ragged.
+
+            The row sits OUTSIDE the name column on purpose. Inside it, the
+            chips only got whatever width the kebab left over, so "Personal
+            Server" was cut to "Personal Se…" while there was visibly empty
+            card to the right of it. Out here they get the full card width and
+            nothing has to be truncated. */}
+        {(typeLabel || !isImage) && (
+          <div className="flex flex-nowrap items-center gap-1 mt-1.5 overflow-hidden">
+          {/* 6.14.0: quality first — it is the thing that changes per
+            version and the thing a stopped encode makes ambiguous. */}
+          {!isImage && qualityLabel && (
+            <span className="shrink-0 inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
+            {qualityLabel}
+            </span>
+          )}
+          {typeLabel && (
+            <span className="shrink-0 inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
+            {typeLabel}
+            </span>
+          )}
+          {!isImage &&
+            storageLocationLabels(storageBackend, storageLocations).map((lbl, i) => (
+            <span
+              key={i}
+              title={lbl}
+              className="shrink-0 px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10"
+            >
+              {lbl}
+            </span>
+            ))}
+          </div>
         )}
       </div>
     </div>

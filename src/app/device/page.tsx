@@ -74,10 +74,9 @@ function DeviceAuthForm() {
         throw new Error(data.error || ta('passkeyFailed'))
       }
 
-      if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
+      if (data?.tokens?.accessToken) {
         setTokens({
           accessToken: data.tokens.accessToken,
-          refreshToken: data.tokens.refreshToken,
         })
       }
 
@@ -116,10 +115,9 @@ function DeviceAuthForm() {
         throw new Error(data.error || ta('loginFailed'))
       }
 
-      if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
+      if (data?.tokens?.accessToken) {
         setTokens({
           accessToken: data.tokens.accessToken,
-          refreshToken: data.tokens.refreshToken,
         })
       }
 

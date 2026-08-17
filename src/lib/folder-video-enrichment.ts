@@ -18,6 +18,7 @@ import { prisma } from '@/lib/db'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { legacyBackend } from '@/lib/storage-backends'
 import { logError } from '@/lib/logging'
+import { jsonSafe } from '@/lib/json-safe'
 
 /** A single video row, minimally typed — we only touch the fields we
  *  actually use here and pass the rest through untouched. */
@@ -151,12 +152,21 @@ export async function enrichVideosForAdmin<T extends VideoLike>(
         }
       }
 
-      return {
+      // 6.14.0: jsonSafe converts BigInt by TYPE, over the whole object.
+      //
+      // This used to convert `originalFileSize` by hand while `...v` spread
+      // every other column straight through — so the moment the worker wrote
+      // the first per-tier size (`preview480Size`, right after the SD encode
+      // finished), this route started throwing "Do not know how to serialize
+      // a BigInt" and the folder list 500'd mid-encode. Same shape as the
+      // 6.9.1 outage, in the one helper that had been missed: naming the
+      // fields individually is a list that goes stale every time a BigInt
+      // column is added. Converting by type cannot.
+      // `jsonSafe` is type-preserving at runtime but TypeScript cannot express
+      // "same shape, BigInt swapped for string" through a generic, hence the
+      // assertion. The declared return type below is the contract callers see.
+      return jsonSafe({
         ...v,
-        originalFileSize:
-          typeof v.originalFileSize === 'bigint'
-            ? v.originalFileSize.toString()
-            : (v.originalFileSize ?? null),
         // 4.2.0+: resolve NULL (legacy) to the instance default backend so the
         // storage tag shows the real location for older videos at the root too.
         storageBackend: (v as any).storageBackend ?? legacyBackend(),
@@ -165,6 +175,13 @@ export async function enrichVideosForAdmin<T extends VideoLike>(
         storyboardUrl,
         commentCount: v._count?.comments ?? 0,
         createdBy: uploadersByVideoId.get(v.id) ?? null,
+      }) as T & {
+        thumbnailUrl: string | null
+        previewUrl: string | null
+        storyboardUrl: string | null
+        originalFileSize: string | number | null
+        commentCount: number
+        createdBy: any
       }
     }),
   )

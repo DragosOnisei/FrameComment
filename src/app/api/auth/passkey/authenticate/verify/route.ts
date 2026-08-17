@@ -4,6 +4,7 @@ import { checkRateLimit, incrementRateLimit, clearRateLimit } from '@/lib/rate-l
 import { getClientIpAddress } from '@/lib/utils'
 import type { AuthenticationResponseJSON } from '@simplewebauthn/browser'
 import { issueAdminTokens } from '@/lib/auth'
+import { setRefreshCookie } from '@/lib/auth-cookies'
 import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
 import { getAppUrl } from '@/lib/url'
 import { userIsPlatformAdmin } from '@/lib/platform'
@@ -162,7 +163,8 @@ export async function POST(request: NextRequest) {
     }).catch(() => {})
 
     // Return user data (without password)
-    return NextResponse.json({
+    // 6.13.0: refresh token leaves as an HttpOnly cookie, not in the body.
+    const authResponse = NextResponse.json({
       success: true,
       user: {
         id: result.user.id,
@@ -174,11 +176,11 @@ export async function POST(request: NextRequest) {
       },
       tokens: {
         accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
         accessExpiresAt: tokens.accessExpiresAt,
         refreshExpiresAt: tokens.refreshExpiresAt,
       },
     })
+    return setRefreshCookie(authResponse, request, tokens.refreshToken, tokens.refreshMaxAgeSeconds)
   } catch (error) {
     logError('[PASSKEY] Authentication verification error:', error)
 

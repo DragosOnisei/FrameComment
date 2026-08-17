@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect, type CSSProperties } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { Video } from '@prisma/client'
 import { X, ChevronDown, GitCompareArrows, Volume2, VolumeX, Film } from 'lucide-react'
+import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
 import VideoComparisonControls from './VideoComparisonControls'
 import VideoComparisonSlider from './VideoComparisonSlider'
 
@@ -27,24 +28,12 @@ function getVideoUrl(video: Video, quality: '720p' | '1080p' | '2160p'): string 
 }
 
 // 3.8.x: storyboard sprite-scrub for the version thumbnails in the compare
-// picker — same 10×10 grid the rest of the app uses. Hovering a thumbnail
-// maps the mouse X to the nearest frame via background-position.
-const STORY_COLS = 10
-const STORY_ROWS = 10
-const STORY_CELLS = STORY_COLS * STORY_ROWS
-function storyboardCellStyle(url: string, fraction: number): CSSProperties {
-  const idx = Math.max(0, Math.min(STORY_CELLS - 1, Math.round(fraction * STORY_CELLS)))
-  const col = idx % STORY_COLS
-  const row = Math.floor(idx / STORY_COLS)
-  const xPct = (col / (STORY_COLS - 1)) * 100
-  const yPct = (row / (STORY_ROWS - 1)) * 100
-  return {
-    backgroundImage: `url(${url})`,
-    backgroundSize: `${STORY_COLS * 100}% ${STORY_ROWS * 100}%`,
-    backgroundPosition: `${xPct}% ${yPct}%`,
-    backgroundRepeat: 'no-repeat',
-  }
-}
+// picker.
+//
+// 6.14.0: this was the last private copy of the 10×10 assumption. Sprites have
+// been sized by duration since 6.9.3 (up to 20×20), so a long clip was read
+// with the wrong geometry and showed a mosaic of four frames instead of one.
+// It now uses the shared reader with the geometry recorded on the version.
 
 export default function VideoComparison({
   videoVersions,
@@ -474,7 +463,15 @@ export default function VideoComparison({
                             className={`absolute inset-0 transition-opacity duration-75 ${
                               scrubbing ? 'opacity-100' : 'opacity-0'
                             }`}
-                            style={scrubbing ? storyboardCellStyle(storyboard, hoverScrub!.f) : undefined}
+                            style={
+                              scrubbing
+                                ? storyboardCellStyle(
+                                    storyboard,
+                                    hoverScrub!.f,
+                                    storyboardGridOf(ver as any),
+                                  )
+                                : undefined
+                            }
                           />
                         )}
                       </div>

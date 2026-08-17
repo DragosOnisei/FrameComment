@@ -3,11 +3,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
-import { Upload, Video, X, Pause, Play, CheckCircle2 } from 'lucide-react'
+import { Upload, Video, X, Pause, Play, CheckCircle2, Loader2 } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import * as tus from 'tus-js-client'
 import { apiPost, apiDelete } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
+import { ConfirmModal } from '@/components/ConfirmModal'
 import { getAccessToken } from '@/lib/token-store'
 import { getTusUploadErrorMessage, createTusAfterResponseHandler, createTusShouldRetryHandler, resetTusAuthRetry } from '@/lib/tus-error'
 import { getTusChunkSizeBytes, TUS_RETRY_DELAYS_MS } from '@/lib/transfer-tuning'
@@ -18,6 +19,10 @@ import {
   getUploadMetadata,
   storeUploadMetadata,
   clearUploadMetadata,
+  listResumableUploads,
+  matchesResumable,
+  forgetResumable,
+  type ResumableUpload,
 } from '@/lib/tus-context'
 import { useStorageProvider } from '@/components/StorageConfigProvider'
 import { useS3MultipartUpload } from '@/hooks/useS3MultipartUpload'
@@ -27,7 +32,7 @@ interface PendingUpload {
   file: File
   videoName: string
   versionLabel: string
-  status: 'pending' | 'uploading' | 'completed' | 'error'
+  status: 'pending' | 'uploading' | 'completed' | 'error' | 'cancelling'
   progress: number
   speed: number
   /** 6.3.0 stall detection: bytes seen so far and when they last moved.
@@ -211,6 +216,21 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
           uploadRefs.current.delete(u.id)
         } catch {
           /* already gone */
+        }
+        // 6.14.0: tell the SERVER the transfer is over.
+        //
+        // This is the half that was missing. The watchdog gave up here and
+        // the row stayed UPLOADING in the database, so the global upload
+        // banner kept reading "1 in progress" at whatever percentage the
+        // transfer died at — until the 30-minute abandoned-upload sweep
+        // eventually noticed. The client knew half an hour earlier; now it
+        // says so.
+        if (u.videoId) {
+          apiPost(`/api/videos/${u.videoId}/cancel-upload`, {
+            reason: 'Upload stalled — no data sent for 30 seconds.',
+          }).catch(() => {
+            /* the reaper is still the backstop */
+          })
         }
       }
     }
@@ -561,7 +581,7 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     // ever closing the modal in between.
   }, [isOpen, triggerNonce, initialFiles, initialFilesWithFolders])
 
-  const handleRemove = (id: string) => {
+  const performRemove = async (id: string) => {
     // 1.5.x+: Cancel/Remove now performs a FULL teardown — not just
     // "stop the TUS PATCH stream". The old version only aborted the
     // TUS client, which left two orphans behind:
@@ -579,38 +599,203 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     // We now: (a) abort TUS / S3, (b) DELETE the video record so the
     // worker job becomes a no-op, and (c) wipe the localStorage
     // resume state so the retry starts a clean upload.
-    const itemSnapshot = pendingUploads.find(u => u.id === id)
+    const itemSnapshot = pendingUploadsRef.current.find(u => u.id === id)
+
+    // 6.14.0: the teardown is now AWAITED, and the row stays on screen while
+    // it runs.
+    //
+    // It used to fire everything off and drop the row immediately. That read
+    // as "cancelled" and was not: `abort(true)` sends a DELETE to the TUS
+    // server (which is what removes the half-written file from disk), and
+    // nobody waited for it — so on a slow link the partial file could outlive
+    // the click. Worse, the row vanished from the modal while the Video row
+    // was still UPLOADING in the database, which is why the corner banner
+    // came back with its pulsing dot: from the server's point of view the
+    // upload was still happening.
+    //
+    // Order matters. Terminate the transfer FIRST so no more bytes arrive,
+    // then delete the record. The other way round, an in-flight chunk can
+    // land on a row that no longer exists.
+    setPendingUploads(prev =>
+      prev.map(u => (u.id === id ? { ...u, status: 'cancelling' as const, speed: 0 } : u)),
+    )
 
     const tusUpload = uploadRefs.current.get(id)
     if (tusUpload) {
-      tusUpload.abort(true)
       uploadRefs.current.delete(id)
+      try {
+        // `true` = terminate server-side, not just stop sending. This is the
+        // call that deletes the partial file; without it the bytes already
+        // uploaded stay on disk as junk nobody ever looks at again.
+        await tusUpload.abort(true)
+      } catch (err) {
+        logError('[UPLOAD] Could not terminate the TUS session:', err)
+      }
     }
     const s3Key = s3UploadKeys.current.get(id)
     if (s3Key) {
-      abortS3Upload(s3Key)
       s3UploadKeys.current.delete(id)
-    }
-    if (itemSnapshot) {
-      // Best-effort: clear localStorage so the next attempt starts
-      // a fresh session instead of trying to resume a dead one.
-      try { clearTUSFingerprint(itemSnapshot.file) } catch {}
-      try { clearUploadMetadata(itemSnapshot.file) } catch {}
-      // Best-effort: delete the DB record. Fire-and-forget — if it
-      // fails (network blip, race with worker), the cleanup job will
-      // catch it within 24 h via the UPLOADING-too-long sweep.
-      //
-      // 1.5.8: `?permanent=1` skips the Trash bucket. A canceled
-      // upload never produced anything the user wants to recover,
-      // so soft-deleting it would just clutter the Trash with
-      // half-finished rows the cleanup job has to sweep anyway.
-      if (itemSnapshot.videoId) {
-        apiDelete(`/api/videos/${itemSnapshot.videoId}?permanent=1`).catch(() => {
-          /* silent — cleanup job will pick it up later */
-        })
+      try {
+        await abortS3Upload(s3Key)
+      } catch (err) {
+        logError('[UPLOAD] Could not abort the S3 multipart upload:', err)
       }
     }
+
+    if (itemSnapshot) {
+      // Clear localStorage so the next attempt starts a fresh session
+      // instead of trying to resume a dead one.
+      try { clearTUSFingerprint(itemSnapshot.file) } catch {}
+      try { clearUploadMetadata(itemSnapshot.file) } catch {}
+
+      // `?permanent=1` skips Trash: a cancelled upload never produced
+      // anything worth recovering, and a half-finished row in Trash is
+      // just work for the cleanup sweep. This also takes the row back out
+      // of a version stack if the file had been dropped onto an existing
+      // video.
+      if (itemSnapshot.videoId) {
+        try {
+          await apiDelete(`/api/videos/${itemSnapshot.videoId}?permanent=1`)
+        } catch (err) {
+          // The abandoned-upload sweep is still the backstop.
+          logError('[UPLOAD] Could not delete the cancelled row:', err)
+        }
+      }
+    }
+
     setPendingUploads(prev => prev.filter(u => u.id !== id))
+  }
+
+  // 6.14.0: cancelling a live transfer asks first — and PAUSES while it asks.
+  //
+  // The X used to tear the upload down on the first click. On a file that has
+  // been going for ten minutes that is a very expensive misclick, and the
+  // button sits right next to Pause. Now an in-flight row is paused (so no
+  // more bytes are wasted while the question is on screen) and the teardown
+  // only happens on confirm. Saying no resumes exactly where it stopped —
+  // which is the one thing TUS is genuinely good at.
+  //
+  // Rows that are not transferring — queued, failed, finished — are removed
+  // straight away. There is nothing in flight to lose and a confirmation for
+  // "take this off the list" is just a second click.
+  const [cancelCandidate, setCancelCandidate] = useState<string | null>(null)
+  const resumeAfterCancelRef = useRef(false)
+
+  const handleRemove = (id: string) => {
+    const item = pendingUploadsRef.current.find((u) => u.id === id)
+    if (!item || item.status !== 'uploading') {
+      void performRemove(id)
+      return
+    }
+    if (!item.paused) {
+      resumeAfterCancelRef.current = true
+      handlePauseResume(id)
+    } else {
+      resumeAfterCancelRef.current = false
+    }
+    setCancelCandidate(id)
+  }
+
+  const dismissCancelPrompt = () => {
+    const id = cancelCandidate
+    setCancelCandidate(null)
+    if (!id) return
+    // Only resume what WE paused — a transfer the user had paused themselves
+    // before clicking X stays paused.
+    if (resumeAfterCancelRef.current) {
+      resumeAfterCancelRef.current = false
+      const item = pendingUploadsRef.current.find((u) => u.id === id)
+      if (item?.paused) handlePauseResume(id)
+    }
+  }
+
+  // 6.14.0 — offer to pick up an upload a page refresh interrupted.
+  //
+  // A reload throws away the `File`, and no API can hand it back without the
+  // user choosing it again — that is a security boundary, not a bug we can
+  // work around. Everything ELSE survives: the server still has the partial
+  // file and the exact offset, and the fingerprint is still in localStorage.
+  // So we ask for the one missing piece. Picking the same file resumes from
+  // the offset; nothing already transferred is sent twice.
+  const [resumable, setResumable] = useState<ResumableUpload | null>(null)
+  const resumeInputRef = useRef<HTMLInputElement>(null)
+  const [resumeMismatch, setResumeMismatch] = useState(false)
+  // Video ids this tab has already taken responsibility for — either resumed
+  // or discarded. Without it the re-scan below immediately re-offers the very
+  // upload the user just resumed: the row is still UPLOADING (correctly, it is
+  // uploading again) and the metadata is still there (correctly, tus needs
+  // it), so every signal still says "unfinished".
+  const claimedResumesRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    let cancelled = false
+    const scan = async () => {
+      const candidates = listResumableUploads(projectId)
+      if (candidates.length === 0) {
+        if (!cancelled) setResumable(null)
+        return
+      }
+      // Only offer rows the server still considers unfinished. A completed or
+      // cancelled upload must not be advertised as resumable.
+      try {
+        const res = await apiPost<{ statuses: Record<string, string> }>(
+          '/api/videos/statuses',
+          { ids: candidates.map((c) => c.videoId).slice(0, 20) },
+        )
+        const alive = candidates.find(
+          (c) =>
+            res?.statuses?.[c.videoId] === 'UPLOADING' &&
+            !claimedResumesRef.current.has(c.videoId) &&
+            !pendingUploadsRef.current.some((u) => u.videoId === c.videoId),
+        )
+        for (const c of candidates) {
+          if (c !== alive && !res?.statuses?.[c.videoId]) forgetResumable(c)
+        }
+        if (!cancelled) setResumable(alive ?? null)
+      } catch {
+        if (!cancelled) setResumable(null)
+      }
+    }
+    void scan()
+    return () => {
+      cancelled = true
+    }
+    // Re-scan when the pending list empties (an upload just finished or was
+    // cancelled) so a stale offer disappears.
+  }, [projectId, pendingUploads.length])
+
+  const handleResumePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !resumable) return
+    if (!matchesResumable(file, resumable)) {
+      setResumeMismatch(true)
+      return
+    }
+    setResumeMismatch(false)
+    const entry = resumable
+    claimedResumesRef.current.add(entry.videoId)
+    setResumable(null)
+    const item: PendingUpload = {
+      id: `resume-${entry.videoId}`,
+      file,
+      videoName: entry.targetName || file.name.replace(/\.[^.]+$/, ''),
+      versionLabel: entry.versionLabel || '',
+      status: 'pending',
+      progress: 0,
+      speed: 0,
+    }
+    setPendingUploads((prev) => [...prev, item])
+    void startUpload(item)
+  }
+
+  const dismissResumable = () => {
+    if (resumable) {
+      claimedResumesRef.current.add(resumable.videoId)
+      forgetResumable(resumable)
+    }
+    setResumable(null)
+    setResumeMismatch(false)
   }
 
   const handleUpdateName = (id: string, newName: string) => {
@@ -652,11 +837,48 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
       ensureFreshUploadOnContextChange(file, contextKey)
 
       const existingMetadata = getUploadMetadata(file)
-      const canResumeExisting =
+      let canResumeExisting =
         existingMetadata?.projectId === projectId &&
         !!existingMetadata.videoId &&
         existingMetadata?.targetName === trimmedVideoName &&
         (existingMetadata.versionLabel || '') === (trimmedVersionLabel || '')
+
+      // 6.14.0: a stored resume is only good if the row it points at is still
+      // there.
+      //
+      // The failure this fixes: refresh the page mid-upload, cancel the
+      // half-finished upload, then pick the same file again. tus-js-client
+      // finds its fingerprint in localStorage and happily resumes the OLD
+      // session — whose metadata names a Video row that the cancel deleted.
+      // Every chunk then landed on nothing (`No record was found for an
+      // update`, then `Video not found`), the transfer "succeeded", and the
+      // video simply never appeared. Silent data loss dressed up as a
+      // completed upload.
+      //
+      // So: ask the server whether that row still exists before trusting the
+      // resume. If it is gone, drop the fingerprint and start clean — the
+      // bytes are re-sent, which is the correct price for a cancelled upload.
+      if (canResumeExisting && existingMetadata?.videoId) {
+        try {
+          const check = await apiPost<{ statuses: Record<string, string> }>(
+            '/api/videos/statuses',
+            { ids: [existingMetadata.videoId] },
+          )
+          if (!check?.statuses?.[existingMetadata.videoId]) {
+            logError(
+              `[UPLOAD] Stored resume points at a missing video (${existingMetadata.videoId}) — starting a fresh upload`,
+            )
+            try { clearTUSFingerprint(file) } catch {}
+            try { clearUploadMetadata(file) } catch {}
+            canResumeExisting = false
+          }
+        } catch {
+          // Could not check (offline, blip). Resuming is still the better bet
+          // than re-sending gigabytes; a dead session now fails loudly at the
+          // server instead of silently, thanks to the guard in the upload
+          // endpoint.
+        }
+      }
 
       let videoId: string
       let createdVideoRecord = false
@@ -956,8 +1178,10 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
   }
 
   const handleClose = () => {
-    // Only allow close if no uploads are in progress
-    const hasActiveUploads = pendingUploads.some(u => u.status === 'uploading')
+    // Only allow close while nothing is transferring — or being torn down.
+    const hasActiveUploads = pendingUploads.some(
+      u => u.status === 'uploading' || u.status === 'cancelling',
+    )
     if (hasActiveUploads) return
 
     // Clean up completed uploads from the list
@@ -965,7 +1189,9 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     onClose()
   }
 
-  const hasActiveUploads = pendingUploads.some(u => u.status === 'uploading')
+  const hasActiveUploads = pendingUploads.some(
+    u => u.status === 'uploading' || u.status === 'cancelling',
+  )
   const hasPendingItems = pendingUploads.some(u => u.status === 'pending' && u.videoName.trim())
   const allCompleted = pendingUploads.length > 0 && pendingUploads.every(u => u.status === 'completed')
 
@@ -982,23 +1208,29 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     }
   }, [hasActiveUploads])
 
-  // 2.0.x+: banner-style flow — once every upload in the panel
-  // has flipped to `completed`, leave the "all done" tick on
-  // screen for ~5 s so the user gets to acknowledge it, then
-  // dismiss the banner automatically (clears state via the
-  // existing handleClose). If the user adds more files during
-  // the grace window we cancel the timer.
+  // 2.0.x+: banner-style flow — once every upload in the panel has flipped to
+  // `completed`, leave the "all done" tick on screen briefly so the user gets
+  // to acknowledge it, then dismiss the banner automatically (clears state via
+  // the existing handleClose). If the user adds more files during the grace
+  // window we cancel the timer.
+  //
+  // 6.14.0: 5s → 2s. The tick is an acknowledgement, not something anyone
+  // reads; five seconds of a finished banner sitting over the grid read as the
+  // UI being stuck. Matches `HWM_RESET_DELAY_MS` in ProcessingStatusContext so
+  // the two bottom-right stacks clear at the same rhythm.
+  const ALL_DONE_DISMISS_MS = 2_000
   useEffect(() => {
     if (!allCompleted) return
     const id = setTimeout(() => {
       setPendingUploads([])
       onClose()
-    }, 5_000)
+    }, ALL_DONE_DISMISS_MS)
     return () => clearTimeout(id)
   }, [allCompleted, onClose])
 
   return (
-    <UploadBannerView
+    <>
+      <UploadBannerView
       isOpen={isOpen}
       pendingUploads={pendingUploads}
       fileInputRef={fileInputRef}
@@ -1011,7 +1243,46 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
       hasActiveUploads={hasActiveUploads}
       stallNotice={stallNotice}
       onDismissStall={() => setStallNotice(null)}
-    />
+      resumable={resumable}
+      resumeMismatch={resumeMismatch}
+      resumeInputRef={resumeInputRef}
+      onResumePick={handleResumePick}
+      onDismissResumable={dismissResumable}
+      />
+
+      {/* 6.14.0: the "are you sure" in front of a live transfer. The upload is
+          already paused behind it, so nothing is being wasted while it waits
+          for an answer. */}
+      <ConfirmModal
+        open={cancelCandidate !== null}
+        onOpenChange={(next) => {
+          if (!next) dismissCancelPrompt()
+        }}
+        title="Cancel this upload?"
+        description={
+          <>
+            <span className="font-medium text-white">
+              {pendingUploads.find((u) => u.id === cancelCandidate)?.videoName ||
+                pendingUploads.find((u) => u.id === cancelCandidate)?.file.name}
+            </span>{' '}
+            is paused. Cancelling discards everything transferred so far and
+            removes it — the upload would have to start over. If it was going
+            onto an existing video as a new version, it is taken back out of
+            that version stack.
+          </>
+        }
+        confirmLabel="Cancel upload"
+        cancelLabel="Keep uploading"
+        variant="destructive"
+        onConfirm={() => {
+          const id = cancelCandidate
+          resumeAfterCancelRef.current = false
+          setCancelCandidate(null)
+          if (id) void performRemove(id)
+        }}
+        onCancel={dismissCancelPrompt}
+      />
+    </>
   )
 }
 
@@ -1043,12 +1314,17 @@ function UploadBannerView({
   hasActiveUploads,
   stallNotice,
   onDismissStall,
+  resumable,
+  resumeMismatch,
+  resumeInputRef,
+  onResumePick,
+  onDismissResumable,
 }: {
   isOpen: boolean
   pendingUploads: PendingUpload[]
   fileInputRef: React.RefObject<HTMLInputElement | null>
   handleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
-  handleRemove: (id: string) => void
+  handleRemove: (id: string) => void | Promise<void>
   handlePauseResume: (id: string) => void
   handleRetry: (id: string) => void
   handleClose: () => void
@@ -1057,6 +1333,12 @@ function UploadBannerView({
   onDismissStall: () => void
   allCompleted: boolean
   hasActiveUploads: boolean
+  /** 6.14.0: an upload a refresh interrupted, waiting for the file again. */
+  resumable: ResumableUpload | null
+  resumeMismatch: boolean
+  resumeInputRef: React.RefObject<HTMLInputElement | null>
+  onResumePick: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onDismissResumable: () => void
 }) {
   const t = useTranslations('videos')
   const tc = useTranslations('common')
@@ -1093,7 +1375,94 @@ function UploadBannerView({
     />
   )
 
-  if (!isOpen || pendingUploads.length === 0) return hiddenInput
+  // 6.14.0: the resume offer has to survive the "nothing pending" early
+  // return — after a refresh there IS nothing pending, which is the entire
+  // point. It renders on its own, without the rest of the banner.
+  const resumeInput = (
+    <input
+      ref={resumeInputRef}
+      type="file"
+      accept="video/*,image/jpeg,image/png,image/webp,image/gif"
+      onChange={onResumePick}
+      className="hidden"
+    />
+  )
+
+  const resumeCard =
+    mounted && resumable
+      ? createPortal(
+          // Same glass recipe as the status banners it sits above — translucent
+          // navy, accent-tinted radial wash, 40px backdrop blur, hairline ring.
+          // The previous flat `#162533/95` box read as a foreign dialog dropped
+          // on top of the app instead of another one of its surfaces.
+          <div
+            className="fixed bottom-4 right-4 z-[2147483750] w-[340px] max-w-[calc(100vw-2rem)] rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white p-3.5 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden"
+            style={{
+              backgroundColor: 'rgba(22, 37, 51, 0.62)',
+              backgroundImage:
+                'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
+              backdropFilter: 'blur(40px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+              transform: 'translate3d(0, 0, 0)',
+              willChange: 'backdrop-filter, transform',
+              isolation: 'isolate',
+            }}
+            role="status"
+          >
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 ring-1 ring-primary/30">
+                <Upload className="w-3.5 h-3.5 text-primary" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold leading-tight">
+                  Unfinished upload
+                </div>
+                <div className="text-[11px] text-white/55 mt-0.5 truncate">
+                  {resumable.targetName || resumable.fileName}
+                </div>
+                <p className="text-[11px] text-white/45 mt-2 leading-relaxed">
+                  The page reloaded before this finished. Choose the same file
+                  again and it carries on from where it stopped — nothing
+                  already uploaded is sent twice.
+                </p>
+                {resumeMismatch && (
+                  <p className="text-[11px] text-destructive mt-2">
+                    That is a different file. Pick the one that was uploading.
+                  </p>
+                )}
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => resumeInputRef.current?.click()}
+                    className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-[11px] font-semibold hover:brightness-110 transition-[filter]"
+                    style={{ color: '#ffffff' }}
+                  >
+                    Choose file &amp; resume
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDismissResumable}
+                    className="h-8 px-3 rounded-lg text-[11px] font-medium text-white/80 bg-white/[0.06] hover:bg-white/[0.12] hover:text-white ring-1 ring-white/15 hover:ring-white/25 transition-colors"
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null
+
+  if (!isOpen || pendingUploads.length === 0) {
+    return (
+      <>
+        {hiddenInput}
+        {resumeInput}
+        {resumeCard}
+      </>
+    )
+  }
   if (!mounted) return hiddenInput
 
   const done = pendingUploads.filter((u) => u.status === 'completed').length
@@ -1115,6 +1484,8 @@ function UploadBannerView({
   return (
     <>
       {hiddenInput}
+      {resumeInput}
+      {resumeCard}
       {createPortal(
       <div
         className="fixed bottom-4 right-4 z-[2147483700] flex flex-col gap-2 max-w-[calc(100vw-2rem)] pointer-events-none"
@@ -1256,6 +1627,7 @@ function UploadBannerView({
       </div>,
       document.body,
       )}
+
     </>
   )
 }
@@ -1281,6 +1653,8 @@ function UploadRow({
           <CheckCircle2 className="w-4 h-4 text-emerald-300" />
         ) : upload.status === 'error' ? (
           <X className="w-4 h-4 text-red-300" />
+        ) : upload.status === 'cancelling' ? (
+          <Loader2 className="w-4 h-4 text-white/55 animate-spin" />
         ) : upload.paused ? (
           <Pause className="w-4 h-4 text-amber-400" />
         ) : (
@@ -1297,6 +1671,11 @@ function UploadRow({
         <div className="text-[10px] text-white/55 truncate tabular-nums">
           {upload.status === 'completed'
             ? formatFileSize(upload.file.size)
+            : upload.status === 'cancelling'
+              // 6.14.0: the row stays until the server has actually stopped
+              // and the partial file is gone. Removing it the instant the X
+              // was clicked is what made "cancelled" a lie.
+              ? 'Cancelling — removing what was uploaded…'
             : upload.status === 'error'
               ? (upload.error || 'Failed')
               : upload.stalled
@@ -1310,12 +1689,18 @@ function UploadRow({
                     : ` · ${upload.speed.toFixed(1)} MB/s`
                 }`}
         </div>
-        {(upload.status === 'uploading' || upload.status === 'pending') && (
+        {(upload.status === 'uploading' ||
+          upload.status === 'pending' ||
+          upload.status === 'cancelling') && (
           <div className="mt-1 h-1 w-full rounded-full bg-white/10 overflow-hidden">
             <div
               className={cn(
                 'h-full rounded-full transition-all',
-                upload.paused ? 'bg-amber-400' : 'bg-primary',
+                upload.status === 'cancelling'
+                  ? 'bg-white/25'
+                  : upload.paused
+                    ? 'bg-amber-400'
+                    : 'bg-primary',
               )}
               style={{ width: `${upload.progress}%` }}
             />
@@ -1347,8 +1732,9 @@ function UploadRow({
         {upload.status !== 'completed' && (
           <button
             type="button"
+            disabled={upload.status === 'cancelling'}
             onClick={onRemove}
-            className="p-1 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors"
+            className="p-1 rounded-md hover:bg-white/[0.08] text-white/55 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label={tc('remove')}
             title={tc('remove')}
           >

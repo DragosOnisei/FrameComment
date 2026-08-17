@@ -42,6 +42,8 @@ export interface InAppNotification {
   folderId: string | null
   actorName: string | null
   message?: string | null
+  /** 6.14.0: deep-link target inside the comment thread. */
+  commentId?: string | null
   isRead: boolean
   createdAt: string
 }

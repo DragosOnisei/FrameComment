@@ -1,39 +1,56 @@
-let inMemoryAccessToken: string | null = null
-let cachedRefreshToken: string | null = null
+/**
+ * 6.13.0 — the browser keeps ONE credential, in memory, and nothing on disk.
+ *
+ * Until now the refresh token was written to `localStorage` so a PWA could
+ * survive being closed. It worked, and it was the wrong trade: anything that
+ * can run JavaScript on this origin can read `localStorage`, so one XSS — ours
+ * or a dependency's — was a full account takeover, for as long as the refresh
+ * token lived. Raising sessions to 30 days would have made that window a
+ * month.
+ *
+ * The refresh token now lives in an HttpOnly cookie set by the server (see
+ * `lib/auth-cookies.ts`). This module never sees it and cannot: that is the
+ * point. The browser attaches it automatically to `/api/auth/*`, so persistence
+ * across app restarts still works — cookies with a Max-Age outlive a closed
+ * PWA exactly like `localStorage` did.
+ *
+ * What is left here is the access token, held in memory only. It dies with the
+ * tab, which is fine: on the next load `attemptRefresh()` trades the cookie for
+ * a fresh one.
+ */
 
-type TokenChangeListener = (tokens: { accessToken: string | null; refreshToken: string | null }) => void
+let inMemoryAccessToken: string | null = null
+
+type TokenChangeListener = (tokens: { accessToken: string | null }) => void
 const listeners = new Set<TokenChangeListener>()
 
-// Use localStorage for PWA persistence (survives app close on iOS)
-// sessionStorage would be cleared when iOS closes the PWA
-const STORAGE_KEY = 'framecomment_refresh_token'
-
-function syncRefreshFromStorage(): string | null {
-  if (typeof window === 'undefined') return null
-  if (cachedRefreshToken) return cachedRefreshToken
-  const stored = window.localStorage.getItem(STORAGE_KEY)
-  if (stored) {
-    cachedRefreshToken = stored
+/**
+ * 6.13.0: one-time cleanup. Anyone upgrading has a refresh token sitting in
+ * localStorage from the old scheme; it is dead weight now (the server no
+ * longer accepts it from a browser) and it is exactly the thing we just
+ * decided must not be there. Remove it on first load rather than leaving a
+ * stale credential lying around in people's browsers indefinitely.
+ */
+const LEGACY_STORAGE_KEY = 'framecomment_refresh_token'
+if (typeof window !== 'undefined') {
+  try {
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY)
+  } catch {
+    // Private mode / storage disabled — nothing to clean up.
   }
-  return cachedRefreshToken
 }
 
 export function getAccessToken(): string | null {
   return inMemoryAccessToken
 }
 
-export function getRefreshToken(): string | null {
-  return cachedRefreshToken || syncRefreshFromStorage()
-}
-
-export function setTokens(tokens: { accessToken: string; refreshToken: string }) {
+/**
+ * `refreshToken` is accepted and ignored on purpose: the login/refresh routes
+ * no longer return one, and keeping the parameter means the call sites did not
+ * all have to change in the same commit as the security fix.
+ */
+export function setTokens(tokens: { accessToken: string; refreshToken?: string }) {
   inMemoryAccessToken = tokens.accessToken
-  cachedRefreshToken = tokens.refreshToken
-
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(STORAGE_KEY, tokens.refreshToken)
-  }
-
   notifyListeners()
 }
 
@@ -44,12 +61,6 @@ export function updateAccessToken(accessToken: string) {
 
 export function clearTokens() {
   inMemoryAccessToken = null
-  cachedRefreshToken = null
-
-  if (typeof window !== 'undefined') {
-    window.localStorage.removeItem(STORAGE_KEY)
-  }
-
   notifyListeners()
 }
 
@@ -59,6 +70,6 @@ export function subscribe(listener: TokenChangeListener): () => void {
 }
 
 function notifyListeners() {
-  const snapshot = { accessToken: inMemoryAccessToken, refreshToken: cachedRefreshToken }
+  const snapshot = { accessToken: inMemoryAccessToken }
   listeners.forEach(fn => fn(snapshot))
 }

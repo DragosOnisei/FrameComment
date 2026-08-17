@@ -14,6 +14,389 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.14.0] - 2026-08-17
+
+### Bannerul de upload spune cât de repede merge, și te lasă să-l oprești
+
+„Iar nu apare viteza" avea o explicație pe care n-o spusesem: **viteza n-a fost
+niciodată în banner**. MB/s trăia doar în lista din modalul de upload, peste
+evenimentele lui TUS. Bannerul din colț e altă suprafață — o citire de pe
+server — deci arăta un procent care uneori stătea pe loc minute întregi, fără
+să poți deosebi „încet" de „mort".
+
+Acum bannerul calculează viteza din diferența de `uploadProgress` între două
+poll-uri, cu o medie exponențială ca să nu sară de la 40 MB/s la 0 când două
+chunk-uri cad în aceeași fereastră. Merge pentru orice sursă: alt tab, alt
+browser, sau `bulk-upload.mjs` de pe alt calculator — browserul care se uită
+nu are nevoie de niciun transfer propriu ca să măsoare.
+
+Fără bytes 20 de secunde, rândul spune „No data for 24s — retrying" și se
+stinge vizual. Nu mai pretinde că lucrează.
+
+### Timeout-ul chiar închide bannerul
+
+Watchdog-ul din modal făcea deja partea grea: fără bytes 30 de secunde reia o
+dată transferul, iar dacă se blochează iar îl marchează eșuat. Dar se oprea
+acolo — rândul rămânea `UPLOADING` în baza de date, deci bannerul global
+continua să arate „1 in progress" la procentul unde murise, până când mătura
+de upload-uri abandonate observa. Aia rulează la 30 de minute.
+
+Clientul știa cu o jumătate de oră mai devreme. Acum spune.
+
+### Cancel din cerculețul de status
+
+Treci cu mouse-ul peste bulina de upload sau peste inelul SD/HD/4K de la
+encoding și devine un coș de gunoi. Click → confirmare → se oprește.
+
+Pipul e deja obiectul de stare al rândului, deci ieșirea de urgență stă exact
+unde se uită ochiul, fără să adaug un buton pe fiecare rând. Anularea șterge
+rândul, nu îl trimite în Trash: un fișier pe jumătate urcat sau pe jumătate
+encodat nu e ceva ce vrei să recuperezi. Iar dacă fișierul fusese pus peste un
+video existent ca versiune nouă, ștergerea rândului îl scoate automat din
+stiva aia — reel-ul revine la versiunile care chiar există.
+
+### „Stop" nu oprea de fapt encodarea
+
+Prima variantă doar refuza să SALVEZE tierul după ce se termina — ffmpeg
+continua să mestece un 4K încă zece minute după click, vizibil în meniul de
+calitate din player ca tiere care încă urcau. Mecanismul de abort exista deja,
+pentru cazul „videoul a fost șters în timpul encodării"; acum e folosit și
+aici. Verificarea se face pe același tick throttled ca scrierea progresului,
+deci costă un GET Redis la 1,5 secunde per encode activ, iar procesul ffmpeg
+chiar primește SIGTERM.
+
+### Tag-ul de calitate nu apărea
+
+Datele erau în răspunsul API, dar `FolderBrowser` construiește pentru fiecare
+card un obiect cu câmpuri enumerate explicit, iar `completedTiers` nu era
+printre ele — ajungea `undefined` la card, deci chip-ul nu se randa niciodată.
+
+### Bannerul rămânea agățat după „Stop and keep"
+
+Rândul se oprea corect, dar nu pleca. `/api/processing-status` păstrează
+intenționat în banner un video READY cât timp BullMQ mai raportează un job
+activ pentru el — altfel rândul ar dispărea în clipa în care aterizează primul
+tier, deși worker-ul e evident încă ocupat. După un stop, regula lucra
+împotriva noastră: tierul deja intrat în ffmpeg rămâne „activ" până se termină,
+deci videoul oprit stătea în banner la 100%, fără nimic de făcut și fără cale
+de a-l închide.
+
+Acum un video oprit explicit e scos din acel set. Un singur MGET peste câteva
+id-uri, deci poll-ul rămâne ieftin.
+
+### Badge-ul „Encoding HD…" de pe thumbnail a dispărut
+
+Spunea exact ce spune bannerul din dreapta-jos, într-un loc unde se bătea cu
+eticheta de versiune și cu durata, și îl deducea din `plannedTiers` — o
+intenție stocată, pe care un encode oprit o lasă învechită. Două suprafețe care
+raportează același lucru, una dintre ele dintr-o sursă mai proastă, înseamnă o
+suprafață în plus. Bannerul e viu (citește BullMQ), acolo stă și butonul de
+Stop, și e singurul loc care mai susține că un video se encodează.
+
+### Scrub-ul pe carduri arăta un mozaic pe clipurile lungi
+
+Sprite-ul e dimensionat după durată din 6.9.3 (aproximativ un cadru pe
+secundă, până la 20×20), dar cardul, picker-ul de comparație și copiile lor
+private citeau în continuare foaia ca 10×10. Sub ~100 de secunde cele două
+coincid și nimic nu părea greșit — de asta a supraviețuit. Peste, o foaie de
+20×20 citită ca 10×10 arată patru cadre deodată, exact mozaicul din captură.
+
+6.9.3 a reparat player-ul și reel-ul de versiuni și a ratat celelalte două
+locuri. Acum toate folosesc același cititor, cu geometria înregistrată pe
+versiune, și nu mai există nicio copie locală a presupunerii 10×10.
+
+### Scrub pe thumbnail: un seek pe frame, nu unul pe mișcare de mouse
+
+Cardurile fără sprite de storyboard cad pe varianta veche de scrub — un
+`<video>` ascuns căruia i se schimbă `currentTime`. Fiecare `mousemove` făcea
+un seek, iar fiecare seek cere altă bucată din fișier: un trackpad la 120 Hz
+care traversează un card genera ~120 de cereri autentificate pe secundă,
+fiecare cu verificare de token și citire de fișier. Câțiva oameni care se
+plimbă prin grilă puteau ține serverul ocupat derulând înainte și înapoi
+același clip.
+
+Acum poziția cea mai nouă e reținută și aplicată o dată per frame. Ochiul nu
+distinge 120 de seek-uri pe secundă de 60 — decodorul oricum le aruncă pe
+majoritatea.
+
+### Tag de calitate pe cardul de video
+
+Înainte de „Video 16:9" apare acum SD / HD / HD+ / 4K. Se citește din tierele
+**terminate**, nu din cele planificate: planul e o intenție, iar de la 6.14.0
+poate fi oprit intenționat la jumătate — un video oprit la SD nu are voie să
+se laude cu 4K.
+
+Rândul de tag-uri a fost scos din coloana cu numele și mutat sub ea, pe toată
+lățimea cardului. Înăuntru primea doar cât spațiu rămânea de la butonul kebab,
+deci al treilea tag se rupea pe rândul doi (cardul creștea și grila arăta
+neuniform) sau se tăia — „Personal Se…" — cu jumătate de card gol în dreapta.
+
+### Stop la encoding păstrează calitățile deja gata
+
+Anularea unui encode nu mai înseamnă „aruncă videoul". Înseamnă „oprește-te
+aici".
+
+- Stop în timpul **SD**: nu există încă nicio calitate redabilă, deci videoul
+  se șterge — ca până acum.
+- Stop în timpul **HD**: videoul rămâne, redabil la SD.
+- Stop în timpul **HD+**: rămâne cu SD și HD.
+
+Dialogul spune exact ce supraviețuiește, iar butonul se numește „Stop and keep
+SD + HD" în loc de un „Cancel" care nu promitea nimic.
+
+Trei lucruri trebuie să se întâmple împreună, altfel scara crește la loc: un
+semnal către worker (tierul aflat în ffmpeg chiar acum e abandonat, nu salvat
+un minut mai târziu), scoaterea tierelor din coadă, și micșorarea lui
+`plannedTiers` la ce s-a terminat — altfel fiecare bară de progres din aplicație
+ar continua să împartă la un numitor care nu mai poate fi atins, iar videoul ar
+rămâne „83% encodat" pentru totdeauna.
+
+Tierul întrerupt e abandonat, nu salvat: dacă HD se termină la două secunde
+după click, nu apare oricum în listă — ai spus că nu îl vrei. Reprocesarea
+manuală șterge semnalul, deci un encode nou pornește curat.
+
+### Pauza la upload arunca o excepție necapturată în proces
+
+Vizibil doar în log, și exact genul de lucru care nu trebuie ignorat:
+
+    Error: aborted { code: 'ECONNRESET' }
+    ⨯ uncaughtException: Error: aborted
+
+Pauza întrerupe cererea PATCH în zbor. `IncomingMessage` emite atunci `aborted`
+și o eroare `ECONNRESET`, iar fiindcă stream-ul era predat serverului TUS fără
+ca nimeni să ascluste `error` pe cererea originală, eroarea rămânea fără
+handler. În dev, Next o afișează și merge înainte. În producție,
+`uncaughtException` e un eveniment la nivel de proces — un upload pus pe pauză
+nu are ce să decidă despre soarta serverului.
+
+Nici nu e o eroare, de fapt: utilizatorul a apăsat Pause, iar TUS e construit
+să reia exact de acolo. Acum abandonul e recunoscut ca atare (pauză, cancel,
+tab închis), nu se mai scrie pe un socket deja închis, iar zgomotul din log
+apare doar cu `DEBUG_UPLOADS=true`.
+
+### „Failed to load folders (HTTP 500)" în timpul encodării
+
+Aceeași eroare de BigInt ca la 6.9.1, într-un loc pe care nu-l acoperisem
+atunci. `enrichVideosForAdmin` — helperul din spatele listei de foldere —
+converteà de mână doar `originalFileSize`, în timp ce `...v` copia mai departe
+toate celelalte coloane. În clipa în care worker-ul scria prima dimensiune
+per-tier (`preview480Size`, exact după ce se termina SD-ul), ruta începea să
+arunce „Do not know how to serialize a BigInt" și lista de foldere pica la
+fiecare 3 secunde, în timp ce encodarea mergea liniștită mai departe. De asta
+revenea aplicația când dădeai stop: nu mai apărea nicio dimensiune nouă.
+
+Enumerarea câmpurilor pe nume e o listă care se învechește de fiecare dată când
+se adaugă o coloană BigInt. Conversia după TIP nu poate. Helperul folosește
+acum `jsonSafe`, ca celelalte două rute reparate în 6.9.1.
+
+### Bannerele terminate dispar în 2 secunde
+
+Starea „All uploads complete" / „All processing complete" stătea pe ecran mult
+mai mult decât scria în cod. Întârzierea era declarată 5 secunde, dar nu era un
+timer — era o comparație de timestamp evaluată la fiecare poll, iar pollul
+rulează la 3 secunde. Pollul care vedea primul `count === 0` doar nota
+momentul; comparația se făcea la pollul următor (3s, sub prag), deci resetul
+cădea abia la al treilea. Real: 6–9 secunde, plus până la 3 secunde până când
+pollul observa că lucrarea s-a terminat. Între 6 și 12 secunde de banner
+terminat peste grid — se citea ca interfață blocată, nu ca o confirmare.
+
+Acum e un `setTimeout` adevărat de 2 secunde, deci valoarea din cod e valoarea
+pe care o vezi. Timerul se armează o singură dată — re-armarea la fiecare poll
+cât timp contorul stă pe zero ar împinge termenul la infinit, exact capcana pe
+care versiunea cu timestamp o evita și din cauza căreia depășea propriul prag —
+și se anulează dacă apare lucru nou în fereastra de grație. Bannerul de upload
+din modal a trecut de la 5s la aceleași 2s, ca ambele stive din dreapta-jos să
+se golească în același ritm.
+
+### Un upload întrerupt de refresh se poate relua
+
+Nu automat — și merită spus de ce, pentru că e o graniță, nu o scăpare.
+Bytes-ii vin dintr-un obiect `File` pe care browserul l-a dat paginii când ai
+ales fișierul. La reîncărcare acel obiect dispare, iar nicio pagină nu poate
+redeschide singură un fișier după cale. Asta e voit, din motive de securitate.
+
+Restul supraviețuiește însă complet: serverul are fișierul parțial și offsetul
+exact, iar amprenta e în `localStorage`. Lipsea doar puntea. Acum, după un
+refresh, apare un card care spune că ai un upload neterminat și cere fișierul
+din nou. Îl alegi, transferul continuă **de unde a rămas** — nimic din ce s-a
+urcat deja nu se retrimite.
+
+Se verifică mărimea fișierului înainte de reluare, ca să nu poți continua din
+greșeală cu alt fișier peste sesiunea veche, iar oferta apare doar dacă
+serverul mai consideră rândul `UPLOADING`. „Discard" șterge sesiunea și
+amprenta.
+
+Cardul folosește aceeași rețetă de sticlă ca bannerele de status de sub el —
+navy translucid, spălare radială în culoarea de accent, blur de 40px, inel de
+un pixel. Iar odată ce transferul e reluat, oferta dispare: rândul rămâne
+`UPLOADING` (corect, se urcă din nou) și amprenta rămâne în localStorage
+(corect, tus are nevoie de ea), deci fără o evidență a ceea ce tabul curent a
+preluat deja, scanarea următoare re-oferea exact uploadul tocmai pornit.
+
+### Re-upload după un refresh: fișierul se urca în gol
+
+Cel mai urât bug din release, pentru că se termina cu „succes".
+
+Reîncarci pagina în timpul unui upload, anulezi transferul rămas la jumătate,
+apoi alegi din nou același fișier. `tus-js-client` își găsește amprenta în
+`localStorage` și reia vechea sesiune — a cărei metadată numește un rând
+`Video` pe care anularea tocmai l-a șters. Fiecare chunk ateriza pe nimic
+(`No record was found for an update`, apoi `Video not found`), transferul „se
+încheia", și videoul nu apărea niciodată.
+
+Două straturi de reparație, pentru că fiecare acoperă ce celălalt nu poate:
+
+- **Client**: înainte să aibă încredere într-o reluare salvată, întreabă
+  serverul dacă rândul mai există. Dacă nu, șterge amprenta și pornește curat.
+  Bytes-ii se retrimit — prețul corect pentru un upload anulat.
+- **Server**: un `P2025` la scrierea progresului nu mai e înghițit ca o
+  nimica toată. Înseamnă că sesiunea aparține unui rând șters, deci sesiunea e
+  terminată pe loc, la primul chunk care observă. Clientul primește o eroare
+  clară în loc de un gol. Înainte, asta se prindea abia la final, după ce tot
+  fișierul fusese retrimis.
+
+### X-ul întreabă înainte, și pune pe pauză cât întreabă
+
+Anula din prima apăsare. Pe un fișier care se urcă de zece minute asta e o
+greșeală scumpă, iar butonul stă exact lângă Pause. Acum un transfer în curs e
+pus pe pauză — ca să nu se mai consume bytes cât stă întrebarea pe ecran — și
+demontarea se face doar la confirmare. „Keep uploading" reia exact de unde a
+rămas, singurul lucru la care TUS chiar se pricepe. Dacă transferul era deja
+pus pe pauză de tine, rămâne pe pauză.
+
+Rândurile care nu transferă — în așteptare, eșuate, terminate — se scot direct.
+Nu e nimic în zbor de pierdut, iar o confirmare pentru „scoate asta din listă"
+e doar un click în plus.
+
+### X-ul din modal chiar anulează
+
+Pauza mergea. X-ul nu: pornea demontarea și ștergea rândul din listă imediat,
+fără să aștepte nimic. Două urmări. `abort(true)` trimite un DELETE către
+serverul TUS — exact apelul care șterge fișierul pe jumătate scris de pe disc —
+și nimeni nu-l aștepta, deci pe o legătură lentă bucata rămânea acolo. Iar
+rândul dispărea din modal în timp ce în baza de date videoul era încă
+`UPLOADING`, așa că bannerul din colț revenea cu bulina lui albastră: din
+punctul de vedere al serverului, upload-ul continua.
+
+Acum rândul rămâne pe ecran, scrie „Cancelling — removing what was uploaded…",
+și abia după ce transferul e oprit pe server și rândul e șters dispare. Ordinea
+contează: întâi oprim transferul, apoi ștergem înregistrarea — invers, un chunk
+în zbor aterizează pe un rând care nu mai există. Modalul nu se închide cât
+timp o anulare e în curs.
+
+### „Encoding tiers · 0 / 2 done" lângă o bară la 16%
+
+Ambele numere erau adevărate — zero *videouri* terminate — dar puse alături
+arătau ca un bug. Eticheta spune „Encoding tiers", așa că acum se numără
+tierele: se termină la câteva minute, nu la o jumătate de oră, și se mișcă
+sub ochii tăi. Videourile care se termină ies din listă, deci tierele lor
+sunt ținute într-o bază separată — altfel numitorul ar scădea pe măsură ce
+lucrarea avansează și „3 / 8" ar deveni „1 / 4".
+
+### Play după schimbarea versiunii pornea de la început
+
+Schimbi versiunea: bara rămânea corect la momentul unde erai, previzualizarea
+la fel, dar Play sărea la zero. Bara spunea adevărul — elementul `<video>` nou
+pur și simplu nu fusese informat. Acum poziția e reaplicată la
+`loadedmetadata`, cu clamp pe durata versiunii noi dacă e mai scurtă.
+
+### Notificarea de reply te duce fix la comentariu
+
+Ducea corect la video și te lăsa în capul firului să cauți singur răspunsul.
+Pagina de review știe de mult să focalizeze un comentariu (`?comment=`) — doar
+că notificarea nu avea id-ul ca să-l pună în link. Acum îl are: firul derulează
+la cardul potrivit și acesta primește o singură pulsație de scale, ca ochiul
+să aterizeze unde trebuie. Se respectă `prefers-reduced-motion`.
+
+
+## [6.13.0] - 2026-08-17
+
+> Livrat împreună cu 6.14.0, în aceeași imagine. Nu există tag `v6.13.0`:
+> modificările de sesiune și cele de upload/encoding s-au întrepătruns în
+> aceleași fișiere înainte să apuc să tai release-ul, iar un commit intermediar
+> care să compileze singur n-ar fi fost sincer. Notele rămân separate pentru
+> că sunt două subiecte diferite.
+
+### Sesiuni de 30 de zile, făcute în siguranță
+
+Fereastra de inactivitate pentru admin urcă de la 12 ore la **720 de ore**
+pentru toate companiile. Panoul Security e ascuns tenanților din 5.11.0, deci
+valoarea din baza de date *este* comportamentul produsului — un default, nu o
+opțiune. Migrarea actualizează și rândurile existente, nu doar default-ul.
+
+Ridicarea singură ar fi fost o înrăutățire, nu o îmbunătățire. Restul
+release-ului există ca să o facă apărabilă.
+
+### Refresh token-ul iese din localStorage
+
+OWASP numește explicit `localStorage` ca loc nepotrivit pentru credențiale:
+orice script de pe origine îl poate citi, deci un singur XSS — al nostru sau al
+unei dependențe — preda sesiunea întreagă. La 12 ore era o idee proastă cu
+fitil scurt; la 30 de zile ar fi fost una cu fitil de o lună.
+
+Acum refresh token-ul călătorește într-un cookie `HttpOnly` + `Secure` +
+`SameSite=Strict`, limitat pe calea `/api/auth`. JavaScript-ul aplicației nu-l
+mai poate citi — acesta e tot rostul. Access token-ul rămâne în memorie, unde
+era deja.
+
+CSRF, pe scurt: toate rutele autentificate citesc un header `Bearer`, niciodată
+cookie-ul, deci un POST cross-site n-are pe ce călări. Singurele două rute care
+citesc cookie-ul sunt refresh și logout.
+
+### Access token-ul redevine scurt
+
+Un lucru găsit la review-ul propriei schimbări, înainte de livrare: access
+token-ul era semnat cu durata sesiunii de admin. Cu 720h, bearer-ul pe care
+îl acceptă fiecare rută API ar fi devenit valabil o lună — iar mutarea
+refresh-ului în cookie n-ar mai fi însemnat aproape nimic. Acum access token-ul
+are 15 minute și se reînnoiește tăcut; numărul mare spune cât stai autentificat,
+cel mic spune cât valorează o credențială scursă.
+
+### Plafon absolut de sesiune
+
+Un `sat` (session started at) trece nemodificat prin fiecare rotație, iar
+sesiunea moare la 30 de zile de la login indiferent cât de activă e. Rotația
+reînnoiește token-ul, nu sesiunea. OWASP cere explicit un timeout absolut peste
+cel de inactivitate: „încă ești logat" trebuie să înceteze cândva.
+
+Consecință de spus direct: cu inactivitate 720h și plafon absolut de 30 de zile,
+plafonul absolut e granița reală. Cronometrul de inactivitate nu mai apucă să se
+declanșeze — exact efectul cerut.
+
+### Furt de token: detectat, cu marjă pentru taburi
+
+Rotația revocă token-ul vechi. Dacă unul deja rotit revine, cineva rejoacă o
+copie — iar răspunsul sigur la un semnal ambiguu e „furt": toată familia de
+token-uri moare. Verificarea amprentei de dispozitiv rulează prima, ca un token
+prezentat de pe altă mașină să nu treacă.
+
+Cu o marjă de 20 de secunde, totuși: două taburi care pornesc simultan prezintă
+același token, iar al doilea nu e un hoț, e o cursă cu sine. În fereastra aceea
+token-ul rejucat primește propriul succesor în loc de un logout global.
+
+### Toate sesiunile vechi sunt invalidate
+
+Orice refresh token emis înainte de 6.13.0 e refuzat. Cele vechi au stat în
+`localStorage` și au 30 de zile de viață: o copie exfiltrată ieri ar fi rămas o
+sesiune validă până luna viitoare, iar curățarea din browserul victimei șterge
+doar copia ei. Toată lumea se autentifică o dată, iar asta e costul întreg al
+migrării.
+
+### Ce protejează acțiunile distructive
+
+Ștergerea companiei, transferul de proprietate și schimbarea parolei cer parola
+inline, ca înainte. Ștergerea definitivă din Trash NU cere — a fost încercată
+în timpul dezvoltării acestui release și scoasă înainte de livrare: elementele
+sunt deja șterse o dată de aceeași persoană, iar un prompt de parolă la fiecare
+curățare de Trash e fricțiune care se învață să fie ignorată, nu securitate.
+
+### Eliminat
+
+- `framecomment_refresh_token` din `localStorage`. Este șters automat la prima
+  încărcare după update — un rest de credențială nu se lasă în browserul
+  nimănui.
+
+
 ## [6.12.0] - 2026-08-17
 
 ### Preview-ul din scrub arăta alt moment decât cel de sub cursor

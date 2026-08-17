@@ -10,9 +10,14 @@ import { getActiveBackend, backendIsLocalFilesystem, type StorageBackend } from 
 import { generateThumbnail } from '@/lib/ffmpeg'
 import path from 'path'
 import fs from 'fs'
-import { Readable } from 'stream'
+import { PassThrough, Readable } from 'stream'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { logError, logMessage } from '@/lib/logging'
+
+/** Aborts are routine (pause, cancel, tab close) — noisy only when debugging. */
+const debugLog = (...args: unknown[]) => {
+  if (process.env.DEBUG_UPLOADS === 'true') logMessage(...(args as [string]))
+}
 import { parseBearerToken, verifyAdminAccessToken, verifyShareToken } from '@/lib/auth'
 import { handleReverseShareUploadNotification } from '@/lib/upload-notifications'
 
@@ -358,10 +363,28 @@ const UPLOAD_PROGRESS_THROTTLE_MS = 1500
         where: { id: videoId },
         data: { uploadProgress: pct },
       })
-      .catch((err) => {
-        // Don't blow up the upload because we couldn't update a
-        // progress field. Most likely the row got deleted mid-
-        // upload (user navigated away + cancelled). Swallow.
+      .catch(async (err) => {
+        // 6.14.0: P2025 = the row this session belongs to is gone. That is
+        // not a progress-write hiccup to swallow, it is a dead session, and
+        // swallowing it is what let a resumed upload stream gigabytes into
+        // nothing and then report success — the file finished, the video
+        // never appeared.
+        //
+        // Kill the session here, on the first chunk that notices, so the
+        // client gets a hard 404 on its next PATCH instead of a silent void.
+        // The old behaviour only caught this at the very END, in
+        // `handleVideoUploadFinish`, after the whole file had been re-sent.
+        if ((err as { code?: string })?.code === 'P2025') {
+          logMessage(
+            `[UPLOAD] Session ${upload?.id} belongs to a deleted video (${videoId}) — terminating it`,
+          )
+          try {
+            await (tusServer.datastore as any).remove?.(upload.id)
+          } catch (removeErr) {
+            logError('[UPLOAD] Could not remove the orphaned TUS session:', removeErr)
+          }
+          return
+        }
         logError(`[UPLOAD] uploadProgress update failed for ${videoId}:`, err)
       })
   } catch (err) {
@@ -831,6 +854,34 @@ export const config = {
   maxDuration: 3600,
 }
 
+/**
+ * 6.14.0 — pausing or cancelling an upload must not be able to take the
+ * process down.
+ *
+ * Pause aborts the in-flight PATCH. Node's `IncomingMessage` then emits
+ * `aborted` and an `ECONNRESET` error, and because `Readable.toWeb(req)` hands
+ * the stream to the TUS server without anybody listening for `error` on the
+ * original request, that error had no handler:
+ *
+ *     Error: aborted { code: 'ECONNRESET' }
+ *     ⨯ uncaughtException: Error: aborted
+ *
+ * In dev Next prints it and carries on. In production an uncaughtException is
+ * a process-level event — one paused upload should never be able to decide the
+ * fate of the server. It is also not an error in any meaningful sense: the
+ * user pressed Pause, and TUS is built to resume from exactly there.
+ */
+function isClientAbort(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  const message = (error as Error | null)?.message || ''
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ECONNABORTED' ||
+    message === 'aborted' ||
+    message.includes('aborted')
+  )
+}
+
 function toWebRequest(req: NextApiRequest): Request {
   const protocol = req.headers['x-forwarded-proto'] || 'http'
   const host = req.headers['x-forwarded-host'] || req.headers.host
@@ -845,8 +896,38 @@ function toWebRequest(req: NextApiRequest): Request {
 
   let body: ReadableStream | undefined
   if (req.method !== 'GET' && req.method !== 'HEAD') {
+    // An `error` listener on the IncomingMessage is necessary but NOT
+    // sufficient. `Readable.toWeb(req)` hands the socket straight to the TUS
+    // server, and when the client aborts, the failure surfaces inside the web
+    // stream's read loop — a floating promise that never passes through the
+    // try/catch around `handleWeb`, which is why the uncaughtException
+    // survived the first attempt at this fix.
+    //
+    // So the request is piped through a PassThrough that turns an abort into a
+    // clean END instead of an error. Nothing downstream can throw: TUS reads a
+    // short body, writes the bytes it received, and answers with the new
+    // offset — which is precisely what a paused upload IS in the protocol. The
+    // client then resumes from that offset, exactly as it does today.
+    const safeBody = new PassThrough()
+    const finishQuietly = (why: string) => {
+      debugLog(`[UPLOAD] ${why} — closing the request stream cleanly`)
+      if (!safeBody.writableEnded) safeBody.end()
+    }
+    req.on('aborted', () => finishQuietly('Client aborted (pause / cancel)'))
+    req.on('error', (err) => {
+      if (isClientAbort(err)) {
+        finishQuietly('Client closed the connection')
+        return
+      }
+      logError('[UPLOAD] Request stream error:', err)
+      if (!safeBody.writableEnded) safeBody.end()
+    })
+    // A PassThrough that nobody is reading from yet must not blow up either.
+    safeBody.on('error', (err) => logError('[UPLOAD] Upload body stream error:', err))
+    req.pipe(safeBody)
+
     // @ts-ignore
-    body = Readable.toWeb(req)
+    body = Readable.toWeb(safeBody)
   }
 
   return new Request(url, {
@@ -859,6 +940,17 @@ function toWebRequest(req: NextApiRequest): Request {
 }
 
 async function fromWebResponse(webRes: Response, res: NextApiResponse): Promise<void> {
+  if (res.writableEnded) return
+
+  // The client may have hung up while the TUS server was still working. There
+  // is nobody to write to, but the handler must still END the response —
+  // returning early is what produced "API resolved without sending a response
+  // for /api/uploads/..., this may result in stalled requests."
+  if (res.destroyed) {
+    res.end()
+    return
+  }
+
   res.status(webRes.status)
 
   webRes.headers.forEach((value, key) => {
@@ -869,16 +961,19 @@ async function fromWebResponse(webRes: Response, res: NextApiResponse): Promise<
     const reader = webRes.body.getReader()
     try {
       while (true) {
+        if (res.destroyed) break
         const { done, value } = await reader.read()
         if (done) break
         res.write(value)
       }
+    } catch (err) {
+      if (!isClientAbort(err)) throw err
     } finally {
       reader.releaseLock()
     }
   }
 
-  res.end()
+  if (!res.writableEnded) res.end()
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -887,9 +982,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const webResponse = await tusServer.handleWeb(webRequest)
     await fromWebResponse(webResponse, res)
   } catch (error) {
+    if (isClientAbort(error)) {
+      // Pause / cancel / navigate-away. Nothing to report and nobody to
+      // report it to — the socket is already gone.
+      debugLog('[UPLOAD] Request aborted by the client, no response sent')
+      if (!res.writableEnded) res.end()
+      return
+    }
     logError('[UPLOAD] Pages Router Error:', error)
-    res.status(500).json({
-      error: 'Internal server error',
-    })
+    if (!res.writableEnded) {
+      res.status(500).json({
+        error: 'Internal server error',
+      })
+    }
   }
 }

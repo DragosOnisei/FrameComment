@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { apiFetch, attemptRefresh } from '@/lib/api-client'
-import { clearTokens, getAccessToken, getRefreshToken } from '@/lib/token-store'
+import { clearTokens, getAccessToken } from '@/lib/token-store'
 
 interface User {
   id: string
@@ -136,17 +136,18 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
    */
   async function logout() {
     try {
-      const refreshToken = getRefreshToken()
       const accessToken = getAccessToken()
 
-      await fetch('/api/auth/logout', { 
+      // 6.13.0: the refresh token rides along as an HttpOnly cookie, so there
+      // is nothing to put in the body — the server reads it and clears it.
+      await fetch('/api/auth/logout', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-          ...(refreshToken ? { 'X-Refresh-Token': `Bearer ${refreshToken}` } : {}),
         },
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({}),
       })
     } catch (error) {
       // Continue with local logout even if API call fails

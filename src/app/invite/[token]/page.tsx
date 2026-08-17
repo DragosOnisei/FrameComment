@@ -89,10 +89,9 @@ function InviteForm() {
         return
       }
 
-      if (data?.tokens?.accessToken && data?.tokens?.refreshToken) {
+      if (data?.tokens?.accessToken) {
         setTokens({
           accessToken: data.tokens.accessToken,
-          refreshToken: data.tokens.refreshToken,
         })
       } else {
         clearTokens()

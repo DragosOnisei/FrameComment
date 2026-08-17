@@ -2,6 +2,7 @@ import { prisma } from '../lib/db'
 import { downloadFile, uploadFile, getLocalSourcePath } from '../lib/storage'
 import { getVideoBackend, type StorageBackend } from '../lib/storage-backends'
 import { transcodeVideo, generateThumbnail, generateStoryboard, getVideoMetadata, remuxToHls, VideoMetadata } from '../lib/ffmpeg'
+import { isEncodeStopped } from '../lib/encode-cancel'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -385,6 +386,22 @@ export async function processPreview(
           // Once the abort fires, stop touching the DB — ffmpeg is
           // being torn down, no point fighting the row that's gone.
           if (abortController.signal.aborted) return
+
+          // 6.14.0: STOP means stop.
+          //
+          // The first cut of this feature only refused to SAVE the tier once
+          // it finished, which left ffmpeg chewing through a 4K encode for
+          // another ten minutes after the click — visible in the player's
+          // quality menu as tiers still ticking up. The abort machinery to do
+          // it properly was already here for the delete-mid-encode case; this
+          // reuses it. Checked on the same throttled tick as the progress
+          // write, so it costs one Redis GET every 1.5s per active encode.
+          if (await isEncodeStopped(videoId)) {
+            debugLog(`Encode stopped by the user — killing ffmpeg for ${videoId}`)
+            abortController.abort()
+            return
+          }
+
           const now = Date.now()
           // 1.9.4+ Phase A: write more often (every 1.5s instead
           // of every 3s) so the share-page spinner climbs visibly

@@ -496,6 +496,7 @@ export async function POST(request: NextRequest) {
     if (parentId) {
       await notifyCommentReply({
         parentCommentId: parentId,
+        replyCommentId: comment.id,
         actorUserId: authContext.user?.id ?? null,
         actorName:
           contentValidation.sanitizedAuthorName ?? authContext.user?.name ?? null,

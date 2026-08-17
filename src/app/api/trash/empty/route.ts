@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
   }, 'admin-trash-empty')
   if (rl) return rl
 
+
   try {
     // Pull every trashed video + folder + project, then permanently
     // delete each one. Done one at a time so a single storage

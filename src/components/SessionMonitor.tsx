@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { getAccessToken, getRefreshToken, clearTokens, subscribe } from '@/lib/token-store'
+import { getAccessToken, clearTokens, subscribe } from '@/lib/token-store'
 
 // 2.4.2+: raised from 15 minutes → 12 hours. Matches the new
 // SecuritySettings schema default. The /api/settings/security
@@ -12,7 +12,7 @@ import { getAccessToken, getRefreshToken, clearTokens, subscribe } from '@/lib/t
 // only fires while the fetch is in flight or if it fails outright,
 // preventing a sub-minute "session expired" flash on the first
 // page of the day.
-const DEFAULT_INACTIVITY_TIMEOUT_MS = 12 * 60 * 60 * 1000 // 12 hours
+const DEFAULT_INACTIVITY_TIMEOUT_MS = 720 * 60 * 60 * 1000 // 720 hours (30 days)
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
 // 6.12.0: raised from 24 h. Matches ADMIN_REFRESH_TTL_SECONDS (30 days).
 const MAX_INACTIVITY_SECONDS = 720 * 60 * 60
@@ -76,16 +76,15 @@ export default function SessionMonitor() {
 
   const handleLogout = useCallback(async () => {
     const accessToken = getAccessToken()
-    const refreshToken = getRefreshToken()
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-          ...(refreshToken ? { 'X-Refresh-Token': `Bearer ${refreshToken}` } : {}),
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({}),
       })
     } catch (error) {
       // ignore

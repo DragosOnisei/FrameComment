@@ -1,9 +1,88 @@
 'use client'
 
-import { useState } from 'react'
-import { Upload, Cog, ChevronDown, ChevronUp, CheckCircle2, FolderOpen } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Upload, Cog, ChevronDown, ChevronUp, CheckCircle2, FolderOpen, Trash2, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { useProcessingStatus, type ProcessingVideo } from '@/contexts/ProcessingStatusContext'
+import { ConfirmModal } from '@/components/ConfirmModal'
+import { apiDelete, apiPost } from '@/lib/api-client'
+import { logError } from '@/lib/logging'
+
+/**
+ * 6.14.0 — live transfer rate for the upload banner.
+ *
+ * The banner is fed by the server: it polls `/api/processing-status`, which
+ * reports each row's `uploadProgress`. That number is bumped by the TUS
+ * endpoint as chunks land, so the DIFFERENCE between two polls is real bytes
+ * over real time — no client-side transfer state required. Which is the point:
+ * this works for an upload running in another tab, in another browser, or from
+ * `bulk-upload.mjs` on a different machine entirely.
+ *
+ * Until now the megabytes-per-second readout lived only inside the upload
+ * modal, over its own TUS progress events. Close the modal — or upload from
+ * anywhere else — and the banner could only show a percentage that sometimes
+ * sat still for minutes with no way to tell "slow" from "dead".
+ *
+ * Smoothing: an exponential moving average, because a 3-second poll against a
+ * chunked transfer is naturally lumpy — two chunks landing in one window and
+ * none in the next would otherwise read as 40 MB/s followed by 0.
+ */
+function useTransferRate(video: ProcessingVideo, enabled: boolean) {
+  const [mbps, setMbps] = useState<number | null>(null)
+  const [stalledMs, setStalledMs] = useState(0)
+  const sample = useRef<{ bytes: number; at: number } | null>(null)
+  const ema = useRef<number | null>(null)
+  // Seeded on the first effect run, not during render — `Date.now()` in a
+  // render body is impure and React's lint rule is right to refuse it.
+  const lastMoveAt = useRef<number | null>(null)
+
+  const size = video.originalFileSize ?? 0
+  const pct = Math.max(0, Math.min(100, video.uploadProgress ?? 0))
+  const bytes = size > 0 ? (size * pct) / 100 : pct // percent-only fallback
+
+  useEffect(() => {
+    if (!enabled) return
+    const now = Date.now()
+    if (lastMoveAt.current == null) lastMoveAt.current = now
+    const prev = sample.current
+    sample.current = { bytes, at: now }
+    if (!prev) return
+
+    const dt = (now - prev.at) / 1000
+    const moved = bytes - prev.bytes
+    if (dt <= 0) return
+
+    if (moved > 0) {
+      lastMoveAt.current = now
+      if (size > 0) {
+        const instant = moved / dt / (1024 * 1024)
+        ema.current = ema.current == null ? instant : ema.current * 0.6 + instant * 0.4
+        setMbps(ema.current)
+      }
+    }
+  }, [bytes, enabled, size])
+
+  // A second ticker so "no data for 18s" counts up on screen instead of only
+  // updating when a poll happens to bring new bytes.
+  useEffect(() => {
+    if (!enabled) {
+      setStalledMs(0)
+      return
+    }
+    const t = setInterval(() => {
+      if (lastMoveAt.current == null) lastMoveAt.current = Date.now()
+      const quiet = Date.now() - lastMoveAt.current
+      setStalledMs(quiet)
+      if (quiet > 8000) setMbps(0)
+    }, 1000)
+    return () => clearInterval(t)
+  }, [enabled])
+
+  return { mbps, stalledMs }
+}
+
+/** No bytes for this long and we stop calling it "uploading". */
+const BANNER_STALL_MS = 20_000
 
 /**
  * 2.0.x+: bottom-right pair of "Uploading X/Y videos" and
@@ -167,6 +246,63 @@ function computeSmoothProgressForVideo(
   return totalFraction / planned.length
 }
 
+
+/**
+ * 6.14.0 — count TIERS for the encoding banner, not videos.
+ *
+ * The header used to read "0 / 2 done" while the bar underneath sat at 16% and
+ * a row visibly ground through a 4K encode. Both numbers were true — zero
+ * VIDEOS had finished — but put next to each other they read as a bug, and the
+ * banner is literally labelled "Encoding tiers". So count the thing the label
+ * names: individual tiers, which finish every few minutes instead of every
+ * half hour, and move while you watch.
+ *
+ * Videos that finish leave the polled list entirely, so their tiers are folded
+ * into a running base — otherwise the denominator would shrink as work
+ * completes and "3 / 8" would become "1 / 4", which looks like going
+ * backwards. The base resets once the queue drains.
+ */
+function useTierTally(videos: ProcessingVideo[], isDone: boolean) {
+  // Base = tiers belonging to videos that have already left the list. Held in
+  // state (not a ref) so reading it during render is legitimate.
+  const [base, setBase] = useState<{ done: number; total: number }>({ done: 0, total: 0 })
+  const [seen, setSeen] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    if (isDone) {
+      setBase({ done: 0, total: 0 })
+      setSeen({})
+      return
+    }
+    const live = new Set(videos.map((v) => v.id))
+    setSeen((prevSeen) => {
+      let finishedTiers = 0
+      const next: Record<string, number> = {}
+      for (const [id, planned] of Object.entries(prevSeen)) {
+        if (live.has(id)) continue
+        // Gone from the list = finished. Its whole ladder counts as done.
+        finishedTiers += planned
+      }
+      for (const v of videos) next[v.id] = v.plannedTiers?.length ?? 0
+      if (finishedTiers > 0) {
+        setBase((b) => ({ done: b.done + finishedTiers, total: b.total + finishedTiers }))
+      }
+      const sameKeys =
+        Object.keys(next).length === Object.keys(prevSeen).length &&
+        Object.keys(next).every((k) => prevSeen[k] === next[k])
+      return sameKeys ? prevSeen : next
+    })
+  }, [videos, isDone])
+
+  let done = base.done
+  let total = base.total
+  for (const v of videos) {
+    done += v.completedTiers?.length ?? 0
+    total += v.plannedTiers?.length ?? 0
+  }
+  return { done, total }
+}
+
 function StatusBanner({
   kind,
   current,
@@ -179,8 +315,56 @@ function StatusBanner({
   videos: ProcessingVideo[]
 }) {
   const [expanded, setExpanded] = useState(false)
+  const { refetch } = useProcessingStatus()
+  // 6.14.0: cancelling from the banner. The pip turns into a bin on hover,
+  // and this is the confirmation behind it.
+  const [pendingCancel, setPendingCancel] = useState<ProcessingVideo | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  // What survives a stop: exactly the tiers already encoded. The dialog names
+  // only the HIGHEST of them — "keep SD and HD and HD+" is three ways of
+  // saying the same thing, because the ladder is cumulative: keeping HD+ means
+  // SD and HD are there too. The top rung is the number the person is deciding
+  // about.
+  const keptTiers = pendingCancel?.completedTiers ?? []
+  const keptTop = keptTiers.length > 0 ? highestTier(keptTiers) : null
+
+  const cancelVideo = useCallback(async (video: ProcessingVideo) => {
+    setCancelling(true)
+    try {
+      if (kind === 'processing') {
+        // 6.14.0: stopping an encode is not the same as discarding the video.
+        // The server keeps whatever tiers already landed and deletes the row
+        // only when none have — see /api/videos/[id]/stop-encoding.
+        const res = await apiPost(`/api/videos/${video.id}/stop-encoding`, {})
+        if (!res.ok && res.status !== 404) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body?.error || `HTTP ${res.status}`)
+        }
+      } else {
+        // An upload has nothing worth keeping: hard delete, skipping Trash.
+        // Deleting the row is also what un-stacks it — if this file was
+        // dropped onto an existing video as a new version, the reel goes back
+        // to the versions that actually exist.
+        const res = await apiDelete(`/api/videos/${video.id}?permanent=1`)
+        if (!res.ok && res.status !== 404) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body?.error || `HTTP ${res.status}`)
+        }
+      }
+    } catch (error) {
+      logError('[banner] Could not cancel:', error)
+    } finally {
+      setCancelling(false)
+      setPendingCancel(null)
+      // Re-poll immediately so the row disappears now rather than in three
+      // seconds — and so the banner closes if that was the last one.
+      refetch()
+    }
+  }, [refetch, kind])
+
   const total = Math.max(hwm, current)
   const done = Math.max(0, total - current)
+  const tierTally = useTierTally(videos, current === 0 && hwm > 0)
   // We treat the banner as "complete" only when the current
   // count is zero *and* something actually happened (hwm > 0).
   // The HWM reset window in the context will hide the banner a
@@ -247,9 +431,11 @@ function StatusBanner({
   // "queued" concept on the client side — every UPLOADING row IS
   // streaming bytes.
   const labelCount = isDone
-    ? `${total} / ${total} done`
+    ? kind === 'processing'
+      ? `${tierTally.total} / ${tierTally.total} tiers done`
+      : `${total} / ${total} done`
     : kind === 'processing'
-    ? `${done} / ${total} done`
+    ? `${tierTally.done} / ${tierTally.total} tiers done`
     : done > 0
     ? `${activeInFlight} in progress · ${done} / ${total} done`
     : `${activeInFlight} in progress`
@@ -361,18 +547,77 @@ function StatusBanner({
             ) : (
               <ul className="divide-y divide-white/10">
                 {visibleVideos.map((v) => (
-                  <VideoRow key={v.id} video={v} kind={kind} />
+                  <VideoRow
+                    key={v.id}
+                    video={v}
+                    kind={kind}
+                    onRequestCancel={setPendingCancel}
+                  />
                 ))}
               </ul>
             )}
           </div>
         )
       })()}
+
+      {/* 6.14.0: one confirmation, whichever pip was clicked. */}
+      <ConfirmModal
+        open={pendingCancel !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingCancel(null)
+        }}
+        title={kind === 'upload' ? 'Cancel this upload?' : 'Stop encoding?'}
+        description={
+          <>
+            <span className="font-medium text-white">{pendingCancel?.name}</span>{' '}
+            {kind === 'upload' ? (
+              <>
+                will stop uploading and be removed. Anything already
+                transferred is discarded, and if it was uploaded as a new
+                version of an existing video it is taken back out of that
+                version stack.
+              </>
+            ) : keptTop ? (
+              <>
+                will stop encoding and stay playable up to{' '}
+                <span className="font-medium text-white">{tierLabel(keptTop)}</span>
+                . The qualities still queued are cancelled.
+              </>
+            ) : (
+              <>
+                has not finished a single quality yet, so there is nothing
+                playable to keep — it will be removed.
+              </>
+            )}
+          </>
+        }
+        confirmLabel={
+          kind === 'upload'
+            ? 'Cancel upload'
+            : keptTop
+              ? `Stop and keep ${tierLabel(keptTop)}`
+              : 'Stop and remove'
+        }
+        cancelLabel="Keep going"
+        variant="destructive"
+        busy={cancelling}
+        onConfirm={() => {
+          if (pendingCancel) void cancelVideo(pendingCancel)
+        }}
+      />
     </div>
   )
 }
 
-function VideoRow({ video, kind }: { video: ProcessingVideo; kind: BannerKind }) {
+function VideoRow({
+  video,
+  kind,
+  onRequestCancel,
+}: {
+  video: ProcessingVideo
+  kind: BannerKind
+  onRequestCancel: (video: ProcessingVideo) => void
+}) {
   // Deep-link to the project page (or folder if known) so the
   // user can click straight from the banner into the right
   // place. Versions of the same upload share project + folder.
@@ -392,7 +637,11 @@ function VideoRow({ video, kind }: { video: ProcessingVideo; kind: BannerKind })
   // run client-side), so we additionally fall back to "the row
   // has uploadProgress > 0" as a sign that bytes are flowing.
   const uploadInFlight = kind === 'upload' && (video.uploadProgress ?? 0) > 0
-  const isActive = video.isActive || uploadInFlight
+  const { mbps, stalledMs } = useTransferRate(video, kind === 'upload')
+  const stalled = kind === 'upload' && stalledMs > BANNER_STALL_MS
+  // A stalled transfer is not an active one — dim it like a queued row so the
+  // banner stops implying that bytes are moving.
+  const isActive = (video.isActive || uploadInFlight) && !stalled
 
   return (
     <li>
@@ -416,8 +665,29 @@ function VideoRow({ video, kind }: { video: ProcessingVideo; kind: BannerKind })
             <FolderOpen className="w-2.5 h-2.5 shrink-0" />
             <span className="truncate">{video.projectTitle || 'Untitled project'}</span>
           </div>
+          {kind === 'upload' && (
+            <div className="text-[10px] truncate">
+              {stalled ? (
+                <span className="text-amber-400 flex items-center gap-1">
+                  <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                  No data for {Math.round(stalledMs / 1000)}s — retrying
+                </span>
+              ) : mbps != null ? (
+                <span className="text-white/45 tabular-nums">
+                  {mbps.toFixed(1)} MB/s
+                </span>
+              ) : (
+                <span className="text-white/35">Starting…</span>
+              )}
+            </div>
+          )}
         </div>
-        <StatusPip kind={kind} active={isActive} video={video} />
+        <StatusPip
+          kind={kind}
+          active={isActive}
+          video={video}
+          onCancel={() => onRequestCancel(video)}
+        />
       </Link>
     </li>
   )
@@ -592,6 +862,21 @@ function getInProgressTier(video: ProcessingVideo): string | null {
   return null
 }
 
+/** '480p' → 'SD', so the confirmation speaks the same language as the pip. */
+function tierLabel(tier: string): string {
+  return TIER_LABEL[tier] || tier
+}
+
+/** The top rung of a set of tiers, in ladder order. */
+function highestTier(tiers: string[]): string | null {
+  let best = -1
+  for (const tier of tiers) {
+    const idx = TIER_ORDER.indexOf(tier)
+    if (idx > best) best = idx
+  }
+  return best >= 0 ? TIER_ORDER[best] : null
+}
+
 function getInProgressTierLabel(video: ProcessingVideo): string | null {
   const tier = getInProgressTier(video)
   return tier ? TIER_LABEL[tier] || tier : null
@@ -618,12 +903,20 @@ function StatusPip({
   kind,
   active,
   video,
+  onCancel,
 }: {
   kind: BannerKind
   active: boolean
   video: ProcessingVideo
+  onCancel: () => void
 }) {
   const SIZE = 36
+  // 6.14.0: hover the pip and it offers to stop the thing it is reporting on.
+  // The pip is already the row's status object — the dot for a transfer, the
+  // SD/HD/4K ring for an encode — so turning it into a bin on hover puts the
+  // escape hatch exactly where the eye already is, without adding a button to
+  // every row.
+  const [hovered, setHovered] = useState(false)
   const tierLabel = getInProgressTierLabel(video)
   // 2.2.10+: read per-tier progress so the ring around the label
   // fills 0..100 instead of staying a flat static border. Only
@@ -688,9 +981,24 @@ function StatusPip({
       ? 'Active — worker just started this video'
       : 'Queued — waiting for a worker slot'
   return (
-    <div
-      className={`shrink-0 relative rounded-full flex items-center justify-center ${
-        showRing ? '' : `border ${ringColour}`
+    <button
+      type="button"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+      onClick={(e) => {
+        // The whole row is a link to the project; cancelling must not navigate.
+        e.preventDefault()
+        e.stopPropagation()
+        onCancel()
+      }}
+      className={`shrink-0 relative rounded-full flex items-center justify-center transition-colors ${
+        hovered
+          ? 'ring-1 ring-destructive/50 bg-destructive/15'
+          : showRing
+            ? ''
+            : `border ${ringColour}`
       }`}
       style={{ width: SIZE, height: SIZE }}
       aria-label={
@@ -699,16 +1007,20 @@ function StatusPip({
           : labelAria
       }
       title={
-        showRing
-          ? `${labelTitle} (${Math.round(tierPercent!)}%)`
-          : labelTitle
+        hovered
+          ? kind === 'upload'
+            ? 'Cancel this upload'
+            : 'Cancel this encode'
+          : showRing
+            ? `${labelTitle} (${Math.round(tierPercent!)}%)`
+            : labelTitle
       }
     >
       {/* 2.2.10+: SVG progress ring. Inset 2px from the box edge so
           the stroke sits just inside the rounded container. Track
           (faint background arc) draws the full circle; the
           foreground arc draws `tierPercent` of it. */}
-      {showRing && (
+      {showRing && !hovered && (
         <svg
           className="absolute inset-0 -rotate-90"
           width={SIZE}
@@ -740,7 +1052,9 @@ function StatusPip({
           />
         </svg>
       )}
-      {tierLabel ? (
+      {hovered ? (
+        <Trash2 className="relative w-4 h-4 text-destructive" aria-hidden />
+      ) : tierLabel ? (
         <span
           className={`relative text-[10px] font-semibold tracking-tight tabular-nums ${textColour} ${
             // 2.2.10+: when the ring is doing the "alive" job, drop
@@ -756,7 +1070,7 @@ function StatusPip({
           className={`block w-1.5 h-1.5 rounded-full ${dotColour} ${active ? 'animate-pulse' : ''}`}
         />
       )}
-    </div>
+    </button>
   )
 }
 

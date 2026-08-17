@@ -1,0 +1,12 @@
+-- 6.14.0 — a notification remembers WHICH comment it is about.
+--
+-- Clicking a reply notification opened the right video and then left you at
+-- the top of the thread to find the reply yourself. The review page has known
+-- how to focus a comment (`?comment=<id>`) for a long time; the bell simply
+-- never had the id to put in the link.
+--
+-- Nullable and unconstrained on purpose: "new comments" rows summarise several
+-- comments and carry none, rows created before this release have none, and a
+-- notification whose comment was later deleted should still open the video
+-- rather than disappear.
+ALTER TABLE "Notification" ADD COLUMN IF NOT EXISTS "commentId" TEXT;

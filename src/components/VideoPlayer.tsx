@@ -2020,6 +2020,31 @@ export default function VideoPlayer({
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       const dur = videoRef.current.duration
+
+      // 6.14.0: carry the playhead across a version switch.
+      //
+      // Picking another version swaps the <video> src, and a fresh element
+      // starts at 0 — but `currentTimeRef` (and with it the timeline UI) still
+      // held the old position. So the bar looked right, the preview looked
+      // right, and pressing Play jumped to the beginning. The bar was telling
+      // the truth about where you were; the element simply hadn't been told.
+      //
+      // Only when the element really is at the start: an initial seek from a
+      // comment deep-link has already positioned it by this point, and this
+      // must not undo it.
+      const resumeAt = currentTimeRef.current
+      if (
+        Number.isFinite(dur) &&
+        dur > 0 &&
+        resumeAt > 0.05 &&
+        videoRef.current.currentTime < 0.05
+      ) {
+        const target = Math.min(resumeAt, Math.max(0, dur - 0.05))
+        videoRef.current.currentTime = target
+        currentTimeRef.current = target
+        setCurrentTimeState(target)
+      }
+
       setVideoDuration(dur)
       setVolume(videoRef.current.volume)
       setIsMuted(videoRef.current.muted)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyCredentials, issueAdminTokens } from '@/lib/auth'
+import { setRefreshCookie } from '@/lib/auth-cookies'
 import { checkRateLimit, incrementRateLimit, clearRateLimit } from '@/lib/rate-limit'
 import { validateRequest, loginSchema, safeParseBody } from '@/lib/validation'
 import { logSecurityEvent } from '@/lib/video-access'
@@ -240,8 +241,9 @@ export async function POST(request: NextRequest) {
       },
     }).catch(() => {})
 
-    // Return user data (without password)
-    return NextResponse.json({
+    // 6.13.0: the refresh token is NOT in this body. It goes back as an
+    // HttpOnly cookie the page's JavaScript cannot read — see lib/auth-cookies.
+    const response = NextResponse.json({
       success: true,
       user: {
         id: user.id,
@@ -254,11 +256,11 @@ export async function POST(request: NextRequest) {
       },
       tokens: {
         accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
         accessExpiresAt: tokens.accessExpiresAt,
         refreshExpiresAt: tokens.refreshExpiresAt,
       },
     })
+    return setRefreshCookie(response, request, tokens.refreshToken, tokens.refreshMaxAgeSeconds)
   } catch (error) {
     return NextResponse.json(
       { error: authMessages.errorOccurredDuringLogin || 'An error occurred during login' },

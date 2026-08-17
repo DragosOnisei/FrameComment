@@ -412,7 +412,7 @@ export async function DELETE(
   try {
     const existing = await prisma.folder.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, deletedAt: true } as any,
     })
     if (!existing) {
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 })

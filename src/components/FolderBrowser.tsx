@@ -329,6 +329,12 @@ interface VideoGroup {
   /** Worker transcode progress 0..100 for the latest version
    *  (status = PROCESSING). Drives the same bar. */
   processingProgress?: number | null
+  /** 6.14.0: the encode ladder, for the card's quality chip. */
+  plannedTiers?: string[] | null
+  completedTiers?: string[] | null
+  /** 6.14.0: sprite geometry, so the card scrubs the sheet it actually has. */
+  storyboardCols?: number | null
+  storyboardRows?: number | null
   /** Sum of comments across every version in the group. */
   commentCount: number
   /** "uploader" = createdBy of the latest version. */
@@ -1171,6 +1177,13 @@ function FolderBrowserInner(
         originalFileSize: latest.originalFileSize ?? null,
         storageBackend: (latest as any).storageBackend ?? null,
         storageLocations: (latest as any).storageLocations ?? null,
+        // 6.14.0: the card's quality chip reads these. They were being
+        // dropped here, so `completedTiers` arrived undefined and the chip
+        // never rendered — the data was in the API response all along.
+        plannedTiers: (latest as any).plannedTiers ?? null,
+        completedTiers: (latest as any).completedTiers ?? null,
+        storyboardCols: (latest as any).storyboardCols ?? null,
+        storyboardRows: (latest as any).storyboardRows ?? null,
       })
     }
     // Order the unified grid by the shared admin sort mode: name A→Z / Z→A,
@@ -3907,6 +3920,8 @@ function FolderBrowserInner(
               status={v.status}
               uploadProgress={v.uploadProgress ?? null}
               processingProgress={v.processingProgress ?? null}
+              storyboardCols={(v as any).storyboardCols ?? null}
+              storyboardRows={(v as any).storyboardRows ?? null}
               plannedTiers={(v as any).plannedTiers ?? null}
               completedTiers={(v as any).completedTiers ?? null}
               commentCount={v.commentCount}

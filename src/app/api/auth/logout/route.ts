@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { rateLimit } from '@/lib/rate-limit'
 import { parseBearerToken, revokePresentedTokens } from '@/lib/auth'
+import { clearRefreshCookie, readRefreshCookie } from '@/lib/auth-cookies'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -36,14 +37,19 @@ export async function POST(request: NextRequest) {
 
     await revokePresentedTokens({ accessToken, refreshToken })
 
-    return NextResponse.json({ success: true })
+    return clearRefreshCookie(NextResponse.json({ success: true }), request)
   } catch (error) {
     logError('Logout error:', error)
-    return NextResponse.json({ success: true })
+    return clearRefreshCookie(NextResponse.json({ success: true }), request)
   }
 }
 
 async function extractRefreshToken(request: NextRequest): Promise<string | null> {
+  // 6.13.0: the cookie is the browser's copy. Header/body are kept for the
+  // device flow and for clients that still send them.
+  const cookieToken = readRefreshCookie(request)
+  if (cookieToken) return cookieToken
+
   let token = request.headers.get('x-refresh-token')
   if (token?.toLowerCase().startsWith('bearer ')) {
     token = token.slice(7)
