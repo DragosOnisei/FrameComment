@@ -72,6 +72,11 @@ interface SubfolderRow {
         videoId: string
         thumbnailUrl: string
         storyboardUrl?: string
+        // 6.15.2: the sprite's real grid, alongside the sheet. Without it the
+        // tile assumed 10×10 over sheets that are up to 20×20 since 6.9.3, and
+        // drew a 2×2 block of frames as if it were one.
+        storyboardCols?: number | null
+        storyboardRows?: number | null
       }
     | { kind: 'folder'; folderId: string }
   >
@@ -91,6 +96,8 @@ interface VideoRow {
   thumbnailUrl?: string | null
   previewUrl?: string | null
   storyboardUrl?: string | null
+  storyboardCols?: number | null
+  storyboardRows?: number | null
   createdAt?: string
   commentCount?: number
   createdBy?: {
@@ -557,6 +564,8 @@ function PublicFolderSharePageInner() {
       thumbnailUrl?: string | null
       previewUrl?: string | null
       storyboardUrl?: string | null
+      storyboardCols?: number | null
+      storyboardRows?: number | null
       status?: string
       commentCount: number
       uploaderName: string | null
@@ -580,6 +589,8 @@ function PublicFolderSharePageInner() {
         thumbnailUrl: latest.thumbnailUrl ?? null,
         previewUrl: latest.previewUrl ?? null,
         storyboardUrl: latest.storyboardUrl ?? null,
+        storyboardCols: latest.storyboardCols ?? null,
+        storyboardRows: latest.storyboardRows ?? null,
         status: latest.status,
         // Latest version's own comments (per-version count from the
         // server), so a fresh v2 with no comments reads 0 — not the
@@ -812,6 +823,8 @@ function PublicFolderSharePageInner() {
                   thumbnailUrl={v.thumbnailUrl}
                   previewUrl={v.previewUrl}
                   storyboardUrl={v.storyboardUrl}
+                  storyboardCols={v.storyboardCols}
+                  storyboardRows={v.storyboardRows}
                   status={v.status}
                   commentCount={v.commentCount}
                   uploaderName={v.uploaderName}

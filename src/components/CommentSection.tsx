@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Comment, Video } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { CheckCircle2, MessageSquare, ChevronDown, ChevronUp, PanelRightClose, Pencil, Check, X as XIcon, Send } from 'lucide-react'
+import { CheckCircle2, MessageSquare, MessagesSquare, ClipboardPaste, ChevronDown, ChevronUp, PanelRightClose, Pencil, Check, X as XIcon, Send } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
@@ -21,6 +21,7 @@ import {
   getClippedComments,
   hasClippedComments,
   setClippedComments,
+  type ClippedComment,
 } from '@/lib/comments-clipboard'
 
 type CommentWithReplies = Comment & {
@@ -70,12 +71,15 @@ function InlineReplyForm({
   placeholder,
   onSubmit,
   onCancel,
+  initialText = '',
 }: {
   placeholder: string
   onSubmit: (text: string) => Promise<void> | void
   onCancel: () => void
+  /** 6.15.2: pre-typed "@Name " when answering a specific reply. */
+  initialText?: string
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText)
   const [submitting, setSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -85,7 +89,14 @@ function InlineReplyForm({
     const el = textareaRef.current
     if (!el) return
     // Slight delay so iOS Safari doesn't fight us on focus.
-    const t = setTimeout(() => el.focus(), 50)
+    const t = setTimeout(() => {
+      el.focus()
+      // With a "@Name " prefill the caret must land AFTER it — focus() alone
+      // selects nothing and leaves it at position 0, so the first keystroke
+      // would type in front of the mention.
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+    }, 50)
     return () => clearTimeout(t)
   }, [])
 
@@ -213,6 +224,7 @@ export default function CommentSection({
     handleNameSourceChange,
     handleAttachmentAdded,
     handleRemoveAttachment,
+    takePendingForEdit,
     handleAttachmentErrorChange,
     handleStartDrawing,
     handleClearAnnotation,
@@ -294,10 +306,27 @@ export default function CommentSection({
     videoId: string
   } | null>(null)
   const editingCommentEndTimecodeRef = useRef<string | null>(null)
+  /**
+   * 6.16.0: which comment is open for editing, tracked independently of the
+   * range bookkeeping above.
+   *
+   * `editingCommentRef` is only populated once the timecode parses — it exists
+   * to paint a range on the timeline, so bailing out on a comment without a
+   * usable one is correct for its purpose. But routing a drawing to the right
+   * comment must not inherit that condition: a comment with an odd or missing
+   * timecode would silently lose the annotation, with no error anywhere.
+   */
+  const editingCommentIdRef = useRef<string | null>(null)
+  // The same fact as state, because the composer has to re-render when an edit
+  // opens so it can say where a drawing will land.
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
 
   useEffect(() => {
     const onEditStart = (e: Event) => {
       const detail = (e as CustomEvent).detail || {}
+      // Recorded first, unconditionally — see `editingCommentIdRef`.
+      editingCommentIdRef.current = detail.commentId ?? null
+      setEditingCommentId(detail.commentId ?? null)
       const tc: string | undefined = detail.timecode
       const tcEnd: string | null = detail.timecodeEnd ?? null
       const vid: string | undefined = detail.videoId
@@ -331,6 +360,8 @@ export default function CommentSection({
     const onEditEnd = () => {
       editingCommentRef.current = null
       editingCommentEndTimecodeRef.current = null
+      editingCommentIdRef.current = null
+      setEditingCommentId(null)
       // Clear the timeline range. The hook's own commentRangeStateChanged
       // emitter will repaint the composer range (if any) on its next tick.
       window.dispatchEvent(
@@ -885,6 +916,31 @@ export default function CommentSection({
     if (editingForThis) {
       payload.timecodeEnd = editingCommentEndTimecodeRef.current
     }
+    // 6.16.0: fold in whatever the composer is holding.
+    //
+    // While a comment is open for editing, the attach and draw controls at the
+    // bottom belong to it — there is only one set of them, which is the point:
+    // duplicating them inside the edit box created two places to attach a file
+    // and no way to tell which one a drawing was meant for.
+    //
+    // Scoped to the comment actually being edited. Extras must never be
+    // hoovered up by an unrelated PATCH — a resolve or a rename going through
+    // this path would otherwise silently swallow a drawing the user was still
+    // working on.
+    if (editingCommentIdRef.current === commentId) {
+      const extras = takePendingForEdit(
+        editingCommentRef.current?.videoId ?? selectedVideoId ?? null,
+      )
+      if (extras.assetIds.length > 0) {
+        payload.assetIds = extras.assetIds
+      }
+      // Only when something was actually drawn. `undefined` is not the same as
+      // null here: null tells the server to erase the existing annotation, and
+      // wiping a drawing because someone fixed a typo would be unforgivable.
+      if (extras.annotations) {
+        payload.annotations = extras.annotations
+      }
+    }
     const body = JSON.stringify(payload)
     const response = isAdminView
       ? await apiFetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
@@ -904,7 +960,7 @@ export default function CommentSection({
       window.dispatchEvent(new CustomEvent('commentDeleted'))
     }
     await fetchComments()
-  }, [isAdminView, shareToken, fetchComments])
+  }, [isAdminView, shareToken, fetchComments, takePendingForEdit])
 
   // Initialize localComments only (no polling - hook handles optimistic updates)
   useEffect(() => {
@@ -1163,6 +1219,12 @@ export default function CommentSection({
 
   const replyingToComment = mergedComments.find(c => c.id === replyingToCommentId) || null
 
+  // 6.15.2: when Reply is clicked on a REPLY rather than the root comment, the
+  // composer opens addressed to that person. Kept next to the composer instead
+  // of inside it so it survives the input being re-mounted when the user
+  // switches from one thread to another.
+  const [replyMention, setReplyMention] = useState<string | null>(null)
+
   // Format message time
   const formatMessageTime = (date: Date) => {
     const now = new Date()
@@ -1264,54 +1326,50 @@ export default function CommentSection({
     return () => window.removeEventListener('storage', onStorage)
   }, [projectId])
 
-  const handleCopyComments = useCallback(() => {
-    // Snapshot what's currently visible in the sidebar (already
-    // filtered to the active video by `displayComments`). Includes
-    // replies as standalone entries on paste — a reasonable
-    // simplification for a single-pass version-bump review.
-    const flat = displayComments.map((c: any) => ({
+  /**
+   * Turn thread rows into clipboard records.
+   *
+   * 6.16.0: replies come along. They used to be dropped, so pasting into a new
+   * version produced a wall of orphaned questions — including ones already
+   * answered with "fixed, see 0:14". Carrying the note without its answer does
+   * not just lose detail, it actively misleads the next reviewer.
+   */
+  const toClipped = (list: any[]) =>
+    list.map((c: any) => ({
       content: c.content,
       timecode: c.timecode,
       timecodeEnd: c.timecodeEnd ?? null,
       timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
       authorName: c.authorName ?? null,
+      replies: Array.isArray(c.replies)
+        ? c.replies.map((r: any) => ({
+            content: r.content,
+            authorName: r.authorName ?? null,
+          }))
+        : [],
     }))
-    setClippedComments(projectId, flat)
-    setHasClipboardForProject(flat.length > 0)
-    return { count: flat.length }
+
+  const handleCopyComments = useCallback(() => {
+    // Snapshot what's currently visible in the sidebar (already filtered to
+    // the active video by `displayComments`).
+    const clipped = toClipped(displayComments as any[])
+    setClippedComments(projectId, clipped)
+    setHasClipboardForProject(clipped.length > 0)
+    // The count is what the user is told was copied, so it counts what they
+    // see in the list: threads, not individual messages.
+    return { count: clipped.length }
   }, [displayComments, projectId])
 
-  const handlePasteComments = useCallback(async () => {
-    const items = getClippedComments(projectId)
-    if (!items || items.length === 0) {
-      throw new Error('Nothing to paste')
-    }
-    if (!selectedVideoId) {
-      throw new Error('No video selected')
-    }
-    // Sequential POSTs so the backend rate-limiter doesn't reject
-    // half of them and so the order is preserved in the timeline.
-    let created = 0
-    for (const item of items) {
-      const body: Record<string, unknown> = {
-        projectId,
-        videoId: selectedVideoId,
-        timecode: item.timecode,
-        content: item.content,
-        isInternal: !!isAdminView,
-        // 3.8.x: flag pasted comments so the thread shows a "Copied" tag.
-        isCopied: true,
-      }
-      if (item.timecodeEnd) body.timecodeEnd = item.timecodeEnd
-      if (typeof item.timestampMs === 'number') body.timestampMs = item.timestampMs
-      if (item.authorName) body.authorName = item.authorName
-      const res = isAdminView
-        ? await apiFetch('/api/comments', {
+  /** One POST, admin or share flavour. */
+  const postComment = useCallback(
+    async (body: Record<string, unknown>) => {
+      return isAdminView
+        ? apiFetch('/api/comments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
           })
-        : await fetch('/api/comments', {
+        : fetch('/api/comments', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1319,15 +1377,165 @@ export default function CommentSection({
             },
             body: JSON.stringify(body),
           })
-      if (res.ok) created += 1
+    },
+    [isAdminView, shareToken],
+  )
+
+  /**
+   * Write a set of clipped threads onto the active video.
+   *
+   * Shared by the kebab's "Paste comments" and by 6.16.0's "Paste N comments
+   * from vX" button — same mechanics, the only difference is whether we also
+   * record where they came from.
+   *
+   * Sequential on purpose. The backend rate-limits comment creation, so firing
+   * twenty in parallel gets half of them rejected; and a reply cannot be
+   * posted until its parent exists and has an id.
+   */
+  const pasteThreads = useCallback(
+    async (
+      items: ClippedComment[],
+      source?: { videoId: string; versionLabel: string },
+    ) => {
+      if (!selectedVideoId) throw new Error('No video selected')
+      let created = 0
+      for (const item of items) {
+        const body: Record<string, unknown> = {
+          projectId,
+          videoId: selectedVideoId,
+          timecode: item.timecode,
+          content: item.content,
+          isInternal: !!isAdminView,
+          // 3.8.x: flag pasted comments so the thread shows a "Copied" tag.
+          isCopied: true,
+        }
+        if (item.timecodeEnd) body.timecodeEnd = item.timecodeEnd
+        if (typeof item.timestampMs === 'number') body.timestampMs = item.timestampMs
+        if (item.authorName) body.authorName = item.authorName
+        if (source) {
+          body.sourceVideoId = source.videoId
+          body.sourceVersionLabel = source.versionLabel
+        }
+        const res = await postComment(body)
+        if (!res.ok) continue
+        created += 1
+
+        // 6.16.0: replies ride along with their parent.
+        const replies = Array.isArray(item.replies) ? item.replies : []
+        if (replies.length === 0) continue
+        // The POST body is the whole project's comments (every caller relies on
+        // that), so the new row's id travels in a header instead — see the
+        // route. Without it we would be guessing which of N rows we just made.
+        const parentId = res.headers.get('X-Comment-Id')
+        if (!parentId) {
+          // Older server, or the header was stripped by a proxy. Post the
+          // parent and stop rather than re-adding the answers as orphaned
+          // top-level notes — that shape is what this feature exists to fix.
+          continue
+        }
+        for (const reply of replies) {
+          const replyBody: Record<string, unknown> = {
+            projectId,
+            videoId: selectedVideoId,
+            // A reply has no timeline position of its own; it inherits the
+            // parent's. Sending the parent's timecode keeps the server's
+            // validation happy without inventing a second marker.
+            timecode: item.timecode,
+            content: reply.content,
+            isInternal: !!isAdminView,
+            isCopied: true,
+            parentId,
+          }
+          if (reply.authorName) replyBody.authorName = reply.authorName
+          if (source) {
+            replyBody.sourceVideoId = source.videoId
+            replyBody.sourceVersionLabel = source.versionLabel
+          }
+          const replyRes = await postComment(replyBody)
+          if (replyRes.ok) created += 1
+        }
+      }
+      await fetchComments()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('commentDeleted'))
+      }
+      return created
+    },
+    [projectId, selectedVideoId, isAdminView, postComment, fetchComments],
+  )
+
+  /**
+   * 6.16.0 — the version you just uploaded is empty, and the feedback you want
+   * is one version back.
+   *
+   * Frame.io shows "N comments on other versions" here with a View button that
+   * takes you away. Taking you away is the wrong move for the person who just
+   * exported v2: they do not want to read v1's notes somewhere else, they want
+   * them in front of the new cut so they can work through them.
+   *
+   * Which version: the most recent OTHER one that actually has comments, not
+   * strictly v(n-1). Uploading a quick fix that nobody commented on should not
+   * hide the notes from the cut before it.
+   */
+  const previousCommentSource = useMemo(() => {
+    if (!isAdminView) return null
+    if (!selectedVideoId) return null
+    if (displayComments.length > 0) return null
+
+    const byVideo = new Map<string, any[]>()
+    for (const c of mergedComments as any[]) {
+      // Roots only. Replies travel with their parent, and counting them here
+      // would promise "7 comments" and then paste 3 threads.
+      if (c.parentId) continue
+      if (!c.videoId || c.videoId === selectedVideoId) continue
+      const bucket = byVideo.get(c.videoId) ?? []
+      bucket.push(c)
+      byVideo.set(c.videoId, bucket)
     }
-    // Refresh the sidebar so the pasted comments show up.
-    await fetchComments()
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('commentDeleted'))
+    if (byVideo.size === 0) return null
+
+    let best: { video: any; comments: any[] } | null = null
+    for (const [videoId, list] of byVideo) {
+      const video = videos.find((v) => v.id === videoId)
+      if (!video) continue
+      if (!best || (video.version ?? 0) > (best.video.version ?? 0)) {
+        best = { video, comments: list }
+      }
     }
-    return { count: created }
-  }, [projectId, selectedVideoId, isAdminView, shareToken, fetchComments])
+    if (!best) return null
+
+    return {
+      videoId: best.video.id as string,
+      versionLabel:
+        ((best.video as any).versionLabel as string | null) ||
+        `v${best.video.version ?? 1}`,
+      comments: best.comments,
+      count: best.comments.length,
+    }
+  }, [isAdminView, selectedVideoId, displayComments.length, mergedComments, videos])
+
+  const [pastingPrevious, setPastingPrevious] = useState(false)
+  const handlePastePreviousVersion = useCallback(async () => {
+    if (!previousCommentSource || pastingPrevious) return
+    setPastingPrevious(true)
+    try {
+      await pasteThreads(toClipped(previousCommentSource.comments), {
+        videoId: previousCommentSource.videoId,
+        versionLabel: previousCommentSource.versionLabel,
+      })
+    } finally {
+      setPastingPrevious(false)
+    }
+  }, [previousCommentSource, pastingPrevious, pasteThreads])
+
+  const handlePasteComments = useCallback(async () => {
+    const items = getClippedComments(projectId)
+    if (!items || items.length === 0) {
+      throw new Error('Nothing to paste')
+    }
+    const count = await pasteThreads(items)
+    return { count }
+  }, [projectId, pasteThreads])
 
   // 1.3.2+: bridge between this section and the top-level PlayerTopMenu.
   // The menu lives outside CommentSection (in the title bar) but Copy /
@@ -1667,6 +1875,7 @@ export default function CommentSection({
           >
             <CommentInput
               transparentBackground
+              feedingEditId={editingCommentId}
               newComment={newComment}
               onCommentChange={handleCommentChange}
               onInputFocus={handleCommentInputFocus}
@@ -1884,10 +2093,34 @@ export default function CommentSection({
           }
         >
           {sortedComments.length === 0 ? (
-            <div className="text-center py-12">
-              <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-muted-foreground">{t('noMessages')}</p>
-            </div>
+            previousCommentSource ? (
+              <div className="flex flex-col items-center text-center py-10 px-4">
+                <MessagesSquare className="w-10 h-10 text-white/20 mb-3" />
+                <p className="text-sm font-medium text-foreground">
+                  {t('noCommentsHere')}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t('commentsOnVersion', {
+                    count: previousCommentSource.count,
+                    version: previousCommentSource.versionLabel,
+                  })}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handlePastePreviousVersion()}
+                  disabled={pastingPrevious}
+                  className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-xs font-semibold text-primary-foreground hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
+                >
+                  <ClipboardPaste className="w-3.5 h-3.5" />
+                  {pastingPrevious ? t('pastingFromVersion') : t('pasteFromVersion')}
+                </button>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                <p className="text-muted-foreground">{t('noMessages')}</p>
+              </div>
+            )
           ) : (
             <>
               {sortedComments.map((comment, index) => {
@@ -1927,7 +2160,10 @@ export default function CommentSection({
                     <MessageBubble
                       comment={comment}
                       isReply={false}
-                      onReply={() => handleReply(comment.id, comment.videoId)}
+                      onReply={(mentionName) => {
+                        setReplyMention(mentionName ?? null)
+                        handleReply(comment.id, comment.videoId)
+                      }}
                       // 1.0.9+: no seek handler for image comments —
                       // clicking the bubble must do nothing (images
                       // have no timeline).
@@ -1973,11 +2209,17 @@ export default function CommentSection({
                       inlineReplyInput={
                         replyingToCommentId === comment.id ? (
                           <InlineReplyForm
+                            key={`${comment.id}:${replyMention ?? ''}`}
                             placeholder="Reply to comment..."
-                            onSubmit={(text) =>
-                              submitInlineReply(comment.id, comment.videoId, text)
-                            }
-                            onCancel={handleCancelReply}
+                            initialText={replyMention ? `@${replyMention} ` : ''}
+                            onSubmit={(text) => {
+                              setReplyMention(null)
+                              return submitInlineReply(comment.id, comment.videoId, text)
+                            }}
+                            onCancel={() => {
+                              setReplyMention(null)
+                              handleCancelReply()
+                            }}
                           />
                         ) : null
                       }
@@ -1994,6 +2236,7 @@ export default function CommentSection({
         {/* Input Area - Desktop and non-collapsible mobile */}
         <div className={cn(mobileCollapsible && "hidden lg:block lg:order-2")}>
           <CommentInput
+          feedingEditId={editingCommentId}
           newComment={newComment}
           onCommentChange={handleCommentChange}
           onInputFocus={handleCommentInputFocus}

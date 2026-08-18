@@ -20,6 +20,24 @@ interface PendingAttachment {
   fileSize: string
   fileType: string
   category: string
+  /** 6.16.0: blob: URL of the local file, for the composer's thumbnail. */
+  previewUrl?: string
+}
+
+/**
+ * Release a blob: URL once its chip is gone.
+ *
+ * `URL.createObjectURL` pins the whole file in memory until revoked — a few
+ * screenshots is nothing, but someone attaching and removing images all
+ * afternoon in a long review session would accumulate every one of them.
+ */
+function revokePreview(attachment: { previewUrl?: string }): void {
+  if (!attachment.previewUrl) return
+  try {
+    URL.revokeObjectURL(attachment.previewUrl)
+  } catch {
+    // Already revoked, or a browser that never gave us one.
+  }
 }
 
 interface UseCommentManagementProps {
@@ -204,6 +222,7 @@ export function useCommentManagement({
       pendingAttachments.length > 0
     ) {
       const staleAttachments = pendingAttachments.filter(a => a.videoId !== selectedVideoId)
+      staleAttachments.forEach(revokePreview)
       if (staleAttachments.length > 0) {
         setPendingAttachments(prev => prev.filter(a => a.videoId === selectedVideoId))
         setAttachmentError(null)
@@ -638,6 +657,7 @@ export function useCommentManagement({
     setSelectedTimecodeEnd(null)
     const attachmentsForComment = pendingAttachments.filter(a => a.videoId === validatedVideoId)
     const commentAssetIds = attachmentsForComment.map(a => a.assetId)
+    attachmentsForComment.forEach(revokePreview)
     setPendingAttachments(prev => prev.filter(a => !commentAssetIds.includes(a.assetId)))
 
     try {
@@ -981,6 +1001,7 @@ export function useCommentManagement({
 
   const handleRemoveAttachment = async (assetId: string) => {
     const attachment = pendingAttachments.find(a => a.assetId === assetId)
+    if (attachment) revokePreview(attachment)
     setPendingAttachments(prev => prev.filter(a => a.assetId !== assetId))
     setAttachmentError(null)
     setAttachmentNotice(null)
@@ -1003,6 +1024,37 @@ export function useCommentManagement({
         detail: { timecodeEnd: selectedTimecodeEnd },
       })
     )
+  }
+
+  /**
+   * 6.16.0 — hand the composer's pending extras to an open edit.
+   *
+   * While a saved comment is being edited, whatever you draw or attach in the
+   * composer belongs to THAT comment, not to a new one. This lifts the ids and
+   * the annotation out and clears them, without deleting the uploaded assets:
+   * they are about to be linked by the PATCH, so `handleRemoveAttachment`'s
+   * cleanup would be exactly the wrong move.
+   */
+  const takePendingForEdit = (videoId: string | null) => {
+    const forVideo = videoId
+      ? pendingAttachments.filter(a => a.videoId === videoId)
+      : pendingAttachments
+    const assetIds = forVideo.map(a => a.assetId)
+    if (assetIds.length > 0) {
+      forVideo.forEach(revokePreview)
+      setPendingAttachments(prev => prev.filter(a => !assetIds.includes(a.assetId)))
+    }
+    const annotations = pendingAnnotationRef.current
+    if (annotations) {
+      pendingAnnotationRef.current = null
+      setPendingAnnotation(null)
+      setSelectedTimecodeEnd(null)
+      // Tell VideoPlayer to drop the preview overlay. Without this the shape
+      // stays painted on the frame after the edit has already absorbed it —
+      // which is precisely the "the square stays on the video" symptom.
+      window.dispatchEvent(new CustomEvent('annotationCleared'))
+    }
+    return { assetIds, annotations }
   }
 
   const handleClearAnnotation = () => {
@@ -1069,6 +1121,7 @@ export function useCommentManagement({
     handleNameSourceChange,
     handleAttachmentAdded,
     handleRemoveAttachment,
+    takePendingForEdit,
     handleAttachmentErrorChange,
     handleStartDrawing,
     handleClearAnnotation,

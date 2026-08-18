@@ -26,11 +26,22 @@ export type FolderPreviewItem =
       kind: 'video'
       videoId: string
       thumbnailUrl: string
-      // 3.5.x: signed URL to the storyboard sprite-sheet (10×10 grid of
-      // frames) so each mosaic tile can hover-scrub through that clip,
-      // exactly like the video card. Absent for legacy rows that never
-      // got a storyboard — those tiles just stay static thumbnails.
+      // 3.5.x: signed URL to the storyboard sprite-sheet so each mosaic tile
+      // can hover-scrub through that clip, exactly like the video card. Absent
+      // for legacy rows that never got a storyboard — those tiles just stay
+      // static thumbnails.
       storyboardUrl?: string
+      /**
+       * 6.15.2: the sprite's real grid. Since 6.9.3 the worker sizes the
+       * storyboard by duration (roughly one frame per second, 100–400 cells,
+       * up to 20×20), so the old fixed 10×10 assumption is only true for short
+       * clips. Sending the URL without the dimensions left the tile doing
+       * 10×10 maths over a 20×20 sheet — each "frame" it drew was actually a
+       * 2×2 block of frames, which is the four-way split you see while
+       * scrubbing a folder cover.
+       */
+      storyboardCols?: number | null
+      storyboardRows?: number | null
     }
   | { kind: 'folder'; folderId: string }
 
@@ -123,6 +134,8 @@ export async function fetchFolderPreviewData(
       stackId: true,
       thumbnailPath: true,
       storyboardPath: true,
+      storyboardCols: true,
+      storyboardRows: true,
     } as any,
   })) as unknown as Array<{
     id: string
@@ -132,6 +145,8 @@ export async function fetchFolderPreviewData(
     stackId: string | null
     thumbnailPath: string | null
     storyboardPath: string | null
+    storyboardCols: number | null
+    storyboardRows: number | null
   }>
   const videosByFolder = new Map<string, typeof videos>()
   for (const v of videos) {
@@ -191,7 +206,15 @@ export async function fetchFolderPreviewData(
             kind: 'video',
             videoId: v.id,
             thumbnailUrl: `/api/content/${token}`,
-            ...(storyboardUrl ? { storyboardUrl } : {}),
+            ...(storyboardUrl
+              ? {
+                  storyboardUrl,
+                  // Ship the grid with the sheet, always together — a URL
+                  // without dimensions is what caused the mosaic.
+                  storyboardCols: v.storyboardCols ?? null,
+                  storyboardRows: v.storyboardRows ?? null,
+                }
+              : {}),
           })
         } catch (err) {
           logError('[fetchFolderPreviewData] thumbnail token failed:', err)

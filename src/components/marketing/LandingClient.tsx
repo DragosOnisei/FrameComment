@@ -816,9 +816,14 @@ export function LandingClient() {
           <h2 className="fc-reveal text-3xl sm:text-5xl font-bold text-white leading-tight">
             Ready to stop chasing feedback?
           </h2>
+          {/* The free tier is one seat — the owner — plus 10 GB. "Start free
+              with your team" read as "your whole team is free", which is the
+              pricing card two sections up saying "1 team member". Clients are
+              not seats and never were, so inviting one is still free: that is
+              the part worth saying here. */}
           <p className="fc-reveal mt-4 text-lg text-white/60 max-w-xl mx-auto">
-            Start free with your team and your first 10 GB. Bring a client,
-            send one link, you&apos;ll feel the difference on the first
+            Start free on your own, with your first 10 GB. Invite a client at no
+            cost, send one link, you&apos;ll feel the difference on the first
             review round.
           </p>
           <div className="fc-reveal mt-8 mx-auto w-full max-w-md sm:max-w-none flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">

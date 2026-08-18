@@ -251,6 +251,11 @@ interface FolderRow {
         videoId: string
         thumbnailUrl: string
         storyboardUrl?: string
+        // 6.15.2: the sprite's real grid, alongside the sheet. Without it the
+        // tile assumed 10×10 over sheets that are up to 20×20 since 6.9.3, and
+        // drew a 2×2 block of frames as if it were one.
+        storyboardCols?: number | null
+        storyboardRows?: number | null
       }
     | { kind: 'folder'; folderId: string }
   >

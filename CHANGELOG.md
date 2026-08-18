@@ -14,6 +14,223 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.16.0] - 2026-08-18
+
+### Un comentariu trimis poate primi ulterior fișier și adnotare
+
+Scrii nota, dai send, și abia atunci îți dai seama că voiai să atașezi cadrul
+de referință sau să încercuiești lucrul despre care vorbeai. Singura cale era
+ștergi și scrii din nou — ceea ce arunca răspunsurile (se șterg în cascadă),
+starea de rezolvat, reacțiile și locul comentariului în fir.
+
+Nu există butoane noi. Cât timp un comentariu e deschis în edit, bara de jos —
+aceeași pe care o folosești pentru un comentariu nou — lucrează pentru el:
+desenul și fișierele adunate acolo intră în PATCH când dai Save pe comentariu.
+Prima variantă dubla controalele în caseta de edit și era greșită: două locuri
+din care poți atașa un fișier, și niciun mod de a spune cărui comentariu îi
+aparține un desen.
+
+Amănuntul care a costat două iterații: nu există niciun buton de „gata cu
+desenul". Formele părăsesc pânza doar când rulează `finishDrawingMode`, iar
+inițial singurul lucru care îl apela era butonul de trimitere din composer.
+Deci săgeata desenată nu era comisă niciodată — stătea vie pe pânză, Save
+n-avea ce să atașeze, iar forma rămânea pictată peste video fiindcă sesiunea de
+desen nu se încheiase. Prima corectură a fost să nu mai blochez acel buton cât
+ține editul; asta a mutat problema, n-a rezolvat-o, pentru că presupunea că
+apeși un buton înainte de Save — un al doilea pas ascuns pe care nimeni n-are
+de unde să-l ghicească.
+
+Acum **Save** încheie desenul. Desenezi, dai Save pe comentariu, săgeata
+aterizează pe el. Dacă ai intrat în modul de desen fără să desenezi nimic, Save
+îl închide oricum, altfel pânza ar fi continuat să înghită clicurile pe video
+după ce editul s-a închis.
+
+Rutarea nu mai depinde nici de evidența de interval. Aceasta se populează doar
+dacă timecode-ul comentariului se parsează — corect pentru scopul ei, dar un
+comentariu cu timecode lipsă sau ciudat ar fi pierdut tăcut adnotarea. Id-ul
+comentariului editat se reține separat, necondiționat.
+
+Un lucru de subliniat: **nu** e delete-and-recreate, deși rezultatul vizibil e
+același. E un UPDATE. Ai cerut „ca și cum șterge comentariul vechi și adaugă
+unul nou cu tot ce trebuie" — rezultatul e exact acela, dar fără să detoneze
+conversația agățată de el.
+
+Serverul validează atașamentele la fel ca la creare: un id de asset venit din
+browser e o pretenție, nu un fapt, deci trebuie să existe, să fie pe videoul
+comentariului, să fie neatașat, iar pentru non-admini să provină din propria
+sesiune de upload.
+
+### Comentariile aduse din altă versiune nu se mai pot edita
+
+Un comentariu lipit e o **consemnare** a ceea ce a spus cineva pe altă
+tăietură. Editarea lui ar rescrie tăcut acea consemnare: textul din fața ta n-ar
+mai fi textul care s-a scris, și n-ar mai exista nimic cu care să-l verifici.
+Deci sunt read-only — le rezolvi, le răspunzi, le ștergi, dar nu pui cuvinte în
+gura autorului. Dacă nota trebuie reformulată pentru tăietura curentă, aia e un
+comentariu nou.
+
+Tratamentul se aplică oricărui comentariu lipit, nu doar celor care își știu
+versiunea: card estompat, fără Edit în meniu, pin gri pe timeline. Iar pinul
+arată „C", nu inițialele autorului — pe un marker inițialele răspund la „cine a
+spus asta", ceea ce pentru o notă adusă e întrebarea greșită și un răspuns ușor
+înșelător: omul n-a spus-o aici.
+
+### Ataşamentele: se închide singur, şi vezi poza
+
+Dialogul de upload afişa „All files uploaded ✓" şi apoi aştepta să apeşi Done.
+Nu mai avea nimic de spus: treaba era gata, pastila era deja în composer în
+spatele lui, iar singurul lucru pe care îl obţinea clicul era să închidă o
+cutie goală. Acum se închide instantaneu.
+
+Prima variantă îl ţinea 700ms pe bifa verde, pe teoria că o clipă de
+confirmare linişteşte. În practică se citea ca un fulger de interfaţă la care
+n-ai apucat să reacţionezi — mai rău decât ori să-l arăţi ca lumea, ori să nu-l
+arăţi deloc. Confirmarea e thumbnail-ul care apare în composer, şi ăla rămâne.
+
+Dacă un fişier a dat eroare, dialogul rămâne deschis: acolo chiar mai e ceva de
+spus, iar închiderea ar ascunde exact fişierul care are nevoie de atenţie.
+
+Preview şi în lista din dialog, cât fişierul aşteaptă să plece. Iar pastila din
+composer arată tot imaginea, nu numele ei. Un screenshot
+numit „CleanShot 2026-08-18 at 21.33.49.png" nu-ţi spune nimic despre dacă ai
+prins cadrul corect, şi ăsta e singurul lucru pe care vrei să-l verifici
+înainte de send. Thumbnail-ul e fişierul local, deci apare instantaneu şi nu
+costă niciun request. URL-urile se fac o dată, la alegerea fişierului, nu în
+JSX: acolo ar fi însemnat un URL nou la fiecare re-randare — şi sunt multe cât
+se mişcă o bară de progres — scurgând câte unul pe cadru, fără să mai rămână
+vreo referinţă cu care să-l eliberezi. Se eliberează când rândul sau pastila
+dispare, şi când dialogul se închide.
+
+Odată ce începe upload-ul, preview-ul lasă locul spinner-ului şi bifei:
+atunci întrebarea e progresul, nu identitatea fişierului.
+
+### Textul din composer curge sub timestamp
+
+Chip-ul de timecode și textarea erau două coloane surori într-un flex, deci
+textul avea propria lui coloană mai îngustă și fiecare rând nou rămânea
+indentat lângă chip — un bloc zdrențuit care nu semăna deloc cu comentariul
+după send, unde textul revine la lățimea întreagă pe sub timecode.
+
+O textarea nu poate curge în jurul unui float, așa că acum chip-ul e poziționat
+peste colțul din stânga-sus, iar textarea primește un `text-indent` cât
+lățimea lui. Indentul se aplică doar primei linii, adică exact regula dorită:
+începe după chip, continuă pe sub el. Lățimea se măsoară, nu se ghicește —
+eticheta variază de la „0:14" la „11:06 → 13:03", iar butonul X apare abia
+după ce există un IN point.
+
+
+### Comentariile versiunii precedente, aduse pe versiunea nouă
+
+Exportezi v2 și panoul de comentarii e gol, deși tot feedback-ul pe care vrei
+să-l bifezi e pe v1. Frame.io pune aici „N comments on other versions" cu un
+buton View, care te duce în altă parte. Pentru omul care tocmai a exportat v2
+asta e direcția greșită: nu vrea să citească notele lui v1 altundeva, le vrea
+în fața tăieturii noi, ca să le poată rezolva.
+
+Deci: „No comments on this version · 4 on v1" și un buton care le aduce aici.
+Versiunea sursă e cea mai recentă **care are comentarii**, nu strict v(n-1) —
+un fix rapid pe care nu l-a comentat nimeni n-ar trebui să ascundă notele de
+pe tăietura dinainte. Butonul apare doar în review-ul intern: e o decizie de
+flux de lucru, nu de feedback.
+
+Comentariile aduse primesc un tag chihlimbariu „Previous version · v1" și stau
+estompate, ca ochiul să găsească întâi feedback-ul scris pe tăietura curentă;
+la hover revin la opacitate completă, pentru că adesea nota veche e chiar
+motivul pentru care ești acolo. Pe timeline, pinii lor se desenează gri în loc
+de culoarea autorului. Identitatea contează mai puțin decât „e proaspăt sau e
+rămas din runda trecută", iar griul răspunde la asta fără legendă.
+
+Tag-ul rămâne permanent, inclusiv după ce marchezi comentariul rezolvat.
+Peste o lună tot vrei să știi că nota s-a scris pe v1 — mai ales dacă între
+timp a supraviețuit la două runde fără să fie rezolvată. Provenanța se
+stochează denormalizat, cu etichetă cu tot: un join către rândul sursă ar
+returna gol exact când versiunea veche e ștearsă sau redenumită, adică fix
+când informația contează cel mai mult.
+
+Copy/paste manual din meniul cu trei puncte rămâne exact cum era, pentru
+mutări între videouri care nu sunt versiuni unul altuia.
+
+### Copy la comentarii ia și răspunsurile
+
+Copy aplatiza firul: răspunsurile ori se pierdeau, ori aterizau ca note
+separate de nivel unu. Rezultatul era un perete de întrebări orfane pe
+versiunea nouă — inclusiv unele la care se răspunsese deja cu „rezolvat, vezi
+la 0:14". O notă de review fără discuția ei nu doar că pierde detalii, ci
+induce activ în eroare pe următorul recenzent.
+
+Acum răspunsurile călătoresc cu părintele lor și se recreează tot ca
+răspunsuri. Un nivel de adâncime, ca în interfață. Ruta de comentarii întoarce
+id-ul rândului nou creat într-un antet `X-Comment-Id`: corpul rămâne ce
+așteaptă fiecare apelant existent — toate comentariile proiectului — dar
+pentru a agăța un răspuns e nevoie de id-ul părintelui, iar scormonitul după
+el prin listă, după conținut și oră, ar fi fost o ghicitoare.
+
+### Tagurile de sub video încap pe două rânduri când trebuie
+
+6.14.0 le-a fixat pe un singur rând, ca un card HD+ să nu stea cu un rând mai
+înalt decât vecinii lui. Corect la lățimi de desktop, greșit imediat ce grila
+se îngustează: trei tag-uri pur și simplu nu intră într-un card de 180px, iar
+`nowrap` plus `overflow-hidden` răspundea la asta tăind ultimul cuvânt în
+două. Un al doilea rând e răspunsul onest, iar cardurile dintr-un rând se
+întind oricum să se potrivească, deci grila rămâne dreaptă în ambele cazuri.
+
+
+### „Start free with your team" promitea ceva ce nu vindem
+
+CTA-ul final de pe landing spunea „Start free with your team and your first
+10 GB". Tierul gratuit e **un singur loc** — owner-ul — plus 10 GB, exact cum
+scrie cardul de pricing cu două secțiuni mai sus: „1 team member". Fraza se
+citea ca „toată echipa e gratis", adică se contrazicea cu propriul tabel de
+prețuri de pe aceeași pagină.
+
+Acum: „Start free on your own, with your first 10 GB. Invite a client at no
+cost." Clienții n-au fost niciodată locuri plătite, deci partea care chiar e
+gratis e spusă explicit, în loc să fie subînțeleasă greșit.
+
+Restul paginii era deja corect — cardul de pricing, JSON-LD-ul din `page.tsx`
+și `llms.txt` spun toate „1 team member".
+
+
+### Scrub-ul pe coperta unui folder arăta patru cadre deodată
+
+Sprite-ul de storyboard nu mai e 10×10 din 6.9.3 — worker-ul îl dimensionează
+după durată (aproximativ un cadru pe secundă, între 100 și 400 de celule, până
+la 20×20). Cardul de video a învățat asta în 6.12.0, dar plăcuțele din coperta
+folderului nu: API-ul le trimitea `storyboardUrl` **fără** dimensiuni, iar
+componenta cădea pe fallback-ul de 10×10. Pe o foaie de 20×20 asta înseamnă că
+fiecare „cadru" desenat era de fapt un bloc de 2×2 cadre reale — exact
+împărțirea în patru din captură. De aceea se vedea doar la scrub pe folder: în
+interiorul folderului cardul primea dimensiunile corecte.
+
+Acum grila călătorește întotdeauna împreună cu foaia. Am reparat și grila de
+videouri din share-ul de folder pentru clienți, care avea aceeași scăpare —
+`storyboardUrl` fără `storyboardCols` / `storyboardRows`.
+
+### Poți răspunde la un răspuns
+
+Doar comentariul rădăcină avea buton de Reply, deci în momentul în care un fir
+primea un răspuns conversația nu mai avea unde să continue: trebuia să deschizi
+un comentariu nou de nivel unu și pierdeai contextul.
+
+Răspunsul se atașează tot de comentariul rădăcină, nu se cuibărește mai adânc.
+Modelul de date permite orice adâncime, dar un fir de review care se indentează
+la nesfârșit devine ilizibil lângă un video. În schimb, composer-ul se deschide
+cu „@Nume " deja scris și cu cursorul după el, ca să fie clar cui i se răspunde.
+
+### O eroare de randare nu mai aruncă tot afară din aplicație
+
+Nu exista niciun `error.tsx` în arbore, deci orice excepție în timpul
+randării ajungea la pagina implicită din Next: „This page couldn't load", în
+afara layout-ului nostru, fără stil, fără navigație și — partea care chiar
+costă — fără nicio indicație despre *ce* a crăpat. Cine o nimerea putea doar să
+raporteze „s-a stricat", iar noi ghiceam.
+
+Acum apare ecranul aplicației, cu „Try again" și „Go back", și cu mesajul erorii
+plus `digest`-ul de la Next la vedere. Mesajul nu e ascuns după o verificare de
+mediu: e un produs pe care oamenii îl rulează cu materialul lor pe serverul lor,
+iar „Cannot read properties of null" respectă mai mult timpul lor decât o
+ridicare din umeri. Stack trace-ul rămâne în consolă.
+
 ## [6.15.0] - 2026-08-18
 
 ### În fullscreen dispare și cursorul, nu doar bara

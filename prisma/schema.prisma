@@ -662,6 +662,18 @@ model Comment {
   // Copy/Paste comments. Surfaces a "Copied" tag in the thread so reviewers
   // can tell carried-over notes apart from fresh ones.
   isCopied     Boolean  @default(false)
+  // 6.16.0: WHERE a carried-over comment came from, not just that it was
+  // carried over. `isCopied` alone could not answer "written on which cut?",
+  // which is the question that matters when you are looking at v3 and trying
+  // to work out whether a note has already been addressed.
+  //
+  // The label is denormalised on purpose. Following sourceVideoId would give
+  // the live label, but the point of the tag is to record the state at the
+  // moment of the paste — and the source row can be renamed, re-versioned or
+  // deleted, at which point a join returns nothing and the provenance is lost
+  // exactly when it is most needed.
+  sourceVideoId     String?
+  sourceVersionLabel String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

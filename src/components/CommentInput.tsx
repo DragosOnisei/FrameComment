@@ -27,6 +27,17 @@ interface CommentInputProps {
   loading: boolean
 
   // Timestamp
+  /**
+   * 6.16.0: the id of the comment currently open for editing, if any.
+   *
+   * While an edit is open this composer stops being "write a new comment" and
+   * becomes the toolbox for that edit: the drawing and the attachments it
+   * gathers get folded into the PATCH when the user hits Save on the comment.
+   * There is one set of these controls on purpose — duplicating them inside
+   * the edit box gave two places to attach a file and no way to tell which one
+   * a drawing belonged to.
+   */
+  feedingEditId?: string | null
   selectedTimestamp: number | null
   onClearTimestamp: () => void
   selectedVideoFps: number // FPS of the currently selected video
@@ -65,7 +76,7 @@ interface CommentInputProps {
   // Attachments
   allowClientAssetUpload?: boolean
   selectedVideoId?: string | null
-  pendingAttachments?: Array<{ assetId: string; videoId: string; fileName: string; fileSize: string; fileType: string; category: string }>
+  pendingAttachments?: Array<{ assetId: string; videoId: string; fileName: string; fileSize: string; fileType: string; category: string; previewUrl?: string }>
   onAttachmentAdded?: (attachment: { assetId: string; videoId: string; fileName: string; fileSize: string; fileType: string; category: string }) => void
   onRemoveAttachment?: (assetId: string) => void
   attachmentError?: string | null
@@ -90,6 +101,7 @@ export default function CommentInput({
   onInputFocus,
   onSubmit,
   loading,
+  feedingEditId = null,
   selectedTimestamp,
   onClearTimestamp,
   selectedVideoFps,
@@ -383,6 +395,42 @@ export default function CommentInput({
       setRangeEditActive(false)
     }
   }, [hasCapturedTimestamp])
+  /**
+   * Width of the timecode chip, so the first line of the textarea can clear it.
+   *
+   * Measured, not computed from the character count: the label is "0:14" on a
+   * point comment and "11:06 → 13:03" on a range, the X button appears only
+   * once an IN point exists, and the font is whatever the browser resolved for
+   * `font-mono`. A ResizeObserver keeps the indent correct through all of it,
+   * including the moment the user drags an OUT point and the chip grows
+   * mid-typing.
+   */
+  const [chipWidth, setChipWidth] = useState(0)
+  const chipObserverRef = useRef<ResizeObserver | null>(null)
+  // A callback ref rather than an effect: the chip mounts and unmounts with
+  // `currentVideoRestricted`, and its width changes on label edits that an
+  // effect would need a dependency list to notice. Measuring where the node
+  // itself arrives sidesteps both, and keeps the observer's lifetime tied to
+  // the element instead of to a render.
+  const timestampChipRef = useCallback((el: HTMLDivElement | null) => {
+    chipObserverRef.current?.disconnect()
+    chipObserverRef.current = null
+    if (!el) {
+      setChipWidth(0)
+      return
+    }
+    setChipWidth(el.getBoundingClientRect().width)
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() =>
+      setChipWidth(el.getBoundingClientRect().width),
+    )
+    ro.observe(el)
+    chipObserverRef.current = ro
+  }, [])
+  // 8px of breathing room, matching the old flex gap. Zero when the chip is
+  // gone (restricted video) so the text starts at the edge.
+  const firstLineIndent = chipWidth > 0 ? `${Math.round(chipWidth) + 8}px` : undefined
+
   const chipSeconds = hasCapturedTimestamp ? selectedTimestamp! : livePlayheadSeconds
   const timestampLabel = formatCommentTimestamp({
     timecode: secondsToTimecode(Math.max(0, chipSeconds), selectedVideoFps),
@@ -625,9 +673,24 @@ export default function CommentInput({
               {pendingAttachments.map((att) => (
                 <span
                   key={att.assetId}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-white/90 bg-white/[0.06] ring-1 ring-white/10"
+                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-md text-xs text-white/90 bg-white/[0.06] ring-1 ring-white/10"
                 >
-                  <Paperclip className="w-3 h-3 text-white/55" />
+                  {/* 6.16.0: show the picture, not its filename. A screenshot
+                      called "CleanShot 2026-08-18 at 21.33.49.png" tells you
+                      nothing about whether you grabbed the right frame, and
+                      that is the one thing you want to check before sending.
+                      The thumbnail is the local file, so it appears instantly
+                      and costs no request. */}
+                  {att.previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={att.previewUrl}
+                      alt=""
+                      className="h-7 w-7 rounded object-cover ring-1 ring-white/10"
+                    />
+                  ) : (
+                    <Paperclip className="w-3 h-3 text-white/55 ml-1" />
+                  )}
                   <span className="truncate max-w-[120px]">{att.fileName}</span>
                   {onRemoveAttachment && (
                     <button
@@ -679,7 +742,23 @@ export default function CommentInput({
                 '0 8px 24px -14px rgba(0,0,0,0.6)'
             }}
           >
-            <div className="flex items-start gap-2 min-w-0">
+            {/*
+              6.16.0: the chip and the text share ONE column now.
+
+              They used to be two flex siblings, so the textarea had its own
+              narrower column and every wrapped line stayed indented beside the
+              chip — a ragged block that looked nothing like the comment once
+              posted, where the text wraps back to the full width underneath
+              the timecode.
+
+              A textarea cannot flow around a float, so the chip is positioned
+              over the top-left corner and the textarea is given a first-line
+              `text-indent` the width of the chip. Indent applies to the first
+              line only, which is exactly the rule we want: start after the
+              chip, continue underneath it. The width is measured rather than
+              guessed because the label swings from "0:14" to "11:06 → 13:03".
+            */}
+            <div className="relative min-w-0">
               {!currentVideoRestricted && (
                 // 1.2.0+: Inline timestamp chip — Frame.io-style, ALWAYS
                 // visible (even before the input is focused) so the
@@ -727,7 +806,8 @@ export default function CommentInput({
                       ? 'Range edit mode — ←/→ moves the yellow handle. Esc to exit.'
                       : 'Click to adjust range with ←/→ arrow keys'
                   }
-                  className={`self-start inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-mono font-semibold shrink-0 mt-[2px] cursor-pointer select-none transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-warning ${
+                  ref={timestampChipRef}
+                  className={`absolute left-0 top-[2px] z-10 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-mono font-semibold shrink-0 cursor-pointer select-none transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-warning ${
                     rangeEditing
                       ? 'bg-warning text-black ring-2 ring-warning shadow-sm'
                       : 'bg-warning-visible text-warning hover:bg-warning/30'
@@ -770,7 +850,7 @@ export default function CommentInput({
                 placeholder. It disappears as soon as the user starts
                 typing.
               */}
-              <div className="relative flex-1 min-w-0">
+              <div className="relative min-w-0">
                 <Textarea
                   ref={textareaRef}
                   placeholder=""
@@ -781,12 +861,14 @@ export default function CommentInput({
                   onFocus={onInputFocus}
                   maxLength={MAX_COMMENT_LENGTH}
                   className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-snug"
+                  style={{ textIndent: firstLineIndent }}
                   rows={1}
                 />
                 {!newComment && (
                   <span
                     aria-hidden="true"
                     className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm leading-snug"
+                    style={{ textIndent: firstLineIndent }}
                   >
                     {markerMode ? 'Note (optional)' : t('typeMessage')}
                   </span>
@@ -949,6 +1031,40 @@ export default function CommentInput({
               {!markerMode && (
                 <Button
                   onClick={() => {
+                    /*
+                     * 6.16.0: while an edit owns this composer, this button
+                     * COMMITS the drawing instead of posting a comment.
+                     *
+                     * This is the whole reason the first attempt failed. There
+                     * is no separate "done drawing" control — shapes only leave
+                     * the canvas when `finishDrawingMode` runs, and the only
+                     * thing that calls it is this button, via
+                     * `submitWithAutoFinish`. Disabling it during an edit meant
+                     * the arrow you drew was never committed: it sat live on the
+                     * canvas, Save had nothing to attach, and the shape stayed
+                     * painted over the video because the drawing session had
+                     * never ended.
+                     *
+                     * So the drawing flow is unchanged — draw, press the same
+                     * button — and what differs is only where the result goes:
+                     * into the composer's pending slot, which the open edit
+                     * absorbs on Save.
+                     */
+                    if (feedingEditId) {
+                      if (annotationCtx?.isDrawingMode) {
+                        if (annotationCtx.drawing.hasShapes) {
+                          // No videoId on purpose. Passing one makes the hook
+                          // re-capture the composer's timestamp from where the
+                          // drawing started — right for a new comment, wrong
+                          // here: the drawing is joining a comment that already
+                          // has its own moment on the timeline.
+                          annotationCtx.finishDrawingMode()
+                        } else {
+                          annotationCtx.cancelDrawingMode()
+                        }
+                      }
+                      return
+                    }
                     if (voiceSendRef.current) {
                       justUploadedVoiceRef.current = true
                       voiceSendRef.current()
@@ -958,9 +1074,24 @@ export default function CommentInput({
                   }}
                   variant="default"
                   disabled={
-                    !hasVoicePending &&
-                    !canSubmit &&
-                    !annotationCtx?.isDrawingMode
+                    feedingEditId
+                      ? // Only useful mid-drawing. Posting a NEW comment is off
+                        // the table: the attachments and the drawing here
+                        // belong to the comment being edited, and Send would
+                        // spend them on a separate one and leave the edit
+                        // empty — the worst of both.
+                        !annotationCtx?.isDrawingMode
+                      : !hasVoicePending &&
+                        !canSubmit &&
+                        !annotationCtx?.isDrawingMode
+                  }
+                  title={
+                    feedingEditId
+                      ? annotationCtx?.isDrawingMode
+                        ? t('finishDrawingForEdit') || 'Finish the drawing'
+                        : t('feedingEdit') ||
+                          'Attaching to the comment you are editing — press Save there to apply.'
+                      : undefined
                   }
                   size="icon"
                   className="h-8 w-8 shrink-0"

@@ -128,6 +128,43 @@ const flagTextClass = (c: string) => FLAG_TEXT_MAP[c] || FLAG_TEXT_MAP.blue
 const SOLID_RING = 'ring-black/40 dark:ring-black/50'
 const SOLID_TEXT = 'text-white'
 const solid = (bg: string) => ({ bg, ring: SOLID_RING, text: SOLID_TEXT })
+
+/**
+ * 6.16.0 — a note carried over from an earlier cut draws grey on the timeline.
+ *
+ * Author colour is the right default: it tells you at a glance who is talking.
+ * But for a pasted note that identity is the LESS useful fact — what you need
+ * while scanning a new cut is which pins are fresh feedback and which are
+ * leftovers from the last round. Grey answers that without a legend, and it
+ * matches the amber tag in the thread: both mean "not written here".
+ *
+ * Grey, not hidden. The pin still seeks, still opens its popover, and the
+ * whole reason the notes were pasted is that somebody intends to work through
+ * them.
+ */
+const PREVIOUS_VERSION_COLOR_KEY = 'border-gray-500'
+
+/** Carried over from another cut — pasted from a version, or from the kebab. */
+function isCarriedOverComment(comment: any): boolean {
+  return !!(comment?.sourceVersionLabel || comment?.isCopied)
+}
+
+function markerColorKey(comment: any, fallback: string): string {
+  return isCarriedOverComment(comment) ? PREVIOUS_VERSION_COLOR_KEY : fallback
+}
+
+/**
+ * "C", not the author's initials.
+ *
+ * On a pin the initials answer "who said this". For a carried-over note that
+ * is the wrong question and a slightly misleading answer — the person did not
+ * say it here, on this cut. "C" says what the pin actually is, and pairs with
+ * the grey so the two cues agree instead of one of them arguing that this is
+ * ordinary feedback from a named reviewer.
+ */
+function markerInitials(comment: any, fallback: string): string {
+  return isCarriedOverComment(comment) ? 'C' : fallback
+}
 const COLOR_MAP: Record<string, { bg: string; ring: string; text: string }> = {
   // Receiver palette (saturated 500-tier).
   'border-gray-500': solid('bg-gray-500'),
@@ -721,7 +758,10 @@ export default function CustomVideoControls({
           ((comment as any).user?.name || (comment as any).user?.email || null)
         // Use isInternal from comment, default to false if not present (client comment)
         const isCommentInternal = (comment as any).isInternal ?? false
-        const colorKey = getUserColor(effectiveAuthorName, isCommentInternal).border
+        const colorKey = markerColorKey(
+          comment,
+          getUserColor(effectiveAuthorName, isCommentInternal).border,
+        )
         const rawContent = comment.content ?? ''
         const normalizedContent = rawContent.replace(/[<>]/g, ' ')
 
@@ -744,7 +784,7 @@ export default function CustomVideoControls({
           id: comment.id,
           timestamp,
           authorName: effectiveAuthorName,
-          initials: initialsFromName(effectiveAuthorName),
+          initials: markerInitials(comment, initialsFromName(effectiveAuthorName)),
           colorKey,
           // 3.8.x: timeline popover preview — up to 300 chars, with a
         // trailing " [...]" marker when the comment was actually longer
@@ -810,7 +850,10 @@ export default function CustomVideoControls({
         const effectiveAuthorName = comment.authorName ||
           ((comment as any).user?.name || (comment as any).user?.email || null)
         const isCommentInternal = (comment as any).isInternal ?? false
-        const colorKey = getUserColor(effectiveAuthorName, isCommentInternal).border
+        const colorKey = markerColorKey(
+          comment,
+          getUserColor(effectiveAuthorName, isCommentInternal).border,
+        )
 
         return {
           id: comment.id,

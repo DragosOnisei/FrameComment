@@ -1234,18 +1234,22 @@ export default function VideoCard({
         )}
         </div>
 
-        {/* 6.14.0: one line, always. Three chips ("HD+", "Video 9:16",
-            "Personal Server") used to wrap onto a second row, so an
-            HD+ card stood a row taller than its neighbours and the grid
-            looked ragged.
-
-            The row sits OUTSIDE the name column on purpose. Inside it, the
-            chips only got whatever width the kebab left over, so "Personal
+        {/* 6.14.0: the row sits OUTSIDE the name column on purpose. Inside it,
+            the chips only got whatever width the kebab left over, so "Personal
             Server" was cut to "Personal Se…" while there was visibly empty
             card to the right of it. Out here they get the full card width and
-            nothing has to be truncated. */}
+            nothing has to be truncated.
+
+            6.16.0: wrapping is allowed again, but only when it has to happen.
+            6.14.0 pinned the row to one line to stop an HD+ card standing a
+            row taller than its neighbours — correct at desktop widths, wrong
+            once the grid narrows: three chips simply do not fit in a 180 px
+            card, and `nowrap` + `overflow-hidden` answered that by cutting the
+            last one off mid-word. A second row is the honest outcome; the
+            cards in a row stretch to match, so the grid stays even either
+            way. */}
         {(typeLabel || !isImage) && (
-          <div className="flex flex-nowrap items-center gap-1 mt-1.5 overflow-hidden">
+          <div className="flex flex-wrap items-center gap-1 mt-1.5">
           {/* 6.14.0: quality first — it is the thing that changes per
             version and the thing a stopped encode makes ambiguous. */}
           {!isImage && qualityLabel && (

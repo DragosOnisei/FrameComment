@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useTranslations } from 'next-intl'
 import { Paperclip, Loader2, CheckCircle2, AlertCircle, Upload, X, FileIcon, RotateCcw } from 'lucide-react'
 import { Button } from './ui/button'
@@ -34,6 +34,27 @@ interface PendingAttachment {
   fileSize: string
   fileType: string
   category: string
+  /**
+   * 6.16.0: a blob: URL for the local file, so the composer can show the
+   * picture instead of its filename.
+   *
+   * Deliberately local rather than a signed URL from the server. The file is
+   * already in this browser's memory — round-tripping to mint a token and pull
+   * the bytes back for a 40px thumbnail would be slower, would fail while the
+   * upload is still settling, and would cost a request per attachment. Only
+   * set for images; everything else keeps the paperclip.
+   */
+  previewUrl?: string
+}
+
+/** A picture we can actually show, as opposed to a PDF or a LUT. */
+function localPreviewUrl(file: File): string | undefined {
+  if (!file.type.startsWith('image/')) return undefined
+  try {
+    return URL.createObjectURL(file)
+  } catch {
+    return undefined
+  }
 }
 
 interface CommentAttachmentButtonProps {
@@ -53,6 +74,14 @@ interface FileUploadItem {
   error?: string
   assetId?: string
   tusUpload?: tus.Upload
+  /**
+   * 6.16.0: thumbnail of the picked file, for images.
+   *
+   * Made at pick time rather than on render — an object URL created inside JSX
+   * would be a new URL on every re-render (and there are many while a progress
+   * bar moves), leaking one per frame with no handle left to revoke them.
+   */
+  previewUrl?: string
 }
 
 // 4.1.1+: imperative handle so the composer can trigger paste-to-attach.
@@ -110,6 +139,7 @@ const CommentAttachmentButton = forwardRef<
   const storageProvider = useStorageProvider()
 
   const allDone = items.length > 0 && items.every((i) => i.status === 'completed' || i.status === 'error')
+  const hasErrors = items.some((i) => i.status === 'error')
   const hasFiles = items.length > 0
   const atLimit = items.length >= MAX_FILES
 
@@ -126,6 +156,7 @@ const CommentAttachmentButton = forwardRef<
           status: error ? 'error' as const : 'pending' as const,
           progress: 0,
           error: error || undefined,
+          previewUrl: localPreviewUrl(file),
         }
       })
       return [...prev, ...newItems]
@@ -147,7 +178,17 @@ const CommentAttachmentButton = forwardRef<
         tusUploadsRef.current.delete(id)
       }
     }
-    setItems((prev) => prev.filter((i) => i.id !== id))
+    setItems((prev) => {
+      const going = prev.find((i) => i.id === id)
+      if (going?.previewUrl) {
+        try {
+          URL.revokeObjectURL(going.previewUrl)
+        } catch {
+          /* already gone */
+        }
+      }
+      return prev.filter((i) => i.id !== id)
+    })
   }, [abortS3Upload, storageProvider])
 
   const uploadFile = async (
@@ -221,7 +262,7 @@ const CommentAttachmentButton = forwardRef<
               s3AbortKeysRef.current.delete(item.id)
               clearFileContext(item.file)
               clearUploadMetadata(item.file)
-              onAttachmentAdded({ assetId, videoId, fileName, fileSize: item.file.size.toString(), fileType: item.file.type || 'application/octet-stream', category })
+              onAttachmentAdded({ assetId, videoId, fileName, fileSize: item.file.size.toString(), fileType: item.file.type || 'application/octet-stream', category, previewUrl: localPreviewUrl(item.file) })
               resolve(true)
             },
             onError: (err) => {
@@ -283,6 +324,7 @@ const CommentAttachmentButton = forwardRef<
             fileSize: item.file.size.toString(),
             fileType: item.file.type || 'application/octet-stream',
             category,
+            previewUrl: localPreviewUrl(item.file),
           })
 
           resolve(true)
@@ -410,11 +452,55 @@ const CommentAttachmentButton = forwardRef<
 
   useImperativeHandle(ref, () => ({ pasteUpload }))
 
-  const handleDone = () => {
+  /**
+   * Empty the list and release every thumbnail it was holding.
+   *
+   * Done through the updater rather than by reading `items` so it needs no
+   * dependencies and can't operate on a stale snapshot — missing one here
+   * would pin that file in memory for the life of the tab.
+   */
+  const clearItems = useCallback(() => {
+    setItems((prev) => {
+      prev.forEach((i) => {
+        if (!i.previewUrl) return
+        try {
+          URL.revokeObjectURL(i.previewUrl)
+        } catch {
+          /* already gone */
+        }
+      })
+      return []
+    })
+  }, [])
+
+  const handleDone = useCallback(() => {
     setOpen(false)
-    setItems([])
+    clearItems()
     setUploadProgress({ current: 0, total: 0 })
-  }
+  }, [clearItems])
+
+  /**
+   * 6.16.0: close itself the instant everything has landed.
+   *
+   * "All files uploaded ✓ … now press Done" is a dialog asking to be dismissed
+   * for no reason — the work is finished, the attachment chip is already in the
+   * composer behind it, and the only thing the click achieves is closing a box
+   * that has nothing left to say.
+   *
+   * No delay. A first pass held it for 700ms on the green tick, on the theory
+   * that a beat of confirmation reassures; in practice it read as a flash of
+   * UI you were not fast enough to act on, which is worse than either showing
+   * it properly or not at all. The thumbnail appearing in the composer is the
+   * confirmation, and it stays.
+   *
+   * Skipped when anything errored — that dialog DOES still have something to
+   * say, and closing it would hide the one file that needs attention.
+   */
+  useEffect(() => {
+    if (!open || !allDone) return
+    if (items.some((i) => i.status === 'error')) return
+    handleDone()
+  }, [open, allDone, items, handleDone])
 
   const handleOpenChange = (next: boolean) => {
     if (!next && isUploading) {
@@ -427,7 +513,7 @@ const CommentAttachmentButton = forwardRef<
       tusUploadsRef.current.clear()
       s3AbortKeysRef.current.forEach((key) => abortS3Upload(key).catch(() => {}))
       s3AbortKeysRef.current.clear()
-      setItems([])
+      clearItems()
       setUploadProgress({ current: 0, total: 0 })
     }
   }
@@ -542,7 +628,9 @@ const CommentAttachmentButton = forwardRef<
             </p>
           )}
 
-          {allDone && (
+          {/* Only reachable when something failed — the all-clear path closes
+              the dialog before this could paint. */}
+          {allDone && hasErrors && (
             <p className="text-sm text-green-600 dark:text-green-400 flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4" />
               {t('allFilesUploaded')}
@@ -558,8 +646,23 @@ const CommentAttachmentButton = forwardRef<
                   className="flex flex-col rounded-md px-2 py-1.5 text-sm bg-muted/50"
                 >
                   <div className="flex items-center gap-2">
+                    {/* 6.16.0: the picture itself while it is still waiting to
+                        go. A row that reads "CleanShot 2026-08-18 at 21.33.49
+                        .png" is no help at all in deciding whether you grabbed
+                        the right frame — which is the only question you have
+                        at this point. Once uploading starts the spinner and
+                        tick take over, because then the question is progress,
+                        not identity. */}
+                    {item.status === 'pending' && item.previewUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.previewUrl}
+                        alt=""
+                        className="w-8 h-8 shrink-0 rounded object-cover ring-1 ring-white/10"
+                      />
+                    )}
                     {/* Status icon */}
-                    {item.status === 'pending' && (
+                    {item.status === 'pending' && !item.previewUrl && (
                       <FileIcon className="w-4 h-4 shrink-0 text-muted-foreground" />
                     )}
                     {item.status === 'uploading' && (
@@ -638,6 +741,10 @@ const CommentAttachmentButton = forwardRef<
               {items.length}/{MAX_FILES}
             </span>
             {allDone ? (
+              // Same story as the banner above: on a clean run the dialog is
+              // already gone by the time this would render, so in practice
+              // this is the "some of them failed, I have read the errors"
+              // button.
               <Button onClick={handleDone}>{tc('done')}</Button>
             ) : (
               <Button

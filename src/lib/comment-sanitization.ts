@@ -118,6 +118,12 @@ export function sanitizeComment(
     // Drives the "Copied" tag in the thread. Coerced to boolean so a
     // stale row (pre-migration) surfaces as false instead of undefined.
     isCopied: !!comment.isCopied,
+    // 6.16.0: which version the note was originally written on. Null for
+    // comments written here, and for pre-6.16.0 pastes that only recorded
+    // THAT they were copied — those keep the plain "Copied" tag rather than
+    // being given a version we never stored.
+    sourceVideoId: (comment as any).sourceVideoId ?? null,
+    sourceVersionLabel: (comment as any).sourceVersionLabel ?? null,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     parentId: comment.parentId,

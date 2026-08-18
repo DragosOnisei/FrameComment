@@ -8,7 +8,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeAndValidateContent } from '@/lib/comment-helpers'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { getPrimaryRecipient } from '@/lib/recipients'
-import { safeParseBody } from '@/lib/validation'
+import { safeParseBody, annotationDataSchema } from '@/lib/validation'
 import { z } from 'zod'
 import { isValidTimecode } from '@/lib/timecode'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
@@ -21,8 +21,25 @@ export const dynamic = 'force-dynamic'
 // sent when the user adjusts the range while editing the comment. We
 // validate them as proper SMPTE-style timecode strings; null is allowed
 // for `timecodeEnd` so the user can shrink a range back to a point.
+//
+// 6.16.0: an edit can also add attachments and an annotation. The trigger is
+// the obvious one — you post the note, then realise you meant to attach the
+// reference frame or circle the thing you were describing. Before this, the
+// only route was delete-and-repost, which loses the replies (they cascade),
+// the resolved state, the reactions and the position in the thread.
+//
+// So this is an UPDATE, not a delete-and-recreate. Same visible result — the
+// comment ends up with everything it should have had — without detonating the
+// conversation hanging off it.
 const editCommentSchema = z.object({
   content: z.string().min(1).max(10000),
+  /** Assets uploaded during the edit, to be linked to this comment. */
+  assetIds: z.array(z.string()).max(50).optional(),
+  /**
+   * Drawing captured during the edit. `null` erases the existing annotation
+   * (the "actually, remove that scribble" case); omitted leaves it alone.
+   */
+  annotations: annotationDataSchema.optional().nullable(),
   timecode: z
     .string()
     .refine(isValidTimecode, {
@@ -180,7 +197,7 @@ export async function PATCH(
         { status: 400 }
       )
     }
-    const { content, timecode, timecodeEnd } = validation.data
+    const { content, timecode, timecodeEnd, assetIds, annotations } = validation.data
 
     // Look up the existing comment
     // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
@@ -191,6 +208,10 @@ export async function PATCH(
       select: {
         id: true,
         projectId: true,
+        // 6.16.0: needed to validate attachments added during an edit — an
+        // asset may only be linked to a comment on the video it was uploaded
+        // against, same rule as POST.
+        videoId: true,
         userId: true,
         editorSessionId: true,
         authorName: true,
@@ -271,6 +292,51 @@ export async function PATCH(
     if (timecodeEnd !== undefined) {
       // null clears the end (range → single point); a string sets it.
       updateData.timecodeEnd = timecodeEnd
+    }
+    // 6.16.0: an annotation drawn (or erased) during the edit. `undefined`
+    // means the client never touched it, which must not wipe an existing
+    // drawing — hence the explicit check rather than a truthiness test.
+    if (annotations !== undefined) {
+      updateData.annotations = annotations
+    }
+
+    // 6.16.0: attachments uploaded during the edit.
+    //
+    // Validated exactly like POST does, and for the same reason: an asset id
+    // arriving from the browser is a claim, not a fact. It must exist, belong
+    // to THIS comment's video, be client-uploaded, and not already be attached
+    // to another comment. Non-admins additionally may only link assets from
+    // their own upload session, so one reviewer cannot staple another's file
+    // onto their note.
+    if (assetIds && assetIds.length > 0) {
+      const uploaderSessionId =
+        (request.headers.get('x-framecomment-client-id') || '').trim().length > 0
+          ? `client:${(request.headers.get('x-framecomment-client-id') || '').trim()}`
+          : existingComment.editorSessionId
+      const assets = await prisma.videoAsset.findMany({
+        where: {
+          id: { in: assetIds },
+          videoId: existingComment.videoId,
+          uploadedBy: 'client',
+          ...(isAdmin ? {} : { uploadedBySessionId: uploaderSessionId ?? undefined }),
+          commentId: null,
+        },
+        select: { id: true },
+      })
+      if (assets.length !== assetIds.length) {
+        return NextResponse.json(
+          {
+            error:
+              commentsMessages.invalidAttachments ||
+              'One or more attachments are invalid or no longer available. Please attach the file again.',
+          },
+          { status: 400 },
+        )
+      }
+      await prisma.videoAsset.updateMany({
+        where: { id: { in: assets.map((a) => a.id) } },
+        data: { commentId: id },
+      })
     }
     const updated = await prisma.comment.update({
       where: { id },

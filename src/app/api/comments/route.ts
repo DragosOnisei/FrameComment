@@ -237,6 +237,8 @@ export async function POST(request: NextRequest) {
       parentId,
       isInternal,
       isCopied,
+      sourceVideoId,
+      sourceVersionLabel,
       assetIds,
       annotations,
     } = validation.data
@@ -410,15 +412,33 @@ export async function POST(request: NextRequest) {
     // keeps NORMAL comment creation bulletproof: it never depends on the
     // generated Prisma client knowing the `isCopied` column, so a stale
     // client / not-yet-run migration can't break posting comments.
+    //
+    // 6.16.0 carries the provenance in the same statement, for the same
+    // reason and with the same guarantee: if the columns are not there yet,
+    // the comment is still created and simply loses its version tag.
     if (isCopied && comment?.id) {
       try {
         await prisma.$executeRawUnsafe(
-          'UPDATE "Comment" SET "isCopied" = true WHERE id = $1',
+          'UPDATE "Comment" SET "isCopied" = true, "sourceVideoId" = $2, "sourceVersionLabel" = $3 WHERE id = $1',
           comment.id,
+          sourceVideoId ?? null,
+          sourceVersionLabel ?? null,
         )
         ;(comment as any).isCopied = true
+        ;(comment as any).sourceVideoId = sourceVideoId ?? null
+        ;(comment as any).sourceVersionLabel = sourceVersionLabel ?? null
       } catch {
-        /* column absent on older DBs — non-fatal; comment is still created */
+        // Columns absent on an older DB — non-fatal. Fall back to the 3.8.x
+        // behaviour so a pre-migration instance still gets the "Copied" tag.
+        try {
+          await prisma.$executeRawUnsafe(
+            'UPDATE "Comment" SET "isCopied" = true WHERE id = $1',
+            comment.id,
+          )
+          ;(comment as any).isCopied = true
+        } catch {
+          /* nothing left to try; the comment itself is safe */
+        }
       }
     }
 
@@ -522,7 +542,17 @@ export async function POST(request: NextRequest) {
       )
     )
 
-    return NextResponse.json(sanitizedComments)
+    // 6.16.0: the id of the row we just created, in a header.
+    //
+    // The body stays what every existing caller expects — the whole project's
+    // comments, so the UI can re-render without a second round-trip. But
+    // pasting a thread needs the parent's id to hang its replies off, and
+    // digging it out of that array by matching content + timestamp would be a
+    // guess. A header adds the one fact the body cannot express without
+    // changing its shape.
+    return NextResponse.json(sanitizedComments, {
+      headers: { 'X-Comment-Id': comment.id },
+    })
   } catch (error) {
     console.error('[/api/comments] failed:', error)
     return NextResponse.json({ error: commentsMessages.operationFailed || 'Operation failed' }, { status: 500 })

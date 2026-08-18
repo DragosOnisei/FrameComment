@@ -33,7 +33,13 @@ type ReactionGroup = {
 interface MessageBubbleProps {
   comment: CommentWithReplies
   isReply: boolean
-  onReply?: () => void
+  /**
+   * 6.15.2: takes an optional name to address. Clicking Reply on a REPLY
+   * routes here too — the thread stays one level deep (that is deliberate:
+   * nested trees turn a review into a forum), so the new reply attaches to
+   * the same root comment and simply opens with "@Name " already typed.
+   */
+  onReply?: (mentionName?: string | null) => void
   onSeekToTimecode?: (
     timecode: string,
     videoId: string,
@@ -123,6 +129,7 @@ export default function MessageBubble({
   // Local edit state for the main comment
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
+
   const [isSaving, setIsSaving] = useState(false)
 
   // Local edit state for replies (keyed by reply id)
@@ -272,6 +279,35 @@ export default function MessageBubble({
     if (!trimmed) return
     try {
       setIsSaving(true)
+      /*
+       * 6.16.0: Save ends the drawing.
+       *
+       * Shapes live on the canvas until `finishDrawingMode` commits them, and
+       * nothing else on screen calls it — the send arrow in the composer does,
+       * but expecting someone to press THAT before pressing Save is a hidden
+       * second step nobody would guess. So Save does it: you draw, you hit
+       * Save, the arrow lands on the comment.
+       *
+       * The listener that stores the committed shapes runs synchronously off
+       * the event, but we still yield a tick before the PATCH — the same
+       * caution the composer's own submit path takes — so the value is
+       * definitely readable by the time the request is built.
+       */
+      if (annotationCtx?.isDrawingMode) {
+        if (annotationCtx.drawing.hasShapes) {
+          annotationCtx.finishDrawingMode()
+        } else {
+          // Entered drawing mode and drew nothing. Leaving it open would keep
+          // the canvas swallowing clicks on the video after the edit closed.
+          annotationCtx.cancelDrawingMode()
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      // No extras are gathered here. Anything drawn or attached while this edit
+      // is open lives in the composer at the bottom — the same controls used
+      // for a new comment — and CommentSection folds it into the PATCH.
+      // Duplicating those buttons inside the edit box gave two places to
+      // attach a file and no way to tell which one a drawing belonged to.
       await onEdit(trimmed)
       setIsEditing(false)
       setEditValue('')
@@ -392,6 +428,32 @@ export default function MessageBubble({
     void onReact(comment.id, emoji)
   }
 
+  /**
+   * 6.16.0: a note carried over from an earlier cut.
+   *
+   * `isCopied` (3.8.x) only said THAT a comment was pasted. The version label
+   * is what makes it actionable — looking at v3, "written on v1" tells you the
+   * note has survived two rounds without being addressed, which is a very
+   * different signal from "someone pasted this".
+   *
+   * Comments pasted before 6.16.0 have no label; they keep the plain "Copied"
+   * tag rather than being shown a version we never recorded.
+   */
+  const sourceVersionLabel: string | null =
+    (comment as any).sourceVersionLabel || null
+  const isFromPreviousVersion = !!sourceVersionLabel
+  /**
+   * Any carried-over note, whether it remembers its version or not.
+   *
+   * A pasted comment is a RECORD of what someone said on another cut. Editing
+   * it would quietly rewrite history: the text in front of you would no longer
+   * be the text that was written, and there is nothing left to check it
+   * against. So carried-over notes are read-only — you resolve them, reply to
+   * them, or delete them, but you do not put words in the original author's
+   * mouth. If the note needs rewording for this cut, that is a new comment.
+   */
+  const isCarriedOver = isFromPreviousVersion || !!(comment as any).isCopied
+
   const threadReplies = !isReply && replies && replies.length > 0 ? replies : []
   const hasReplies = threadReplies.length > 0
 
@@ -427,7 +489,14 @@ export default function MessageBubble({
           // gets a slightly brighter base bg as a hint, with the
           // ring delegated to .is-selected when it eventually fires.
           isAnnotationFocused ? 'bg-white/[0.08]' : ''
-        } ${isResolved ? 'opacity-70' : ''} comment-card`}
+        } ${isResolved ? 'opacity-70' : ''} ${
+          // Carried-over notes sit back a step so the eye finds feedback
+          // written ON this cut first. Not hidden — often the old note is the
+          // whole reason you are here — just clearly second in line. Full
+          // opacity on hover, because the moment you reach for it you want to
+          // read it properly.
+          isCarriedOver && !isResolved ? 'opacity-60 hover:opacity-100' : ''
+        } comment-card`}
       >
         {hasReplies && (
           <div className="absolute left-[18px] top-9 bottom-9 w-px bg-border/50" aria-hidden="true" />
@@ -452,15 +521,32 @@ export default function MessageBubble({
               <div className="ml-auto shrink-0 flex items-center gap-1.5">
                 {/* 3.8.x: "Copied" tag for comments pasted in from another
                     version (Frame.io-style), so carried-over notes are
-                    distinguishable from fresh ones. */}
-                {(comment as any).isCopied && (
+                    distinguishable from fresh ones.
+                    6.16.0: when we know WHICH version, say it — and say it in
+                    amber, because "this was already raised on an older cut" is
+                    a thing you want to catch while scanning, not something to
+                    find by reading every tag. */}
+                {isFromPreviousVersion ? (
                   <span
-                    className="text-[10px] font-medium text-white/50 uppercase tracking-wide"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-400/12 ring-1 ring-amber-400/25 whitespace-nowrap"
+                    title={`Written on ${sourceVersionLabel}, carried over to this version`}
+                  >
+                    {t('previousVersion') || 'Previous version'}
+                    <span className="font-mono normal-case text-amber-200/70">
+                      {sourceVersionLabel}
+                    </span>
+                  </span>
+                ) : (comment as any).isCopied ? (
+                  // Pasted before 6.16.0, or pasted from the kebab rather than
+                  // from a version — we know it was carried over, just not
+                  // from where. Say exactly that much and no more.
+                  <span
+                    className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300/80 bg-amber-400/10 ring-1 ring-amber-400/20 whitespace-nowrap"
                     title="Copied from another version"
                   >
                     Copied
                   </span>
-                )}
+                ) : null}
                 {isResolved ? (
                   <span
                     className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-white shadow-sm"
@@ -603,7 +689,7 @@ export default function MessageBubble({
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        onReply()
+                        onReply(null)
                       }}
                       className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
                     >
@@ -631,7 +717,7 @@ export default function MessageBubble({
                       = solid `#162533` + ring-white/10 (backdrop-blur
                       doesn't compose reliably in this stacking context
                       so we go solid like the rest of the dropdowns). */}
-                  {(canEdit || onDelete) && (
+                  {((canEdit && !isCarriedOver) || onDelete) && (
                     <div ref={menuRef} className="relative">
                       <button
                         ref={menuTriggerRef}
@@ -691,7 +777,12 @@ export default function MessageBubble({
                                 : t('copyComment') || 'Copy'}
                             </span>
                           </button>
-                          {canEdit && onEdit && (
+                          {/* Carried-over notes are a record of what someone
+                              said elsewhere; editing them would rewrite that
+                              record with nothing left to check it against.
+                              Delete and Copy stay — removing a note you no
+                              longer need is not the same as rewording it. */}
+                          {canEdit && onEdit && !isCarriedOver && (
                             <button
                               type="button"
                               onClick={() => {
@@ -801,7 +892,31 @@ export default function MessageBubble({
                     <span className="text-[11px] text-muted-foreground flex-shrink-0">
                       {formatMessageTime(reply.createdAt)}
                     </span>
-                    <div className="ml-auto flex items-center gap-1.5 text-muted-foreground/80">
+                    <div className="ml-auto flex items-center gap-2 text-muted-foreground/80">
+                      {/*
+                        6.15.2: you can answer a reply. Before, only the root
+                        comment carried a Reply button, so the moment a thread
+                        had one answer the conversation had nowhere to go —
+                        you had to start a second top-level comment and lose
+                        the context.
+
+                        It attaches to the same root comment rather than
+                        nesting deeper: the data model allows arbitrary depth,
+                        but a review thread that indents forever stops being
+                        readable next to a video. Addressing the person by
+                        name keeps it clear who is being answered.
+                      */}
+                      {!commentsDisabled && onReply && editingReplyId !== reply.id && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onReply(replyEffectiveName || null)
+                          }}
+                          className="hover:text-foreground transition-colors font-medium whitespace-nowrap text-[11px]"
+                        >
+                          {t('reply')}
+                        </button>
+                      )}
                       {canEditReply && canEditReply(reply) && onEditReply && editingReplyId !== reply.id && (
                         <button
                           onClick={() => handleStartEditReply(reply)}

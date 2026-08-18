@@ -447,7 +447,7 @@ const shapeSchema = z.discriminatedUnion('type', [
   rectangleShapeSchema,
 ])
 
-const annotationDataSchema = z.object({
+export const annotationDataSchema = z.object({
   version: z.literal(1),
   shapes: z.array(shapeSchema).min(1).max(200),
 })
@@ -477,6 +477,12 @@ export const createCommentSchema = z
     isInternal: z.boolean().optional(),
     // 3.8.x: set when the comment is pasted in from another version.
     isCopied: z.boolean().optional(),
+    // 6.16.0: WHICH version it came from. Sent together with isCopied by the
+    // "paste previous version comments" flow; plain copy/paste still sends
+    // only isCopied, so the tag degrades to "Copied" rather than lying about
+    // a version.
+    sourceVideoId: cuidSchema.optional().nullable(),
+    sourceVersionLabel: safeStringSchema(1, 64).optional().nullable(),
     assetIds: z.array(z.string()).max(50).optional(),
     annotations: annotationDataSchema.optional().nullable(),
   })

@@ -224,6 +224,10 @@ export async function GET(
           preview1080Path: true,
           preview2160Path: true,
           storyboardPath: true,
+          // 6.15.2: without these the client-side card falls back to a 10×10
+          // grid, which has only been right for short clips since 6.9.3.
+          storyboardCols: true,
+          storyboardRows: true,
           createdAt: true,
           _count: { select: { comments: true } },
         },
