@@ -14,7 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [6.16.0] - 2026-08-18
+## [6.17.0] - 2026-08-18
+
+> Acesta e conţinutul care purta numărul 6.16.0. Tag-ul acela a ajuns pe
+> GitHub cu o eroare de tipuri şi build-ul a picat, deci nu există nicio
+> imagine `6.16.0` — iar a-l rescrie ar fi însemnat două lucruri diferite sub
+> acelaşi nume. Numărul e ars; conţinutul se livrează ca 6.17.0.
+>
+> Eroarea merită numită: CI-ul rulează `prisma generate`, aşa că `Comment` a
+> primit coloanele noi de provenienţă, iar `as CommentWithReplies` de pe
+> rândul optimist a încetat să se suprapună cu tipul. Local trecuse pentru că
+> verificam împotriva unui client generat înainte de migrare.
+
 
 ### Un comentariu trimis poate primi ulterior fișier și adnotare
 

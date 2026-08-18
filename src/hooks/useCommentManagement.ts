@@ -620,6 +620,12 @@ export function useCommentManagement({
       isInternal: isInternalComment,
       // 3.8.x: fresh comments are never "copied" (only paste marks them).
       isCopied: false,
+      // 6.16.0: nor do they come from another version — that is what makes
+      // them fresh. Present rather than omitted because the generated Prisma
+      // type requires every scalar here, and the `as CommentWithReplies` cast
+      // stops overlapping the moment one is missing.
+      sourceVideoId: null,
+      sourceVersionLabel: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       parentId: replyingToCommentId,
