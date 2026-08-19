@@ -741,7 +741,13 @@
     "thumbnailReverted": "Reverted to system-generated thumbnail",
     "thumbnailUpdated": "Thumbnail updated successfully",
     "failedToSetThumbnailApi": "Failed to set thumbnail",
-    "tooManyThumbnailUpdateRequests": "Too many thumbnail update requests. Please slow down."
+    "tooManyThumbnailUpdateRequests": "Too many thumbnail update requests. Please slow down.",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "volume": "Volume",
+    "compareAudioPlayFromThis": "Play audio from this version",
+    "compareAudioMute": "Mute both",
+    "compareAudioUnmute": "Unmute this version"
   },
   "comments": {
     "feedbackAndDiscussion": "All comments",
@@ -754,11 +760,11 @@
     "noCommentsHere": "No comments on this version",
     "commentsOnVersion": "{count, plural, one {# comment} other {# comments}} from {version}",
     "pasteFromVersion": "Paste them here",
-    "pastingFromVersion": "Pasting\u2026",
+    "pastingFromVersion": "Pasting…",
     "previousVersion": "Previous version",
     "annotationAttached": "Drawing",
     "addAnnotation": "Draw on the frame",
-    "feedingEdit": "Attaching to the comment you are editing \u2014 press Save there to apply.",
+    "feedingEdit": "Attaching to the comment you are editing — press Save there to apply.",
     "finishDrawingForEdit": "Finish the drawing",
     "replyingTo": "Replying to",
     "justNow": "Just now",

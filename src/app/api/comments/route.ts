@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, orgSettingsWhere, rawArmed } from '@/lib/db'
+import { prisma, orgSettingsWhere, rawArmed, currentOrgId } from '@/lib/db'
 import { armOrgForProjectId } from '@/lib/share-org'
 import { getAuthContext } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
@@ -8,6 +8,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment, buildGuestSessionIndex } from '@/lib/comment-sanitization'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
+import { logError } from '@/lib/logging'
 import { maybeNotifyEditorForComment, notifyCommentReply } from '@/lib/inapp-notifications'
 import {
 
@@ -241,6 +242,7 @@ export async function POST(request: NextRequest) {
       sourceVersionLabel,
       assetIds,
       annotations,
+      copyAssetsFromCommentId,
     } = validation.data
 
     // Enforce configurable max comment attachments
@@ -477,9 +479,84 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    /*
+     * 6.22.0 — a pasted comment brings its attachments.
+     *
+     * A note reading "the logo is wrong, see the screenshot" is worthless on the
+     * new cut if the screenshot stayed behind on the old one, and a voice
+     * message is nothing BUT its attachment: carrying only the text meant
+     * carrying an empty bubble.
+     *
+     * The file itself is not copied. New VideoAsset rows point at the same
+     * `storagePath`, the way `assets/copy-to-version` already does — duplicating
+     * bytes so two comments can reference the same screenshot would be a way to
+     * make storage bills grow by pasting. The delete path already counts other
+     * rows sharing a `storagePath` and only removes the file when it is the last
+     * one, so the shared reference is safe in both directions.
+     *
+     * Unlike that older endpoint, this carries `storageBackend` and
+     * `storageLocations` across. Dropping them (as copy-to-version does) leaves
+     * the row claiming to live on the default backend, so the file resolves only
+     * as long as the default never moves.
+     *
+     * Staff only. The field names a comment and the browser could name any
+     * comment, so the guard is: signed-in internal user, and the source comment
+     * must sit in the same project as the paste target. Without that, a guest on
+     * a single-video share link could copy files off videos they cannot see.
+     */
+    let copiedAssetCount = 0
+    if (copyAssetsFromCommentId && isAdmin) {
+      try {
+        const sourceComment = await prisma.comment.findUnique({
+          where: { id: copyAssetsFromCommentId },
+          select: { id: true, projectId: true },
+        })
+        if (sourceComment && sourceComment.projectId === projectId) {
+          const sourceAssets = await prisma.videoAsset.findMany({
+            where: { commentId: sourceComment.id },
+            select: {
+              fileName: true,
+              fileSize: true,
+              fileType: true,
+              storagePath: true,
+              storageBackend: true,
+              storageLocations: true,
+              category: true,
+              uploadedBy: true,
+              uploadedByName: true,
+            },
+          })
+          for (const asset of sourceAssets) {
+            await prisma.videoAsset.create({
+              data: {
+                ...asset,
+                videoId,
+                commentId: comment.id,
+                // The bytes are already on disk under the shared path, so there
+                // is no upload to wait for. Leaving this null would make the
+                // attachment invisible: listings filter on it.
+                uploadCompletedAt: new Date(),
+                organizationId: currentOrgId(),
+              } as any,
+            })
+            copiedAssetCount += 1
+          }
+        } else {
+          logError(
+            '[POST /api/comments] refused to copy attachments: source comment ' +
+            `${copyAssetsFromCommentId} is not in project ${projectId}`,
+          )
+        }
+      } catch (assetErr) {
+        // The comment is already created and is the thing the user asked for.
+        // Losing an attachment copy is worth a log line, not a failed paste.
+        logError('[POST /api/comments] attachment copy failed (non-fatal):', assetErr)
+      }
+    }
+
     // Collect attachment file names for notifications
     let attachmentNames: string[] | undefined
-    if (assetIds && assetIds.length > 0) {
+    if ((assetIds && assetIds.length > 0) || copiedAssetCount > 0) {
       const linkedAssets = await prisma.videoAsset.findMany({
         where: { commentId: comment.id },
         select: { fileName: true },
@@ -558,7 +635,14 @@ export async function POST(request: NextRequest) {
     // guess. A header adds the one fact the body cannot express without
     // changing its shape.
     return NextResponse.json(sanitizedComments, {
-      headers: { 'X-Comment-Id': comment.id },
+      headers: {
+        'X-Comment-Id': comment.id,
+        // 6.22.0: how many attachments actually came across. The paste loop
+        // compares this with what it expected and tells the user when a file
+        // could not be brought along — the source comment having been deleted
+        // since the copy is the ordinary way that happens.
+        'X-Attachments-Copied': String(copiedAssetCount),
+      },
     })
   } catch (error) {
     console.error('[/api/comments] failed:', error)

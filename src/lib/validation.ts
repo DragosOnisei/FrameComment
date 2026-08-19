@@ -485,6 +485,14 @@ export const createCommentSchema = z
     sourceVersionLabel: safeStringSchema(1, 64).optional().nullable(),
     assetIds: z.array(z.string()).max(50).optional(),
     annotations: annotationDataSchema.optional().nullable(),
+    // 6.22.0: bring the source comment's attachments across on a paste.
+    //
+    // Names a COMMENT, not a list of files, and deliberately so: the client
+    // must not be the one deciding which assets it may copy. The server reads
+    // the attachments off that comment after checking it belongs to the same
+    // project as the paste target, and the whole field is ignored for anyone
+    // who is not signed-in staff — see the route.
+    copyAssetsFromCommentId: cuidSchema.optional().nullable(),
   })
   // A comment must have *something* — text, an attachment (e.g. voice
   // message), or an annotation. Empty-on-all-fronts comments would render
@@ -493,7 +501,12 @@ export const createCommentSchema = z
     (data) =>
       (data.content && data.content.trim().length > 0) ||
       (data.assetIds && data.assetIds.length > 0) ||
-      (data.annotations && data.annotations.shapes && data.annotations.shapes.length > 0),
+      (data.annotations && data.annotations.shapes && data.annotations.shapes.length > 0) ||
+      // 6.22.0: a pasted voice message is a comment with no text, no shapes and
+      // no assetIds — its file arrives by reference. Without this clause the
+      // schema rejected exactly the comments that consist of nothing but an
+      // attachment, which is the normal shape of a voice note.
+      !!data.copyAssetsFromCommentId,
     {
       message: 'Comment must contain text, an attachment, or an annotation.',
       path: ['content'],

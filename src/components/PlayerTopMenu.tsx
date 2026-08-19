@@ -74,7 +74,11 @@ export interface PlayerTopMenuProps {
 
 type Toast =
   | { kind: 'copied'; count: number }
-  | { kind: 'pasted'; count: number }
+  // 6.22.0: `filesMissing` is how many attachments could not be brought along —
+  // normally zero, non-zero when a source comment was deleted between the copy
+  // and the paste. A paste that quietly loses a screenshot is worse than one
+  // that says it did.
+  | { kind: 'pasted'; count: number; filesMissing?: number }
   | { kind: 'link-copied' }
   | { kind: 'deleted' }
   | { kind: 'error'; message: string }
@@ -285,7 +289,11 @@ export default function PlayerTopMenu({
       if (detail.kind === 'copied' && typeof detail.count === 'number') {
         setToast({ kind: 'copied', count: detail.count })
       } else if (detail.kind === 'pasted' && typeof detail.count === 'number') {
-        setToast({ kind: 'pasted', count: detail.count })
+        setToast({
+          kind: 'pasted',
+          count: detail.count,
+          filesMissing: typeof detail.filesMissing === 'number' ? detail.filesMissing : 0,
+        })
       } else if (detail.kind === 'error') {
         setToast({
           kind: 'error',
@@ -545,7 +553,11 @@ export default function PlayerTopMenu({
         >
           {toast.kind !== 'error' && <Check className="w-3 h-3" />}
           {toast.kind === 'copied' && `Copied ${toast.count}`}
-          {toast.kind === 'pasted' && `Pasted ${toast.count}`}
+          {toast.kind === 'pasted' && (
+            toast.filesMissing
+              ? `Pasted ${toast.count} · ${toast.filesMissing} file${toast.filesMissing === 1 ? '' : 's'} unavailable`
+              : `Pasted ${toast.count}`
+          )}
           {toast.kind === 'link-copied' && 'Link copied'}
           {toast.kind === 'deleted' && 'Deleted'}
           {toast.kind === 'error' && toast.message}

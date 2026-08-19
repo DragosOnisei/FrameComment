@@ -145,11 +145,19 @@ export default function FounderSidebar() {
 
         {showUserMenu && (
           <div
-            className="absolute bottom-full left-0 right-0 mb-2 glass-panel rounded-lg shadow-lg p-1.5"
+            /* 6.22.0: opaque, matching the admin sidebar's menu and the rest of
+               the menu family. See the note in AdminSidebar for why glass is
+               wrong specifically for menus. */
+            className="brand-menu-surface absolute bottom-full left-0 right-0 mb-2 rounded-lg ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1.5 bg-background"
             role="menu"
-            // Same iOS compositing guard the other menus use: without it,
-            // backdrop-filter surfaces behind can paint over this panel.
-            style={{ transform: 'translateZ(0)', isolation: 'isolate' }}
+            style={{
+              backgroundColor:
+                'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
+              // Existing iOS compositing guard, kept: without it, backdrop-filter
+              // surfaces behind can paint over this panel regardless of z-index.
+              transform: 'translateZ(0)',
+              isolation: 'isolate',
+            }}
           >
             <Link
               href="/admin/profile"

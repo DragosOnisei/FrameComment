@@ -34,11 +34,44 @@ export interface ClippedComment {
    * product does not.
    */
   replies?: ClippedReply[]
+  /**
+   * 6.22.0: the drawing, carried with the note.
+   *
+   * A comment reading "this bit" means nothing without the arrow that says
+   * which bit. Annotations are shapes in the video's own coordinate space, so
+   * they transfer to another cut of the same edit unchanged — which is exactly
+   * the case paste exists for.
+   */
+  annotations?: unknown | null
+  /**
+   * 6.22.0: the id of the comment this was copied FROM, so the server can bring
+   * its attachments across.
+   *
+   * Everything else in this payload is content; this is a reference, and it is
+   * here for one reason: the client must not be the one deciding which files it
+   * may copy. It names a comment, the server checks that comment lives in the
+   * same project as the paste target, and only then duplicates. Sending asset
+   * ids instead would mean trusting the browser's list.
+   */
+  sourceCommentId?: string | null
+  /**
+   * 6.22.0: how many files the original had, recorded at copy time.
+   *
+   * Only used to tell the truth afterwards. The server reports how many it
+   * actually copied, and if the source comment was deleted between the copy and
+   * the paste the answer is fewer than this — which the user should hear about
+   * rather than discover later.
+   */
+  attachmentCount?: number
 }
 
 export interface ClippedReply {
   content: string
   authorName?: string | null
+  /** 6.22.0: replies can carry drawings and files of their own. */
+  annotations?: unknown | null
+  sourceCommentId?: string | null
+  attachmentCount?: number
 }
 
 const KEY_PREFIX = 'framecomment:clipboard:comments'

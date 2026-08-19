@@ -14,6 +14,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.22.0] - 2026-08-19
+
+### Added
+
+- **A pasted comment brings its drawing and its files.** Carrying only the text
+  meant "the logo is wrong, see the screenshot" arrived on the new cut without
+  the screenshot, and a voice message — which is nothing *but* its attachment —
+  arrived as an empty bubble. Annotations travel as data. Attachments do not:
+  new `VideoAsset` rows point at the same `storagePath`, the way
+  `assets/copy-to-version` already does, because duplicating bytes would make
+  storage bills grow by pasting. The delete path already counts other rows
+  sharing a path and removes the file only when it is the last one, so the shared
+  reference is safe from both ends. Unlike that older endpoint, this one carries
+  `storageBackend` and `storageLocations` across — dropping them leaves the row
+  claiming to live on the default backend, which resolves only until the default
+  moves.
+  - The client sends the id of the source COMMENT, never a list of files. The
+    server checks that comment belongs to the same project as the paste target
+    and only then copies, and the field is ignored for anyone who is not
+    signed-in staff: otherwise a guest holding a single-video share link could
+    pull files off videos they cannot see.
+  - A voice note is a comment with no text, no shapes and no `assetIds`, which
+    the schema rejected outright — the new field now counts as content.
+  - An annotation that fails validation would have failed the whole request and
+    dropped the comment with it. The drawing gives way instead: losing a drawing
+    is a shame, losing the note it belonged to is a bug.
+  - When a file cannot come along — the source comment deleted between the copy
+    and the paste — the toast says so rather than reporting a clean paste.
+- **Sound controls in compare mode.** There were none: one of the two clips was
+  always audible, so two cuts could not be watched in silence — which is what you
+  want when the room is not yours, or when you are looking at grading rather than
+  listening to a mix. Mute is now a state of its own, separate from which side
+  has focus, and both survive switching sides. Volume lives on the left with the
+  slider sliding out on hover, matching the main player's group exactly rather
+  than inventing a second one; clicking the live pane's red badge silences both,
+  clicking the other pane moves the audio there and lifts the mute, because that
+  is what the click means. Volume zero and the mute button agree with each other,
+  so the icon can never show sound while nothing is audible.
+
+### Changed
+
+- Compare mode's timeline is the main player's timeline. It was a near-miss of
+  it: a permanently thick bar instead of 3px thickening on hover, a white disc
+  with an accent ring instead of the thin vertical tick, `blur(24)` against
+  `blur(32)`. And the bar read visibly bluer, because the player's translucent
+  surface sits on a `bg-black` wrapper while compare mode's sits on the overlay's
+  own tinted backdrop — so the accent was bleeding through into the one place it
+  should not. The black is now stated locally, an opaque shell with the
+  translucent bar inside, which is the player's structure rather than a guess at
+  its output; both composite to the same colour. The backdrop-filter is gone with
+  it: nothing left to see through, and blurring under an opaque fill is pure GPU
+  cost.
+- Compare mode's bottom row is the player's row too: play, speed and volume on
+  the left, the time centred in the same size and weight with the same dimmed
+  separator, compare-only controls on the right. The frame back/forward buttons
+  are gone, as they went from the normal player in 4.1.0 — stepping is on
+  Ctrl+J / Ctrl+L, which compare mode already binds, and two extra buttons only
+  made the two bars look like different products.
+- The account menu in both sidebars is opaque. `glass-panel` is white at 4% over
+  a 20px blur — fine for a panel on a flat page, wrong for a menu, because
+  whatever sits underneath shows through the item labels. It now uses the same
+  accent-tinted opaque surface as the topbar account menu, the notification bell
+  and the sort menu, so all of them read as one family, plus the compositing
+  guard that stops iOS Safari painting backdrop-filter siblings over them.
+
 ## [6.21.0] - 2026-08-19
 
 ### Fixed

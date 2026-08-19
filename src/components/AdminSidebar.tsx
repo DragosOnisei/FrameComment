@@ -269,8 +269,29 @@ export default function AdminSidebar() {
         </button>
 
         {showUserMenu && (
+          /*
+           * 6.22.0: opaque, not glass.
+           *
+           * `glass-panel` is white at 4% over a 20px blur, which is fine for a
+           * panel sitting on a flat page and wrong for a menu: whatever is
+           * underneath — sidebar rows, project thumbnails — shows through the
+           * item labels and makes them hard to read. Same accent-tinted opaque
+           * surface as the topbar account menu, the notification bell and the
+           * sort menu, so all four read as one family. `bg-background` is the
+           * fallback for engines without `color-mix`, and the ring replaces the
+           * border `glass-panel` was supplying.
+           */
           <div
-            className="absolute bottom-full left-0 right-0 mb-2 glass-panel rounded-lg shadow-lg p-1.5"
+            className="brand-menu-surface absolute bottom-full left-0 right-0 mb-2 rounded-lg ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1.5 bg-background"
+            style={{
+              backgroundColor:
+                'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
+              // Same compositing guard the other opaque menus carry: iOS Safari
+              // promotes backdrop-filter surfaces to their own layers and paints
+              // them above non-composited siblings, ignoring z-index.
+              transform: 'translateZ(0)',
+              isolation: 'isolate',
+            }}
             role="menu"
           >
             <Link

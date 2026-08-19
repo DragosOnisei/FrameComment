@@ -69,6 +69,17 @@ export default function VideoComparison({
   // into noise). Default = B (the latest version). Clicking a window moves
   // the audio there — news-panel "which camera is live" style.
   const [activeAudio, setActiveAudio] = useState<'A' | 'B'>('B')
+  /*
+   * 6.22.0 — silence as a first-class state.
+   *
+   * `activeAudio` alone can only answer "which of the two do I hear", so one of
+   * them was always audible: there was no way to compare two cuts without sound,
+   * which is what you want when the room is not yours or when you are looking at
+   * grading rather than listening to a mix. Mute is therefore separate from
+   * focus, and both survive switching sides.
+   */
+  const [isMuted, setIsMuted] = useState(false)
+  const [volume, setVolume] = useState(1)
   // 3.8.x: hover-scrub state for the version-picker thumbnails (which side,
   // which version index, and the 0..1 fraction from the mouse X).
   const [hoverScrub, setHoverScrub] = useState<{
@@ -152,9 +163,9 @@ export default function VideoComparison({
     }
   }, [isPlaying])
 
-  const stepFrame = useCallback((direction: 'forward' | 'backward') => {
-    stepFrameRef.current(direction)
-  }, [])
+  // 6.22.0: the `stepFrame` wrapper is gone with the frame buttons — the only
+  // remaining caller is the Ctrl+J / Ctrl+L handler, which reaches
+  // `stepFrameRef.current` directly.
 
   // A's timeupdate drives the UI timeline only — no sync logic
   useEffect(() => {
@@ -203,6 +214,19 @@ export default function VideoComparison({
     }
   }, [videoUrlA])
 
+  /**
+   * Should this side be silent?
+   *
+   * Two independent reasons: it is not the focused side, or sound is off
+   * altogether. `volume === 0` counts as off so the slider bottoming out and the
+   * mute button agree with each other — otherwise the icon would show sound
+   * while nothing was audible.
+   */
+  const mutedFor = useCallback(
+    (side: 'A' | 'B') => isMuted || volume === 0 || activeAudio !== side,
+    [isMuted, volume, activeAudio],
+  )
+
   // Handle metadata load — set duration, apply speed
   const handleLoadedMetadata = useCallback(() => {
     const a = videoRefA.current
@@ -211,17 +235,71 @@ export default function VideoComparison({
     if (dur && dur !== Infinity) {
       setVideoDuration(dur)
     }
-    if (a) { a.playbackRate = playbackSpeed; a.muted = activeAudio !== 'A' }
-    if (b) { b.playbackRate = playbackSpeed; b.muted = activeAudio !== 'B' }
-  }, [playbackSpeed, activeAudio])
+    if (a) { a.playbackRate = playbackSpeed; a.muted = mutedFor('A'); a.volume = volume }
+    if (b) { b.playbackRate = playbackSpeed; b.muted = mutedFor('B'); b.volume = volume }
+  }, [playbackSpeed, mutedFor, volume])
 
-  // Apply audio focus: mute the non-active side. Re-applied whenever the
-  // active side changes or either version reloads (the <video> elements
-  // remount on version change, so we re-assert `muted` here).
+  // Apply audio focus: mute the non-active side, and both when muted. Re-applied
+  // whenever the active side, mute or volume changes, or either version reloads
+  // (the <video> elements remount on version change, so we re-assert here).
   useEffect(() => {
-    if (videoRefA.current) videoRefA.current.muted = activeAudio !== 'A'
-    if (videoRefB.current) videoRefB.current.muted = activeAudio !== 'B'
-  }, [activeAudio, versionAIndex, versionBIndex, mode])
+    if (videoRefA.current) {
+      videoRefA.current.muted = mutedFor('A')
+      videoRefA.current.volume = volume
+    }
+    if (videoRefB.current) {
+      videoRefB.current.muted = mutedFor('B')
+      videoRefB.current.volume = volume
+    }
+  }, [mutedFor, volume, versionAIndex, versionBIndex, mode])
+
+  /**
+   * Move the audio to one side.
+   *
+   * Clicking the side that is ALREADY live toggles silence — the red badge is
+   * the only mute control inside the video area, and asking someone to travel
+   * to the bottom bar to shut up the clip they are pointing at is the kind of
+   * detail that makes a feature feel unfinished. Clicking the OTHER side means
+   * "let me hear that one", so it un-mutes as well as switching.
+   */
+  const focusAudio = useCallback((side: 'A' | 'B') => {
+    setActiveAudio((current) => {
+      if (current === side) {
+        setIsMuted((m) => !m)
+        return current
+      }
+      setIsMuted(false)
+      return side
+    })
+  }, [])
+
+  const toggleMute = useCallback(() => {
+    // A slider dragged to zero and then a click on the mute button should turn
+    // sound ON, not toggle a flag that changes nothing audible.
+    if (volume === 0) {
+      setVolume(1)
+      setIsMuted(false)
+      return
+    }
+    setIsMuted((m) => !m)
+  }, [volume])
+
+  const handleVolumeChange = useCallback((next: number) => {
+    const clamped = Math.min(1, Math.max(0, next))
+    setVolume(clamped)
+    // Moving the slider up is an unambiguous "I want to hear this", so it lifts
+    // the mute rather than leaving the user with a slider that does nothing.
+    if (clamped > 0) setIsMuted(false)
+  }, [])
+
+  /** Plain-language title for the per-pane badge, since it now has three states. */
+  const audioBadgeLabel = useCallback(
+    (side: 'A' | 'B') => {
+      if (activeAudio !== side) return t('compareAudioPlayFromThis')
+      return mutedFor(side) ? t('compareAudioUnmute') : t('compareAudioMute')
+    },
+    [activeAudio, mutedFor, t],
+  )
 
   // Keyboard shortcuts — match the main player exactly (Ctrl+ prefix)
   useEffect(() => {
@@ -550,25 +628,26 @@ export default function VideoComparison({
                     crossOrigin="anonymous"
                     playsInline
                     preload="auto"
-                    muted={activeAudio !== 'A'}
+                    muted={mutedFor('A')}
                     onLoadedMetadata={handleLoadedMetadata}
-                    onClick={() => setActiveAudio('A')}
+                    onClick={() => focusAudio('A')}
                   />
-                  {/* Audio-focus badge. Red + Volume2 = this side is the
-                      live audio source; muted icon = click to move audio here.
-                      (Clicking anywhere on the video does the same.) */}
+                  {/* Audio badge. Red + Volume2 = this side is live; click it
+                      again to silence both. Muted icon = click to bring the
+                      audio here (which also lifts a global mute). Clicking
+                      anywhere on the video does the same thing. */}
                   <button
                     type="button"
-                    onClick={() => setActiveAudio('A')}
-                    aria-label={activeAudio === 'A' ? 'Audio source' : 'Play audio from this version'}
-                    title={activeAudio === 'A' ? 'Audio: this version' : 'Play audio from this version'}
+                    onClick={() => focusAudio('A')}
+                    aria-label={audioBadgeLabel('A')}
+                    title={audioBadgeLabel('A')}
                     className={`absolute top-2 right-2 z-20 h-8 w-8 rounded-full flex items-center justify-center transition-colors ${
-                      activeAudio === 'A'
+                      activeAudio === 'A' && !mutedFor('A')
                         ? 'bg-red-500 text-white shadow-lg'
                         : 'bg-black/50 text-white/60 ring-1 ring-white/15 hover:bg-black/70 hover:text-white'
                     }`}
                   >
-                    {activeAudio === 'A' ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                    {mutedFor('A') ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -593,22 +672,22 @@ export default function VideoComparison({
                     crossOrigin="anonymous"
                     playsInline
                     preload="auto"
-                    muted={activeAudio !== 'B'}
+                    muted={mutedFor('B')}
                     onLoadedMetadata={handleLoadedMetadata}
-                    onClick={() => setActiveAudio('B')}
+                    onClick={() => focusAudio('B')}
                   />
                   <button
                     type="button"
-                    onClick={() => setActiveAudio('B')}
-                    aria-label={activeAudio === 'B' ? 'Audio source' : 'Play audio from this version'}
-                    title={activeAudio === 'B' ? 'Audio: this version' : 'Play audio from this version'}
+                    onClick={() => focusAudio('B')}
+                    aria-label={audioBadgeLabel('B')}
+                    title={audioBadgeLabel('B')}
                     className={`absolute top-2 right-2 z-20 h-8 w-8 rounded-full flex items-center justify-center transition-colors ${
-                      activeAudio === 'B'
+                      activeAudio === 'B' && !mutedFor('B')
                         ? 'bg-red-500 text-white shadow-lg'
                         : 'bg-black/50 text-white/60 ring-1 ring-white/15 hover:bg-black/70 hover:text-white'
                     }`}
                   >
-                    {activeAudio === 'B' ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                    {mutedFor('B') ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -647,13 +726,16 @@ export default function VideoComparison({
             isPlaying={isPlaying}
             onPlayPause={togglePlayPause}
             onSeek={handleSeek}
-            onFrameStep={stepFrame}
             mode={mode}
             onModeChange={setMode}
             playbackSpeed={playbackSpeed}
             onSpeedChange={handleSpeedChange}
             videoFps={videoFps}
             timestampDisplayMode={timestampDisplayMode}
+            volume={volume}
+            isMuted={isMuted || volume === 0}
+            onVolumeChange={handleVolumeChange}
+            onToggleMute={toggleMute}
           />
         </div>
       </div>

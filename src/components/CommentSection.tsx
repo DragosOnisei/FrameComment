@@ -164,6 +164,26 @@ function InlineReplyForm({
   )
 }
 
+/**
+ * 6.22.0 — only carry an annotation the server will actually accept.
+ *
+ * `annotationDataSchema` requires `version: 1` and at least one shape, and a
+ * rejected field fails the WHOLE request. So a comment whose drawing was stored
+ * by an older build, or whose shapes array ended up empty, would come back as a
+ * 400 and be dropped from the paste entirely. Losing a drawing is a shame;
+ * losing the note it belonged to is a bug, so the drawing is what gives way.
+ *
+ * Module scope, not component scope: it depends on nothing but its argument, and
+ * defining it inside the component would make `toClipped` a new value on every
+ * render and drag every hook that uses it into re-running.
+ */
+function carryableAnnotations(raw: any) {
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.version !== 1) return null
+  if (!Array.isArray(raw.shapes) || raw.shapes.length === 0) return null
+  return raw
+}
+
 export default function CommentSection({
   projectId,
   projectSlug: _projectSlug,
@@ -1341,10 +1361,24 @@ export default function CommentSection({
       timecodeEnd: c.timecodeEnd ?? null,
       timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
       authorName: c.authorName ?? null,
+      // 6.22.0: the drawing and the files come too.
+      //
+      // "The logo is wrong, see the screenshot" is useless on the new cut if the
+      // screenshot stayed on the old one, and a voice message is nothing BUT its
+      // attachment — pasting one used to produce an empty bubble. Annotations
+      // travel as data; attachments travel as a reference to the source comment,
+      // which the server resolves (the browser must not pick which files it may
+      // copy).
+      annotations: carryableAnnotations(c.annotations),
+      sourceCommentId: c.id ?? null,
+      attachmentCount: Array.isArray(c.assets) ? c.assets.length : 0,
       replies: Array.isArray(c.replies)
         ? c.replies.map((r: any) => ({
             content: r.content,
             authorName: r.authorName ?? null,
+            annotations: carryableAnnotations(r.annotations),
+            sourceCommentId: r.id ?? null,
+            attachmentCount: Array.isArray(r.assets) ? r.assets.length : 0,
           }))
         : [],
     }))
@@ -1399,6 +1433,11 @@ export default function CommentSection({
     ) => {
       if (!selectedVideoId) throw new Error('No video selected')
       let created = 0
+      // 6.22.0: attachments the source claimed to have, versus the ones that
+      // actually made it. They differ when a source comment has been deleted
+      // since the copy, and the difference is worth saying out loud.
+      let filesExpected = 0
+      let filesCopied = 0
       for (const item of items) {
         const body: Record<string, unknown> = {
           projectId,
@@ -1412,13 +1451,16 @@ export default function CommentSection({
         if (item.timecodeEnd) body.timecodeEnd = item.timecodeEnd
         if (typeof item.timestampMs === 'number') body.timestampMs = item.timestampMs
         if (item.authorName) body.authorName = item.authorName
-        if (source) {
-          body.sourceVideoId = source.videoId
-          body.sourceVersionLabel = source.versionLabel
+        // 6.22.0: the drawing rides along as data; the files by reference.
+        if (item.annotations) body.annotations = item.annotations
+        if (item.sourceCommentId && (item.attachmentCount || 0) > 0) {
+          body.copyAssetsFromCommentId = item.sourceCommentId
+          filesExpected += item.attachmentCount || 0
         }
         const res = await postComment(body)
         if (!res.ok) continue
         created += 1
+        filesCopied += Number(res.headers.get('X-Attachments-Copied') || 0)
 
         // 6.16.0: replies ride along with their parent.
         const replies = Array.isArray(item.replies) ? item.replies : []
@@ -1447,19 +1489,27 @@ export default function CommentSection({
             parentId,
           }
           if (reply.authorName) replyBody.authorName = reply.authorName
+          if (reply.annotations) replyBody.annotations = reply.annotations
+          if (reply.sourceCommentId && (reply.attachmentCount || 0) > 0) {
+            replyBody.copyAssetsFromCommentId = reply.sourceCommentId
+            filesExpected += reply.attachmentCount || 0
+          }
           if (source) {
             replyBody.sourceVideoId = source.videoId
             replyBody.sourceVersionLabel = source.versionLabel
           }
           const replyRes = await postComment(replyBody)
-          if (replyRes.ok) created += 1
+          if (replyRes.ok) {
+            created += 1
+            filesCopied += Number(replyRes.headers.get('X-Attachments-Copied') || 0)
+          }
         }
       }
       await fetchComments()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('commentDeleted'))
       }
-      return created
+      return { created, filesCopied, filesMissing: Math.max(0, filesExpected - filesCopied) }
     },
     [projectId, selectedVideoId, isAdminView, postComment, fetchComments],
   )
@@ -1533,8 +1583,8 @@ export default function CommentSection({
     if (!items || items.length === 0) {
       throw new Error('Nothing to paste')
     }
-    const count = await pasteThreads(items)
-    return { count }
+    const { created, filesMissing } = await pasteThreads(items)
+    return { count: created, filesMissing }
   }, [projectId, pasteThreads])
 
   // 1.3.2+: bridge between this section and the top-level PlayerTopMenu.
@@ -1546,7 +1596,9 @@ export default function CommentSection({
   useEffect(() => {
     const reply = (
       detail:
-        | { kind: 'copied' | 'pasted'; count: number }
+        // 6.22.0: `filesMissing` rides along so the toast can admit that some
+        // attachments did not make it, rather than reporting a clean paste.
+        | { kind: 'copied' | 'pasted'; count: number; filesMissing?: number }
         | { kind: 'error'; message: string },
     ) => {
       window.dispatchEvent(
@@ -1567,7 +1619,7 @@ export default function CommentSection({
     const onPaste = async () => {
       try {
         const r = await handlePasteComments()
-        reply({ kind: 'pasted', count: r.count })
+        reply({ kind: 'pasted', count: r.count, filesMissing: r.filesMissing })
       } catch (err) {
         reply({
           kind: 'error',
