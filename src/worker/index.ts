@@ -371,11 +371,26 @@ async function main() {
    * once per replica.
    */
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+  const DAY_MS = 24 * 60 * 60 * 1000
   const securityScanInterval = setInterval(async () => {
     try {
-      if (!(await scheduledScanIsDue(WEEK_MS))) return
-      logMessage('Running scheduled weekly security scan...')
-      await runScheduledSecurityScan()
+      // Weekly first, and return if it ran: a full scan covers everything the
+      // daily one does, so running both on the same tick would write two rows
+      // saying the same thing and diff the daily against a stale predecessor.
+      if (await scheduledScanIsDue(WEEK_MS, 'FULL')) {
+        logMessage('Running scheduled weekly security scan (full)...')
+        await runScheduledSecurityScan('FULL')
+        return
+      }
+      // 6.20.0: the daily pass covers only what can change without a deploy —
+      // a worker that died overnight, an RLS policy someone altered, a share
+      // link made public this afternoon, a purge job that stopped. Dependency
+      // advisories and file hashes cannot move between deploys of one image,
+      // so re-deriving them every day is cost without information.
+      if (await scheduledScanIsDue(DAY_MS, 'DAILY')) {
+        logMessage('Running scheduled daily security checks...')
+        await runScheduledSecurityScan('DAILY')
+      }
     } catch (err) {
       logError('Scheduled security scan failed', err)
     }

@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prismaPrivileged } from '@/lib/db'
 import { requirePlatformAdmin } from '@/lib/platform'
 import { rateLimit } from '@/lib/rate-limit'
-import { runSecurityScan, computeScore, SCAN_STAGES, describeEnvironment } from '@/lib/security-scan'
+import { runSecurityScan, computeScore, SCAN_STAGES, stagesFor, describeEnvironment } from '@/lib/security-scan'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -43,7 +43,12 @@ export async function GET(request: NextRequest) {
         })
 
     return NextResponse.json({
-      stages: SCAN_STAGES.map((s) => ({ id: s.id, label: s.label, blurb: s.blurb })),
+      // The strip shows the stages THIS run covered, not all twelve — a daily
+      // run rendered against the full list would show four stages greyed out
+      // as if they had failed to complete.
+      stages: (scan?.kind === 'DAILY' ? stagesFor('DAILY') : SCAN_STAGES).map((s) => ({
+        id: s.id, label: s.label, blurb: s.blurb,
+      })),
       scan: scan
         ? { ...scan, log: scan.logJson ? JSON.parse(scan.logJson) : [] }
         : null,
@@ -89,6 +94,10 @@ export async function POST(request: NextRequest) {
     const scan = await (prismaPrivileged as any).securityScan.create({
       data: {
         status: 'RUNNING',
+        // The button always runs everything. A partial scan is a scheduling
+        // optimisation, not something to offer someone who came here on
+        // purpose to check.
+        kind: 'FULL',
         environment: describeEnvironment(),
         startedById: user?.id ?? null,
         startedByName: user?.name || user?.email || null,

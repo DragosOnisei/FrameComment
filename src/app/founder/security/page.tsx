@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, AlertTriangle, Ban, CheckCircle2, Globe2, Loader2, Lock,
-  MinusCircle, RefreshCw, Shield, ShieldAlert, ShieldCheck, XCircle,
+  FileDown, MinusCircle, RefreshCw, Shield, ShieldAlert, ShieldCheck, XCircle,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 
@@ -134,6 +134,46 @@ export default function FounderSecurityPage() {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     }
   }, [running, loadScan])
+
+  /**
+   * 6.20.0 — download the report.
+   *
+   * Fetched with the bearer token and turned into a blob rather than pointed
+   * at with a plain link: the endpoint is founder-only and `<a href>` does not
+   * carry the Authorization header, so a link would 404 and look like the
+   * feature was broken.
+   */
+  const [downloading, setDownloading] = useState(false)
+  const downloadReport = async () => {
+    if (!scan?.id) return
+    setDownloading(true)
+    try {
+      const res = await apiFetch(`/api/founder/security/report?id=${scan.id}`)
+      if (!res.ok) {
+        setError('Could not build the report.')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      // The filename the server chose — it carries the environment and the
+      // date, which is what makes a folder of these navigable later.
+      const disposition = res.headers.get('content-disposition') || ''
+      const match = disposition.match(/filename="([^"]+)"/)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = match?.[1] || 'security-report.pdf'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      // Released on the next tick: revoking synchronously can cancel the
+      // download in Safari before it has read the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      setError('Could not build the report.')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const startScan = async () => {
     setStarting(true)
@@ -346,6 +386,11 @@ export default function FounderSecurityPage() {
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-primary" />
               Configuration scan
+              {scan?.kind === 'DAILY' && (
+                <span className="text-[10px] font-medium uppercase tracking-wide text-white/40 bg-white/[0.06] ring-1 ring-white/12 rounded px-1.5 py-0.5">
+                  Daily checks
+                </span>
+              )}
             </h2>
             <p className="text-[11px] text-white/45 mt-0.5">
               {scan?.finishedAt
@@ -372,15 +417,39 @@ export default function FounderSecurityPage() {
             {scan?.environment && (
               <p className="text-[11px] text-white/30 mt-0.5 font-mono">{scan.environment}</p>
             )}
+            {/* A daily run is not a full audit, and a reader who does not know
+                the difference will treat it as one. */}
+            {scan?.kind === 'DAILY' && (
+              <p className="text-[11px] text-white/40 mt-1 max-w-xl">
+                Daily runs cover only the checks whose answer can change without a deployment.
+                File integrity, dependencies, content safety and mail reputation are verified
+                by the weekly full scan.
+              </p>
+            )}
           </div>
-          <button
-            onClick={() => void startScan()}
-            disabled={starting || running}
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
-          >
-            {running || starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Shield className="w-3.5 h-3.5" />}
-            {running ? 'Scanning…' : starting ? 'Starting…' : 'Run scan'}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Only for a finished run. A PDF of a scan still in progress
+                would have numbers that do not add up, and whoever received it
+                would have no way to know why. */}
+            {scan?.status === 'COMPLETED' && (
+              <button
+                onClick={() => void downloadReport()}
+                disabled={downloading}
+                className="inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-xs font-medium text-white/80 bg-white/[0.06] hover:bg-white/[0.12] hover:text-white ring-1 ring-white/15 disabled:opacity-60 transition-colors"
+              >
+                {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+                {downloading ? 'Building…' : 'Download PDF'}
+              </button>
+            )}
+            <button
+              onClick={() => void startScan()}
+              disabled={starting || running}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
+            >
+              {running || starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Shield className="w-3.5 h-3.5" />}
+              {running ? 'Scanning…' : starting ? 'Starting…' : 'Run scan'}
+            </button>
+          </div>
         </div>
 
         {/*

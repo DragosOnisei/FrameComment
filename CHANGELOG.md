@@ -14,6 +14,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.20.0] - 2026-08-19
+
+### Raport PDF, descărcabil după scan
+
+Butonul apare doar pentru o rulare terminată. Un PDF al unui scan încă în curs
+ar avea cifre care nu se adună, iar cine îl primește n-are cum să știe de ce —
+ar concluziona doar că raportul e greșit, ceea ce ar fi concluzia corectă din
+motivul greșit.
+
+Documentul pleacă din clădire: cineva îl va trimite unui investitor, unui
+asigurător sau departamentului IT al unui client, și va fi citit de oameni care
+nu pot pune o întrebare de clarificare. Asta a decis fiecare alegere din el.
+
+Spune pe ce instalație a rulat, în antet **și** în subsolul fiecărei pagini. Un
+raport al unui laptop prezentat drept producție e cel mai rău lucru pe care
+l-ar putea produce funcția asta, iar singura apărare e ca documentul s-o spună
+pe fiecare pagină.
+
+Eșecurile și avertismentele vin primele, cu linia în limbaj obișnuit. Un raport
+care se deschide cu patruzeci de bife verzi e un material de marketing; unul
+care se deschide cu ce e stricat e un document de securitate.
+
+Check-urile care n-au putut rula sunt un grup separat, niciodată amestecate cu
+trecerile. Diferența dintre „am verificat asta" și „n-am putut verifica asta" e
+toată valoarea raportului, iar amestecarea lor e felul în care un document
+devine necinstit fără ca nimeni să fi mințit.
+
+Fără logo-uri, fără gradiente, fără cadran de scor. Se printează alb-negru pe
+imprimanta cuiva din birou și tot se citește. Foloseşte `pdfkit`, acelaşi
+renderer ca raportul de platformă — o singură stivă PDF în proiect, nu două
+care se depărtează una de alta.
+
+### Scan zilnic, cu doar ce se poate schimba fără deploy
+
+Împărțirea nu e „important vs neimportant" — toate etapele contează. E „se
+poate schimba asta fără un deploy?".
+
+O vulnerabilitate de dependință, un fișier modificat, un DMARC lipsă: niciuna
+nu poate deveni adevărată între două deploy-uri ale aceleiași imagini, deci
+verificarea lor zilnică e zgomot care costă interogări DNS și un hash pe tot
+directorul. Un worker mort peste noapte, o politică RLS pe care a modificat-o
+cineva, un link făcut public azi după-amiază, un purge care s-a oprit: alea
+sunt exact lucrurile care se strică fără să deployeze nimeni.
+
+Deci zilnic rulează opt etape, iar săptămânal toate douăsprezece. Dacă amândouă
+sunt scadente în aceeași oră, rulează doar cea completă — un scan complet
+acoperă tot ce face cel zilnic, iar rularea ambelor ar scrie două rânduri care
+spun același lucru.
+
+Comparația pentru alerte se face **între rulări de același fel**. Un scan zilnic
+comparat cu unul săptămânal ar vedea dispărând fiecare check exclusiv-complet
+și l-ar raporta ca rezolvat, apoi ca nou-stricat când rulează iar cel
+săptămânal — o alertă care strigă „lupul" după orar.
+
+Pagina spune explicit când te uiți la o rulare zilnică, și ce nu acoperă ea.
+
+
 ## [6.19.0] - 2026-08-19
 
 ### Fiecare avertisment spune şi ce înseamnă, pe înţelesul omului

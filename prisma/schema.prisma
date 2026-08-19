@@ -1826,6 +1826,11 @@ model AccessAttempt {
 model SecurityScan {
   id          String    @id @default(cuid())
   status      String    @default("RUNNING") // RUNNING | COMPLETED | FAILED
+  /// 6.20.0 — FULL (everything) or DAILY (only what can change without a
+  /// deploy). Recorded because the two are not comparable: diffing a daily run
+  /// against a full one would report every full-only check as newly resolved,
+  /// then newly broken again the next week, and the alert would be noise.
+  kind        String    @default("FULL")
   /// 0–100, updated as stages complete so the UI can show a real bar rather
   /// than an animation that means nothing.
   progress    Int       @default(0)

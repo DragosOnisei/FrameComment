@@ -62,6 +62,23 @@ export interface ScanStage {
   label: string
   /** One line explaining what this stage is actually looking at. */
   blurb: string
+  /**
+   * 6.20.0 — is this stage worth running EVERY day?
+   *
+   * The split is not "important vs unimportant"; every stage here matters.
+   * It is "can this change without a deploy?".
+   *
+   * A dependency advisory, a modified file, a missing DMARC record: none of
+   * those can become true between two deploys of the same image, so checking
+   * them daily is noise that costs DNS lookups and a full directory hash. A
+   * worker that died overnight, an RLS policy someone altered, a share link a
+   * colleague made public this afternoon, a purge job that stopped: those are
+   * exactly the things that go wrong while nobody is deploying.
+   *
+   * So the daily run is the subset that can change underneath you, and the
+   * weekly run is everything.
+   */
+  daily: boolean
   run: () => Promise<Finding[]>
 }
 
@@ -865,19 +882,28 @@ export function describeEnvironment(): string {
 }
 
 export const SCAN_STAGES: ScanStage[] = [
-  { id: 'server', label: 'Server state', blurb: 'Database, Redis, worker, migrations', run: stageServer },
-  { id: 'transport', label: 'Transport', blurb: 'HTTPS and cookie hardening', run: stageTransport },
-  { id: 'secrets', label: 'Secrets', blurb: 'Signing key strength and separation', run: stageSecrets },
-  { id: 'isolation', label: 'Tenant isolation', blurb: 'Row-level security across companies', run: stageIsolation },
-  { id: 'sessions', label: 'Sessions', blurb: 'Token lifetime, rotation, replay detection', run: stageSessions },
-  { id: 'accounts', label: 'Accounts', blurb: 'Hashing, roles, dormant users, invites', run: stageAccounts },
-  { id: 'exposure', label: 'Data exposure', blurb: 'Public shares, expiry, source maps', run: stageExposure },
-  { id: 'files', label: 'File integrity', blurb: 'App files unchanged since the build', run: stageFiles },
-  { id: 'content', label: 'Content safety', blurb: 'Comment sanitisation, attachment types', run: stageContent },
-  { id: 'dependencies', label: 'Dependencies', blurb: 'Known vulnerabilities in packages', run: stageDependencies },
-  { id: 'reputation', label: 'Mail reputation', blurb: 'SPF and DMARC for outbound mail', run: stageReputation },
-  { id: 'privacy', label: 'Privacy', blurb: 'Retention, local geolocation, purge', run: stagePrivacy },
+  // daily: true — state that changes underneath you, with nobody deploying.
+  { id: 'server', label: 'Server state', blurb: 'Database, Redis, worker, migrations', daily: true, run: stageServer },
+  { id: 'transport', label: 'Transport', blurb: 'HTTPS and cookie hardening', daily: true, run: stageTransport },
+  { id: 'secrets', label: 'Secrets', blurb: 'Signing key strength and separation', daily: true, run: stageSecrets },
+  { id: 'isolation', label: 'Tenant isolation', blurb: 'Row-level security across companies', daily: true, run: stageIsolation },
+  { id: 'sessions', label: 'Sessions', blurb: 'Token lifetime, rotation, replay detection', daily: true, run: stageSessions },
+  { id: 'accounts', label: 'Accounts', blurb: 'Hashing, roles, dormant users, invites', daily: true, run: stageAccounts },
+  { id: 'exposure', label: 'Data exposure', blurb: 'Public shares, expiry, source maps', daily: true, run: stageExposure },
+  { id: 'privacy', label: 'Privacy', blurb: 'Retention, local geolocation, purge', daily: true, run: stagePrivacy },
+  // daily: false — these can only change when a new image is deployed, so a
+  // daily run would re-derive the same answer at the cost of a directory hash
+  // and a handful of DNS lookups.
+  { id: 'files', label: 'File integrity', blurb: 'App files unchanged since the build', daily: false, run: stageFiles },
+  { id: 'content', label: 'Content safety', blurb: 'Comment sanitisation, attachment types', daily: false, run: stageContent },
+  { id: 'dependencies', label: 'Dependencies', blurb: 'Known vulnerabilities in packages', daily: false, run: stageDependencies },
+  { id: 'reputation', label: 'Mail reputation', blurb: 'SPF and DMARC for outbound mail', daily: false, run: stageReputation },
 ]
+
+/** The stages a given run covers. */
+export function stagesFor(kind: 'FULL' | 'DAILY'): ScanStage[] {
+  return kind === 'DAILY' ? SCAN_STAGES.filter((s) => s.daily) : SCAN_STAGES
+}
 
 /**
  * One number for a slide.
@@ -904,7 +930,7 @@ export function computeScore(findings: Finding[]): number {
   return Math.round((earned / possible) * 100)
 }
 
-/** Run every stage, reporting progress as it goes. Never throws. */
+/** Run the stages for this kind of scan, reporting progress. Never throws. */
 export async function runSecurityScan(
   onProgress: (update: {
     stageId: string
@@ -913,10 +939,12 @@ export async function runSecurityScan(
     total: number
     findings: Finding[]
   }) => Promise<void> | void,
+  kind: 'FULL' | 'DAILY' = 'FULL',
 ): Promise<Finding[]> {
+  const stages = stagesFor(kind)
   const all: Finding[] = []
-  for (let i = 0; i < SCAN_STAGES.length; i += 1) {
-    const stage = SCAN_STAGES[i]
+  for (let i = 0; i < stages.length; i += 1) {
+    const stage = stages[i]
     let findings: Finding[] = []
     try {
       findings = await stage.run()
@@ -933,7 +961,7 @@ export async function runSecurityScan(
       stageId: stage.id,
       stageLabel: stage.label,
       index: i + 1,
-      total: SCAN_STAGES.length,
+      total: stages.length,
       findings,
     })
   }

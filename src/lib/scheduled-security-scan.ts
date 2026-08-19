@@ -41,10 +41,14 @@ function isAlarming(f: Finding): boolean {
  * background noise. The first time a check breaks is the alert; the fifth time
  * is a to-do item, and to-do items belong on the page, not in your inbox.
  */
-async function newlyAlarming(current: Finding[]): Promise<Finding[]> {
+async function newlyAlarming(current: Finding[], kind: 'FULL' | 'DAILY'): Promise<Finding[]> {
   try {
+    // Compared against the previous run OF THE SAME KIND. A daily run diffed
+    // against a weekly one would see every full-only check vanish and report
+    // it as resolved, then report it as newly broken when the weekly ran
+    // again — an alert that cries wolf on a schedule.
     const previous = await (prismaPrivileged as any).securityScan.findFirst({
-      where: { status: 'COMPLETED' },
+      where: { status: 'COMPLETED', kind },
       orderBy: { startedAt: 'desc' },
       include: { findings: true },
     })
@@ -62,7 +66,9 @@ async function newlyAlarming(current: Finding[]): Promise<Finding[]> {
   }
 }
 
-export async function runScheduledSecurityScan(): Promise<{
+export async function runScheduledSecurityScan(
+  kind: 'FULL' | 'DAILY' = 'FULL',
+): Promise<{
   scanId: string
   score: number
   failures: number
@@ -70,8 +76,9 @@ export async function runScheduledSecurityScan(): Promise<{
 } | null> {
   const startedAt = Date.now()
   const environment = describeEnvironment()
+  const cadence = kind === 'DAILY' ? 'daily' : 'weekly'
   const log: Array<{ at: string; text: string }> = [
-    { at: new Date().toISOString(), text: `Scheduled weekly scan against ${environment}` },
+    { at: new Date().toISOString(), text: `Scheduled ${cadence} scan against ${environment}` },
   ]
 
   let scanId: string
@@ -79,8 +86,9 @@ export async function runScheduledSecurityScan(): Promise<{
     const created = await (prismaPrivileged as any).securityScan.create({
       data: {
         status: 'RUNNING',
+        kind,
         environment,
-        startedByName: 'Scheduled',
+        startedByName: kind === 'DAILY' ? 'Scheduled · daily' : 'Scheduled · weekly',
         logJson: JSON.stringify(log),
       },
     })
@@ -117,11 +125,11 @@ export async function runScheduledSecurityScan(): Promise<{
           logJson: JSON.stringify(log.slice(-200)),
         },
       })
-    })
+    }, kind)
 
     // Compared BEFORE this run is marked completed, so "the previous scan" is
     // genuinely the previous one and not the row we just wrote.
-    const worthTelling = await newlyAlarming(findings)
+    const worthTelling = await newlyAlarming(findings, kind)
 
     const passed = findings.filter((f) => f.status === 'PASS').length
     const warnings = findings.filter((f) => f.status === 'WARN').length
@@ -131,7 +139,7 @@ export async function runScheduledSecurityScan(): Promise<{
 
     log.push({
       at: new Date().toISOString(),
-      text: `Weekly scan complete — score ${score}/100, ${failures} failures, ${worthTelling.length} new issue(s).`,
+      text: `${cadence === 'daily' ? 'Daily' : 'Weekly'} scan complete — score ${score}/100, ${failures} failures, ${worthTelling.length} new issue(s).`,
     })
 
     await (prismaPrivileged as any).securityScan.update({
@@ -166,7 +174,7 @@ export async function runScheduledSecurityScan(): Promise<{
         eventType: 'SECURITY_ALERT',
         title,
         body:
-          `Weekly scan of ${environment}\n` +
+          `${cadence === 'daily' ? 'Daily' : 'Weekly'} scan of ${environment}\n` +
           `Score ${score}/100 — ${passed} passed, ${warnings} warnings, ${failures} failures.\n\n` +
           `New since the last scan:\n${lines.join('\n')}${more}\n\n` +
           `Full report: Founder → Security`,
@@ -177,7 +185,7 @@ export async function runScheduledSecurityScan(): Promise<{
     }
 
     logMessage(
-      `[SECURITY-SCAN] Weekly run finished: score ${score}/100, ${failures} failures, ` +
+      `[SECURITY-SCAN] ${cadence} run finished: score ${score}/100, ${failures} failures, ` +
       `${worthTelling.length} new issue(s)${notified ? ' — alert sent' : ''}`,
     )
 
@@ -201,10 +209,13 @@ export async function runScheduledSecurityScan(): Promise<{
  * restarts twice a day does not either skip the week or run the scan on every
  * boot. The timer only asks the question; the database decides.
  */
-export async function scheduledScanIsDue(intervalMs: number): Promise<boolean> {
+export async function scheduledScanIsDue(
+  intervalMs: number,
+  kind: 'FULL' | 'DAILY' = 'FULL',
+): Promise<boolean> {
   try {
     const last = await (prismaPrivileged as any).securityScan.findFirst({
-      where: { startedByName: 'Scheduled' },
+      where: { kind, startedByName: { startsWith: 'Scheduled' } },
       orderBy: { startedAt: 'desc' },
       select: { startedAt: true },
     })
