@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
 
   try {
-    const [totals, topIps, topCountries, topIdentifiers, recent, daily, lastScan] =
+    const [totals, topIps, topCountries, topIdentifiers, recent, daily, lastScan, shareOpens] =
       await Promise.all([
         prismaPrivileged.$queryRawUnsafe<Array<{
           total: bigint; failed: bigint; succeeded: bigint; critical: bigint; uniqueips: bigint
@@ -114,6 +114,32 @@ export async function GET(request: NextRequest) {
                  "startedAt", "finishedAt", "startedByName"
           FROM "SecurityScan" ORDER BY "startedAt" DESC LIMIT 1
         `),
+
+        /*
+         * 6.24.0 — clients opening share links.
+         *
+         * A different question from the one the rest of this page answers.
+         * `AccessAttempt` is about people trying to get INTO the installation;
+         * this is about the people you deliberately let in, and when. Both
+         * belong on a security page, and conflating them into one feed would
+         * bury four real sign-in failures under two hundred routine client
+         * visits.
+         *
+         * Privileged and cross-organization on purpose: this is the founder's
+         * platform-wide view. The project title comes along because "someone
+         * opened a link" is not information — which link is.
+         */
+        prismaPrivileged.$queryRawUnsafe<Array<Record<string, unknown>>>(`
+          SELECT sa.id, sa."accessMethod" AS accessmethod, sa.email,
+                 sa."ipAddress" AS ipaddress, sa.country, sa."countryName" AS countryname,
+                 sa."createdAt" AS createdat,
+                 p.title AS projecttitle
+          FROM "SharePageAccess" sa
+          LEFT JOIN "Project" p ON p.id = sa."projectId"
+          WHERE sa."createdAt" >= $1
+          ORDER BY sa."createdAt" DESC
+          LIMIT 100
+        `, since),
       ])
 
     const num = (v: unknown) => Number(v ?? 0)
@@ -158,6 +184,16 @@ export async function GET(request: NextRequest) {
         succeeded: num(r.succeeded),
       })),
       lastScan: lastScan?.[0] ?? null,
+      shareOpens: shareOpens.map((r) => ({
+        id: r.id,
+        projectTitle: r.projecttitle,
+        accessMethod: r.accessmethod,
+        email: r.email,
+        ipAddress: r.ipaddress,
+        country: r.country,
+        countryName: r.countryname,
+        createdAt: r.createdat,
+      })),
     })
   } catch (error) {
     logError('[FOUNDER/SECURITY] overview failed:', error)

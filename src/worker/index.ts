@@ -14,7 +14,7 @@ import {
 import { initStorage, refreshLocalStorageRoot } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { purgeExpiredTrash } from '../lib/trash-cleanup'
-import { purgeExpiredAccessAttempts, ACCESS_RETENTION_DAYS } from '../lib/access-log'
+import { purgeExpiredAccessAttempts, purgeExpiredShareAccesses, ACCESS_RETENTION_DAYS } from '../lib/access-log'
 import { runScheduledSecurityScan, scheduledScanIsDue } from '../lib/scheduled-security-scan'
 import { finalizeExpiredTransfers } from '../lib/ownership'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
@@ -355,6 +355,10 @@ async function main() {
   await purgeExpiredAccessAttempts()
     .then((n) => n > 0 && logMessage(`[WORKER] Removed ${n} expired access records`))
     .catch((err) => logError('Initial access-log purge failed', err))
+  // 6.24.0: share-link opens carry visitor IPs and get the same window.
+  await purgeExpiredShareAccesses()
+    .then((n) => n > 0 && logMessage(`[WORKER] Removed ${n} expired share-open records`))
+    .catch((err) => logError('Initial share-access purge failed', err))
 
   /*
    * 6.19.0 — the weekly security scan.
@@ -400,6 +404,9 @@ async function main() {
     await purgeExpiredAccessAttempts()
       .then((n) => n > 0 && logMessage(`[WORKER] Removed ${n} expired access records`))
       .catch((err) => logError('Scheduled access-log purge failed', err))
+    await purgeExpiredShareAccesses()
+      .then((n) => n > 0 && logMessage(`[WORKER] Removed ${n} expired share-open records`))
+      .catch((err) => logError('Scheduled share-access purge failed', err))
   }, SIX_HOURS_MS)
 
   // Schedule Trash cleanup every 24 hours (1.0.8+). Hard-deletes

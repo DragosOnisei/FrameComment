@@ -14,6 +14,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.24.0] - 2026-08-19
+
+### Added
+
+- **"Recent link opens" on the founder Security page.** The page answered one
+  question — who tried to get IN — and had nothing to say about the people you
+  deliberately let in. Clients opening share links were already recorded for
+  per-project analytics; this surfaces them platform-wide: which project, how
+  they got past the gate (email code, password, guest, or an open link with no
+  gate at all), from where, and when. A separate feed rather than a merged one,
+  because four real sign-in failures must not be buried under two hundred
+  routine client visits.
+- Share opens now record the country they came from, resolved at the moment of
+  the open. Not derived later from the stored address: the address is blunted to
+  its network without cookie consent, and a country is precisely the coarse,
+  non-identifying fact that anonymisation is meant to leave behind — so
+  resolving it at write time is both more accurate and no less private. Existing
+  rows are deliberately not backfilled; an open recorded before this release has
+  no country, and inventing one from a present-day lookup would record a guess
+  as an observation.
+- Every flag has a tooltip naming the country. An emoji alone is unreadable to
+  anyone who does not recognise the flag and invisible to a screen reader — and
+  the stored country NAME is empty on this installation, because the country
+  arrives as a bare code in Cloudflare's header with no local database to expand
+  it. The name is derived from the code through `Intl.DisplayNames`, which ships
+  with the runtime, so there is no country table to maintain.
+
+### Changed
+
+- "Recent activity" is now "Recent sign-in attempts", which is what it has
+  always contained.
+- Failed and Critical events show their number in red rather than amber. Amber
+  read as "worth a look" for something that means somebody tried to get in and
+  failed. Zero stays green: a red 0 is an alarm about nothing, and a page that
+  cries wolf gets ignored on the day it is right.
+
+### Fixed
+
+- **Share opens were kept forever.** `SharePageAccess` holds visitor IP
+  addresses and had no retention limit, while the Security page carried a line
+  promising deletion after 90 days — a promise the database was not keeping.
+  They now expire on the same window and in the same worker sweep as sign-in
+  records, and the scan's retention check counts both tables instead of
+  reporting the policy as honoured after looking at only one of them.
+- The Cloudflare-country preference and the flag helper each existed in two
+  places — the second copy of the first was about to be written for share opens,
+  and the founder page had reimplemented the second while `geoip.ts` exported an
+  identical one that nothing imported. Both now have one home. Two copies of a
+  rule is how the mail stage ended up reading a variable the app does not use.
+
 ## [6.23.0] - 2026-08-19
 
 ### Fixed

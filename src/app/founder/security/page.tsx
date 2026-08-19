@@ -20,8 +20,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, AlertTriangle, Ban, CheckCircle2, Globe2, Loader2, Lock,
   FileDown, MinusCircle, RefreshCw, Shield, ShieldAlert, ShieldCheck, XCircle,
+  LinkIcon,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
+import { countryFlag, countryLabel } from '@/lib/country'
 
 // ── types ───────────────────────────────────────────────────────────────────
 interface TopIp {
@@ -39,6 +41,18 @@ interface Overview {
   recent: Array<Record<string, any>>
   daily: Array<{ day: string; failed: number; succeeded: number }>
   lastScan: Record<string, any> | null
+  /** 6.24.0: clients opening share links — who you let in, not who tried. */
+  shareOpens: ShareOpen[]
+}
+interface ShareOpen {
+  id: string
+  projectTitle: string | null
+  accessMethod: string | null
+  email: string | null
+  ipAddress: string | null
+  country: string | null
+  countryName: string | null
+  createdAt: string
 }
 interface Finding {
   id: string; stage: string; checkId: string; title: string
@@ -52,14 +66,26 @@ interface ScanState {
 }
 
 /**
- * Flag emoji from a country code. Regional indicator symbols, computed rather
- * than fetched — no sprite sheet, no icon library, nothing to update when a
- * country changes its flag.
+ * 6.24.0: the flag markup, in one place.
+ *
+ * This page had its own copy of the flag function while `lib/geoip.ts` exported
+ * an identical one that nothing imported. Both now come from `lib/country.ts`,
+ * which carries no MaxMind dependency and so is safe in a client component.
+ *
+ * The tooltip is the point of wrapping it: an emoji alone is unreadable to
+ * anyone who does not recognise the flag, invisible to a screen reader, and on
+ * this installation `countryName` is usually empty — the country arrives as a
+ * bare code in Cloudflare's header, with no local database to name it. So the
+ * name is derived when it was not stored.
  */
-function flag(code: string | null | undefined): string {
-  if (!code || code.length !== 2 || !/^[A-Za-z]{2}$/.test(code)) return '🏳️'
-  return String.fromCodePoint(
-    ...[...code.toUpperCase()].map((c) => 0x1f1e6 + (c.charCodeAt(0) - 65)),
+function Flag({
+  code, name, className = 'text-sm',
+}: { code: string | null | undefined; name?: string | null; className?: string }) {
+  const label = countryLabel(code, name)
+  return (
+    <span className={className} title={label} aria-label={label} role="img">
+      {countryFlag(code)}
+    </span>
   )
 }
 
@@ -265,7 +291,12 @@ export default function FounderSecurityPage() {
       {/* ── Summary ─────────────────────────────────────────────────────── */}
       <section className="grid gap-3 grid-cols-2 lg:grid-cols-5">
         <Stat label="Attempts" value={overview?.totals.total ?? 0} icon={Activity} tone="neutral" />
-        <Stat label="Failed" value={overview?.totals.failed ?? 0} icon={XCircle} tone={overview?.totals.failed ? 'warn' : 'good'} />
+        {/* 6.24.0: red, not amber. These two are the bad-news numbers on this
+            page, and amber read as "worth a look" for something that means
+            somebody tried to get in and failed. Zero stays green: a red 0 is an
+            alarm about nothing, and a page that cries wolf gets ignored on the
+            day it is right. */}
+        <Stat label="Failed" value={overview?.totals.failed ?? 0} icon={XCircle} tone={overview?.totals.failed ? 'bad' : 'good'} />
         <Stat label="Unique addresses" value={overview?.totals.uniqueIps ?? 0} icon={Globe2} tone="neutral" />
         <Stat label="Critical events" value={overview?.totals.critical ?? 0} icon={ShieldAlert} tone={overview?.totals.critical ? 'bad' : 'good'} />
         <Stat
@@ -312,7 +343,7 @@ export default function FounderSecurityPage() {
                       <span className="block text-[10px] text-white/35">{timeAgo(row.lastSeen)}</span>
                     </td>
                     <td className="py-2 pr-2 hidden sm:table-cell">
-                      <span className="text-base leading-none mr-1.5">{flag(row.country)}</span>
+                      <Flag code={row.country} name={row.countryName} className="text-base leading-none mr-1.5" />
                       <span className="text-xs text-white/70">{row.countryName || row.country || 'Unknown'}</span>
                       {row.asn && <span className="block text-[10px] text-white/35 truncate max-w-[180px]">{row.asn}</span>}
                     </td>
@@ -344,7 +375,7 @@ export default function FounderSecurityPage() {
               <ul className="space-y-1.5">
                 {overview.topCountries.map((c) => (
                   <li key={c.country} className="flex items-center gap-2 text-sm">
-                    <span className="text-base leading-none">{flag(c.country)}</span>
+                    <Flag code={c.country} name={c.countryName} className="text-base leading-none" />
                     <span className="text-white/75 flex-1 truncate">{c.countryName || c.country}</span>
                     <span className="text-[11px] text-white/40">{c.ips} IP{c.ips === 1 ? '' : 's'}</span>
                     <span className="font-semibold text-white/85 tabular-nums w-10 text-right">{c.attempts}</span>
@@ -566,7 +597,7 @@ export default function FounderSecurityPage() {
       </section>
 
       {/* ── Raw feed ────────────────────────────────────────────────────── */}
-      <Panel title="Recent activity" icon={Activity}>
+      <Panel title="Recent sign-in attempts" icon={Activity}>
         {overview && overview.recent.length > 0 ? (
           <div className="custom-scrollbar max-h-[420px] overflow-y-auto -mx-1 px-1">
             <table className="w-full text-sm table-fixed">
@@ -588,7 +619,7 @@ export default function FounderSecurityPage() {
                         address and time survive to the smallest width — they
                         are what the row is for. */}
                     <td className="py-1.5 pr-2 whitespace-nowrap hidden sm:table-cell">
-                      <span className="text-sm mr-1">{flag(r.country)}</span>
+                      <Flag code={r.country} name={r.countryName} className="text-sm mr-1" />
                       <span className="text-[11px] text-white/45">{r.city || r.countryName || ''}</span>
                     </td>
                     <td className="py-1.5 pr-2 text-xs text-white/55 truncate hidden md:table-cell">{r.identifier || '—'}</td>
@@ -607,8 +638,74 @@ export default function FounderSecurityPage() {
           Aggregate counts survive; they identify nobody.
         </p>
       </Panel>
+
+      {/*
+        6.24.0 — the other half of "who reached this installation".
+
+        The panel above is people trying to get IN. This is the people you
+        deliberately let in: clients opening the links you sent them. Kept as a
+        separate feed rather than merged, because four real sign-in failures
+        must not be buried under two hundred routine client visits — and
+        because the two answer different questions, one about intrusion and one
+        about delivery.
+      */}
+      <Panel title="Recent link opens" icon={LinkIcon}>
+        {overview && overview.shareOpens.length > 0 ? (
+          <div className="custom-scrollbar max-h-[420px] overflow-y-auto -mx-1 px-1">
+            <table className="w-full text-sm table-fixed">
+              <tbody>
+                {overview.shareOpens.map((o) => (
+                  <tr key={o.id} className="border-t border-white/[0.05]">
+                    <td className="py-1.5 pr-2 whitespace-nowrap">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80">
+                        {SHARE_METHOD_LABEL[o.accessMethod || ''] || o.accessMethod || 'Opened'}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-2 text-xs text-white/70 truncate">{o.projectTitle || '—'}</td>
+                    <td className="py-1.5 pr-2 whitespace-nowrap hidden sm:table-cell">
+                      <Flag code={o.country} name={o.countryName} className="text-sm mr-1" />
+                    </td>
+                    <td className="py-1.5 pr-2 font-mono text-xs text-white/55 break-all hidden md:table-cell">
+                      {o.ipAddress || '—'}
+                    </td>
+                    {/* The email is only ever present for one-time-code access;
+                        for password and guest links there is nobody to name, and
+                        printing a placeholder as though there were would be
+                        inventing an identity. */}
+                    <td className="py-1.5 pr-2 text-xs text-white/55 truncate hidden lg:table-cell">
+                      {o.email || ''}
+                    </td>
+                    <td className="py-1.5 text-[11px] text-white/35 text-right whitespace-nowrap">
+                      {timeAgo(o.createdAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty>No link has been opened in this window.</Empty>
+        )}
+        <p className="mt-3 text-[11px] text-white/35">
+          Recorded only while analytics are enabled, and without cookie consent the address is
+          blunted to its network before it is stored. Deleted after {overview?.retentionDays ?? 90} days,
+          like sign-in records.
+        </p>
+      </Panel>
     </div>
   )
+}
+
+/**
+ * How the visitor proved they were allowed in. `NONE` is a link with no gate at
+ * all — worth naming plainly rather than leaving blank, since it is the case
+ * the scan warns about.
+ */
+const SHARE_METHOD_LABEL: Record<string, string> = {
+  OTP: 'Email code',
+  PASSWORD: 'Password',
+  GUEST: 'Guest',
+  NONE: 'Open link',
 }
 
 // ── small pieces ────────────────────────────────────────────────────────────

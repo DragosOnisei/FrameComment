@@ -35,7 +35,7 @@ import type { NextRequest } from 'next/server'
 import { prismaPrivileged } from './db'
 import { getClientIpAddress } from './utils'
 import { deviceSignature } from './device-signature'
-import { lookupIp } from './geoip'
+import { resolveRequestGeo } from './geoip'
 import { logError } from './logging'
 
 export type AccessAttemptKind =
@@ -84,15 +84,12 @@ export async function recordAccessAttempt(params: {
   const { request, kind, identifier, succeeded = false, details } = params
   try {
     const ipAddress = getClientIpAddress(request)
-    const geo = await lookupIp(ipAddress)
+    // 6.24.0: the Cloudflare-header preference now lives in `resolveRequestGeo`,
+    // shared with the share-open log. It used to be written out here, and the
+    // second caller would have copied it.
+    const geo = await resolveRequestGeo(ipAddress, request.headers.get('cf-ipcountry'))
+    const country = geo.country
     const userAgent = request.headers.get('user-agent')
-
-    // Cloudflare already knows the country for free when traffic passes
-    // through it. Preferring the header costs nothing and gives accurate
-    // geography to installs that never set up a local database.
-    const cfCountry = request.headers.get('cf-ipcountry')
-    const country =
-      cfCountry && cfCountry.length === 2 && cfCountry !== 'XX' ? cfCountry.toUpperCase() : geo.country
 
     await (prismaPrivileged as any).accessAttempt.create({
       data: {
@@ -145,6 +142,43 @@ export async function purgeExpiredAccessAttempts(): Promise<number> {
     }
   } catch (error) {
     logError('[ACCESS-LOG] Purge failed:', error)
+  }
+  return removed
+}
+
+/**
+ * 6.24.0 — the same retention window for share-link opens.
+ *
+ * `SharePageAccess` holds visitor IP addresses and has kept them forever since
+ * it was introduced. That was easier to overlook while the rows only fed a
+ * per-project analytics chart; putting them on the founder's Security page,
+ * under a line promising deletion after 90 days, makes it a promise the
+ * database was not keeping. Same window, same batching, same schedule.
+ *
+ * Privileged client: these rows are org-scoped and the worker runs without an
+ * organization context, so an org-armed client would match nothing and the
+ * purge would report success having deleted none — the exact failure mode that
+ * hid three bugs in 6.21.0.
+ */
+export async function purgeExpiredShareAccesses(): Promise<number> {
+  const cutoff = new Date(Date.now() - ACCESS_RETENTION_DAYS * 24 * 60 * 60 * 1000)
+  let removed = 0
+  try {
+    for (let pass = 0; pass < 50; pass += 1) {
+      const batch: Array<{ id: string }> = await (prismaPrivileged as any).sharePageAccess.findMany({
+        where: { createdAt: { lt: cutoff } },
+        select: { id: true },
+        take: 5_000,
+      })
+      if (batch.length === 0) break
+      const result = await (prismaPrivileged as any).sharePageAccess.deleteMany({
+        where: { id: { in: batch.map((r) => r.id) } },
+      })
+      removed += result.count
+      if (batch.length < 5_000) break
+    }
+  } catch (error) {
+    logError('[ACCESS-LOG] Share-access purge failed:', error)
   }
   return removed
 }

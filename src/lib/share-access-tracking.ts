@@ -5,6 +5,7 @@ import { enqueueExternalNotification } from '@/lib/external-notifications/enqueu
 import { generateShareUrl, getAppUrl } from '@/lib/url'
 import { getClientIpAddress } from '@/lib/utils'
 import { anonymizeIp } from '@/lib/ip-anonymization'
+import { resolveRequestGeo } from '@/lib/geoip'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 
@@ -44,6 +45,17 @@ export async function trackSharePageAccess(params: {
 
   if (settings.trackAnalytics) {
     try {
+      /*
+       * 6.24.0 — record the country too.
+       *
+       * Resolved from the ORIGINAL address, not the stored one: without
+       * analytics consent the IP is anonymised to its /24 before storage, and
+       * a country is not personal data — it is exactly the coarse, non-
+       * identifying fact anonymisation is meant to leave behind. Deriving it
+       * later from the stored, blunted address would be less accurate for no
+       * privacy gain.
+       */
+      const geo = await resolveRequestGeo(rawIp, request.headers.get('cf-ipcountry'))
       await prisma.sharePageAccess.create({
         data: {
           projectId,
@@ -52,7 +64,9 @@ export async function trackSharePageAccess(params: {
           sessionId,
           ipAddress,
           userAgent,
-        },
+          country: geo.country,
+          countryName: geo.countryName,
+        } as any,
       })
     } catch (error) {
       logError('[ANALYTICS] Failed to track share page access', error)

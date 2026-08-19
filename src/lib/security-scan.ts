@@ -921,20 +921,32 @@ async function stagePrivacy(): Promise<Finding[]> {
   )
 
   try {
+    /*
+     * 6.24.0: both tables holding addresses, not just one.
+     *
+     * `SharePageAccess` stores visitor IPs and, until this release, kept them
+     * forever — so a check that looked only at `AccessAttempt` would report the
+     * retention policy as honoured while the other table quietly disproved it.
+     * Counting one table and speaking for the policy is how a scan ends up
+     * reassuring you about something it never looked at.
+     */
     const rows: Array<{ count: bigint }> = await prismaPrivileged.$queryRawUnsafe(
-      `SELECT COUNT(*)::bigint AS count FROM "AccessAttempt" WHERE "createdAt" < NOW() - INTERVAL '${ACCESS_RETENTION_DAYS} days'`,
+      `SELECT (
+         (SELECT COUNT(*) FROM "AccessAttempt"   WHERE "createdAt" < NOW() - INTERVAL '${ACCESS_RETENTION_DAYS} days')
+       + (SELECT COUNT(*) FROM "SharePageAccess" WHERE "createdAt" < NOW() - INTERVAL '${ACCESS_RETENTION_DAYS} days')
+       )::bigint AS count`,
     )
     const overdue = Number(rows?.[0]?.count ?? 0)
     out.push(
       overdue === 0
         ? ok(s, 'privacy.purged', 'No records past their retention window', 'Purge is keeping up')
         : fail(s, 'privacy.purged', 'Records kept past their retention window',
-            `${overdue} record(s) older than ${ACCESS_RETENTION_DAYS} days`,
+            `${overdue} sign-in or share-open record(s) older than ${ACCESS_RETENTION_DAYS} days`,
             'The purge job is not running. Personal data is being kept longer than the stated policy.', 'HIGH',
             'You are keeping personal data longer than your own privacy policy promises. That gap is the problem, not the data.'),
     )
   } catch {
-    out.push(skip(s, 'privacy.purged', 'No records past their retention window', 'Access table not readable'))
+    out.push(skip(s, 'privacy.purged', 'No records past their retention window', 'Access tables not readable'))
   }
 
   return out

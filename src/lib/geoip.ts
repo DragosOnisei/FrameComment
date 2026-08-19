@@ -28,6 +28,7 @@
 import fs from 'fs'
 import path from 'path'
 import { logError, logMessage } from './logging'
+import { countryNameOf } from './country'
 
 export interface GeoLocation {
   /** ISO-3166 alpha-2, uppercase. */
@@ -159,17 +160,36 @@ export async function geoipStatus(): Promise<{
 }
 
 /**
- * Flag emoji from a country code, computed rather than shipped as images.
+ * 6.24.0 — the geography of one request, from the best source available.
  *
- * Regional indicator symbols: 'RO' becomes U+1F1F7 U+1F1F4, which every modern
- * platform renders as a flag. No image requests, no sprite sheet, no icon
- * library that would need updating when a country changes its flag.
+ * `CF-IPCountry` beats the local database whenever it is present: Cloudflare
+ * resolved the address at the edge, for free, and an install with no MaxMind
+ * database has nothing else to go on — which is the common case, since the
+ * database is a manual download.
+ *
+ * Extracted because the sign-in log had this logic inline and the share-open
+ * path was about to grow a second copy. Two copies of a rule is how the mail
+ * stage ended up reading a variable the app does not use.
  */
-export function countryFlag(code: string | null | undefined): string {
-  if (!code || code.length !== 2) return '🏳️'
-  const upper = code.toUpperCase()
-  if (!/^[A-Z]{2}$/.test(upper)) return '🏳️'
-  return String.fromCodePoint(
-    ...[...upper].map((c) => 0x1f1e6 + (c.charCodeAt(0) - 65)),
-  )
+export async function resolveRequestGeo(
+  ip: string,
+  cfCountryHeader?: string | null,
+): Promise<GeoLocation> {
+  const geo = await lookupIp(ip)
+  const cf = (cfCountryHeader || '').trim().toUpperCase()
+  // 'XX' is Cloudflare's "I could not tell", not a country.
+  const usable = cf.length === 2 && cf !== 'XX' && /^[A-Z]{2}$/.test(cf)
+  const country = usable ? cf : geo.country
+  return {
+    ...geo,
+    country,
+    // The stored name comes from the local database; when the country came
+    // from the header instead there is no name, so derive one rather than
+    // leaving every row in the UI with a flag and no words.
+    countryName: countryNameOf(country, geo.countryName),
+  }
 }
+
+// Re-exported so existing importers keep working; the implementation moved to
+// `country.ts`, which the browser can import without pulling in MaxMind.
+export { countryFlag } from './country'

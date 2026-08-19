@@ -1328,11 +1328,27 @@ model SharePageAccess {
   ipAddress String?
   userAgent String?
 
+  // 6.24.0: where the visitor opened it from, resolved at write time.
+  //
+  // Not derived at display time on purpose. Country would then be a function of
+  // whatever the geo database happens to say today rather than a record of what
+  // was true when the link was opened — and with no local database installed it
+  // would simply be blank, while the `CF-IPCountry` header was sitting right
+  // there on the request. Same order of preference as the sign-in log.
+  //
+  // Nullable and never backfilled: opens recorded before this release have no
+  // country and will show none, which is the truth about them.
+  country     String?  // ISO-3166 alpha-2
+  countryName String?
+
   createdAt DateTime @default(now())
 
   @@index([projectId, createdAt])
   @@index([projectId, accessMethod])
   @@index([sessionId])
+  // 6.24.0: the founder Security page reads these newest-first across every
+  // project, and the purge sweeps them oldest-first.
+  @@index([createdAt])
 
   @@index([organizationId])
 }
