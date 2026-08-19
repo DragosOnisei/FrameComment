@@ -221,6 +221,24 @@ export default function AnnotationOverlay({
   hidden = false,
   pendingAnnotation = null,
 }: AnnotationOverlayProps) {
+  /*
+   * 6.26.0 — a saved drawing appears because somebody asked to see it.
+   *
+   * This import has been here, unused, since the overlay was written: the
+   * context declares `activeCommentId` as "the comment whose saved annotations
+   * are currently being shown", and nothing ever read it. Visibility was decided
+   * purely by the playhead being inside a comment's timecode window, which meant
+   * drawings surfaced on their own during ordinary playback.
+   *
+   * It looked correct only by accident. The clock feeding this overlay is
+   * throttled to 200ms while a point comment's window is about 83ms at 24fps, so
+   * roughly two crossings in three were missed — and range comments, whose
+   * window is the whole range, appeared every single time. Rewinding to the
+   * start crosses every annotated comment in the video, which is why the arrow
+   * key made the behaviour obvious rather than causing it.
+   */
+  const annotationCtx = useOptionalAnnotation()
+  const activeCommentId = annotationCtx?.activeCommentId ?? null
   const [rect, setRect] = useState<{ offsetX: number; offsetY: number; width: number; height: number } | null>(null)
 
   useEffect(() => {
@@ -285,11 +303,16 @@ export default function AnnotationOverlay({
       const shapes = extractShapes((comment as any).annotations)
       if (!shapes) continue
 
-      // Strict time-based visibility: the drawing shows up only while the
-      // playhead is at the comment's timecode. Clicking the comment in the
-      // sidebar already seeks the video to that point, so the user always
-      // gets to see it; once they hit play, it disappears as the playhead
-      // moves on.
+      // 6.26.0: asked for, first. Clicking a comment in the sidebar selects it
+      // AND seeks to its timecode, so the intended path is unchanged — but the
+      // playhead merely passing through no longer summons a drawing nobody
+      // asked about, which is what made a clip unwatchable after a rewind.
+      if (comment.id !== activeCommentId) continue
+
+      // Then the time window, still: the drawing belongs to a moment, so it
+      // goes away as the playhead leaves that moment even while the comment
+      // stays selected. Selecting a note is a request to see it there, not a
+      // request to paint it over the rest of the film.
       const startTime = timecodeToSeconds(comment.timecode, videoFps)
       const frameDuration = 1 / (videoFps || 24)
       const tolerance = frameDuration * 0.5
@@ -322,7 +345,7 @@ export default function AnnotationOverlay({
     }
 
     return result
-  }, [comments, currentTime, videoFps, renderWidth, renderHeight, pendingAnnotation])
+  }, [comments, currentTime, videoFps, renderWidth, renderHeight, pendingAnnotation, activeCommentId])
 
   if (!renderWidth || !renderHeight || visibleShapes.length === 0 || hidden) return null
 

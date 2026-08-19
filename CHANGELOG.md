@@ -14,6 +14,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.26.0] - 2026-08-19
+
+### Fixed
+
+- **Saved drawings appeared over the video on their own during playback.** Most
+  visible after pressing the up arrow to jump back to the start while playing:
+  the clip then crossed every annotated comment in turn and each one painted its
+  shapes on screen.
+  - The arrow key was not the cause. Annotation visibility was decided purely by
+    the playhead sitting inside a comment's timecode window — no other
+    condition, playing or paused. Ordinary playback showed them too; it just
+    missed most of them, because the clock feeding the overlay is throttled to
+    200ms while a point comment's window is about 83ms at 24fps. Roughly two
+    crossings in three fell through the gap, which is why normal play *looked*
+    correct. Range comments, whose window is the whole range, appeared every
+    single time. Rewinding to zero simply guaranteed a crossing of every one of
+    them.
+  - A saved drawing now shows because somebody asked to see it: the overlay
+    reads `activeCommentId`, which the context has declared since it was written
+    as "the comment whose saved annotations are currently being shown" and which
+    nothing had ever read — the import was sitting in the file, unused. Clicking
+    a comment in the sidebar is unchanged, since that already selects it and
+    seeks to its timecode. The time window still applies on top, so the drawing
+    leaves when the playhead leaves the moment it belongs to.
+  - Pressing play clears the selection, which the context also documented and
+    nothing did. Without it a drawing stayed armed: leave it selected, rewind,
+    and it returns on the next crossing.
+  - The not-yet-posted drawing is untouched and still always visible. Hiding the
+    thing you are currently drawing would be a different, worse bug.
+
 ## [6.25.0] - 2026-08-19
 
 ### Added

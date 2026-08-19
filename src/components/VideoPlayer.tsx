@@ -1029,6 +1029,7 @@ export default function VideoPlayer({
     startDrawingMode,
     finishDrawingMode,
     cancelDrawingMode,
+    setActiveCommentId,
   } = useAnnotation()
 
   // Listen for enterDrawingMode event from CommentInput
@@ -2428,6 +2429,16 @@ export default function VideoPlayer({
     const handlePlay = () => {
       setIsPlaying(true)
       resetControlsTimeout()
+      /*
+       * 6.26.0 — pressing play clears the selected comment.
+       *
+       * The context has documented this since it was written ("cleared on seek
+       * / outside click") and nothing ever did it. Without it, a drawing you
+       * opened stays armed: leave it selected, rewind, and it reappears the
+       * next time the playhead crosses its timecode. Play means "I am watching
+       * the video now", which is the moment to put the note away.
+       */
+      setActiveCommentId(null)
     }
     const handlePause = () => setIsPlaying(false)
     // 6.15.0: the clip is over, so the reason for being fullscreen is over.
@@ -2461,7 +2472,7 @@ export default function VideoPlayer({
       video.removeEventListener('ended', handleEnded)
       video.removeEventListener('volumechange', handleVolumeChangeEvent)
     }
-  }, [resetControlsTimeout, exitFullscreenIfActive])
+  }, [resetControlsTimeout, exitFullscreenIfActive, setActiveCommentId])
 
   // Fullscreen change events (desktop). 4.7.x FIX: these DOCUMENT-level
   // listeners must ALWAYS be attached — the old code gated them behind
