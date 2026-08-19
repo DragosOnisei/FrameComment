@@ -1559,6 +1559,14 @@ model Organization {
   // project creation is blocked.
   deletionScheduledAt   DateTime?
   deletionRequestedById String?
+  // 6.25.0: why they left, in their own words, if they chose to say.
+  //
+  // Optional on purpose. Somebody closing their account is already unhappy or
+  // already gone, and a required field at that moment buys "x" from the people
+  // who would have written nothing and resentment from the rest. Cleared when a
+  // deletion is cancelled — a reason for a departure that did not happen is a
+  // note about a bad afternoon, kept against a company still paying.
+  deletionReason        String?
   // Anti-mass-wipe throttle (tenants only): trashing a project stamps this;
   // the next project can only be trashed 24h later, and a trashed project
   // can only be purged 24h after it entered the Trash.

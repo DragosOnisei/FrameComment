@@ -43,6 +43,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}))
     const password = typeof body?.password === 'string' ? body.password : ''
     const companyName = typeof body?.companyName === 'string' ? body.companyName.trim() : ''
+    /*
+     * 6.25.0 — an optional parting word.
+     *
+     * Never gates the deletion: somebody closing their account has already
+     * decided, and refusing to let them leave until they explain would be a
+     * dark pattern in the one place a product should be most gracious. Capped
+     * and trimmed here rather than trusted, because it is free text from a
+     * client that is on its way out and has no reason to behave.
+     */
+    const rawReason = typeof body?.reason === 'string' ? body.reason.trim() : ''
+    const deletionReason = rawReason ? rawReason.slice(0, 1000) : null
 
     // Password re-check — a stolen session alone must not be enough.
     const user = (await prismaPrivileged.user.findUnique({
@@ -94,14 +105,19 @@ export async function POST(request: NextRequest) {
     const deletionScheduledAt = new Date(Date.now() + ORG_DELETION_GRACE_MS)
     await (prismaPrivileged as any).organization.update({
       where: { id: currentOrgId() },
-      data: { deletionScheduledAt, deletionRequestedById: auth.id },
+      data: { deletionScheduledAt, deletionRequestedById: auth.id, deletionReason } as any,
     })
 
     await logSecurityEvent({
       type: 'ORG_DELETE_SCHEDULED',
       severity: 'CRITICAL',
       ipAddress: getClientIpAddress(request),
-      details: { organizationId: currentOrgId(), userId: auth.id, deletionScheduledAt },
+      details: {
+        organizationId: currentOrgId(), userId: auth.id, deletionScheduledAt,
+        // Whether they explained, not what they said — the security log has a
+        // wider audience than the one panel that needs the words.
+        reasonGiven: !!deletionReason,
+      },
       wasBlocked: false,
     }).catch(() => {})
     logMessage(`[danger-zone] org ${currentOrgId()} deletion scheduled for ${deletionScheduledAt.toISOString()} by ${auth.email}`)

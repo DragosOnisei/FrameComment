@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { Download, RefreshCw } from 'lucide-react'
+import { Download, RefreshCw, DoorOpen, Mail } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { FounderCard, FounderPage, MetricTile } from '@/components/founder/FounderPage'
 import { logError } from '@/lib/logging'
@@ -62,6 +62,12 @@ interface Metrics {
     billableUsers: number
     billableGiB: number
     tier: 'free' | 'paid'
+    /** 6.25.0 — the departure, when there is one. */
+    deletionScheduledAt: string | null
+    deletionReason: string | null
+    ownerEmail: string | null
+    ownerName: string | null
+    deletionRequestedByEmail: string | null
   }>
 }
 
@@ -70,6 +76,22 @@ const RANGES = [
   { key: '90d', label: '90 days', days: 90 },
   { key: '12m', label: '12 months', days: 365 },
 ] as const
+
+/**
+ * 6.25.0 — how long a leaving company has left.
+ *
+ * `deletionScheduledAt` already holds the moment of the wipe, grace included,
+ * so this is a plain subtraction. Deliberately the same shape as
+ * `OrgDeletionBanner`: the tenant sees a countdown and the founder sees a
+ * countdown, and the two must never disagree about how long is left.
+ */
+function daysLeft(scheduledAtIso: string): { days: number; label: string } {
+  const msLeft = Math.max(0, new Date(scheduledAtIso).getTime() - Date.now())
+  const days = Math.floor(msLeft / 86_400_000)
+  if (days >= 1) return { days, label: `${days} day${days === 1 ? '' : 's'} left` }
+  const hours = Math.floor(msLeft / 3_600_000)
+  return { days: 0, label: hours >= 1 ? `${hours}h left` : 'today' }
+}
 
 function money(cents: number): string {
   return `$${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
@@ -172,6 +194,17 @@ export default function FounderDashboardPage() {
       setExporting(false)
     }
   }
+
+  /*
+   * 6.25.0 — companies with a deletion scheduled, soonest first.
+   *
+   * Soonest first because this list is a to-do: the company with four days left
+   * is the one worth a call this morning, and burying it under one with
+   * twenty-eight would defeat the point of showing it at all.
+   */
+  const leaving = (data?.companiesTable ?? [])
+    .filter((c) => c.deletionScheduledAt)
+    .sort((a, b) => new Date(a.deletionScheduledAt!).getTime() - new Date(b.deletionScheduledAt!).getTime())
 
   return (
     <FounderPage title="Dashboard" subtitle="Revenue, customers and platform health in one place.">
@@ -340,6 +373,98 @@ export default function FounderDashboardPage() {
         </FounderCard>
       </div>
 
+      {/*
+        6.25.0 — companies on their way out.
+
+        Above the Companies table, not inside it, and rendered only when there
+        is somebody to call. A permanent empty card would train the eye to skip
+        the space, which is the opposite of what a thing you have thirty days to
+        act on needs. Everything here exists to make the call possible: who is
+        leaving, who pressed the button, the address to write to, what they said
+        if they said anything, and how long is left.
+      */}
+      {leaving.length > 0 && (
+        <div className="mt-4">
+          <FounderCard title="Leaving">
+            <p className="-mt-1 mb-3 text-xs text-muted-foreground">
+              Deletion is scheduled. Their data is wiped when the countdown ends, and the Owner
+              can still cancel until then.
+            </p>
+            <div className="space-y-3">
+              {leaving.map((c) => {
+                const left = daysLeft(c.deletionScheduledAt!)
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-lg ring-1 ring-red-500/25 bg-red-500/[0.06] p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <DoorOpen className="w-4 h-4 text-red-300/80 shrink-0" />
+                          <span className="font-medium truncate">{c.name}</span>
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          Customer since {new Date(c.createdAt).toLocaleDateString()}
+                          {c.estimatedMonthlyCents > 0 && <> · {money(c.estimatedMonthlyCents)}/mo</>}
+                          {' · '}{c.users} user{c.users === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                      {/* Under a week turns solid: the number matters more the
+                          closer it gets, and a uniform badge would read the
+                          same on day 29 as on the last morning. */}
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs whitespace-nowrap ring-1 ${
+                          left.days <= 7
+                            ? 'bg-red-500/20 text-red-200 ring-red-500/40'
+                            : 'bg-white/[0.06] text-white/70 ring-white/15'
+                        }`}
+                      >
+                        {left.label}
+                      </span>
+                    </div>
+
+                    {c.deletionReason ? (
+                      <p className="mt-2 text-sm text-white/80 whitespace-pre-wrap break-words">
+                        “{c.deletionReason}”
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground italic">
+                        No reason given.
+                      </p>
+                    )}
+
+                    {/* mailto rather than a copyable string: the whole point of
+                        this panel is the next action, and one click should
+                        start it. */}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                      {c.ownerEmail ? (
+                        <a
+                          href={`mailto:${c.ownerEmail}?subject=${encodeURIComponent(`About your FrameComment account`)}`}
+                          className="inline-flex items-center gap-1.5 text-white/75 hover:text-white underline underline-offset-2"
+                        >
+                          <Mail className="w-3.5 h-3.5" />
+                          {c.ownerName ? `${c.ownerName} · ` : ''}{c.ownerEmail}
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">No owner on record</span>
+                      )}
+                      {/* Only worth saying when it was somebody else — otherwise
+                          it is the same address twice. */}
+                      {c.deletionRequestedByEmail && c.deletionRequestedByEmail !== c.ownerEmail && (
+                        <span className="text-muted-foreground">
+                          Requested by {c.deletionRequestedByEmail}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </FounderCard>
+        </div>
+      )}
+
       <div className="mt-4">
         <FounderCard title="Companies">
           {data && data.companiesTable.length > 0 ? (
@@ -358,7 +483,22 @@ export default function FounderDashboardPage() {
                   {data.companiesTable.map((c) => (
                     <tr key={c.id} className="border-t border-white/[0.06]">
                       <td className="py-2 pr-3">
-                        <div className="truncate max-w-[220px]">{c.name}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate max-w-[220px]">{c.name}</span>
+                          {/* 6.25.0: a company on its way out used to sit here
+                              indistinguishable from a healthy one — same
+                              revenue, same tier pill. Anyone reading the table
+                              for how the business is doing was counting money
+                              that is already walking. */}
+                          {c.deletionScheduledAt && (
+                            <span
+                              className="shrink-0 rounded-full bg-red-500/15 text-red-300 ring-1 ring-red-500/30 px-1.5 py-0.5 text-[10px] whitespace-nowrap"
+                              title="Deletion scheduled"
+                            >
+                              leaving
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-muted-foreground">
                           since {new Date(c.createdAt).toLocaleDateString()}
                         </div>

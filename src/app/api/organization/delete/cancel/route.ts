@@ -47,7 +47,10 @@ export async function POST(request: NextRequest) {
 
     await (prismaPrivileged as any).organization.update({
       where: { id: currentOrgId() },
-      data: { deletionScheduledAt: null, deletionRequestedById: null },
+      // 6.25.0: the reason goes with the cancellation. A note about why someone
+      // was leaving, kept against a company that stayed, is a record of a bad
+      // afternoon presented later as a fact about the customer.
+      data: { deletionScheduledAt: null, deletionRequestedById: null, deletionReason: null } as any,
     })
 
     await logSecurityEvent({

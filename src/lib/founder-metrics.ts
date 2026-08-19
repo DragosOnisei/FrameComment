@@ -84,6 +84,21 @@ export interface FounderMetrics {
      *  PLAN, not about whether a card is attached — `hasCard`/`billingStatus`
      *  still carry that, and the UI flags a paid company with no card. */
     tier: 'free' | 'paid'
+    /**
+     * 6.25.0 — the departure, when there is one.
+     *
+     * `deletionScheduledAt` is the moment the data is wiped, not the moment it
+     * was requested: the 30-day grace is already baked into the stored value,
+     * so days-remaining is a plain subtraction from now — the same arithmetic
+     * the tenant's own countdown banner uses, deliberately, so the two can
+     * never disagree about how long is left.
+     */
+    deletionScheduledAt: string | null
+    deletionReason: string | null
+    /** Who to call: the account holder now, and who pressed the button. */
+    ownerEmail: string | null
+    ownerName: string | null
+    deletionRequestedByEmail: string | null
   }>
 }
 
@@ -99,9 +114,64 @@ export async function computeFounderMetrics(
   const platformId = platformOrgId()
   const orgs = (await (prismaPrivileged as any).organization.findMany({
     where: { isPlatform: false, id: { not: platformId } },
-    select: { id: true, name: true, status: true, createdAt: true },
+    select: {
+      id: true, name: true, status: true, createdAt: true,
+      // 6.25.0: a company on its way out looked exactly like a healthy one in
+      // this table — same row, same revenue, no hint that it will be gone in a
+      // fortnight. Since the countdown is a chance to save the account, the
+      // dashboard has to be the place it is noticed.
+      deletionScheduledAt: true, deletionRequestedById: true, deletionReason: true,
+    },
     orderBy: { createdAt: 'asc' },
-  })) as Array<{ id: string; name: string; status: string; createdAt: Date }>
+  })) as Array<{
+    id: string; name: string; status: string; createdAt: Date
+    deletionScheduledAt: Date | null
+    deletionRequestedById: string | null
+    deletionReason: string | null
+  }>
+
+  /*
+   * Who to call.
+   *
+   * Two lookups rather than a join, because `deletionRequestedById` is a bare
+   * String with no relation — and only for companies that are actually leaving,
+   * so a platform with a thousand tenants and no departures pays nothing.
+   *
+   * The owner is resolved separately from the requester: they are usually the
+   * same person, but ownership can have moved since, and the person worth
+   * calling is whoever holds the account now.
+   */
+  const leavingOrgs = orgs.filter((o) => o.deletionScheduledAt)
+  const contactByOrg = new Map<string, { ownerEmail: string | null; ownerName: string | null; requestedByEmail: string | null }>()
+  if (leavingOrgs.length > 0) {
+    const owners = (await (prismaPrivileged as any).user.findMany({
+      where: { organizationId: { in: leavingOrgs.map((o) => o.id) }, role: 'OWNER' },
+      select: { id: true, email: true, name: true, organizationId: true, createdAt: true },
+      // Oldest wins: an ownership transfer leaves two OWNER rows for its 30-day
+      // grace window, and the original holder is the account of record.
+      orderBy: { createdAt: 'asc' },
+    })) as Array<{ id: string; email: string; name: string | null; organizationId: string; createdAt: Date }>
+
+    const requesterIds = leavingOrgs.map((o) => o.deletionRequestedById).filter(Boolean) as string[]
+    const requesters = requesterIds.length
+      ? ((await (prismaPrivileged as any).user.findMany({
+          where: { id: { in: requesterIds } },
+          select: { id: true, email: true },
+        })) as Array<{ id: string; email: string }>)
+      : []
+    const requesterEmail = new Map(requesters.map((u) => [u.id, u.email]))
+
+    for (const org of leavingOrgs) {
+      const owner = owners.find((u) => u.organizationId === org.id) || null
+      contactByOrg.set(org.id, {
+        ownerEmail: owner?.email ?? null,
+        ownerName: owner?.name ?? null,
+        requestedByEmail: org.deletionRequestedById
+          ? requesterEmail.get(org.deletionRequestedById) ?? null
+          : null,
+      })
+    }
+  }
 
   const orgIds = orgs.map((o) => o.id)
   const activeOrgs = orgs.filter((o) => o.status === 'ACTIVE')
@@ -325,6 +395,11 @@ export async function computeFounderMetrics(
       billableUsers: est?.billableUsers ?? 0,
       billableGiB: est?.billableGiB ?? 0,
       tier: ((est?.totalCents ?? 0) > 0 ? 'paid' : 'free') as 'free' | 'paid',
+      deletionScheduledAt: org.deletionScheduledAt ? org.deletionScheduledAt.toISOString() : null,
+      deletionReason: org.deletionReason ?? null,
+      ownerEmail: contactByOrg.get(org.id)?.ownerEmail ?? null,
+      ownerName: contactByOrg.get(org.id)?.ownerName ?? null,
+      deletionRequestedByEmail: contactByOrg.get(org.id)?.requestedByEmail ?? null,
     }
   })
 

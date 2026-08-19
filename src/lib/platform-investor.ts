@@ -50,8 +50,8 @@ export async function computeRetention(): Promise<RetentionSummary> {
 
   const orgs = (await (prismaPrivileged as any).organization.findMany({
     where: { isPlatform: false, id: { not: platformId } },
-    select: { id: true, status: true, createdAt: true },
-  })) as Array<{ id: string; status: string; createdAt: Date }>
+    select: { id: true, status: true, createdAt: true, deletionScheduledAt: true },
+  })) as Array<{ id: string; status: string; createdAt: Date; deletionScheduledAt: Date | null }>
 
   if (orgs.length === 0) {
     return {
@@ -110,7 +110,18 @@ export async function computeRetention(): Promise<RetentionSummary> {
         retentionPercent: 0,
       } as Cohort)
     c.companies++
-    if (org.status === 'ACTIVE') {
+    /*
+     * 6.25.0 — a company with a deletion scheduled counts as churned.
+     *
+     * The doc comment above has always said "suspended OR scheduled for
+     * deletion", and the code only ever checked the status. Requesting deletion
+     * does not change `status` — it sets `deletionScheduledAt` and leaves the
+     * company ACTIVE for its 30-day grace — so every departing customer was
+     * counted as retained right up until the row was deleted, and then vanished
+     * from the denominator too. Retention was overstated at both ends, in the
+     * one number most likely to be quoted to an investor.
+     */
+    if (org.status === 'ACTIVE' && !org.deletionScheduledAt) {
       c.retained++
       if (activeOrgIds.has(org.id)) c.active30d++
     } else {
@@ -126,7 +137,7 @@ export async function computeRetention(): Promise<RetentionSummary> {
     }))
     .sort((a, b) => a.month.localeCompare(b.month))
 
-  const activeOrgs = orgs.filter((o) => o.status === 'ACTIVE')
+  const activeOrgs = orgs.filter((o) => o.status === 'ACTIVE' && !o.deletionScheduledAt)
   const activeRatePercent =
     activeOrgs.length > 0
       ? (activeOrgs.filter((o) => activeOrgIds.has(o.id)).length / activeOrgs.length) * 100
@@ -151,7 +162,7 @@ export async function computeRetention(): Promise<RetentionSummary> {
     cohorts,
     activeRatePercent,
     medianDaysToFirstUpload,
-    note: 'Cohorts are by signup month, and "retained" is where each cohort stands today — the schema records no date for when a company becomes inactive, so a month-by-month churn curve cannot be produced without inventing it. "Used the product" means uploaded or commented; logins are not recorded.',
+    note: 'Cohorts are by signup month, and "retained" is where each cohort stands today — a company with a deletion scheduled counts as churned from the moment it asks, not when the data is finally wiped — the schema records no date for when a company becomes inactive, so a month-by-month churn curve cannot be produced without inventing it. "Used the product" means uploaded or commented; logins are not recorded.',
   }
 }
 

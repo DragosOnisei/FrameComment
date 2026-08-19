@@ -31,6 +31,7 @@ export function DangerZoneSection({ companyName, isOwner }: DangerZoneSectionPro
   const [open, setOpen] = useState(false)
   const [typedName, setTypedName] = useState('')
   const [password, setPassword] = useState('')
+  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -44,7 +45,7 @@ export function DangerZoneSection({ companyName, isOwner }: DangerZoneSectionPro
       const res = await apiFetch('/api/organization/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, companyName: typedName }),
+        body: JSON.stringify({ password, companyName: typedName, reason }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -154,6 +155,33 @@ export function DangerZoneSection({ companyName, isOwner }: DangerZoneSectionPro
                 className="bg-white/[0.06] border-white/10 text-white"
                 autoComplete="current-password"
               />
+            </div>
+
+            {/*
+              6.25.0 — an optional parting word.
+
+              Last, after the confirmations, and explicitly optional: the button
+              below does not wait for it, and nothing here suggests it might.
+              Somebody at this screen has already decided, and a product that
+              made them justify the decision before letting go would be at its
+              least gracious in the moment it matters most. It is here because
+              some people do want to say why, and today there is nowhere to.
+            */}
+            <div className="space-y-1.5">
+              <Label htmlFor="dz-reason" className="text-white/80">
+                Anything you would like us to know? <span className="text-white/40 font-normal">(optional)</span>
+              </Label>
+              <textarea
+                id="dz-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value.slice(0, 1000))}
+                rows={3}
+                placeholder="What made you decide to leave?"
+                className="w-full rounded-md bg-white/[0.06] ring-1 ring-white/10 px-3 py-2 text-sm text-white placeholder:text-white/30 resize-none focus:outline-none focus:ring-white/20"
+              />
+              <p className="text-[11px] text-white/35">
+                Goes to the FrameComment team, not to anyone in your company. Leave it blank and nothing is recorded.
+              </p>
             </div>
 
             <Button

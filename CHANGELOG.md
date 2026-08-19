@@ -14,6 +14,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.25.0] - 2026-08-19
+
+### Added
+
+- **"Leaving" on the founder Dashboard.** A company that has scheduled its
+  deletion sat in the Companies table indistinguishable from a healthy one —
+  same revenue, same tier pill, no hint it would be gone in a fortnight. There
+  is a 30-day grace period, which is 30 days to pick up the phone, and nothing
+  on the dashboard said the clock was running. The new card lists who is
+  leaving, soonest first, with the account holder's address as a one-click
+  mailto, who pressed the button when that was somebody else, and the countdown
+  — computed with the same arithmetic as the tenant's own banner, so the two can
+  never disagree about how long is left. It renders only when there is somebody
+  to call: a permanently empty card trains the eye to skip the space. Rows in
+  the Companies table now carry a "leaving" tag for the same reason.
+- **An optional parting question.** The deletion dialog asks what made them
+  decide to leave, after the confirmations and explicitly optional — the button
+  does not wait for it. Somebody at that screen has already decided, and a
+  product that made them justify it before letting go would be at its least
+  gracious in the moment that matters most. The answer appears in the panel
+  above; it is cleared if the deletion is cancelled, because a reason for a
+  departure that did not happen is a note about a bad afternoon kept against a
+  company still paying. The security event records only THAT a reason was given,
+  never the words — that log has a wider audience than the one panel that needs
+  them.
+
+### Fixed
+
+- **Retention was overstated at both ends.** `computeRetention` has always
+  documented "churned" as "suspended or scheduled for deletion", and only ever
+  checked the status. Requesting deletion does not change `status` — it sets
+  `deletionScheduledAt` and leaves the company ACTIVE for its grace period — so
+  a departing customer counted as retained right up until the row was deleted,
+  and then left the denominator as well. Both the cohort table and the active
+  rate now treat a scheduled deletion as churn from the moment it is requested.
+  **This lowers the reported retention figure**, which is the honest direction,
+  and it is the number most likely to have been quoted to an investor.
+
 ## [6.24.0] - 2026-08-19
 
 ### Added
