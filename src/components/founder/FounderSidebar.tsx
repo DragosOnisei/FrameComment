@@ -67,7 +67,11 @@ export default function FounderSidebar() {
 
   return (
     <aside
-      className="glass-panel hidden md:flex md:flex-col h-screen sticky top-0 z-40 px-3 py-4 gap-2"
+      // 6.20.2: `h-full` inside a viewport-height shell, not `h-screen
+      // sticky`. Sticky was solving the wrong problem — it kept the panel in
+      // view while the document scrolled past the end of it. Now the document
+      // does not scroll at all; only the content column does.
+      className="glass-panel hidden md:flex md:flex-col h-full shrink-0 z-40 px-3 py-4 gap-2"
       style={{ width: 'var(--sidebar-width)' }}
     >
       {/* Brand lockup — the platform's own name, not a customer's. */}

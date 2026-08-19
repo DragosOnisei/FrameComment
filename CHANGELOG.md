@@ -14,6 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.20.2] - 2026-08-19
+
+### În zona de fondator scrolează conţinutul, nu fereastra
+
+Shell-ul era `min-h-screen` cu bara laterală `sticky top-0`, deci o pagină
+lungă scrola tot documentul. Sticky ţinea bara în cadru, dar doar marginea ei
+de sus: panoul are înălţimea unui ecran, aşa că dincolo de punctul acela se
+termina şi lăsa o coloană goală sub numele tău pentru tot restul paginii.
+
+Acum shell-ul e fixat la înălţimea ferestrei şi doar coloana de conţinut are
+overflow. Bara laterală e mereu exact cât fereastra, nu mai există nimic sub ea
+care să rămână gol, iar navigaţia nu mai poate ieşi din cadru.
+
+`100dvh`, nu `100vh`: pe browserele mobile bara de unelte se strânge la scroll
+şi `vh` nu o urmăreşte — de acolo vine clasa de bug-uri cu conţinut ascuns sub
+bara de adresă.
+
 ## [6.20.1] - 2026-08-19
 
 ### Primul raport de producţie a găsit trei bug-uri — în scan, nu în server
