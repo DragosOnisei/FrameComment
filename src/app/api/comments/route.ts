@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, orgSettingsWhere } from '@/lib/db'
+import { prisma, orgSettingsWhere, rawArmed } from '@/lib/db'
 import { armOrgForProjectId } from '@/lib/share-org'
 import { getAuthContext } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
@@ -416,14 +416,21 @@ export async function POST(request: NextRequest) {
     // 6.16.0 carries the provenance in the same statement, for the same
     // reason and with the same guarantee: if the columns are not there yet,
     // the comment is still created and simply loses its version tag.
+    //
+    // 6.21.0: both statements go through `rawArmed`. A bare raw statement is
+    // not seen by the RLS extension (it arms model operations only), so
+    // post-flip this UPDATE ran without an org context, matched zero rows
+    // under the org_isolation policy and reported success — pasted comments
+    // silently lost both the "Copied" flag and the version tag on production
+    // while working perfectly on a superuser dev database.
     if (isCopied && comment?.id) {
       try {
-        await prisma.$executeRawUnsafe(
+        await rawArmed(prisma.$executeRawUnsafe(
           'UPDATE "Comment" SET "isCopied" = true, "sourceVideoId" = $2, "sourceVersionLabel" = $3 WHERE id = $1',
           comment.id,
           sourceVideoId ?? null,
           sourceVersionLabel ?? null,
-        )
+        ))
         ;(comment as any).isCopied = true
         ;(comment as any).sourceVideoId = sourceVideoId ?? null
         ;(comment as any).sourceVersionLabel = sourceVersionLabel ?? null
@@ -431,10 +438,10 @@ export async function POST(request: NextRequest) {
         // Columns absent on an older DB — non-fatal. Fall back to the 3.8.x
         // behaviour so a pre-migration instance still gets the "Copied" tag.
         try {
-          await prisma.$executeRawUnsafe(
+          await rawArmed(prisma.$executeRawUnsafe(
             'UPDATE "Comment" SET "isCopied" = true WHERE id = $1',
             comment.id,
-          )
+          ))
           ;(comment as any).isCopied = true
         } catch {
           /* nothing left to try; the comment itself is safe */

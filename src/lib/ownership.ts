@@ -17,7 +17,7 @@
  *               target is the sole OWNER.
  */
 import { randomUUID } from 'crypto'
-import { prisma, setOrgContextOn, currentOrgId } from './db'
+import { prisma, setOrgContextOn, currentOrgId, rawArmed } from './db'
 import { logError, logMessage } from './logging'
 import { revokeAllUserTokens } from './token-revocation'
 
@@ -44,23 +44,30 @@ export interface GraceTransfer {
  */
 export async function finalizeExpiredTransfers(): Promise<number> {
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ id: string; fromUserId: string }>>(
+    // 6.21.0: every bare raw statement in this file goes through `rawArmed`.
+    // Raw queries are not intercepted by the RLS extension (it arms model
+    // operations only), so post-flip these ran with no
+    // `app.current_organization_id`: the SELECTs returned nothing and the
+    // UPDATEs matched nothing, silently, and an expired grace window was never
+    // closed out. Without a context (the worker sweep) `rawArmed` degrades to a
+    // plain transaction, which is exactly what that path had before.
+    const rows = await rawArmed(prisma.$queryRawUnsafe<Array<{ id: string; fromUserId: string }>>(
       `SELECT "id", "fromUserId" FROM "OwnershipTransfer"
         WHERE "status" = 'GRACE' AND "graceEndsAt" <= NOW()`,
-    )
+    ))
     let finalized = 0
     for (const r of rows) {
       // Only demote if they're still OWNER — never clobber a role set elsewhere.
-      await prisma.$executeRawUnsafe(
+      await rawArmed(prisma.$executeRawUnsafe(
         `UPDATE "User" SET "role" = 'ADMIN', "updatedAt" = NOW()
           WHERE "id" = $1 AND "role" = 'OWNER'`,
         r.fromUserId,
-      )
-      await prisma.$executeRawUnsafe(
+      ))
+      await rawArmed(prisma.$executeRawUnsafe(
         `UPDATE "OwnershipTransfer" SET "status" = 'FINALIZED', "finalizedAt" = NOW()
           WHERE "id" = $1 AND "status" = 'GRACE'`,
         r.id,
-      )
+      ))
       // Force the demoted user to re-authenticate so their session reflects
       // the reduced permissions immediately.
       try { await revokeAllUserTokens(r.fromUserId) } catch { /* non-fatal */ }
@@ -83,13 +90,13 @@ export async function finalizeExpiredTransfers(): Promise<number> {
 export async function getActiveGraceTransfer(): Promise<GraceTransfer | null> {
   await finalizeExpiredTransfers()
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<GraceTransfer>>(
+    const rows = await rawArmed(prisma.$queryRawUnsafe<Array<GraceTransfer>>(
       `SELECT "id", "fromUserId", "toUserId", "toPreviousRole", "status", "initiatedAt", "graceEndsAt"
          FROM "OwnershipTransfer"
         WHERE "status" = 'GRACE' AND "graceEndsAt" > NOW()
         ORDER BY "initiatedAt" DESC
         LIMIT 1`,
-    )
+    ))
     return rows[0] ?? null
   } catch (err) {
     logError('[ownership] getActiveGraceTransfer failed:', err)
@@ -123,10 +130,10 @@ export async function initiateTransfer(fromUserId: string, toUserId: string): Pr
   if (active) {
     return { ok: false, error: 'An ownership transfer is already in progress.', status: 409 }
   }
-  const rows = await prisma.$queryRawUnsafe<Array<{ id: string; role: string }>>(
+  const rows = await rawArmed(prisma.$queryRawUnsafe<Array<{ id: string; role: string }>>(
     `SELECT "id", "role" FROM "User" WHERE "id" = $1`,
     toUserId,
-  )
+  ))
   const target = rows[0]
   if (!target) return { ok: false, error: 'That user no longer exists.', status: 404 }
   if (target.role === 'OWNER') {

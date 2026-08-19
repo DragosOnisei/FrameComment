@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, prismaPrivileged } from '@/lib/db'
+import { prisma, prismaPrivileged, rawArmed } from '@/lib/db'
 import { requireApiAdmin, requireApiDeleteUsers, getCurrentUserFromRequest } from '@/lib/auth'
 import { hashPassword, validatePassword, verifyPassword } from '@/lib/encryption'
 import { revokeAllUserTokens } from '@/lib/token-revocation'
@@ -345,12 +345,28 @@ export async function PATCH(
     // its baked-in enum list and would reject the value before it reaches
     // Postgres. `role` is already validated + authorized above; the DB enum must
     // already contain the value (guaranteed by `prisma migrate deploy`).
+    //
+    // 6.21.0: through `rawArmed`. A bare raw statement is invisible to the RLS
+    // extension, so post-flip this UPDATE ran with no
+    // `app.current_organization_id`, the org_isolation policy on "User"
+    // matched zero rows, and the role change was discarded — while the
+    // response below still reported the new role, so the UI showed a save that
+    // had not happened. Promoting somebody to Project Manager from the edit
+    // dialog therefore did nothing at all on production.
     if (roleChanged) {
-      await prisma.$executeRawUnsafe(
+      const updated = await rawArmed(prisma.$executeRawUnsafe(
         `UPDATE "User" SET "role" = $1::"UserRole", "updatedAt" = NOW() WHERE "id" = $2`,
         role,
         id,
-      )
+      ))
+      if (!updated) {
+        // Never claim a save that did not land: the old behaviour patched the
+        // response object unconditionally, which is how this stayed invisible.
+        return NextResponse.json(
+          { error: 'The role change could not be saved. Please try again.' },
+          { status: 500 },
+        )
+      }
       ;(user as any).role = role
     }
 

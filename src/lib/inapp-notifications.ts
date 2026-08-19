@@ -22,7 +22,7 @@
 
 import { prisma } from '@/lib/db'
 import { getRedis } from '@/lib/redis'
-import { logError } from '@/lib/logging'
+import { logError, logMessage } from '@/lib/logging'
 
 // Narrow accessor for the new delegate. Confined to this file.
 const notificationDelegate = () => (prisma as any).notification
@@ -236,26 +236,68 @@ export async function maybeNotifyEditorForComment(params: {
 
     // This helper runs AFTER the comment is created, so the just-posted comment
     // is already counted → count === 1 means it's the first of the round.
-    const commentCount = await prisma.comment.count({ where: { videoId: video.id } })
-    if (commentCount > 1) return
+    //
+    // 6.21.0: carried-over comments are excluded. Since 6.16.0 an editor can
+    // paste the previous version's notes onto a new cut, so that cut can start
+    // life with a dozen comments already on it — and the reviewer's first REAL
+    // comment then arrived as number thirteen, the guard read "not the first of
+    // the round", and nobody was ever told the new cut had feedback. The count
+    // is a proxy for "has anyone said anything about this cut yet", and a note
+    // copied from the previous cut is not somebody saying something.
+    const commentCount = await prisma.comment.count({
+      where: { videoId: video.id, isCopied: false },
+    })
+    if (commentCount > 1) {
+      // 6.21.0: say so. Every silent `return` in this function was a place
+      // where "notifications are broken" could only be investigated by reading
+      // rows out of Postgres by hand. Each exit now leaves a line naming which
+      // rule fired, so the log answers the question instead of the DBA.
+      logMessage(
+        `[maybeNotifyEditorForComment] skip video=${video.id}: not the first comment of this version (${commentCount} fresh)`,
+      )
+      return
+    }
 
     // Build the recipient set: the uploader (if any) plus every Project Manager.
-    // Raw SQL for the PM lookup so it keeps working even before `prisma generate`
-    // knows the PROJECT_MANAGER enum value.
+    //
+    // 6.21.0: this lookup used to be `$queryRawUnsafe`, chosen back in 4.4.0 so
+    // the then-new PROJECT_MANAGER enum value worked even if the generated
+    // client predated it. That made it invisible to the RLS extension, which
+    // arms MODEL operations only — so after the multi-tenant flip the statement
+    // ran with no `app.current_organization_id`, the org_isolation policy on
+    // "User" matched zero rows, and every Project Manager silently vanished
+    // from the recipient list. No error and no log line, because RLS filters
+    // rather than raises. The enum has been in the generated client for many
+    // releases, so the original reason for the raw query is long gone; the
+    // typed delegate is armed by the extension and is simply correct.
     const recipientIds = new Set<string>()
     if (video.createdById) recipientIds.add(video.createdById)
     try {
-      const projectManagers = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-        `SELECT "id" FROM "User" WHERE "role" = 'PROJECT_MANAGER'`,
-      )
+      const projectManagers = (await (prisma as any).user.findMany({
+        where: { role: 'PROJECT_MANAGER' },
+        select: { id: true },
+      })) as Array<{ id: string }>
       for (const pm of projectManagers) recipientIds.add(pm.id)
+      if (projectManagers.length === 0) {
+        logMessage('[maybeNotifyEditorForComment] no Project Managers on record for this organization')
+      }
     } catch (pmErr) {
       logError('[maybeNotifyEditorForComment] Project Manager lookup failed (non-fatal):', pmErr)
     }
 
     // Never ping the person who just commented about their own comment.
     if (params.actorUserId) recipientIds.delete(params.actorUserId)
-    if (recipientIds.size === 0) return
+    if (recipientIds.size === 0) {
+      // This is the exit that hid the dead Project Manager lookup for months:
+      // an editor annotating their OWN upload leaves the uploader (themselves,
+      // removed above) and the Project Managers (silently none) — so the set
+      // emptied and the function returned as if there were nobody to tell.
+      logMessage(
+        `[maybeNotifyEditorForComment] skip video=${video.id}: no recipients left ` +
+        `(uploader=${video.createdById ?? 'none'}, actor=${params.actorUserId ?? 'guest'})`,
+      )
+      return
+    }
 
     for (const recipientId of recipientIds) {
       const notification = await createOrBumpNotification({

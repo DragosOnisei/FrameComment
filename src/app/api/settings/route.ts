@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, prismaPrivileged, orgSettingsWhere, orgSettingsCreateBase, currentOrgId } from '@/lib/db'
+import { prisma, prismaPrivileged, orgSettingsWhere, orgSettingsCreateBase, currentOrgId, rawArmed } from '@/lib/db'
 import { requireApiAdmin, requireApiManageSettings } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
@@ -476,9 +476,12 @@ export async function PATCH(request: NextRequest) {
     if (openaiApiKey !== undefined && openaiApiKey !== '••••••••') {
       let currentKey: string | null = null
       try {
-        const rows = await prisma.$queryRawUnsafe<
+        // 6.21.0: `rawArmed` — a bare raw SELECT is not armed by the RLS
+        // extension, so post-flip this returned zero rows and the stored key
+        // read as absent on every save.
+        const rows = await rawArmed(prisma.$queryRawUnsafe<
           Array<{ openaiApiKey: string | null }>
-        >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default')
+        >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default'))
         const stored = rows?.[0]?.openaiApiKey
         currentKey = stored ? decrypt(stored) : null
       } catch {
@@ -703,9 +706,9 @@ export async function PATCH(request: NextRequest) {
     // a stale generated client).
     let openaiConfiguredAfter = false
     try {
-      const rows = await prisma.$queryRawUnsafe<
+      const rows = await rawArmed(prisma.$queryRawUnsafe<
         Array<{ openaiApiKey: string | null }>
-      >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default')
+      >('SELECT "openaiApiKey" FROM "Settings" WHERE id = $1 LIMIT 1', 'default'))
       openaiConfiguredAfter = !!rows?.[0]?.openaiApiKey
     } catch {
       /* column may not exist yet */

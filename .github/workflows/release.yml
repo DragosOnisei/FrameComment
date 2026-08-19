@@ -13,6 +13,21 @@ on:
 permissions:
   contents: write    # needed to create the GitHub Release
 
+# 6.21.0: one release at a time.
+#
+# Pushing several tags at once starts several of these in parallel, and each one
+# ends by moving `:latest` to its own image. Whichever finishes LAST wins, and
+# build times vary — so a batch of four tags left `:latest` pointing at 6.20.1
+# while 6.20.2 never published at all.
+#
+# `cancel-in-progress` is deliberately false: a release that is already pushing
+# layers to Docker Hub must be allowed to finish, not be killed by the next tag.
+# The queue simply serialises them, oldest first, so `:latest` always ends up on
+# the newest version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   IMAGE_NAME: dragosonisei/framecomment
 

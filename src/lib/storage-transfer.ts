@@ -21,7 +21,7 @@
  * stop a long run. The whole thing runs inside the BullMQ worker (it can take
  * hours for a large library), never in a Next request.
  */
-import { prisma } from './db'
+import { prisma, rawArmed } from './db'
 import { getRedis } from './redis'
 import {
   downloadFile,
@@ -325,12 +325,18 @@ async function allFilePaths(item: WorkItem, backend: StorageBackend): Promise<st
 
 async function retag(kind: string, id: string, target: StorageBackend, locations: StorageBackend[]): Promise<void> {
   // `kind` is one of our own constant table names — safe to interpolate.
-  await prisma.$executeRawUnsafe(
+  //
+  // 6.21.0: through `rawArmed`. Raw statements are invisible to the RLS
+  // extension, so post-flip this UPDATE ran with no org context and matched
+  // zero rows — a transfer copied every byte, verified it, reported success and
+  // then failed to re-tag the row, so the video still claimed to live on the
+  // old backend.
+  await rawArmed(prisma.$executeRawUnsafe(
     `UPDATE "${kind}" SET "storageBackend" = $1, "storageLocations" = $2 WHERE id = $3`,
     target,
     formatLocations(locations),
     id,
-  )
+  ))
 }
 
 /**

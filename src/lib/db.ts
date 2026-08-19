@@ -277,6 +277,32 @@ export async function setOrgContextOn(
   await client.$executeRaw`SELECT set_config('app.current_organization_id', ${organizationId}, true)`
 }
 
+/**
+ * 6.21.0 — run a RAW statement with the RLS org context armed.
+ *
+ * The extension above intercepts `$allModels`, which by definition covers
+ * MODEL operations only. `prisma.$queryRaw*` / `$executeRaw*` are client-level
+ * operations and are NOT intercepted, so post-flip they reached Postgres with
+ * no `app.current_organization_id` — and RLS does not raise, it filters. A raw
+ * SELECT returned zero rows and a raw UPDATE matched zero rows, both silently,
+ * both reporting success. Three real bugs came from exactly that (Project
+ * Managers dropping out of the notification recipients, comment provenance
+ * never being stamped, role edits appearing to save and not saving).
+ *
+ * This wraps the statement in the ARRAY form of `$transaction`, which the
+ * proxy above already arms — one connection, one transaction, `set_config`
+ * first. Without an org context (worker, boot) it degrades to a plain
+ * single-statement transaction, which is what those paths had before.
+ *
+ * Usage: `await rawArmed(prisma.$executeRawUnsafe('UPDATE ...', a, b))`.
+ * Prisma's raw builders return a lazy PrismaPromise, so passing the call in
+ * un-awaited is correct — it executes inside the armed transaction.
+ */
+export async function rawArmed<T>(statement: T): Promise<Awaited<T>> {
+  const [result] = await (prisma as any).$transaction([statement])
+  return result as Awaited<T>
+}
+
 /** Convenience: default-client variant (transaction caveat applies). */
 export async function setDatabaseOrgContext(organizationId: string): Promise<void> {
   try {

@@ -14,6 +14,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.21.0] - 2026-08-19
+
+### Fixed
+
+- **Notifications reached almost nobody, and had been failing silently for
+  weeks.** Three separate faults with one root cause. The Prisma extension that
+  arms `app.current_organization_id` intercepts `$allModels`, so it covers model
+  operations and nothing else — `$queryRaw*` and `$executeRaw*` are client-level
+  operations and were never wrapped. After the multi-tenant RLS flip every bare
+  raw statement therefore reached Postgres with no organization context, where
+  the `org_isolation` policies matched zero rows. RLS filters rather than
+  raising, so a raw SELECT returned an empty list and a raw UPDATE changed
+  nothing, both reporting success. Verified on production: as the application
+  role, with no context armed, `SELECT count(*) FROM "User"` returns 0.
+  - Project Managers are meant to be told about every video that receives a
+    comment. Their lookup was raw SQL (chosen in 4.4.0 so the then-new
+    `PROJECT_MANAGER` enum value worked with an older generated client), so it
+    returned nobody. Across nineteen recently-commented videos the count of
+    notifications was never higher than two, where it should have been one per
+    Project Manager plus the uploader — they only ever received the videos they
+    had uploaded themselves. Now read through the typed delegate, which the
+    extension arms.
+  - The provenance write for pasted comments (`isCopied`, `sourceVideoId`,
+    `sourceVersionLabel`) was a raw UPDATE, so on production it changed nothing:
+    carried-over comments were never marked, which is why they showed neither
+    the "from vX" tag nor grey timeline markers there while working perfectly on
+    a superuser development database.
+  - Consequently, the "only notify on the first comment of a version" guard
+    counted pasted comments as real feedback. Paste eight notes onto a new cut
+    and the reviewer's first genuine comment arrived as number nine, the guard
+    read "not the first of the round", and the editor was never told the cut had
+    feedback. The count now excludes carried-over comments.
+- New `rawArmed()` wraps a raw statement in the array form of `$transaction`,
+  which has been armed since 5.10.3. Applied to every remaining raw statement on
+  a request path, each of which was silently doing nothing on production: role
+  changes from the user-edit dialog (which then reported the new role in the
+  response, so the interface showed a save that had not happened — this now
+  fails loudly instead), closing out an expired ownership-transfer grace window,
+  re-tagging a row after a storage transfer completed and verified, and reading
+  back the stored OpenAI key.
+- Every silent exit in the notification helper now logs which rule fired and
+  why. The empty-recipient path — an editor annotating their own upload, leaving
+  only the Project Managers, of whom there were silently none — is what hid all
+  of the above for months, and it could only be investigated by reading rows out
+  of Postgres by hand.
+- Releases no longer race each other. The workflow gains a `concurrency` group,
+  so tags queue instead of running in parallel. Pushing four tags at once had
+  each build end by moving `:latest` to its own image, last finisher winning: the
+  batch through v6.20.2 left `:latest` on 6.20.1, and the 6.20.2 image never
+  published at all. `cancel-in-progress` is false — a release already uploading
+  layers must finish rather than be killed by the next tag.
+
+### Added
+
+- `scripts/backfill-copied-comments.mjs` repairs comments that were pasted in
+  before the fix above and so were never marked. It recognises a carried-over
+  comment by its twin on an earlier version of the same stack — identical text at
+  an identical timecode — which is inference rather than knowledge, because the
+  fact itself was never recorded. Dry run by default: it prints what it would
+  change, grouped by cut, and writes only with `--apply`.
+
 ## [6.20.2] - 2026-08-19
 
 ### În zona de fondator scrolează conţinutul, nu fereastra
