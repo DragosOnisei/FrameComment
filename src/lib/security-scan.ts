@@ -146,13 +146,13 @@ async function stageServer(): Promise<Finding[]> {
     const ms = Date.now() - started
     out.push(
       ms > 500
-        ? warn(s, 'db.reachable', 'Database responds', `Answered in ${ms}ms`,
+        ? warn(s, 'db.reachable', 'Database is slow to respond', `Answered in ${ms}ms`,
             'A slow database makes every request slow. Check load and connection pooling.', 'LOW',
             'The site will feel sluggish for everyone. Not a security hole, but slow systems are the ones people disable protections on.')
         : ok(s, 'db.reachable', 'Database responds', `Answered in ${ms}ms`),
     )
   } catch (error) {
-    out.push(fail(s, 'db.reachable', 'Database responds', String(error),
+    out.push(fail(s, 'db.reachable', 'Database did not respond', String(error),
       'The application cannot serve anything without Postgres. Check the container and DATABASE_URL.', 'CRITICAL',
       'Nothing works at all — no logins, no video, no comments. This is an outage, not a warning.'))
   }
@@ -162,7 +162,7 @@ async function stageServer(): Promise<Finding[]> {
     await getRedis().ping()
     out.push(ok(s, 'redis.reachable', 'Redis responds', `Answered in ${Date.now() - started}ms`))
   } catch (error) {
-    out.push(fail(s, 'redis.reachable', 'Redis responds', String(error),
+    out.push(fail(s, 'redis.reachable', 'Redis did not respond', String(error),
       'Redis holds the revocation list, rate limits and job queue. Without it, revoked sessions may keep working.', 'CRITICAL',
       'Someone you just signed out could still be signed in, and the brute-force protection on the login page stops counting.'))
   }
@@ -172,14 +172,14 @@ async function stageServer(): Promise<Finding[]> {
       await (prismaPrivileged as any).serviceHeartbeat.findMany()
     const worker = beats.find((b) => b.service.toLowerCase().includes('worker'))
     if (!worker) {
-      out.push(warn(s, 'worker.alive', 'Encoding worker is alive', 'No heartbeat recorded',
+      out.push(warn(s, 'worker.alive', 'Encoding worker has never reported in', 'No heartbeat recorded',
         'Uploads will never finish encoding. Check the worker container.', 'HIGH',
         'Clients upload a video and it stays stuck forever. They will assume the product is broken, and they will be right.'))
     } else {
       const ageMin = Math.round((Date.now() - new Date(worker.lastSeenAt).getTime()) / 60000)
       out.push(
         ageMin > 5
-          ? fail(s, 'worker.alive', 'Encoding worker is alive', `Last heartbeat ${ageMin} minutes ago`,
+          ? fail(s, 'worker.alive', 'Encoding worker has stopped reporting', `Last heartbeat ${ageMin} minutes ago`,
               'The worker has stopped. Videos will upload but never encode.', 'HIGH',
               'Clients upload a video and it stays stuck forever. They will assume the product is broken, and they will be right.')
           : ok(s, 'worker.alive', 'Encoding worker is alive', `Last heartbeat ${ageMin} minutes ago`),
@@ -198,7 +198,7 @@ async function stageServer(): Promise<Finding[]> {
     const pending = Number(rows?.[0]?.count ?? 0)
     out.push(
       pending > 0
-        ? fail(s, 'db.migrations', 'All migrations applied', `${pending} migration(s) unfinished`,
+        ? fail(s, 'db.migrations', 'Migrations are unfinished', `${pending} migration(s) unfinished`,
             'Restart the app container; the entrypoint applies migrations on boot.', 'HIGH',
             'The code expects a database shape the database does not have yet. Expect strange errors in random places until it catches up.')
         : ok(s, 'db.migrations', 'All migrations applied', 'No unfinished migrations'),
@@ -213,6 +213,35 @@ async function stageServer(): Promise<Finding[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Transport security
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * The address the application actually publishes itself at, and where that
+ * answer came from.
+ *
+ * 6.23.0 — extracted, because having it in one stage and a different, wrong
+ * version in another is precisely how the bug happened. 6.20.1 fixed the
+ * transport check to read `Settings.appDomain` the way `lib/url.ts` does, and
+ * left the mail stage reading NEXT_PUBLIC_APP_URL — an environment variable
+ * this app does not consult. So on a correctly configured production the mail
+ * stage concluded there was no domain and skipped, while the transport stage
+ * three sections earlier reported the domain by name.
+ *
+ * Environment first (an operator who sets it means it), then the setting.
+ */
+async function resolveAppUrl(): Promise<{ url: string; source: string }> {
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
+  if (fromEnv) return { url: fromEnv, source: 'environment' }
+  try {
+    const rows: Array<{ appDomain: string | null }> = await prismaPrivileged.$queryRawUnsafe(
+      `SELECT "appDomain" FROM "Settings" WHERE "appDomain" IS NOT NULL AND "appDomain" <> '' LIMIT 1`,
+    )
+    if (rows?.[0]?.appDomain) return { url: rows[0].appDomain, source: 'app settings' }
+  } catch {
+    // Settings unreadable — the honest answer is "we cannot tell", which the
+    // callers render as a warning or a skip rather than a pass.
+  }
+  return { url: '', source: 'nowhere' }
+}
+
 async function stageTransport(): Promise<Finding[]> {
   const s = 'transport'
   const out: Finding[] = []
@@ -226,25 +255,10 @@ async function stageTransport(): Promise<Finding[]> {
    * finding nobody could act on correctly: setting the variable would not have
    * changed anything, and the actual configuration was fine.
    */
-  let appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
-  let source = 'environment'
-  if (!appUrl) {
-    try {
-      const rows: Array<{ appDomain: string | null }> = await prismaPrivileged.$queryRawUnsafe(
-        `SELECT "appDomain" FROM "Settings" WHERE "appDomain" IS NOT NULL AND "appDomain" <> '' LIMIT 1`,
-      )
-      if (rows?.[0]?.appDomain) {
-        appUrl = rows[0].appDomain!
-        source = 'app settings'
-      }
-    } catch {
-      // Settings unreadable — fall through to the "not configured" branch,
-      // which is the honest answer when we cannot tell.
-    }
-  }
+  const { url: appUrl, source } = await resolveAppUrl()
 
   if (!appUrl) {
-    out.push(warn(s, 'https.url', 'Public URL is HTTPS',
+    out.push(warn(s, 'https.url', 'No public address configured',
       'No public address configured in settings or environment',
       'Set the app domain in Settings, or NEXT_PUBLIC_APP_URL, so links are absolute rather than derived from whichever host the request arrived on.', 'MEDIUM',
       'Share links are built from the address the browser happened to use. Usually right, but a proxy misconfiguration would send clients somewhere wrong.'))
@@ -252,7 +266,7 @@ async function stageTransport(): Promise<Finding[]> {
     out.push(
       appUrl.startsWith('https://')
         ? ok(s, 'https.url', 'Public URL is HTTPS', `${appUrl} (from ${source})`)
-        : fail(s, 'https.url', 'Public URL is HTTPS', appUrl,
+        : fail(s, 'https.url', 'Public URL is not HTTPS', appUrl,
             'Over plain HTTP the session cookie cannot be Secure and every token crosses the network in the clear.', 'CRITICAL',
             'Anyone on the same wifi as one of your users could read their session and sign in as them. This is the single worst thing on this list.'),
     )
@@ -271,7 +285,7 @@ async function stageTransport(): Promise<Finding[]> {
     out.push(
       allGood
         ? ok(s, 'cookie.flags', 'Refresh cookie is hardened', 'HttpOnly, SameSite=Strict, path-scoped to /api/auth')
-        : fail(s, 'cookie.flags', 'Refresh cookie is hardened',
+        : fail(s, 'cookie.flags', 'Refresh cookie is missing protections',
             `HttpOnly=${hasHttpOnly} SameSite=Strict=${hasStrict} scoped=${scoped}`,
             'The long-lived credential must not be readable by JavaScript or sent cross-site.', 'CRITICAL',
             'A single bad script on the page — ours or a library\u2019s — could steal a login that lasts a month.'),
@@ -323,7 +337,7 @@ async function stageSecrets(): Promise<Finding[]> {
   out.push(
     unique.size === present.length
       ? ok(s, 'secret.distinct', 'Signing secrets are distinct', `${present.length} secrets, all different`)
-      : fail(s, 'secret.distinct', 'Signing secrets are distinct', 'Two or more secrets share a value',
+      : fail(s, 'secret.distinct', 'Signing secrets are reused', 'Two or more secrets share a value',
           'A share token could then be presented as an admin token. Rotate them to independent values.', 'CRITICAL',
           'A client with a share link could turn it into full admin access. Sharing one key between two locks means one key opens both.'),
   )
@@ -337,7 +351,7 @@ async function stageSecrets(): Promise<Finding[]> {
       out.push(
         leaked.length === 0
           ? ok(s, 'secret.notcommitted', 'No live secret in .env.example', 'Placeholders only')
-          : fail(s, 'secret.notcommitted', 'No live secret in .env.example',
+          : fail(s, 'secret.notcommitted', 'A live secret is committed in .env.example',
               `${leaked.length} live secret(s) appear in a committed file`,
               'Rotate them immediately and replace with placeholders.', 'CRITICAL',
               'The key is in the public repository. Treat it as already known by strangers.'),
@@ -387,7 +401,7 @@ async function stageIsolation(): Promise<Finding[]> {
         : missing.length === 0
           ? ok(s, 'rls.enabled', 'Row-level security on tenant tables',
               `${rows.length} tenant tables, all with RLS enabled`)
-          : fail(s, 'rls.enabled', 'Row-level security on tenant tables',
+          : fail(s, 'rls.enabled', 'Tenant tables without row-level security',
               `${missing.length} of ${rows.length} without RLS: ${missing.slice(0, 5).map((r) => r.tablename).join(', ')}`,
               'One company could read another\'s rows. Enable RLS on these tables.', 'CRITICAL',
               'One customer could see another customer\u2019s videos and comments. For a multi-tenant product this is the finding that ends the conversation.'),
@@ -397,7 +411,7 @@ async function stageIsolation(): Promise<Finding[]> {
       out.push(
         unforced.length === 0
           ? ok(s, 'rls.forced', 'Row-level security is FORCED', 'No table exempts its owner')
-          : fail(s, 'rls.forced', 'Row-level security is FORCED',
+          : fail(s, 'rls.forced', 'Row-level security is not forced',
               `${unforced.length} table(s) enabled but not forced: ${unforced.slice(0, 5).map((r) => r.tablename).join(', ')}`,
               'Without FORCE, the owning role bypasses every policy — which is the role the app connects as.', 'CRITICAL',
               'The separation between customers looks configured but is not applied. It would pass a glance and fail a real test.'),
@@ -437,14 +451,14 @@ async function stageIsolation(): Promise<Finding[]> {
         `SELECT usesuper FROM pg_user WHERE usename = $1`, appRole,
       )
       if (su.length === 0) {
-        out.push(warn(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
+        out.push(warn(s, 'rls.notsuperuser', 'Could not confirm the database role',
           `Role "${appRole}" not found in pg_user`,
           'Check DATABASE_URL matches an existing role.', 'MEDIUM',
           'The check could not confirm which permissions the application runs with.'))
       } else {
         out.push(
           su[0].usesuper
-            ? fail(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
+            ? fail(s, 'rls.notsuperuser', 'Application connects as a superuser',
                 `The application connects as "${appRole}", which is a superuser`,
                 'A superuser bypasses every RLS policy. Point DATABASE_URL at a dedicated non-superuser role.', 'CRITICAL',
                 'Every wall between customers is ignored on this connection. A bug in one query could return another company\u2019s data.')
@@ -472,7 +486,7 @@ async function stageSessions(): Promise<Finding[]> {
   out.push(
     accessTtl <= 3600
       ? ok(s, 'session.accessttl', 'Access token is short-lived', `${Math.round(accessTtl / 60)} minutes`)
-      : warn(s, 'session.accessttl', 'Access token is short-lived', `${Math.round(accessTtl / 60)} minutes`,
+      : warn(s, 'session.accessttl', 'Access token lives longer than it should', `${Math.round(accessTtl / 60)} minutes`,
           'A stolen access token stays usable for this long — it cannot be revoked before it expires.', 'MEDIUM',
           'If a token leaks, signing the person out does not stop it. It keeps working until it expires on its own.'),
   )
@@ -483,7 +497,7 @@ async function stageSessions(): Promise<Finding[]> {
   out.push(
     absolute > 0 && absolute <= 90 * 24 * 3600
       ? ok(s, 'session.absolute', 'Sessions have an absolute cap', `${Math.round(absolute / 86400)} days`)
-      : fail(s, 'session.absolute', 'Sessions have an absolute cap',
+      : fail(s, 'session.absolute', 'Sessions have no absolute cap',
           absolute > 0 ? `${Math.round(absolute / 86400)} days` : 'Disabled',
           'Without a cap, a session kept alive by refreshes never ends.', 'HIGH',
           'A stolen session could stay valid forever as long as it keeps being used. There would be no point at which it simply dies.'),
@@ -494,7 +508,7 @@ async function stageSessions(): Promise<Finding[]> {
     out.push(
       /isReplayedRefreshToken/.test(source) && /revokeTokenFamily/.test(source)
         ? ok(s, 'session.replay', 'Refresh-token replay is detected', 'Rotation with reuse detection is active')
-        : fail(s, 'session.replay', 'Refresh-token replay is detected', 'Not found in the auth layer',
+        : fail(s, 'session.replay', 'Refresh-token replay goes undetected', 'Not found in the auth layer',
             'Without reuse detection, rotation is decorative: a stolen token rotates alongside the victim.', 'HIGH',
             'A thief with a copy of a session would keep renewing it in step with the real user, and nothing would notice.'),
     )
@@ -514,7 +528,7 @@ async function stageSessions(): Promise<Finding[]> {
     out.push(
       worst <= 720
         ? ok(s, 'session.idle', 'Idle timeout within the refresh window', `Longest configured: ${Math.round(worst)}h`)
-        : warn(s, 'session.idle', 'Idle timeout within the refresh window', `Longest configured: ${Math.round(worst)}h`,
+        : warn(s, 'session.idle', 'Idle timeout outstays the refresh window', `Longest configured: ${Math.round(worst)}h`,
             'An idle window longer than the refresh-token lifetime is a promise the auth layer cannot keep.', 'LOW',
             'People will be signed out earlier than the setting says. Confusing, not dangerous.'),
     )
@@ -547,7 +561,7 @@ async function stageAccounts(): Promise<Finding[]> {
     out.push(
       unhashed.length === 0
         ? ok(s, 'accounts.hashing', 'All passwords are properly hashed', `${users.length} accounts checked`)
-        : fail(s, 'accounts.hashing', 'All passwords are properly hashed',
+        : fail(s, 'accounts.hashing', 'Some passwords are not properly hashed',
             `${unhashed.length} account(s) without a recognised hash prefix`,
             'Force a password reset for these accounts immediately.', 'CRITICAL',
             'Passwords are stored in a form that can be read or reversed. Anyone who gets a copy of the database gets the passwords.'),
@@ -557,7 +571,7 @@ async function stageAccounts(): Promise<Finding[]> {
     out.push(
       owners.length <= 2
         ? ok(s, 'accounts.owners', 'Owner accounts are few', `${owners.length} owner(s)`)
-        : warn(s, 'accounts.owners', 'Owner accounts are few', `${owners.length} owners across the platform`,
+        : warn(s, 'accounts.owners', 'More owner accounts than necessary', `${owners.length} owners across the platform`,
             'Owner can delete a company. Grant the narrowest role that works.', 'MEDIUM',
             'Each owner can delete everything. The more people hold that, the more ways one bad day ends the business.'),
     )
@@ -580,7 +594,7 @@ async function stageAccounts(): Promise<Finding[]> {
     out.push(
       dormant === 0
         ? ok(s, 'accounts.dormant', 'No dormant accounts', 'Every account signed in within 90 days')
-        : warn(s, 'accounts.dormant', 'No dormant accounts',
+        : warn(s, 'accounts.dormant', 'Dormant accounts still enabled',
             `${dormant} account(s) with no successful sign-in in 90 days`,
             'Disable accounts that are no longer used; they are the ones nobody notices being taken over.', 'MEDIUM',
             'If somebody takes over an account nobody uses, nobody notices. Unused accounts are the quietest way in.'),
@@ -597,7 +611,7 @@ async function stageAccounts(): Promise<Finding[]> {
     out.push(
       stale === 0
         ? ok(s, 'accounts.invites', 'No expired invitations left open', 'None pending')
-        : warn(s, 'accounts.invites', 'No expired invitations left open', `${stale} expired invite(s) still stored`,
+        : warn(s, 'accounts.invites', 'Expired invitations left open', `${stale} expired invite(s) still stored`,
             'Revoke them. An invite link that leaks later is one fewer thing to worry about.', 'LOW',
             'Old invitation links sitting in inboxes. Low risk, but free to clean up.'),
     )
@@ -632,7 +646,7 @@ async function stageExposure(): Promise<Finding[]> {
         ? skip(s, 'exposure.password', 'Shared projects are password-protected', 'No projects yet')
         : unprotected === 0
           ? ok(s, 'exposure.password', 'Shared projects are password-protected', `${total} project(s), all protected`)
-          : warn(s, 'exposure.password', 'Shared projects are password-protected',
+          : warn(s, 'exposure.password', 'Shared projects without a password',
               `${unprotected} of ${total} share without a password`,
               'Anyone with the link can watch. Deliberate for some clients; worth confirming it is deliberate for all of them.', 'MEDIUM',
               'If a link is forwarded, or ends up somewhere public, the footage is watchable by anyone who has it.'),
@@ -643,7 +657,7 @@ async function stageExposure(): Promise<Finding[]> {
         ? skip(s, 'exposure.expiry', 'Share links expire', 'No projects yet')
         : never === 0
           ? ok(s, 'exposure.expiry', 'Share links expire', 'Every project has an expiry')
-          : warn(s, 'exposure.expiry', 'Share links expire', `${never} of ${total} never expire`,
+          : warn(s, 'exposure.expiry', 'Share links that never expire', `${never} of ${total} never expire`,
               'A link in an old email works forever. Set an expiry on finished projects.', 'MEDIUM',
               'A client who left two years ago can still open the project from an old email.'),
     )
@@ -668,7 +682,7 @@ async function stageExposure(): Promise<Finding[]> {
       out.push(
         maps === 0
           ? ok(s, 'exposure.sourcemaps', 'No source maps served in production', 'None found in .next/static')
-          : warn(s, 'exposure.sourcemaps', 'No source maps served in production', `${maps} .map file(s) present`,
+          : warn(s, 'exposure.sourcemaps', 'Source maps served in production', `${maps} .map file(s) present`,
               'Source maps let anyone read your original source. Disable productionBrowserSourceMaps.', 'MEDIUM',
               'Anyone visiting the site can read your original code, including comments about how things work.'),
       )
@@ -713,7 +727,7 @@ async function stageFiles(): Promise<Finding[]> {
       problems === 0
         ? ok(s, 'files.manifest', 'Application files unmodified since build',
             `${Object.keys(manifest).length} files verified`)
-        : fail(s, 'files.manifest', 'Application files unmodified since build',
+        : fail(s, 'files.manifest', 'Application files changed since build',
             `${changed.length} modified, ${missing.length} missing (e.g. ${[...changed, ...missing].slice(0, 3).join(', ')})`,
             'Files inside a container should never change at runtime. Redeploy and investigate how they were written.', 'CRITICAL',
             'The running code is not the code you shipped. Either something is broken, or someone has access to the server.'),
@@ -742,7 +756,7 @@ async function stageContent(): Promise<Finding[]> {
     out.push(
       sanitises
         ? ok(s, 'content.sanitised', 'Comment HTML is sanitised before render', 'sanitizeContent() in use')
-        : fail(s, 'content.sanitised', 'Comment HTML is sanitised before render',
+        : fail(s, 'content.sanitised', 'Comment HTML is not sanitised before render',
             'Raw HTML reaches dangerouslySetInnerHTML',
             'A client comment could then run script in a reviewer\'s session.', 'CRITICAL',
             'A client could leave a comment that runs code in your browser when you read it, and act as you.'),
@@ -762,7 +776,7 @@ async function stageContent(): Promise<Finding[]> {
     out.push(
       rows.length === 0
         ? ok(s, 'content.extensions', 'No executable attachments stored', 'No scripts or binaries among attachments')
-        : warn(s, 'content.extensions', 'No executable attachments stored',
+        : warn(s, 'content.extensions', 'Executable attachments stored',
             `${rows.length} attachment(s) with an executable extension: ${rows.slice(0, 3).map((r) => r.filename).join(', ')}`,
             'They are served as downloads, not executed — but review why they were uploaded at all.', 'MEDIUM',
             'Someone attached a program to a comment. It cannot run on the server, but ask why it is there.'),
@@ -803,14 +817,14 @@ async function stageDependencies(): Promise<Finding[]> {
 
     out.push(
       critical > 0
-        ? fail(s, 'deps.critical', 'No critical dependency vulnerabilities', summary,
+        ? fail(s, 'deps.critical', 'Critical dependency vulnerabilities', summary,
             'Run `npm audit fix` and rebuild.', 'CRITICAL',
             'A third-party library you depend on has a publicly known hole. Public means attackers have the instructions too.')
         : ok(s, 'deps.critical', 'No critical dependency vulnerabilities', summary),
     )
     out.push(
       high > 0
-        ? warn(s, 'deps.high', 'No high-severity dependency vulnerabilities', summary,
+        ? warn(s, 'deps.high', 'High-severity dependency vulnerabilities', summary,
             'Run `npm audit fix` and rebuild. Pay attention to anything that processes user input.', 'HIGH',
             'Known weaknesses in libraries you use. Not proof of a break-in, but a published map of where to try.')
         : ok(s, 'deps.high', 'No high-severity dependency vulnerabilities', summary),
@@ -829,12 +843,18 @@ async function stageReputation(): Promise<Finding[]> {
   const s = 'reputation'
   const out: Finding[] = []
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
+  const { url: appUrl } = await resolveAppUrl()
   let domain = ''
   try { domain = appUrl ? new URL(appUrl).hostname : '' } catch { /* ignore */ }
 
   if (!domain) {
+    // 6.23.0: BOTH checks report, and the reason is stated. The old early
+    // return pushed a single SPF skip and left `mail.dmarc` out of the report
+    // entirely — not passed, not failed, not listed as unverifiable. A check
+    // that silently disappears is worse than one that says it could not run,
+    // because nobody can notice the absence.
     out.push(skip(s, 'mail.spf', 'Sender policy published', 'No app domain configured'))
+    out.push(skip(s, 'mail.dmarc', 'DMARC policy published', 'No app domain configured'))
     return out
   }
 
@@ -848,7 +868,7 @@ async function stageReputation(): Promise<Finding[]> {
     out.push(
       /v=spf1/i.test(flat)
         ? ok(s, 'mail.spf', 'Sender policy published', 'SPF record present')
-        : warn(s, 'mail.spf', 'Sender policy published', 'No SPF record on ' + domain,
+        : warn(s, 'mail.spf', 'No sender policy (SPF) published', 'No SPF record on ' + domain,
             'Without SPF, invitations and password resets are likely to be filtered as spam.', 'MEDIUM',
             'Invitations and password resets will land in spam. A security email nobody reads is a security control that failed quietly.'),
     )
@@ -862,12 +882,12 @@ async function stageReputation(): Promise<Finding[]> {
     out.push(
       /v=DMARC1/i.test(flat)
         ? ok(s, 'mail.dmarc', 'DMARC policy published', 'DMARC record present')
-        : warn(s, 'mail.dmarc', 'DMARC policy published', 'No DMARC record',
+        : warn(s, 'mail.dmarc', 'No DMARC policy published', 'No DMARC record',
             'DMARC stops someone sending mail that claims to be from your domain.', 'MEDIUM',
             'Anyone can send email that looks like it came from you — to your clients, asking for things.'),
     )
   } catch {
-    out.push(warn(s, 'mail.dmarc', 'DMARC policy published', `No _dmarc TXT record on ${domain}`,
+    out.push(warn(s, 'mail.dmarc', 'No DMARC policy published', `No _dmarc TXT record on ${domain}`,
       'DMARC stops someone sending mail that claims to be from your domain.', 'MEDIUM',
       'Anyone can send email that looks like it came from you — to your clients, asking for things.'))
   }
@@ -885,7 +905,7 @@ async function stagePrivacy(): Promise<Finding[]> {
   out.push(
     ACCESS_RETENTION_DAYS > 0 && ACCESS_RETENTION_DAYS <= 365
       ? ok(s, 'privacy.retention', 'Access logs have a retention limit', `${ACCESS_RETENTION_DAYS} days`)
-      : fail(s, 'privacy.retention', 'Access logs have a retention limit',
+      : fail(s, 'privacy.retention', 'Access logs have no retention limit',
           ACCESS_RETENTION_DAYS > 365 ? `${ACCESS_RETENTION_DAYS} days` : 'Disabled',
           'IP addresses are personal data under GDPR. Keeping them indefinitely needs a legal basis you probably do not have.', 'HIGH',
           'A legal exposure rather than a technical one — but a real one, and the kind an investor\u2019s lawyer asks about.'),
@@ -895,7 +915,7 @@ async function stagePrivacy(): Promise<Finding[]> {
   out.push(
     geo.available
       ? ok(s, 'privacy.geoip', 'Geolocation resolved locally', `Database in ${geo.directory}`)
-      : warn(s, 'privacy.geoip', 'Geolocation resolved locally', 'No local database installed',
+      : warn(s, 'privacy.geoip', 'No local geolocation database', 'No local database installed',
           'Country flags will be missing unless traffic passes through Cloudflare. Install GeoLite2 — never call a third-party API, which would export visitor IPs.', 'LOW',
           'Cosmetic. You still see every address; you just cannot see which country it came from at a glance.'),
   )
@@ -908,7 +928,7 @@ async function stagePrivacy(): Promise<Finding[]> {
     out.push(
       overdue === 0
         ? ok(s, 'privacy.purged', 'No records past their retention window', 'Purge is keeping up')
-        : fail(s, 'privacy.purged', 'No records past their retention window',
+        : fail(s, 'privacy.purged', 'Records kept past their retention window',
             `${overdue} record(s) older than ${ACCESS_RETENTION_DAYS} days`,
             'The purge job is not running. Personal data is being kept longer than the stated policy.', 'HIGH',
             'You are keeping personal data longer than your own privacy policy promises. That gap is the problem, not the data.'),

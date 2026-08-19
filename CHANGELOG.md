@@ -14,6 +14,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.23.0] - 2026-08-19
+
+### Fixed
+
+- **The security report was quietly claiming the opposite of what it found.**
+  Every check carried one title, phrased as the desired state, and reused it
+  whether it passed or not — so a failing check announced itself in the language
+  of a passing one. The second production report opens with "No high-severity
+  dependency vulnerabilities" above the line "Observed: 10 high", and continues
+  with "Shared projects are password-protected · 8 of 8 share without a
+  password" and "No expired invitations left open · 1 expired invite". Anyone
+  skimming — which is what happens to a document sent to an investor or a
+  client's IT department — reads the headline and takes away the reverse of the
+  finding. Thirty-seven warn and fail titles now state what was observed;
+  passing checks keep the positive phrasing, and `checkId` is untouched, so
+  history and the weekly diff still line up.
+- **The PDF ended with as many blank pages as it had real ones.** The footer is
+  written below the bottom margin, and pdfkit reads any write past that margin
+  as an overflow and starts a new page — so a two-page report shipped as four,
+  the last two carrying nothing but a footer line each. `bufferPages` in 6.20.1
+  fixed the related bug where every footer read "page 1 of 1" and I called the
+  problem solved; the smoke test I wrote then counted content streams rather
+  than pages, so it passed on a document that was visibly wrong. Verified in
+  both directions this time: with the bug reintroduced the new check reports
+  "1 of 2 pages have a footer" and the page count doubles.
+- **The mail stage read a variable the application does not use, and lost a
+  check doing it.** SPF and DMARC resolved the domain from
+  `NEXT_PUBLIC_APP_URL`, while the app — and, since 6.20.1, the transport check
+  three sections earlier — resolves it from `Settings.appDomain`. On a correctly
+  configured production the mail stage therefore concluded there was no domain
+  and skipped, in the same report where the transport check named the domain out
+  loud. Worse, that branch returned early after pushing a single SPF skip, so
+  `mail.dmarc` appeared nowhere at all: not passed, not failed, not listed as
+  unverifiable. A check that silently disappears is worse than one that admits
+  it could not run, because its absence is invisible. Both now resolve through
+  one shared helper — the duplication is what caused this, since 6.20.1 fixed
+  one copy and left the other.
+
+### Added
+
+- `npm run verify:report` — a regression test for the report PDF that asserts
+  the property which actually broke: every page carries a footer. It runs
+  against the real builder rather than a replica, because a test that
+  reimplements its subject can only confirm the reimplementation agrees with
+  itself.
+
 ## [6.22.0] - 2026-08-19
 
 ### Added

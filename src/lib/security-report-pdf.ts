@@ -247,17 +247,35 @@ export function buildSecurityReportPdf(scan: ReportScan): Promise<Buffer> {
         doc.moveDown(0.6)
       }
 
-      // ── Footer on every page ────────────────────────────────────────────
+      /*
+       * ── Footer on every page ──────────────────────────────────────────
+       *
+       * `margins.bottom = 0` around the write is what stops this loop from
+       * ADDING pages. The footer sits deliberately below the bottom margin, and
+       * pdfkit reads any write past that margin as an overflow and starts a new
+       * page — so a two-page report came out with two extra pages carrying
+       * nothing but a footer line each. `bufferPages` (6.20.1) fixed the
+       * related bug where every footer read "page 1 of 1"; it did not fix this
+       * one, and the smoke test at the time counted content streams rather than
+       * pages, so it passed while the document was visibly wrong.
+       *
+       * The margin is restored per page: `switchToPage` hands back a real page
+       * object, and leaving it at zero would change how anything written
+       * afterwards flows.
+       */
       const range = doc.bufferedPageRange()
       for (let i = range.start; i < range.start + range.count; i += 1) {
         doc.switchToPage(i)
-        const y = doc.page.height - doc.page.margins.bottom + 12
+        const savedBottom = doc.page.margins.bottom
+        doc.page.margins.bottom = 0
+        const y = doc.page.height - savedBottom + 12
         doc.fontSize(7.5).fillColor(FAINT).text(
           `FrameComment security report · ${scan.environment || 'unknown environment'} · ` +
           `${finished.toLocaleString()} · page ${i - range.start + 1} of ${range.count}`,
           doc.page.margins.left, y,
           { width: width(), align: 'center', lineBreak: false },
         )
+        doc.page.margins.bottom = savedBottom
       }
 
       // Required with bufferPages: nothing is written until the buffered
