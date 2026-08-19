@@ -216,16 +216,42 @@ async function stageServer(): Promise<Finding[]> {
 async function stageTransport(): Promise<Finding[]> {
   const s = 'transport'
   const out: Finding[] = []
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
+  /*
+   * 6.20.1 — ask the same question the app asks.
+   *
+   * The previous version only read NEXT_PUBLIC_APP_URL and warned when it was
+   * unset. But `lib/url.ts` resolves the public address from the `appDomain`
+   * setting in the database FIRST, and falls back to the request headers.
+   * Warning about an environment variable the app does not consult produced a
+   * finding nobody could act on correctly: setting the variable would not have
+   * changed anything, and the actual configuration was fine.
+   */
+  let appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
+  let source = 'environment'
+  if (!appUrl) {
+    try {
+      const rows: Array<{ appDomain: string | null }> = await prismaPrivileged.$queryRawUnsafe(
+        `SELECT "appDomain" FROM "Settings" WHERE "appDomain" IS NOT NULL AND "appDomain" <> '' LIMIT 1`,
+      )
+      if (rows?.[0]?.appDomain) {
+        appUrl = rows[0].appDomain!
+        source = 'app settings'
+      }
+    } catch {
+      // Settings unreadable — fall through to the "not configured" branch,
+      // which is the honest answer when we cannot tell.
+    }
+  }
 
   if (!appUrl) {
-    out.push(warn(s, 'https.url', 'Public URL is HTTPS', 'No APP_URL configured',
-      'Set NEXT_PUBLIC_APP_URL so share links and cookies are generated for the right origin.', 'MEDIUM',
-      'Share links you send to clients may point at the wrong address, and the sign-in cookie may not stick.'))
+    out.push(warn(s, 'https.url', 'Public URL is HTTPS',
+      'No public address configured in settings or environment',
+      'Set the app domain in Settings, or NEXT_PUBLIC_APP_URL, so links are absolute rather than derived from whichever host the request arrived on.', 'MEDIUM',
+      'Share links are built from the address the browser happened to use. Usually right, but a proxy misconfiguration would send clients somewhere wrong.'))
   } else {
     out.push(
       appUrl.startsWith('https://')
-        ? ok(s, 'https.url', 'Public URL is HTTPS', appUrl)
+        ? ok(s, 'https.url', 'Public URL is HTTPS', `${appUrl} (from ${source})`)
         : fail(s, 'https.url', 'Public URL is HTTPS', appUrl,
             'Over plain HTTP the session cookie cannot be Secure and every token crosses the network in the clear.', 'CRITICAL',
             'Anyone on the same wifi as one of your users could read their session and sign in as them. This is the single worst thing on this list.'),
@@ -378,21 +404,55 @@ async function stageIsolation(): Promise<Finding[]> {
       )
     }
 
-    // Connecting as a superuser bypasses RLS entirely, whatever the policies say.
-    const su: Array<{ usesuper: boolean; current_user: string }> =
-      await prismaPrivileged.$queryRawUnsafe(
-        `SELECT usesuper, current_user FROM pg_user WHERE usename = current_user`,
+    /*
+     * Does the APPLICATION connect as a superuser? A superuser bypasses every
+     * RLS policy, whatever the policies say.
+     *
+     * 6.20.1 — this used to ask `SELECT current_user` through
+     * `prismaPrivileged`, which is the wrong client to ask. That client exists
+     * precisely to hold the admin role: it runs migrations and the cross-org
+     * reads this scan itself depends on. Asking it whether it is privileged
+     * always answers yes, so the check reported CRITICAL on a correctly
+     * configured production system — the single most alarming line in the
+     * report, and it was measuring the wrong thing.
+     *
+     * The role that matters is the one in DATABASE_URL, which is what every
+     * customer-facing query uses. We read the name from there and ask Postgres
+     * about that role by name, so the answer does not depend on which
+     * connection asks the question.
+     */
+    let appRole = ''
+    try {
+      const url = process.env.DATABASE_URL || ''
+      appRole = url ? decodeURIComponent(new URL(url).username || '') : ''
+    } catch {
+      appRole = ''
+    }
+
+    if (!appRole) {
+      out.push(skip(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
+        'Could not read the role name from DATABASE_URL'))
+    } else {
+      const su: Array<{ usesuper: boolean }> = await prismaPrivileged.$queryRawUnsafe(
+        `SELECT usesuper FROM pg_user WHERE usename = $1`, appRole,
       )
-    const isSuper = !!su?.[0]?.usesuper
-    out.push(
-      isSuper
-        ? fail(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
-            `Connected as "${su[0].current_user}", which is a superuser`,
-            'A superuser bypasses every RLS policy. Connect as a dedicated non-superuser role.', 'CRITICAL',
-            'Every wall between customers is ignored on this connection. A bug in one query could return another company\u2019s data.')
-        : ok(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
-            `Connected as "${su?.[0]?.current_user ?? 'unknown'}"`),
-    )
+      if (su.length === 0) {
+        out.push(warn(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
+          `Role "${appRole}" not found in pg_user`,
+          'Check DATABASE_URL matches an existing role.', 'MEDIUM',
+          'The check could not confirm which permissions the application runs with.'))
+      } else {
+        out.push(
+          su[0].usesuper
+            ? fail(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
+                `The application connects as "${appRole}", which is a superuser`,
+                'A superuser bypasses every RLS policy. Point DATABASE_URL at a dedicated non-superuser role.', 'CRITICAL',
+                'Every wall between customers is ignored on this connection. A bug in one query could return another company\u2019s data.')
+            : ok(s, 'rls.notsuperuser', 'Application connects as a non-superuser',
+                `The application connects as "${appRole}" (not a superuser)`),
+        )
+      }
+    }
   } catch (error) {
     out.push(skip(s, 'rls.enabled', 'Row-level security on tenant tables',
       `Could not inspect: ${String(error).slice(0, 120)}`))

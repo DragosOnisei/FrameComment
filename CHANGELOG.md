@@ -14,6 +14,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.20.1] - 2026-08-19
+
+### Primul raport de producţie a găsit trei bug-uri — în scan, nu în server
+
+Ambele CRITICAL din raport erau greşelile mele. Le scriu aici pentru că un scan
+de securitate care dă alarme false e mai rău decât unul care omite verificarea:
+te învaţă să ignori exact ecranul pe care l-ai construit ca să fii atent.
+
+**„Application connects as a non-superuser" — fals.** Check-ul întreba
+`SELECT current_user` prin `prismaPrivileged`, care e clientul greşit. Acela
+există tocmai ca să deţină rolul de admin: rulează migrările şi citirile
+cross-org de care depinde scanul însuşi. Întrebat dacă e privilegiat, răspunde
+mereu „da" — deci verificarea raporta CRITICAL pe un sistem configurat corect.
+Acum citeşte numele rolului din `DATABASE_URL` (cel folosit de fiecare
+interogare a clienţilor) şi întreabă Postgres despre acel rol pe nume, deci
+răspunsul nu mai depinde de cine pune întrebarea.
+
+**„Application files unmodified since build" — tot fals.** Manifestul se
+genera peste `scripts/`, pe care stage-ul builder îl are şi runner-ul nu — deci
+12 fişiere „lipsă" şi un CRITICAL care spunea că nu rulezi codul pe care l-ai
+livrat. Manifestul acoperă acum exact ce copiază runner-ul.
+
+**Ultima pagină goală, şi „page 1 of 1" în subsol.** `bufferedPageRange` are
+nevoie de `bufferPages: true`; fără el pdfkit trimite fiecare pagină pe măsură
+ce o termină, raportează una singură, iar `switchToPage` adaugă o pagină nouă
+în loc să se întoarcă la una veche.
+
+**Al patrulea, mai blând:** avertismentul „Public URL is HTTPS" citea doar
+`NEXT_PUBLIC_APP_URL`, dar aplicaţia îşi rezolvă adresa din setarea `appDomain`
+din baza de date, iar apoi din antetele cererii. Un avertisment despre o
+variabilă pe care aplicaţia n-o consultă nu se putea rezolva: setarea ei n-ar
+fi schimbat nimic. Acum întreabă acelaşi lanţ pe care îl foloseşte aplicaţia.
+
+Scorul de 44 din primul raport era, în bună parte, artefactul celor două
+critice inventate.
+
+
 ## [6.20.0] - 2026-08-19
 
 ### Raport PDF, descărcabil după scan

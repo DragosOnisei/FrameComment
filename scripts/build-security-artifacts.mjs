@@ -31,10 +31,19 @@ import { execSync } from 'child_process'
 
 const root = process.cwd()
 
-// What to hash. Deliberately not node_modules: 800MB of dependencies would
-// take minutes to hash on every scan, and a modified dependency shows up in
-// the audit report instead. These are the files that carry our own logic.
-const ROOTS = ['src', 'prisma', 'scripts', 'public']
+// What to hash.
+//
+// Must be exactly what the RUNNER stage of the Dockerfile copies, no more.
+// The first version also hashed `scripts/`, which the builder has and the
+// runner does not — so every production scan reported a dozen files as
+// "missing" and raised a CRITICAL saying the running code was not the code we
+// shipped. It was the manifest that was wrong, not the container, and a
+// security report that cries wolf on its own bookkeeping is worse than one
+// that omits the check.
+//
+// Deliberately not node_modules either: 800MB would take minutes to hash on
+// every scan, and a modified dependency shows up in the audit report instead.
+const ROOTS = ['src', 'prisma', 'public']
 const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'uploads', 'uploads-dev'])
 
 function walk(dir, out = []) {

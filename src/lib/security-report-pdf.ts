@@ -81,7 +81,14 @@ const STAGE_LABELS: Record<string, string> = {
 export function buildSecurityReportPdf(scan: ReportScan): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 56, size: 'A4' })
+      /*
+       * `bufferPages` is what makes the footer loop below work. Without it,
+       * pdfkit flushes each page as it is finished, `bufferedPageRange()`
+       * reports a single page, and `switchToPage` appends a NEW page instead
+       * of returning to an old one — which is why the first production report
+       * ended with a blank page and every footer read "page 1 of 1".
+       */
+      const doc = new PDFDocument({ margin: 56, size: 'A4', bufferPages: true })
       const chunks: Buffer[] = []
       doc.on('data', (c: Buffer) => chunks.push(c))
       doc.on('end', () => resolve(Buffer.concat(chunks)))
@@ -253,6 +260,9 @@ export function buildSecurityReportPdf(scan: ReportScan): Promise<Buffer> {
         )
       }
 
+      // Required with bufferPages: nothing is written until the buffered
+      // pages are flushed, and this must happen after the footer pass.
+      doc.flushPages()
       doc.end()
     } catch (error) {
       reject(error)
