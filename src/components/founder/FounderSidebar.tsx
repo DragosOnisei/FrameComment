@@ -21,6 +21,7 @@ import {
   ChevronUp,
   LogOut,
   Settings as SettingsIcon,
+  ShieldAlert,
   ShieldCheck,
   User,
   Users2,
@@ -33,6 +34,7 @@ export const FOUNDER_NAV = [
   { href: '/founder/crm', label: 'CRM', icon: Users2 },
   { href: '/founder/agents', label: 'AI Agents', icon: Bot },
   { href: '/founder/investors', label: 'Investors', icon: ShieldCheck },
+  { href: '/founder/security', label: 'Security', icon: ShieldAlert },
 ] as const
 
 export default function FounderSidebar() {

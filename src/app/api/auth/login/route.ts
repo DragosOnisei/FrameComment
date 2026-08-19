@@ -12,6 +12,8 @@ import { prisma } from '@/lib/db'
 import { prismaPrivileged } from '@/lib/db'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import crypto from 'crypto'
+import { hashDeviceSignature } from '@/lib/device-signature'
+import { recordAccessAttempt } from '@/lib/access-log'
 export const runtime = 'nodejs'
 
 
@@ -101,6 +103,17 @@ export async function POST(request: NextRequest) {
       const { lockedOut } = await incrementRateLimit(request, 'login', email)
 
       const ipAddress = getClientIpAddress(request)
+      // 6.18.0: the founder's Security page reads from AccessAttempt, not from
+      // SecurityEvent — a failed login belongs to no organization, so an
+      // org-scoped table cannot hold it. Not awaited: recording an attack must
+      // never slow down or break the thing being attacked.
+      void recordAccessAttempt({
+        request,
+        kind: lockedOut ? 'LOGIN_LOCKED' : 'LOGIN_FAILED',
+        identifier: email,
+        succeeded: false,
+        details: { lockedOut },
+      })
       await logSecurityEvent({
         type: 'ADMIN_PASSWORD_LOGIN_FAILED',
         severity: 'WARNING',
@@ -211,10 +224,21 @@ export async function POST(request: NextRequest) {
     // User successfully authenticated, reset failed attempt counter
     await clearRateLimit(request, 'login', email)
 
-    const fingerprint = fingerprintHash(request.headers.get('user-agent') || 'unknown')
+    const fingerprint = hashDeviceSignature(request.headers.get('user-agent'))
     const tokens = await issueAdminTokens(user, fingerprint)
 
     const ipAddress = getClientIpAddress(request)
+    // Successes matter as much as failures here: "a login from a country you
+    // have never worked from" is only visible if the successes are recorded
+    // too, and an investor asking "how would you know if you were breached?"
+    // deserves a better answer than "we log the failures".
+    void recordAccessAttempt({
+      request,
+      kind: 'LOGIN_SUCCESS',
+      identifier: user.email,
+      succeeded: true,
+      details: { userId: user.id },
+    })
     await logSecurityEvent({
       type: 'ADMIN_PASSWORD_LOGIN_SUCCESS',
       severity: 'INFO',
@@ -272,6 +296,3 @@ export async function POST(request: NextRequest) {
 /**
  * Store token fingerprint in Redis for theft detection
  */
-function fingerprintHash(userAgent: string): string {
-  return crypto.createHash('sha256').update(userAgent).digest('base64url')
-}

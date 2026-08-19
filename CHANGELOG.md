@@ -14,6 +14,238 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.19.0] - 2026-08-19
+
+### Fiecare avertisment spune şi ce înseamnă, pe înţelesul omului
+
+Un finding avea două rânduri: valoarea observată şi comanda de rulat. Amândouă
+presupun că deja ştii de ce există check-ul. Lipsea propoziţia din mijloc — ce
+se poate întâmpla rău, fără jargon — iar fără ea lista e un set de ordine de
+executat, nu o situaţie de înţeles. Exact persoana care trebuie să decidă ce
+repară prima e cea pe lângă care erau scrise.
+
+Acum fiecare avertisment şi eşec are o linie în limbaj obişnuit, aşezată
+*înaintea* soluţiei, pentru că a decide dacă îţi pasă vine înaintea deciziei ce
+faci. „Application connects as a non-superuser" a devenit „fiecare zid dintre
+clienţi e ignorat pe conexiunea asta; un bug într-o interogare ar putea
+întoarce datele altei companii". Şi la fel pentru toate celelalte 37.
+
+### Fără bare de scroll orizontale
+
+Banda de etape era o şină `min-w-max` într-un `overflow-x-auto` — adică o bară
+orizontală prin construcţie. E un răspuns mai prost decât un al doilea rând,
+pentru că etapele de dincolo de margine devin invizibile, nu doar mai jos. Acum
+e o grilă care curge, iar liniile de legătură au dispărut cu ea: aveau sens
+doar pe un singur rând.
+
+Tabelele renunţă la coloane pe măsură ce ecranul se îngustează, în loc să
+crească o bară. Adresa şi numărătoarea rămân până la cea mai mică lăţime — ele
+sunt motivul pentru care există rândul; ţara şi clientul sunt context, iar
+contextul e primul lucru la care renunţi.
+
+Barele verticale folosesc acum `custom-scrollbar`, stilul aplicaţiei, nu griul
+implicit al browserului.
+
+### Scan automat săptămânal, cu notificare doar când merită
+
+Un scan pe care trebuie să-ţi aminteşti să-l apeşi e un scan apăsat o singură
+dată, în săptămâna în care l-ai construit. Problemele care contează apar *mai
+târziu*: o vulnerabilitate publicată luna viitoare, un link făcut public în
+martie, un certificat expirat. Niciuna nu se anunţă singură.
+
+Rulează în worker, nu în containerul web — acela poate avea mai multe replici,
+şi un timer acolo ar porni câte un scan de fiecare. Ceasul bate din oră în oră,
+dar întrebarea „a trecut o săptămână?" se pune bazei de date, deci un container
+care reporneşte de două ori pe zi nici nu sare săptămâna, nici nu scanează la
+fiecare boot.
+
+Notificarea pleacă doar pentru ce e **nou** faţă de scanul precedent. Un mail
+săptămânal care spune „tot 3 avertismente" te învaţă să-l ştergi necitit, şi
+apoi îl ştergi şi pe cel din săptămâna în care scria altceva. Prima dată când
+un check se strică e o alertă; a cincea oară e un task, iar task-urile stau în
+pagină, nu în inbox.
+
+Corpul mesajului începe cu linia în limbaj obişnuit, nu cu detaliul tehnic.
+Cine îl citeşte duminică pe telefon trebuie să ştie dacă se ridică de pe
+canapea, iar „relforcerowsecurity is false" nu răspunde la asta.
+
+
+## [6.18.1] - 2026-08-19
+
+### Scanul spune cât a durat, ce n-a putut verifica şi pe ce sistem
+
+„A apucat să verifice ceva? Parcă prea repede." E prima întrebare pe care şi-o
+pune oricine în faţa unui scan care se termină într-o secundă, iar numărătorile
+de passed/warnings/failures nu răspund la ea: o rulare cu 34 de check-uri şi
+zero sărituri arată identic cu una în care jumătate din etape au renunţat în
+tăcere.
+
+Acum antetul spune „34 checks in 0.8s", iar dacă ceva n-a putut rula spune şi
+câte — separat de treceri, pentru că un check care n-a rulat nu e o dovadă de
+nimic. Linia din log a fiecărei etape numeşte la fel săriturile: înainte, o
+etapă care n-a putut rula şi una care a rulat curat scriau amândouă „all
+clear", ceea ce e cel mai înşelător lucru pe care îl poate spune un raport de
+securitate.
+
+Şi scrie pe ce instalare a rulat — mod plus hostul bazei de date. Un scan al
+unui laptop nu e o dovadă despre producţie, iar un raport care nu spune la care
+s-a uitat invită exact confuzia asta, inclusiv la cine l-a rulat.
+
+## [6.18.0] - 2026-08-19
+
+### Security — un tab nou în zona de fondator
+
+Două întrebări care se pun în orice discuție de due diligence, cu date live în
+loc de o afirmație: **cine încearcă să intre** și **suntem configurați ca să
+rezistăm**.
+
+#### Cine încearcă să intre
+
+Fiecare încercare de autentificare, cu adresă, origine cu steag, ce nume a fost
+încercat și dacă a mers. Top IP-uri, top țări, top nume de utilizator — plus un
+buton de Block direct pe rând: un tablou care îți arată o adresă care îți bate
+la login și te trimite în altă parte ca să faci ceva e un raport, nu un
+control.
+
+Tabelul nu e org-scoped, spre deosebire de tot restul schemei, și asta e
+intenționat. Un login eșuat n-are organizație — credențialele n-au rezolvat la
+niciun user, ceea ce e fix cazul care contează. Sub row-level security acele
+rânduri ar aparține nimănui și ar fi invizibile pentru toată lumea, adică
+echivalentul cu a nu le scrie.
+
+Se înregistrează și succesele, nu doar eșecurile. „O autentificare dintr-o țară
+din care n-ai lucrat niciodată" e vizibilă doar dacă succesele sunt acolo, iar
+la întrebarea „cum ai ști dacă ai fost spart?" răspunsul „logăm eșecurile" nu e
+suficient.
+
+Ce **nu** se stochează, deliberat: parole sub nicio formă — nici hash-uite,
+nici trunchiate, nici la eșec. O breșă a acestui tabel nu trebuie să fie o
+breșă a credențialelor nimănui. Și nici User-Agent-ul brut, ci doar semnătura
+grosieră `browser:os`.
+
+#### Geolocalizarea nu pleacă nicăieri
+
+Bază MaxMind locală, citită de pe disc. Alternativa evidentă — un apel la
+ip-api sau ipinfo — ar trimite IP-ul fiecărui vizitator unui terț la fiecare
+căutare. Sub GDPR asta e un transfer de date personale către un împuternicit pe
+care trebuie să-l numești în politica de confidențialitate și cu care semnezi
+un DPA, pentru privilegiul de a desena un steag. Ar strica și instalările
+air-gapped, și ar da rate-limit exact la vârful de trafic pe care vrei cel mai
+mult să-l măsori.
+
+Fără bază locală, țara vine din antetul Cloudflare când există. Fără niciuna,
+rândul se stochează fără țară și interfața arată adresa fără steag. Pagina se
+degradează, nu cade.
+
+Retenție 90 de zile, aplicată de worker la pornire și la fiecare șase ore.
+Adresele IP sunt date personale; o politică de retenție pe care n-o aplică
+nimic e mai rea decât lipsa ei, pentru că e o afirmație pe care o faci
+clienților în timp ce ții datele la nesfârșit. Scanul are un check exact pentru
+asta, care pică dacă purge-ul nu-și face treaba.
+
+#### Scanul
+
+Douăsprezece etape, cu bandă de progres și log live, ca la Wordfence.
+
+Etapele **nu** sunt însă copiate. Jumătate dintre cele din Wordfence sunt
+probleme de WordPress — „Spamvertising", scanat PHP după `eval()` injectat —
+care nu pot apărea într-o aplicație Next.js compilată, rulată dintr-o imagine
+de container imutabilă. Să livrez numele acelea cu nimic în spate ar fi
+teatru, iar primul consultant tehnic pe care îl aduce un investitor ar găsi
+check-urile goale într-un minut — ceea ce strică încrederea mai rău decât dacă
+pagina n-ar exista.
+
+Deci fiecare etapă citește stare reală: o setare din bază, o variabilă de
+mediu, un fișier de pe disc, un număr de rânduri. Niciun check nu returnează o
+constantă. Un check care nu poate rula spune SKIPPED și spune de ce, în loc să
+treacă.
+
+Ce verifică: starea serverului, transportul, tăria secretelor (entropie
+Shannon, nu doar lungime), **izolarea între companii** (RLS activat *și* forțat
+pe fiecare tabel cu `organizationId`, plus dacă aplicația se conectează ca
+superuser — care ocolește orice politică), igiena sesiunilor, conturile,
+expunerea datelor, integritatea fișierelor, siguranța conținutului,
+dependențele, reputația de mail și postura de confidențialitate.
+
+Izolarea între companii e cea pe care i-aș arăta-o primul unui investitor. Un
+tabel cu RLS activat dar neforțat arată configurat și nu face nimic: rolul
+proprietar e exceptat, iar acela e rolul cu care se conectează aplicația.
+
+Scorul e ponderat, ca o singură problemă critică să nu se ascundă sub douăzeci
+de check-uri trecute — modul de eșec al oricărei insigne „97% secure".
+Check-urile sărite sunt excluse din calcul, nu numărate ca treceri.
+
+Două etape au nevoie de artefacte generate la build (`.integrity-manifest.json`
+și `.audit-report.json`, scrise de `scripts/build-security-artifacts.mjs`).
+Fără ele raportează SKIPPED cu motivul. Un check care n-a putut rula nu
+trebuie să arate niciodată ca unul care a trecut — distincția asta e diferența
+dintre un scan și o insignă.
+
+Documentație completă în `docs/SECURITY-CENTRE.md`.
+
+
+## [6.17.1] - 2026-08-19
+
+### Un update de browser te dădea afară din cont
+
+„Iar am primit asta când am deschis calculatorul." Nu era inactivitate — era
+Chrome care se actualizase peste noapte.
+
+Legarea sesiunii de dispozitiv, introdusă în 6.13.0, stoca `sha256` peste
+User-Agent-ul **brut**. Şirul acela conţine versiunea browserului, iar
+browserele se actualizează singure: build-ul nou intră în vigoare la
+relansare, adică exact când închizi laptopul seara şi îl deschizi dimineaţa.
+Semnătura se schimba fără ca tu să fi făcut nimic, refresh-ul citea asta ca
+„token folosit de pe alt dispozitiv", iar răspunsul la furt e maxim prin
+construcţie: `revokeTokenFamily` omora toate sesiunile.
+
+Acum semnătura e ce identifică de fapt maşina — familia de browser plus
+sistemul de operare — cu versiunile scoase. Un token folosit din alt browser
+sau alt OS tot cade, care e cazul pentru care există verificarea. Acelaşi
+browser, un point release mai încolo, nu — n-a fost niciodată o ameninţare.
+Mai grosier intenţionat: legarea de dispozitiv e a patra linie de apărare, în
+spatele rotaţiei, detecţiei de replay şi plafonului absolut de 30 de zile, şi
+nu merită să blochezi omul din propriul cont ca să strângi un backstop.
+
+Definiţia stă acum într-un singur fişier. Patru rute o calculau — login,
+register, accept-invitaţie şi refresh — fiecare cu copia ei privată. Se
+potriveau doar din coincidenţă, iar modul de eşec când încetează să se
+potrivească e tăcut şi total: login stochează o valoare, refresh calculează
+alta, nepotrivirea e citită ca furt, şi omul îşi pierde toate sesiunile la
+primul refresh.
+
+Sesiunile create înainte de acest release nu sunt sacrificate: hash-ul vechi e
+acceptat o singură dată, dacă vine de pe acelaşi dispozitiv, iar rotaţia îl
+rescrie imediat în forma nouă. Altfel deploy-ul ar fi delogat pe toată lumea
+simultan — fix eşecul pe care versiunea asta îl repară.
+
+### Trezirea laptopului putea fi citită ca furt de token
+
+La rotaţie, token-ul vechi era revocat **înainte** să se scrie succesorul în
+cache, cu o scriere de fingerprint între ele. Orice refresh care nimerea
+intervalul găsea un token revocat şi niciun succesor, concluziona „replay" şi
+revoca toată familia de sesiuni. Intervalul e lat cât două drumuri la Redis —
+invizibil la uz normal, şi lovit în plin când se trezeşte un laptop şi toate
+tab-urile deschise fac refresh în aceeaşi milisecundă.
+
+Ordinea e inversată. În fereastra rămasă, cel mai rău caz e o a doua rotaţie
+concurentă: două token-uri de refresh valide pentru o sesiune, ambele în mâna
+aceluiaşi om, iar rotaţia următoare taie unul. Un token în plus dat
+proprietarului de drept e un preţ mai bun decât să-l încui pe dinafară de pe
+toate dispozitivele lui.
+
+### Ecranul de login nu mai dă vina pe inactivitate pentru orice
+
+„Your session has expired due to inactivity" se afişa la **orice** eşec de
+refresh — familie revocată, plafon absolut atins, o secundă în care baza de
+date n-a răspuns. Mesajul trimitea pe toată lumea, inclusiv pe mine, să caute
+o setare care nu era problema.
+
+Acum doar cronometrul de inactivitate — singurul care chiar a văzut timpul
+scurgându-se — spune „inactivity". Restul spun „Your session has ended", ceea
+ce e adevărat şi nu inventează o cauză.
+
+
 ## [6.17.0] - 2026-08-18
 
 > Acesta e conţinutul care purta numărul 6.16.0. Tag-ul acela a ajuns pe

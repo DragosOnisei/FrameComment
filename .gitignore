@@ -75,3 +75,9 @@ _*.tmp
 # Local deployment files with real secrets - NEVER commit
 _local-deploy/
 *-SECRETS.txt
+
+# 6.18.0 — produced by scripts/build-security-artifacts.mjs during the image
+# build. Committing them would mean the manifest in git drifts from the one in
+# the image, and the integrity check would report noise instead of intrusions.
+.integrity-manifest.json
+.audit-report.json

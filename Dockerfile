@@ -72,6 +72,14 @@ ENV SKIP_ENV_VALIDATION=1
 ENV NEXT_PHASE=phase-production-build
 RUN npm run build
 
+# 6.18.0 — the two artefacts the Security scan reads at runtime but can only
+# be produced honestly here: a SHA-256 manifest of the shipped files (so a
+# modified file inside a running container is detectable) and the npm audit
+# result (so the scan does not have to reach the registry from production).
+# Failing this step must not fail the image: without the files the scan reports
+# those two checks as SKIPPED, which is the truthful outcome.
+RUN node scripts/build-security-artifacts.mjs || echo "[build] security artefacts skipped"
+
 # === Production ===
 # 2.1.2+: Debian-bookworm runner (was Alpine before). Switch needed
 # because every NVENC-capable ffmpeg distribution for linux is
@@ -149,6 +157,7 @@ RUN groupadd -g 911 app \
 COPY --from=deps --link /tmp/prod_node_modules ./node_modules
 COPY --from=builder --link /app/public ./public
 COPY --from=builder --link /app/.next ./.next
+COPY --from=builder --chown=app:app /app/.integrity-manifest.json /app/.audit-report.json ./
 COPY --from=builder --link /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --link /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder --link /app/prisma ./prisma

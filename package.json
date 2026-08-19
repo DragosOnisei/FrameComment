@@ -1,6 +1,6 @@
 {
   "name": "framecomment",
-  "version": "6.17.0",
+  "version": "6.19.0",
   "description": "FrameComment — self-hosted video review and delivery platform for filmmakers and video professionals.",
   "author": {
     "name": "Dragos Onisei",
@@ -63,6 +63,7 @@
     "isomorphic-dompurify": "^3.7.1",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.563.0",
+    "maxmind": "^5.0.7",
     "next": "^16.1.6",
     "next-intl": "^4.9.0",
     "nodemailer": "^9.0.1",

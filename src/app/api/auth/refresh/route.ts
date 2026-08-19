@@ -5,6 +5,8 @@ import { parseBearerToken, refreshAdminTokens, revokePresentedTokens } from '@/l
 import { clearRefreshCookie, readRefreshCookie, setRefreshCookie } from '@/lib/auth-cookies'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
+import { hashDeviceSignature, hashLegacyUserAgent } from '@/lib/device-signature'
+import { recordAccessAttempt } from '@/lib/access-log'
 
 export const runtime = 'nodejs'
 
@@ -67,10 +69,26 @@ export async function POST(request: NextRequest) {
     }, `auth-refresh:${tokenHash}`)
     if (rateLimitResult) return rateLimitResult
 
-    const fingerprint = hashFingerprint(request.headers.get('user-agent') || 'unknown')
-    const tokens = await refreshAdminTokens({ refreshToken: presentedToken, fingerprintHash: fingerprint })
+    const userAgent = request.headers.get('user-agent')
+    const tokens = await refreshAdminTokens({
+      refreshToken: presentedToken,
+      fingerprintHash: hashDeviceSignature(userAgent),
+      // Accepted once, for sessions minted before 6.17.0 — see the helper.
+      legacyFingerprintHash: hashLegacyUserAgent(userAgent),
+    })
 
     if (!tokens) {
+      // 6.18.0: a refusal here is one of the few genuinely hostile-looking
+      // signals the app produces — a token that no longer matches its device,
+      // or one replayed after rotation. Worth a row on the Security page even
+      // though we cannot tell from here which of the two it was; the server
+      // log distinguishes them.
+      void recordAccessAttempt({
+        request,
+        kind: 'TOKEN_REPLAY',
+        succeeded: false,
+        details: { stage: 'refresh-refused' },
+      })
       await revokePresentedTokens({ refreshToken: presentedToken })
       // Drop the cookie too — leaving a dead token in the jar means every
       // page load retries a refresh that can never succeed.
@@ -105,6 +123,3 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('base64url')
 }
 
-function hashFingerprint(userAgent: string): string {
-  return crypto.createHash('sha256').update(userAgent).digest('base64url')
-}

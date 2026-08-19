@@ -90,7 +90,10 @@ export default function SessionMonitor() {
       // ignore
     } finally {
       clearTokens()
-      router.push('/login?sessionExpired=true')
+      // 6.17.0: this is the one caller that genuinely knows the reason — it
+      // watched the clock run out. Everything else that lands on /login goes
+      // through api-client's generic path and must not claim to know.
+      router.push('/login?sessionExpired=inactivity')
     }
   }, [router])
 

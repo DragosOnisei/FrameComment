@@ -11,14 +11,12 @@ import { logError, logMessage } from '@/lib/logging'
 import { logSecurityEvent } from '@/lib/video-access'
 import { markLeadConverted } from '@/lib/founder-crm'
 import { getClientIpAddress } from '@/lib/utils'
+import { hashDeviceSignature } from '@/lib/device-signature'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /** Same recipe as the login/refresh routes (sha256 → base64url of the UA). */
-function fingerprintHash(userAgent: string): string {
-  return crypto.createHash('sha256').update(userAgent).digest('base64url')
-}
 
 /**
  * 5.0 multi-tenant: POST /api/auth/register — public company registration.
@@ -225,7 +223,7 @@ export async function POST(request: NextRequest) {
       organizationId: orgId,
     }
 
-    const fingerprint = fingerprintHash(request.headers.get('user-agent') || 'unknown')
+    const fingerprint = hashDeviceSignature(request.headers.get('user-agent'))
     const tokens = await issueAdminTokens(authUser, fingerprint)
 
     await logSecurityEvent({

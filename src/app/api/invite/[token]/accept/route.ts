@@ -11,14 +11,12 @@ import { hashInviteToken, looksLikeInviteToken } from '@/lib/team-invites'
 import { logError, logMessage } from '@/lib/logging'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
+import { hashDeviceSignature } from '@/lib/device-signature'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /** Same recipe as login/refresh/register (sha256 → base64url of the UA). */
-function fingerprintHash(userAgent: string): string {
-  return crypto.createHash('sha256').update(userAgent).digest('base64url')
-}
 
 /**
  * 5.6 Phase 4: POST /api/invite/[token]/accept — PUBLIC.
@@ -142,7 +140,7 @@ export async function POST(
       role: user.role as string,
       organizationId: orgId,
     }
-    const fingerprint = fingerprintHash(request.headers.get('user-agent') || 'unknown')
+    const fingerprint = hashDeviceSignature(request.headers.get('user-agent'))
     const tokens = await issueAdminTokens(authUser, fingerprint)
 
     await logSecurityEvent({

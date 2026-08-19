@@ -1775,6 +1775,125 @@ model AgentReport {
 // Who did what in the Founder area. Deliberately NOT SecurityEvent: that
 // table is org-scoped, has no actor, and can be switched off by a per-tenant
 // setting — an audit trail a tenant can silence is not an audit trail.
+/// 6.18.0 — every attempt to authenticate against this installation.
+///
+/// Deliberately NOT org-scoped, unlike SecurityEvent. A failed login has no
+/// organization yet: the credentials did not resolve to a user, which is
+/// exactly the case worth recording. Scoping it would mean the attacks that
+/// matter most — the ones that never got in — belong to nobody and are
+/// invisible.
+///
+/// The IP is personal data under GDPR. Rows are purged after 90 days by the
+/// worker; the aggregate counters below survive, because "1,412 attempts from
+/// Nigeria" identifies nobody.
+model AccessAttempt {
+  id         String   @id @default(cuid())
+  /// LOGIN_FAILED, LOGIN_SUCCESS, LOGIN_LOCKED, RATE_LIMITED,
+  /// TOKEN_DEVICE_MISMATCH, TOKEN_REPLAY, BLOCKED_IP, SHARE_PASSWORD_FAILED
+  kind       String
+  /// INFO | WARNING | CRITICAL — what the founder's dashboard sorts by.
+  severity   String   @default("INFO")
+  ipAddress  String
+  /// ISO-3166 alpha-2, resolved locally at write time. Null when the GeoIP
+  /// database is not installed, or for private/loopback addresses.
+  country    String?
+  countryName String?
+  city       String?
+  asn        String?
+  /// What was tried — an email or username. Never a password, ever.
+  identifier String?
+  /// Coarse browser:os signature, not the raw User-Agent: enough to spot a
+  /// scripted client, not enough to fingerprint a person across sites.
+  client     String?
+  path       String?
+  /// Did this attempt reach anything?
+  succeeded  Boolean  @default(false)
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([ipAddress, createdAt])
+  @@index([kind, createdAt])
+  @@index([country, createdAt])
+  @@index([succeeded, createdAt])
+}
+
+/// 6.18.0 — a security scan and what it found.
+///
+/// Kept as rows rather than a rendered report so the history stays queryable:
+/// "was this check failing last month?" is the question an investor's
+/// technical advisor asks, and a folder of PDFs cannot answer it.
+model SecurityScan {
+  id          String    @id @default(cuid())
+  status      String    @default("RUNNING") // RUNNING | COMPLETED | FAILED
+  /// 0–100, updated as stages complete so the UI can show a real bar rather
+  /// than an animation that means nothing.
+  progress    Int       @default(0)
+  currentStage String?
+  /// Rolled up when the run ends.
+  passed      Int       @default(0)
+  warnings    Int       @default(0)
+  failures    Int       @default(0)
+  /// 6.18.1 — how many checks ran, and how many could not.
+  ///
+  /// "Did it actually check anything?" is the first question anyone asks of a
+  /// scan that finishes quickly, and the honest answer needs both numbers: a
+  /// run with 34 checks and 0 skips means something different from one with 2
+  /// checks and 32 skips, and the pass/warn/fail counts alone cannot tell them
+  /// apart.
+  skipped     Int       @default(0)
+  durationMs  Int?
+  /// Which installation this run describes — "production (db.internal)" or
+  /// "development (localhost)". A scan of a laptop is not evidence about the
+  /// production system, and a report that does not say which one it looked at
+  /// invites exactly that confusion.
+  environment String?
+  /// 0–100. One number a founder can put on a slide, derived from the
+  /// findings rather than typed by hand.
+  score       Int?
+  startedById String?
+  startedByName String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  /// Append-only progress lines, mirroring Wordfence's live log.
+  logJson     String?
+  findings    SecurityScanFinding[]
+
+  @@index([startedAt])
+}
+
+model SecurityScanFinding {
+  id       String   @id @default(cuid())
+  scanId   String
+  scan     SecurityScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  /// Which stage produced it — matches the stage ids in lib/security-scan.
+  stage    String
+  /// Stable id for the individual check, so history can track one check
+  /// across runs even when its wording changes.
+  checkId  String
+  title    String
+  /// PASS | WARN | FAIL | SKIPPED
+  status   String
+  severity String   @default("INFO")
+  /// What was actually observed. The value that made this pass or fail.
+  detail   String?
+  /// What to do about it. Empty for passes.
+  remediation String?
+  /// 6.19.0 — what this means, for someone who is not an engineer.
+  ///
+  /// `detail` is the observed value and `remediation` is the command to run;
+  /// both assume you already know why the check exists. This is the missing
+  /// sentence: what could actually go wrong, in plain words. Without it a
+  /// findings list is a set of instructions to obey rather than a situation to
+  /// understand, and the person who has to decide what to fix first is exactly
+  /// the person it was written past.
+  impact      String?
+  createdAt DateTime @default(now())
+
+  @@index([scanId, stage])
+  @@index([checkId, createdAt])
+}
+
 model PlatformAuditEvent {
   id        String   @id @default(cuid())
   actorId   String?

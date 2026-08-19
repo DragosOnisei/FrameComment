@@ -35,7 +35,16 @@ function LoginForm() {
       !hadExplicitReturnUrl && user?.isPlatformAdmin ? '/founder' : returnUrl,
     [hadExplicitReturnUrl, returnUrl],
   )
-  const sessionExpired = searchParams?.get('sessionExpired') === 'true'
+  /*
+   * 6.17.0: `sessionExpired=inactivity` comes from the idle timer, which
+   * actually watched the clock run out. A bare `true` comes from a failed
+   * token refresh, which could be a dozen things — a revoked family, the
+   * absolute cap, a database blip — and blaming inactivity for all of them
+   * sent people looking for a setting that was not the problem.
+   */
+  const sessionExpiredReason = searchParams?.get('sessionExpired')
+  const sessionExpired = !!sessionExpiredReason
+  const sessionExpiredByInactivity = sessionExpiredReason === 'inactivity'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -289,7 +298,9 @@ function LoginForm() {
               {sessionExpired && (
                 <div className="p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
                   <p className="text-sm text-warning font-medium">
-                    {t('sessionExpired')}
+                    {sessionExpiredByInactivity
+                      ? t('sessionExpiredInactivity')
+                      : t('sessionExpired')}
                   </p>
                 </div>
               )}

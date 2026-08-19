@@ -333,8 +333,10 @@ export async function issueAdminTokens(user: AuthUser, fingerprintHash?: string)
 export async function refreshAdminTokens(params: {
   refreshToken: string
   fingerprintHash?: string
+  /** Pre-6.17.0 raw-UA hash, accepted once so old sessions survive the upgrade. */
+  legacyFingerprintHash?: string
 }) {
-  const { refreshToken, fingerprintHash } = params
+  const { refreshToken, fingerprintHash, legacyFingerprintHash } = params
 
   // 6.13.0 — device binding is checked FIRST, before the leeway cache can
   // hand anything back. Otherwise a token stolen and replayed from another
@@ -345,7 +347,15 @@ export async function refreshAdminTokens(params: {
       (decodeRefreshTokenUnsafely(refreshToken)?.userId as string) || '',
       refreshToken,
     )
-    if (presentedFingerprint && presentedFingerprint !== fingerprintHash) {
+    // 6.17.0: a stored value that is neither the current signature nor the
+    // legacy hash of this same device is a genuine mismatch. Matching the
+    // legacy form means the session predates this release and is being used
+    // from the very device it was created on — the rotation below re-stores it
+    // in the new form, so each session takes this path at most once.
+    const matchesCurrent = presentedFingerprint === fingerprintHash
+    const matchesLegacy =
+      !!legacyFingerprintHash && presentedFingerprint === legacyFingerprintHash
+    if (presentedFingerprint && !matchesCurrent && !matchesLegacy) {
       const owner = decodeRefreshTokenUnsafely(refreshToken)
       if (owner?.userId) {
         logError(`[AUTH] Refresh token presented from a different device for user ${owner.userId}`)
@@ -430,12 +440,6 @@ export async function refreshAdminTokens(params: {
     refreshTtl,
   )
 
-  // Revoke old refresh token on rotation
-  await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
-  if (fingerprintHash) {
-    await storeTokenFingerprint(user.id, newRefreshToken, fingerprintHash)
-  }
-
   const rotated: RotationSuccessor = {
     accessToken,
     refreshToken: newRefreshToken,
@@ -447,7 +451,27 @@ export async function refreshAdminTokens(params: {
     absoluteExpiresAt: (sessionStartedAt + ABSOLUTE_SESSION_DURATION) * 1000,
   }
 
+  /*
+   * 6.17.0 — cache the successor BEFORE revoking the token it replaces.
+   *
+   * The old order revoked first and cached after, with a fingerprint write in
+   * between. Any refresh arriving in that gap found no successor and a revoked
+   * token, concluded "replay", and revoked the entire session family. The gap
+   * is two Redis round-trips wide — invisible under normal use, and hit dead
+   * centre when a laptop wakes and every open tab refreshes in the same
+   * millisecond.
+   *
+   * Reversed, the worst case in that window is a second concurrent rotation:
+   * two valid refresh tokens briefly exist for one session, both legitimately
+   * held by the same person, and the next rotation prunes one. Handing out one
+   * extra token to the rightful owner is a trade worth making against locking
+   * them out of every device they own.
+   */
   await rememberRotationSuccessor(refreshToken, rotated)
+  if (fingerprintHash) {
+    await storeTokenFingerprint(user.id, newRefreshToken, fingerprintHash)
+  }
+  await revokeToken(refreshToken, remainingTtl(refreshToken, ADMIN_REFRESH_SECRET))
 
   return rotated
 }

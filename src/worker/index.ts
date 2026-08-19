@@ -14,6 +14,8 @@ import {
 import { initStorage, refreshLocalStorageRoot } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { purgeExpiredTrash } from '../lib/trash-cleanup'
+import { purgeExpiredAccessAttempts, ACCESS_RETENTION_DAYS } from '../lib/access-log'
+import { runScheduledSecurityScan, scheduledScanIsDue } from '../lib/scheduled-security-scan'
 import { finalizeExpiredTransfers } from '../lib/ownership'
 import { getRedisForQueue, closeRedisConnection } from '../lib/redis'
 import { getCpuAllocation, logCpuAllocation } from '../lib/cpu-config'
@@ -338,6 +340,53 @@ async function main() {
     await cleanupOldTempFiles()
   }, ONE_HOUR_MS)
 
+  /*
+   * 6.18.0 — access-log retention.
+   *
+   * IP addresses are personal data under GDPR, and the Security page states a
+   * retention window. A stated policy that nothing enforces is worse than no
+   * policy: it is a claim we would be making to customers and investors while
+   * quietly keeping the data forever.
+   *
+   * Runs at startup as well as on a timer, so an installation that was off for
+   * a fortnight does not sit on expired records until its first midnight.
+   */
+  logMessage(`Purging access records older than ${ACCESS_RETENTION_DAYS} days...`)
+  await purgeExpiredAccessAttempts()
+    .then((n) => n > 0 && logMessage(`[WORKER] Removed ${n} expired access records`))
+    .catch((err) => logError('Initial access-log purge failed', err))
+
+  /*
+   * 6.19.0 — the weekly security scan.
+   *
+   * A scan you have to remember to press is a scan that gets pressed once. The
+   * findings that matter appear later: a dependency advisory published next
+   * month, a share link somebody made public in March, a certificate that
+   * lapsed. None of those announce themselves.
+   *
+   * The timer ticks hourly but the DUE check is against the database, so a
+   * container that restarts twice a day neither skips the week nor scans on
+   * every boot. It runs in the worker rather than the web container because
+   * the web container can have several replicas and a timer there would fire
+   * once per replica.
+   */
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+  const securityScanInterval = setInterval(async () => {
+    try {
+      if (!(await scheduledScanIsDue(WEEK_MS))) return
+      logMessage('Running scheduled weekly security scan...')
+      await runScheduledSecurityScan()
+    } catch (err) {
+      logError('Scheduled security scan failed', err)
+    }
+  }, ONE_HOUR_MS)
+
+  const accessPurgeInterval = setInterval(async () => {
+    await purgeExpiredAccessAttempts()
+      .then((n) => n > 0 && logMessage(`[WORKER] Removed ${n} expired access records`))
+      .catch((err) => logError('Scheduled access-log purge failed', err))
+  }, SIX_HOURS_MS)
+
   // Schedule Trash cleanup every 24 hours (1.0.8+). Hard-deletes
   // soft-deleted videos and folders whose `deletedAt` is older than
   // 30 days. Runs once at startup so a server that's been off for a
@@ -380,6 +429,8 @@ async function main() {
   process.on('SIGTERM', async () => {
     logMessage('SIGTERM received, closing workers...')
     clearInterval(tusCleanupInterval)
+    clearInterval(accessPurgeInterval)
+    clearInterval(securityScanInterval)
     clearInterval(tempCleanupInterval)
     clearInterval(trashCleanupInterval)
     clearInterval(ownershipFinalizeInterval)
