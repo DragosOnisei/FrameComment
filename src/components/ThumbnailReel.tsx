@@ -547,11 +547,20 @@ export default function ThumbnailReel({
                     // 1.7.0+: bigger primary-blue pill so the
                     // active version reads as a clear status
                     // badge instead of a muted secondary chip.
-                    // Height jumps to 7, font goes uppercase +
-                    // wider tracking + bold, and we use the
-                    // theme primary tokens for the fill.
-                    'inline-flex items-center gap-1 shrink-0 h-7 pl-2.5 pr-1.5 rounded-full',
-                    'text-xs font-semibold uppercase tracking-wider tabular-nums',
+                    // Font goes uppercase + wider tracking + bold,
+                    // and we use the theme primary tokens for the fill.
+                    // 7.0.0: the height now matches the h-9 of the prev/next
+                    // video buttons and the title pill this chip sits
+                    // between. At h-7 it was the one short element in an
+                    // otherwise h-9 row, which read as an accident rather
+                    // than a deliberate hierarchy. Padding is per-variant
+                    // because the ChevronDown only renders on multi-version
+                    // stacks — with a single version the old asymmetric
+                    // pl-2.5/pr-1.5 pushed the bare label visibly
+                    // off-centre inside the pill.
+                    'inline-flex items-center gap-1 shrink-0 h-9 rounded-full',
+                    currentVersions.length > 1 ? 'pl-3 pr-2' : 'px-3.5',
+                    'text-sm font-semibold uppercase tracking-wider tabular-nums',
                     'bg-primary text-primary-foreground shadow-sm',
                     'transition-colors',
                     currentVersions.length > 1 && 'hover:bg-primary/90 active:scale-95 cursor-pointer',
@@ -564,7 +573,7 @@ export default function ThumbnailReel({
                   }
                 >
                   <span>{activeVersionLabel}</span>
-                  {currentVersions.length > 1 && <ChevronDown className="w-3.5 h-3.5" />}
+                  {currentVersions.length > 1 && <ChevronDown className="w-4 h-4" />}
                 </button>
               )}
 

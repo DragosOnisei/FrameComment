@@ -71,9 +71,15 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `git push origin main` then `git push origin v<latest>`.
 - Version numbers that were tagged but never published still count as used —
   pick a number that has never reached GitHub.
-- **The next release is 7.0.0.** Dragos reserved the major bump to mark the
-  move to the company Claude account: everything ≤ 6.26.0 was released from
-  the old personal account. Do not number the next batch 6.27.0.
+- 7.0.0 is **released** — it was the major bump Dragos reserved to mark the move
+  to the company Claude account (everything ≤ 6.26.0 came from the old personal
+  account). It carried no breaking change, only the reserved number. The next
+  batch is an ordinary minor: 7.1.0.
+- `package-lock.json` carries a stale root `version` (6.17.1 while package.json
+  moved on). It has been that way since 6.18 and every Docker image since has
+  built, because `npm ci` validates the dependency tree and not the root
+  version field. Do not "fix" it during a release bump — re-resolving the
+  lockfile is a far bigger change than the release it would be riding on.
 - Migrations: additive, `IF NOT EXISTS`, never backfill a guess ("an open
   recorded before this release has no country, which is the truth about it").
   Entrypoint runs `prisma migrate deploy` with the privileged URL.

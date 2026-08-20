@@ -14,6 +14,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-08-20
+
+The major version marks a change of authorship, not of behaviour. Every release
+up to and including 6.26.0 was published from a personal account; this is the
+first from the company one. Nothing here breaks compatibility — no schema
+changes, no migrations, no API or configuration differences. Upgrading from
+6.26.0 is a plain image swap.
+
+### Changed
+
+- **The version badge in the player's title bar is now the same height as the
+  arrow buttons beside it.** It was 28px tall in a row where everything else is
+  36px — the previous/next video buttons and the title pill sitting between
+  them — so the one element carrying the most important piece of state in that
+  bar was also the smallest thing in it. The badge keeps its pill shape; only
+  the height, the label size and the dropdown chevron grow to match their
+  neighbours.
+  - The label is centred now too. Its padding was 10px on the left against 6px
+    on the right, which only balances when the dropdown chevron is there to
+    fill the gap. On a video with a single version no chevron is drawn, so "V1"
+    was visibly pushed off-centre inside its own badge; the padding is
+    symmetric in that case.
+
 ## [6.26.0] - 2026-08-19
 
 ### Fixed
