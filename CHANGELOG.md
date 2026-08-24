@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.1] - 2026-08-24
+
+### Fixed
+
+- **One side of Compare Versions never started playing.** Most obvious in the
+  overlaid (slider) mode, where a frozen half sits directly against a half that
+  is moving: press play and the left clip ran while the right one stayed on its
+  first frame.
+  - The side that froze was any version whose only encoded progressive tier is
+    480p — a 480p source, since nothing is upscaled. Compare mode picked its
+    file through a quality ladder that listed 720p, 1080p and 2160p and simply
+    did not mention 480p, so for such a version it produced an empty string.
+    The `<video>` was handed `src=""`, which can never play; it showed its
+    poster, which is why it read as a stuck video rather than a missing file.
+    The ladder now matches the one the main player uses, 480p included — which
+    is also why the same clip always played fine in the normal player.
+  - The failure was silent by construction: both play attempts were wrapped in
+    a `catch` that discarded the error. The browser had been reporting
+    "NotSupportedError: The element has no supported sources" on every press.
+    Each side now says why it did not start.
+- **In overlaid mode the timeline stopped following the video.** Switching
+  between side-by-side and overlaid replaces both `<video>` elements, but the
+  effect that listens for time updates was keyed only to the video URL, so it
+  kept listening to the element that had just been discarded. After one switch
+  the clock, the play/pause state and the handler that keeps the second clip
+  following the first were all attached to something no longer on screen.
+
 ## [7.0.0] - 2026-08-20
 
 The major version marks a change of authorship, not of behaviour. Every release

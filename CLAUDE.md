@@ -71,10 +71,23 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `git push origin main` then `git push origin v<latest>`.
 - Version numbers that were tagged but never published still count as used —
   pick a number that has never reached GitHub.
-- 7.0.0 is **released** — it was the major bump Dragos reserved to mark the move
-  to the company Claude account (everything ≤ 6.26.0 came from the old personal
-  account). It carried no breaking change, only the reserved number. The next
-  batch is an ordinary minor: 7.1.0.
+- 7.0.0 is **released** — the major bump Dragos reserved to mark the move to the
+  company Claude account (everything ≤ 6.26.0 came from the old personal
+  account). It carried no breaking change, only the reserved number, and shipped
+  just the version-badge sizing. 7.0.1 followed with the compare-mode playback
+  fix.
+- **Scale the number to the change.** A bug fix or small UI change takes a PATCH
+  bump (7.0.0 → 7.0.1), not a minor — that is Dragos's call, made when a
+  compare-mode fix was about to be numbered 7.1.0. Save minors for actual
+  features.
+- **Before amending "the unpushed commit", verify it is still unpushed.** Run
+  `git fetch origin --tags` and compare against `origin/main`; do not trust the
+  absence of a push in the conversation. Amending a commit he has already pushed
+  rewrites published history: `git push` then wants a force, the tag push is
+  rejected with "would clobber existing tag", and the recovery is
+  `git reset --soft origin/main` plus a fresh patch version. This happened on
+  2026-08-24 — he pushed 7.0.0 while the compare fix was still being written,
+  and the amend had to be unwound into 7.0.1.
 - `package-lock.json` carries a stale root `version` (6.17.1 while package.json
   moved on). It has been that way since 6.18 and every Docker image since has
   built, because `npm ci` validates the dependency tree and not the root

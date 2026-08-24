@@ -17,14 +17,36 @@ interface VideoComparisonProps {
   onClose: () => void
 }
 
+/**
+ * Pick the stream URL a compared version plays from.
+ *
+ * 7.0.1: 480p was missing from every chain here, and that omission was the
+ * whole of "one side of compare never starts". 480p is the LOWEST progressive
+ * tier the worker produces (`preview480Path` in the schema) and for a source
+ * that is itself 480p or smaller it is the ONLY one, because nothing is
+ * upscaled. Such a version therefore came back from this function as an empty
+ * string, its <video> got `src=""`, and it sat on its poster for ever while
+ * the other side played normally — which reads as a frozen video rather than
+ * as a missing file. The browser was saying so the entire time
+ * ("NotSupportedError: The element has no supported sources"); the caller threw
+ * the message away.
+ *
+ * The ladders are deliberately the same ones VideoPlayer uses in its
+ * `effectiveQuality` branches. Compare mode and the main player disagreeing
+ * about which file a version plays from is how you get a clip that plays in one
+ * place and not the other, which is exactly the report this fixes. 720p drops
+ * to 480p before climbing, because the smaller file starts sooner and this is a
+ * review tool.
+ */
 function getVideoUrl(video: Video, quality: '720p' | '1080p' | '2160p'): string {
+  const v = video as any
   if (quality === '2160p') {
-    return (video as any).streamUrl2160p || (video as any).streamUrl1080p || (video as any).streamUrl720p || ''
+    return v.streamUrl2160p || v.streamUrl1080p || v.streamUrl720p || v.streamUrl480p || ''
   }
   if (quality === '1080p') {
-    return (video as any).streamUrl1080p || (video as any).streamUrl720p || (video as any).streamUrl2160p || ''
+    return v.streamUrl1080p || v.streamUrl720p || v.streamUrl2160p || v.streamUrl480p || ''
   }
-  return (video as any).streamUrl720p || (video as any).streamUrl1080p || (video as any).streamUrl2160p || ''
+  return v.streamUrl720p || v.streamUrl480p || v.streamUrl1080p || v.streamUrl2160p || ''
 }
 
 // 3.8.x: storyboard sprite-scrub for the version thumbnails in the compare
@@ -158,7 +180,18 @@ export default function VideoComparison({
       setIsPlaying(false)
     } else {
       b.currentTime = a.currentTime
-      Promise.all([a.play(), b.play()]).catch(() => {})
+      // 7.0.1: a side that refuses to start now says why. This was
+      // `.catch(() => {})`, which is how a version with no playable tier
+      // became a silent frozen frame beside a clip playing normally: the
+      // browser reported "no supported sources" on every attempt and nothing
+      // was listening. Both plays are still started before either is awaited,
+      // so one failing side never stops the other.
+      a.play().catch((err) => {
+        console.warn('[compare] version A did not start:', err?.name, err?.message)
+      })
+      b.play().catch((err) => {
+        console.warn('[compare] version B did not start:', err?.name, err?.message)
+      })
       setIsPlaying(true)
     }
   }, [isPlaying])
@@ -182,7 +215,9 @@ export default function VideoComparison({
       const b = videoRefB.current
       if (b && b.paused) {
         b.currentTime = a.currentTime
-        b.play().catch(() => {})
+        b.play().catch((err) => {
+          console.warn('[compare] version B did not follow A into play:', err?.name, err?.message)
+        })
       }
     }
 
@@ -212,7 +247,13 @@ export default function VideoComparison({
       a.removeEventListener('pause', onPause)
       a.removeEventListener('ended', onEnded)
     }
-  }, [videoUrlA])
+    // 7.0.1: `mode` belongs here. Side-by-side renders its own <video> tags
+    // and slider mode renders VideoComparisonSlider's, so switching mode
+    // replaces both elements. With only `videoUrlA` in the deps the effect did
+    // not re-run — the timeupdate/play/pause/ended listeners stayed attached to
+    // the element React had just thrown away, so after one switch the timeline
+    // stopped moving and B lost the handler that follows A into play.
+  }, [videoUrlA, mode])
 
   /**
    * Should this side be silent?
