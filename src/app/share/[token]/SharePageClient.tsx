@@ -1765,11 +1765,15 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               (the case that lands here) had no way back. It goes above the
               footer, out of the way of the thumbnails.
 
-              7.1.6: the download joins it here, to its right and in green. The
-              two are the only things on this page a visitor can DO, so they
-              belong together rather than at opposite corners. Green because it
-              is the one action that hands something over — `bg-success` from
-              the palette, not a literal colour, so it follows the theme.
+              7.1.6: the download joins it here, to its right. The two are the
+              only things on this page a visitor can DO, so they belong together
+              rather than at opposite corners.
+
+              7.1.6: it went green for one release and came straight back — the
+              accent green read as a warning next to the blue beside it rather
+              than as the friendlier button it was meant to be. Both actions now
+              share the default primary, which is also what the folder share
+              uses.
 
               A guest renders no banner at all, in which case the download
               simply centres on its own. */}
@@ -1789,7 +1793,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                   size="sm"
                   onClick={handleDownloadAll}
                   disabled={downloadingAll}
-                  className="gap-1.5 bg-success text-success-foreground hover:bg-success/90"
+                  className="gap-1.5"
                 >
                   {downloadingAll ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -1868,6 +1872,18 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           video. It is a single small button now, not the old full-width notice.
           Resolves the same target the removed `router.replace` computed: the
           folder holding the shared content, falling back to the project root. */}
+      {/* 7.1.6: only where there is no Back button.
+          Reaching the player by clicking a tile in the grid, or from a folder
+          share, leaves a Back arrow in the reel that already walks to the folder
+          the clip lives in — so an "open in project folder" button beside it
+          offers a second route to the same place and just crowds the bar.
+          `showBackButton={!isSingleVideoShare}` below is the same condition, so
+          the two can never both be missing.
+          A link locked to a single clip is the exception: it draws no Back
+          arrow, because there is no grid behind it to return to. There, this
+          button is the only way a signed-in admin gets into the full app, and it
+          stays. */}
+      {isSingleVideoShare && (
       <div className="shrink-0 flex justify-end px-2 pt-2 sm:px-3 empty:hidden">
         <ShareOpenInProjectBanner
           projectId={project?.id}
@@ -1883,6 +1899,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           }
         />
       </div>
+      )}
 
       {/* Thumbnail Reel - always visible, collapsible */}
         <ThumbnailReel

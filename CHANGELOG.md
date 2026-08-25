@@ -18,14 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The download button moved down beside "Open in project folder", and is
-  green.** Those two are the only things a visitor can DO on this page, so they
-  now sit together at the foot of it rather than at opposite corners. The green
-  comes from the palette's `success` token rather than a literal colour, so it
-  follows the theme instead of fighting it. A guest sees no "open in project
-  folder" button at all, in which case the download simply centres on its own.
-- The reverse-share upload stays in the top row, and the failure message moved
-  down with the download button it describes.
+- **The download button moved down beside "Open in project folder".** Those two
+  are the only things a visitor can DO on this page, so they now sit together at
+  the foot of it rather than at opposite corners. A guest sees no "open in
+  project folder" button at all, in which case the download simply centres on
+  its own. The reverse-share upload stays in the top row, and the download's
+  failure message moved down with the button it describes.
+- **"Open in project folder" no longer appears in the player when a Back button
+  already does the job.** Reaching a clip by clicking a tile in the grid, or
+  from a folder share, leaves a Back arrow in the reel that walks to the folder
+  the clip lives in — so a second button beside it offered a second route to the
+  same place and crowded the bar. A link locked to a single clip is the
+  exception: it draws no Back arrow, because there is no grid behind it to
+  return to, so there the button stays as the only way a signed-in admin reaches
+  the full app.
 
 ## [7.1.5] - 2026-08-26
 
