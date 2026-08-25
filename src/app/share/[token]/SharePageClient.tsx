@@ -174,6 +174,8 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const storyboardUrlCacheRef = useRef<Map<string, string>>(new Map())
   const [thumbnailsLoading, setThumbnailsLoading] = useState(true)
   const [downloadingAll, setDownloadingAll] = useState(false)
+  // 7.1.5: a failed download used to be swallowed entirely — see the handler.
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   // 3.2.x: mobile-only vertical resize of the player vs comments. On
   // phones the layout stacks (video on top, comments below); a grip
   // between them lets the viewer drag the split up/down. `null` height
@@ -1135,11 +1137,53 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     window.addEventListener('touchend', end)
   }, [mobileVideoHeight])
 
+  /**
+   * 7.1.5: one video downloads as that video, not as a ZIP of one.
+   *
+   * This handler has always minted the bulk-ZIP token, which is right for a
+   * share holding several clips and wrong for a share holding one: the server
+   * builds an archive nobody asked for, the transfer is slow enough to look
+   * broken — Dragos watched it sit at 64KB "Resuming…" — and what lands is
+   * `<project>_all_videos.zip` rather than the film. The single-clip case now
+   * takes the same route the player uses: mint an `original` token for the
+   * newest version and let the browser save the file. `allowAssetDownload`
+   * still gates it, on the server as well as on the button.
+   *
+   * The failure is no longer silent. `catch { // Silently fail - user can
+   * retry }` is how a broken download looks identical to a slow one, which is
+   * exactly the confusion this started as.
+   */
   const handleDownloadAll = useCallback(async () => {
     if (downloadingAll || !shareToken) return
 
+    const saveAs = (url: string) => {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = ''
+      link.rel = 'noopener'
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
+
     try {
       setDownloadingAll(true)
+      setDownloadError(null)
+
+      const groups = Object.values(
+        (project?.videosByName as Record<string, any[]> | undefined) ?? {},
+      )
+      // Newest version first — the server sorts each group descending.
+      const onlyVideoId =
+        groups.length === 1 ? (groups[0]?.[0]?.id as string | undefined) : undefined
+
+      if (onlyVideoId) {
+        const originalToken = await fetchVideoTokenWithRetry(onlyVideoId, 'original')
+        if (!originalToken) throw new Error('Download link unavailable')
+        saveAs(`/api/content/${originalToken}?download=true`)
+        return
+      }
 
       const response = await fetch(`/api/share/${token}/download-all-token`, {
         method: 'POST',
@@ -1154,21 +1198,13 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       }
 
       const { url } = await response.json()
-
-      const link = document.createElement('a')
-      link.href = url
-      link.download = ''
-      link.rel = 'noopener'
-      link.style.display = 'none'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-    } catch {
-      // Silently fail - user can retry
+      saveAs(url)
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : 'Download failed')
     } finally {
       setDownloadingAll(false)
     }
-  }, [downloadingAll, shareToken, token])
+  }, [downloadingAll, shareToken, token, project, fetchVideoTokenWithRetry])
 
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault()
@@ -1672,19 +1708,22 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     return (
       <>
       <div className="spotlight-bg-tr fixed inset-0 flex flex-col overflow-hidden">
-        {/* Grid view toolbar */}
-        {/* 7.1.3: transparent. This carried `bg-background/95` + a bottom
-            border, which painted a strip of the flat pre-2.5 #121212 across the
-            very top of the page while the spotlight ran underneath it — the
-            "bar left at the top" Dragos spotted after the rest was fixed. The
-            controls stay; only the slab they sat on is gone. */}
-        {/* 7.1.4: everything right-aligned, so the download sits top-right the
-            way "Download All" does on the folder share. It used to be split —
-            actions left, language right — which put the one button a client
-            looks for at the opposite end of the bar from where the other share
-            page puts it. */}
-        <div className="flex items-center justify-end gap-2 px-3 py-2 z-20 flex-shrink-0">
-          <div className="flex items-center gap-2" data-tutorial="grid-actions">
+        <div className="flex-1 overflow-y-auto">
+          {/* 7.1.5: the boxed layout the folder share uses, down to the same
+              container and the same title row. Until now this page ran edge to
+              edge with its controls pinned to the corners of the viewport, so
+              two share links from the same product opened two different-looking
+              pages — the last structural difference between them. */}
+          <div className="max-w-screen-xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-5">
+
+            {/* Title row. The folder share puts the folder name on the left and
+                its actions on the right; this page has no title to show — the
+                project name was removed in 7.1.3 as part of the old header — so
+                the language picker takes the left and the actions keep the
+                right, which holds the row's shape. */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <LanguageToggle />
+              <div className="flex items-center gap-2 flex-wrap" data-tutorial="grid-actions">
             {(() => {
               if (isGuest) return null
               // 6.11.0: counts clips, not approved clips.
@@ -1701,21 +1740,30 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               return (
                 <>
                   {showDownloadAll && (
-                    <button
+                    // 7.1.5: the same <Button size="sm"> the folder share uses,
+                    // rather than the hand-rolled classes this carried in 7.1.4.
+                    // "Looks like the folder page" is a promise that only holds
+                    // if it IS the folder page's button.
+                    <Button
+                      size="sm"
                       onClick={handleDownloadAll}
                       disabled={downloadingAll}
-                      className="h-9 px-3 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 active:scale-95 transition-colors flex items-center gap-1.5 disabled:opacity-50 text-sm font-medium"
+                      className="gap-1.5"
                     >
-                      {downloadingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {downloadingAll ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4" />
+                      )}
                       {/* 7.1.4: "Download All 1 Videos as ZIP" is what the
                           plural string produced for a share holding one clip.
                           One video gets its own wording. */}
-                      <span className="hidden sm:inline">
+                      <span>
                         {downloadableCount === 1
                           ? t('downloadVideo')
                           : t('downloadAllVideos', { count: downloadableCount })}
                       </span>
-                    </button>
+                    </Button>
                   )}
                   {showUpload && (
                     <ReverseShareUploadPanel
@@ -1727,25 +1775,38 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 </>
               )
             })()}
-          </div>
+                {/* Item count, worded exactly as the folder share words it. */}
+                {(() => {
+                  const itemCount = project.videosByName
+                    ? Object.keys(project.videosByName as Record<string, any[]>).length
+                    : 0
+                  return (
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {itemCount === 1 ? '1 item' : `${itemCount} items`}
+                    </span>
+                  )
+                })()}
+                {/* 7.1.5: a download that fails now says so. It used to fail
+                    into a silent catch, which is indistinguishable from a
+                    download that is merely slow. */}
+                {downloadError && (
+                  <span role="status" className="text-xs text-destructive">
+                    {downloadError}
+                  </span>
+                )}
+              </div>
+            </div>
 
-          {/* Right: language, tutorial. 3.2.6+: theme toggle removed —
-              the client share is dark-only, no light-mode switch. */}
-          <div className="flex items-center gap-2">
-            <LanguageToggle />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8" data-tutorial="video-grid">
-            <ThumbnailGrid
-              videosByName={effectiveVideosByName ?? project.videosByName}
-              thumbnailsByName={thumbnailsByName}
-              storyboardsByName={storyboardsByName}
-              thumbnailsLoading={thumbnailsLoading}
-              onVideoSelect={handleVideoSelect}
-              projectDescription={isGuest ? undefined : project.description}
-            />
+            <div data-tutorial="video-grid">
+              <ThumbnailGrid
+                videosByName={effectiveVideosByName ?? project.videosByName}
+                thumbnailsByName={thumbnailsByName}
+                storyboardsByName={storyboardsByName}
+                thumbnailsLoading={thumbnailsLoading}
+                onVideoSelect={handleVideoSelect}
+                projectDescription={isGuest ? undefined : project.description}
+              />
+            </div>
           </div>
           {/* 7.1.2: grid mode never had the "open in the full app" button —
               it was only wired into the player branch, so a project-level share

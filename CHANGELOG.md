@@ -14,6 +14,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.5] - 2026-08-26
+
+### Fixed
+
+- **A share holding one video downloaded a ZIP of one video, slowly.** The
+  button called the bulk-archive handler, which is right for "Download All" on a
+  folder and wrong for a single clip: the server built an archive nobody asked
+  for, the transfer was slow enough to look broken — it sat at 64KB "Resuming…"
+  — and what arrived was `<project>_all_videos.zip` instead of the film. A
+  single-clip share now takes the route the player takes: an `original` token
+  for the newest version, saved straight to disk. `allowAssetDownload` still
+  gates it, on the server as well as on the button.
+- **A failed download said nothing at all.** The handler ended in
+  `catch { // Silently fail - user can retry }`, which makes a broken download
+  look exactly like a slow one — the confusion this whole report started as. The
+  reason now appears beside the button.
+
+### Changed
+
+- **The share grid uses the folder share's layout.** Same boxed container, same
+  title row with the action and the item count on the right, same `1 item` /
+  `N items` wording. It had been running edge to edge with its controls pinned
+  to the corners of the viewport, so two links from the same product opened two
+  differently-shaped pages.
+- The download button is now the same `Button` component the folder share uses,
+  rather than the hand-rolled classes it carried in 7.1.4. "Looks like the
+  folder page" only holds if it is the folder page's button.
+
 ## [7.1.4] - 2026-08-25
 
 ### Changed
