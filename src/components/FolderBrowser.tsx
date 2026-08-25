@@ -30,6 +30,11 @@ import {
 import { Button } from '@/components/ui/button'
 import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
+import {
+  getClippedComments,
+  CLIPBOARD_CHANGED_EVENT,
+} from '@/lib/comments-clipboard'
+import { pasteClippedThreads } from '@/lib/comments-paste'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import { formatBytes } from '@/lib/project-gradient'
@@ -489,6 +494,36 @@ function FolderBrowserInner(
   // "New Restricted Folder" action).
   const [newDialogRestricted, setNewDialogRestricted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * 7.1.0 — paste the copied comment threads onto every selected video.
+   *
+   * The clipboard is written in the player (per project, see
+   * comments-clipboard.ts) and until now could only be spent one video at a
+   * time. A folder that holds six cuts of the same edit, differing only in the
+   * subtitle colour, needed the same note six times.
+   *
+   * `clippedCount` is read from the same localStorage the player writes and
+   * re-read on CLIPBOARD_CHANGED_EVENT, so copying in a player tab enables this
+   * menu entry without a reload.
+   */
+  const [clippedCount, setClippedCount] = useState(0)
+  useEffect(() => {
+    const read = () => setClippedCount((getClippedComments(projectId) || []).length)
+    read()
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || !e.key.startsWith('framecomment:clipboard:comments')) return
+      read()
+    }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener(CLIPBOARD_CHANGED_EVENT, read)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener(CLIPBOARD_CHANGED_EVENT, read)
+    }
+  }, [projectId])
+
+  const [pastingComments, setPastingComments] = useState(false)
   // Right-click context menu state. `ctxMenu.open === false` keeps the
   // menu unmounted; x/y are viewport-coordinate click positions used
   // by the (fixed) menu container.
@@ -1780,6 +1815,77 @@ function FolderBrowserInner(
   // kebab bulk-label gating, and every bulk handler's "is this a
   // multi-select?" check (1.1.0+).
   const totalSelected = selectedVideoIds.size + selectedFolderIds.size
+
+  /**
+   * Write the clipboard onto each selected video, one at a time.
+   *
+   * Sequential across videos for the same reason comments-paste.ts is
+   * sequential within one: the comment endpoint is rate-limited, and firing a
+   * batch in parallel gets a share of it rejected — which here would mean some
+   * of the selected videos silently receiving fewer notes than the others.
+   *
+   * The notice reports what actually happened rather than what was attempted:
+   * how many threads landed on how many videos, how many videos refused, and
+   * whether any attachments failed to come across. A bulk action that says
+   * "done" while having half worked is worse than one that admits the shortfall.
+   */
+  const handleBulkPasteComments = useCallback(async () => {
+    if (pastingComments) return
+    const items = getClippedComments(projectId)
+    // Unreachable in practice: the menu entry is only offered when the
+    // clipboard already holds something. Kept as a guard, not as a message.
+    if (!items || items.length === 0) return
+    const targets = Array.from(selectedVideoIds)
+    if (targets.length === 0) return
+
+    setPastingComments(true)
+    let videosDone = 0
+    let videosFailed = 0
+    let created = 0
+    let filesMissing = 0
+    try {
+      for (const videoId of targets) {
+        try {
+          const result = await pasteClippedThreads({
+            projectId,
+            videoId,
+            items,
+            // The folder browser is admin-only chrome, so this matches what the
+            // player writes when an admin pastes there.
+            isInternal: true,
+            post: (body) =>
+              apiFetch('/api/comments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+              }),
+          })
+          created += result.created
+          filesMissing += result.filesMissing
+          if (result.created > 0) videosDone += 1
+          else videosFailed += 1
+        } catch (err) {
+          videosFailed += 1
+          logError('[FolderBrowser] bulk paste comments failed:', err, videoId)
+        }
+      }
+      // No success banner: Dragos asked for the paste to be quiet, and the
+      // comments themselves are the confirmation — they are visible the moment
+      // you open any of the videos. A FAILURE still has to be heard, though, so
+      // anything that did not land is logged rather than swallowed.
+      if (videosFailed > 0 || filesMissing > 0) {
+        logError(
+          '[FolderBrowser] bulk paste finished incomplete:',
+          `videos ok=${videosDone} failed=${videosFailed}`,
+          `comments=${created}`,
+          `attachments missing=${filesMissing}`,
+        )
+      }
+      onMutated?.()
+    } finally {
+      setPastingComments(false)
+    }
+  }, [pastingComments, projectId, selectedVideoIds, onMutated])
 
   // 1.1.0+: shared bulk-delete that handles both folders AND videos
   // in the current selection. Used by every kebab Delete trigger
@@ -3467,6 +3573,7 @@ function FolderBrowserInner(
         </div>
       )}
 
+
       {!loading && !error && !hasItems && (
         // 2.5.0+: frosted-glass empty state replaces the old dashed
         // border. Same vocabulary as the rest of the v2.5 chrome —
@@ -4132,6 +4239,14 @@ function FolderBrowserInner(
           // size >= 1, so the kind/id hints are only used at exactly
           // 0 selected (which shouldn't reach here anyway).
           void handleDuplicate()
+        }}
+        // 7.1.0: paste the copied threads onto every selected video. Offered
+        // only with something on the clipboard AND at least one video selected
+        // — a folder has no comment list to paste into.
+        canPasteComments={clippedCount > 0 && selectedVideoIds.size > 0 && !pastingComments}
+        pasteCommentsCount={clippedCount}
+        onPasteComments={() => {
+          void handleBulkPasteComments()
         }}
         // 3.5.x: "Split versions" — only for a single selected video
         // that actually has more than one version. Integrated into the

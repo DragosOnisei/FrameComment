@@ -49,6 +49,19 @@ interface MessageBubbleProps {
     timestampMs?: number | null
   ) => void
   onDelete?: () => void
+  /**
+   * 7.1.0: hand this one thread to the project paste clipboard.
+   *
+   * The sidebar kebab copies EVERY comment on the video, which is the wrong
+   * granularity when a single note applies to the other cuts in the folder and
+   * the rest do not. Copy here now does both jobs: the plain text still goes to
+   * the system clipboard (for an email or a chat message, which is what it was
+   * always for) and the thread also becomes the thing Paste will write.
+   *
+   * The host owns the conversion and the storage key, so this is a callback
+   * rather than a direct write.
+   */
+  onCopyForPaste?: (comment: CommentWithReplies) => void
   /** Called when the user saves an edited version of this comment */
   onEdit?: (newContent: string) => Promise<void> | void
   /** Called when the user saves an edited reply (only used in main bubble) */
@@ -107,6 +120,7 @@ export default function MessageBubble({
   onReply,
   onSeekToTimecode,
   onDelete,
+  onCopyForPaste,
   onEdit,
   onEditReply,
   canEdit,
@@ -219,6 +233,10 @@ export default function MessageBubble({
   // Clipboard API when available (HTTPS / localhost) and falls back to a
   // hidden-textarea execCommand copy for insecure-origin / older browsers.
   const handleCopy = async () => {
+    // 7.1.0: the paste clipboard first, so it is populated even if the system
+    // clipboard write is refused (insecure origin, denied permission). The two
+    // are independent and the in-app one is the one Paste depends on.
+    onCopyForPaste?.(comment)
     const text = htmlToPlainText(comment.content)
     try {
       if (navigator?.clipboard?.writeText) {

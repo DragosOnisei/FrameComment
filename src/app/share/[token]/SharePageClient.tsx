@@ -6,11 +6,11 @@ import { useSearchParams, usePathname, useRouter } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
 import ShareOnboarding from '@/components/ShareOnboarding'
-import { detectLoggedInAdmin } from '@/lib/share-auth'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
+import ShareOpenInProjectBanner from '@/components/ShareOpenInProjectBanner'
 import ResizableSidebar from '@/components/ResizableSidebar'
 import { OTPInput } from '@/components/OTPInput'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -134,43 +134,19 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // onVideoStateChange. Used by ThumbnailReel to highlight the active row
   // in the version dropdown.
   const [activeVideoId, setActiveVideoId] = useState<string | undefined>(undefined)
-  // 3.8.x: seamless routing for a logged-in admin. If a valid admin
-  // session exists (token in localStorage), we send them into the FULL
-  // admin app for this content — where Back reveals sibling folders —
-  // instead of the limited client share. Guests (no token) never trigger
-  // this and stay on the share. We use a manual fetch (NOT apiFetch) so a
-  // 401 can't bounce a guest to /login via the refresh interceptor.
-  const [isLoggedInAdmin, setIsLoggedInAdmin] = useState(false)
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      // Refresh-then-session check: the access token is memory-only and
-      // gone on a fresh load, so we mint one from the persisted refresh
-      // token before asking /api/auth/session (see share-auth.ts).
-      const ok = await detectLoggedInAdmin()
-      if (alive && ok) setIsLoggedInAdmin(true)
-    })()
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  // Once we know it's a logged-in admin AND the project has loaded, send
-  // them into the admin app. We aim for the folder that holds the shared
-  // content (so Back reveals sibling folders); fall back to the project
-  // root when we can't resolve a folder.
-  useEffect(() => {
-    if (!isLoggedInAdmin || !project?.id) return
-    const vids = (project as any)?.videos as
-      | Array<{ id: string; folderId?: string | null }>
-      | undefined
-    const active = vids?.find((v) => v.id === activeVideoId) || vids?.[0]
-    const folderId = urlFolderId || active?.folderId || null
-    const target = folderId
-      ? `/admin/projects/${project.id}/folder/${folderId}`
-      : `/admin/projects/${project.id}`
-    router.replace(target)
-  }, [isLoggedInAdmin, project, activeVideoId, urlFolderId, router])
+  // 7.1.0: a signed-in viewer is no longer redirected off this page.
+  //
+  // 3.8.x through 7.0.1 detected an admin session here and immediately
+  // `router.replace()`d into the admin app, aiming at the folder holding the
+  // shared content. For a link scoped to ONE video that meant landing in a
+  // folder listing every video in it — and when a folder holds several
+  // near-identical cuts, the person who followed the link could no longer tell
+  // which one was shared with them. The link failed precisely by succeeding.
+  //
+  // The share now always shows what was shared. ShareOpenInProjectBanner offers
+  // the trip to the folder instead, and only to a session that has proved it can
+  // actually read this project — see the component for why authentication alone
+  // was the wrong test.
 
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
@@ -1757,6 +1733,23 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col select-none"
       style={{ height: '100dvh' }}
     >
+      {/* 7.1.0: the offer that replaced the redirect. Resolves the same target
+          the old `router.replace` computed — the folder holding the shared
+          content, falling back to the project root. */}
+      <ShareOpenInProjectBanner
+        projectId={project?.id}
+        folderId={
+          urlFolderId ||
+          ((project as any)?.videos as
+            | Array<{ id: string; folderId?: string | null }>
+            | undefined)?.find((v) => v.id === activeVideoId)?.folderId ||
+          ((project as any)?.videos as
+            | Array<{ id: string; folderId?: string | null }>
+            | undefined)?.[0]?.folderId ||
+          null
+        }
+      />
+
       {/* Thumbnail Reel - always visible, collapsible */}
         <ThumbnailReel
           videosByName={effectiveVideosByName ?? project.videosByName}

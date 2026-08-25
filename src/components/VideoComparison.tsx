@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl'
 import { Video } from '@prisma/client'
 import { X, ChevronDown, GitCompareArrows, Volume2, VolumeX, Film } from 'lucide-react'
 import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
+import { videoUploadMeta, formatUploadMetaLine } from '@/lib/video-upload-meta'
+import { useNowMs } from '@/lib/use-now'
 import VideoComparisonControls from './VideoComparisonControls'
 import VideoComparisonSlider from './VideoComparisonSlider'
 
@@ -66,6 +68,8 @@ export default function VideoComparison({
   onClose,
 }: VideoComparisonProps) {
   const t = useTranslations('videos')
+  // 7.1.0: drives the "(22 Hours ago)" tag on both version pickers.
+  const nowMs = useNowMs()
   // Sort versions by version number ascending so selectors are ordered logically
   const sorted = [...videoVersions].sort((a, b) => a.version - b.version)
 
@@ -303,6 +307,24 @@ export default function VideoComparison({
    * detail that makes a feature feel unfinished. Clicking the OTHER side means
    * "let me hear that one", so it un-mutes as well as switching.
    */
+  /**
+   * 7.1.0: in slider mode the audio follows the divider.
+   *
+   * Overlaid, the two cuts share one frame, so "which one am I listening to" has
+   * a natural answer: whichever one you are mostly looking at. Drag the divider
+   * right and version A fills more of the frame, so A is what you hear; drag it
+   * left and B takes over. A dead centre split is a tie, and a tie goes to the
+   * left — an arbitrary choice, but a fixed one, so the audio never flickers
+   * while the divider sits on 50.
+   *
+   * Mute is untouched by this. It is a separate state precisely so you can
+   * compare two grades in silence, and dragging the divider must not start
+   * playing sound at somebody.
+   */
+  const handleSliderPosition = useCallback((percent: number) => {
+    setActiveAudio(percent >= 50 ? 'A' : 'B')
+  }, [])
+
   const focusAudio = useCallback((side: 'A' | 'B') => {
     setActiveAudio((current) => {
       if (current === side) {
@@ -482,12 +504,43 @@ export default function VideoComparison({
     const closeOther = isA ? setShowSelectorB : setShowSelectorA
     const v = sorted[idx]
     const rawName = (v as any)?.originalFileName || v?.name || ''
+    // 7.1.0: who delivered this cut and when, the same line the player prints
+    // under the filename. Comparing two versions without it means comparing two
+    // filenames and guessing which one is the newer delivery — the exact
+    // question compare mode exists to answer. Same helper as ThumbnailReel, so
+    // the wording, the date format and the relative tag cannot drift apart.
+    const meta = videoUploadMeta(v, nowMs)
+    const metaLine = formatUploadMetaLine(meta)
     return (
       <div className="flex items-center justify-center gap-2 mb-2 px-2 min-w-0">
-        <span className={`h-2 w-2 rounded-full shrink-0 ${isA ? 'bg-sky-400' : 'bg-emerald-400'}`} />
-        <span className="text-xs text-white/70 truncate max-w-[55%]" title={rawName}>
-          {stripExt(rawName) || '—'}
-        </span>
+        {/* 7.1.0: the sky/emerald dot is gone from both compare modes. It was
+            added to keep the A and B sides identifiable, which the version
+            labels and now the uploader line already do far better — the dot was
+            a colour you had to learn, next to text that simply says which cut
+            this is. */}
+        <div className="flex flex-col items-center min-w-0 leading-tight max-w-[55%]">
+          <span className="text-xs text-white/70 truncate max-w-full" title={rawName}>
+            {stripExt(rawName) || '—'}
+          </span>
+          {metaLine && (
+            <span
+              className="text-[10px] text-white/45 truncate max-w-full"
+              title={
+                meta.uploaderName
+                  ? `Uploaded by ${meta.uploaderName} · ${meta.uploadedAtLabel}`
+                  : `Uploaded ${meta.uploadedAtLabel}`
+              }
+            >
+              {meta.uploaderName ? (
+                <>
+                  <span className="text-white/60">{meta.uploaderName}</span>
+                  {' · '}
+                </>
+              ) : null}
+              {metaLine}
+            </span>
+          )}
+        </div>
         <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
@@ -753,7 +806,45 @@ export default function VideoComparison({
                   posterA={(versionA as any)?.thumbnailUrl}
                   posterB={(versionB as any)?.thumbnailUrl}
                   onLoadedMetadata={handleLoadedMetadata}
+                  onPositionChange={handleSliderPosition}
                 />
+
+                {/* 7.1.0: the same audio badges side-by-side has, one per side.
+                    Rendered here rather than inside the slider because the
+                    slider owns a single frame, not two panes — and because they
+                    must sit above its divider (z-20).
+
+                    Both handlers stop propagation: the slider container treats a
+                    mousedown anywhere as the start of a drag, so without this a
+                    click on the badge would also yank the divider to the badge's
+                    x position. */}
+                {(['A', 'B'] as const).map((side) => {
+                  const silent = mutedFor(side)
+                  const live = activeAudio === side && !silent
+                  return (
+                    <button
+                      key={side}
+                      type="button"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        focusAudio(side)
+                      }}
+                      aria-label={audioBadgeLabel(side)}
+                      title={audioBadgeLabel(side)}
+                      className={`absolute top-2 z-30 h-8 w-8 rounded-full flex items-center justify-center transition-colors ${
+                        side === 'A' ? 'left-2' : 'right-2'
+                      } ${
+                        live
+                          ? 'bg-red-500 text-white shadow-lg'
+                          : 'bg-black/50 text-white/60 ring-1 ring-white/15 hover:bg-black/70 hover:text-white'
+                      }`}
+                    >
+                      {silent ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}

@@ -958,7 +958,10 @@
     "maxFilesReached": "Maximum files reached",
     "dragDropFiles": "Drop files here or click to browse",
     "supportedFileTypes": "Images, audio, video, documents, subtitles, project files, and archives",
-    "allFilesUploaded": "All files submitted successfully"
+    "allFilesUploaded": "All files submitted successfully",
+    "signedInViewingClientPage": "You're signed in. This is the client view of what was shared with you.",
+    "openInProjectFolder": "Open in project folder",
+    "openInProject": "Open in project"
   },
   "settings": {
     "title": "Global Settings",

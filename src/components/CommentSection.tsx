@@ -21,8 +21,10 @@ import {
   getClippedComments,
   hasClippedComments,
   setClippedComments,
+  CLIPBOARD_CHANGED_EVENT,
   type ClippedComment,
 } from '@/lib/comments-clipboard'
+import { pasteClippedThreads } from '@/lib/comments-paste'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -1342,8 +1344,16 @@ export default function CommentSection({
       if (!e.key || !e.key.startsWith('framecomment:clipboard:comments')) return
       setHasClipboardForProject(hasClippedComments(projectId))
     }
+    // 7.1.0: same reason as in PlayerTopMenu — a clipboard written by the OTHER
+    // menu in this same tab produces no `storage` event, so without this the two
+    // Paste buttons disagreed about whether there was anything to paste.
+    const onChanged = () => setHasClipboardForProject(hasClippedComments(projectId))
     window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
+    window.addEventListener(CLIPBOARD_CHANGED_EVENT, onChanged)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener(CLIPBOARD_CHANGED_EVENT, onChanged)
+    }
   }, [projectId])
 
   /**
@@ -1432,84 +1442,24 @@ export default function CommentSection({
       source?: { videoId: string; versionLabel: string },
     ) => {
       if (!selectedVideoId) throw new Error('No video selected')
-      let created = 0
-      // 6.22.0: attachments the source claimed to have, versus the ones that
-      // actually made it. They differ when a source comment has been deleted
-      // since the copy, and the difference is worth saying out loud.
-      let filesExpected = 0
-      let filesCopied = 0
-      for (const item of items) {
-        const body: Record<string, unknown> = {
-          projectId,
-          videoId: selectedVideoId,
-          timecode: item.timecode,
-          content: item.content,
-          isInternal: !!isAdminView,
-          // 3.8.x: flag pasted comments so the thread shows a "Copied" tag.
-          isCopied: true,
-        }
-        if (item.timecodeEnd) body.timecodeEnd = item.timecodeEnd
-        if (typeof item.timestampMs === 'number') body.timestampMs = item.timestampMs
-        if (item.authorName) body.authorName = item.authorName
-        // 6.22.0: the drawing rides along as data; the files by reference.
-        if (item.annotations) body.annotations = item.annotations
-        if (item.sourceCommentId && (item.attachmentCount || 0) > 0) {
-          body.copyAssetsFromCommentId = item.sourceCommentId
-          filesExpected += item.attachmentCount || 0
-        }
-        const res = await postComment(body)
-        if (!res.ok) continue
-        created += 1
-        filesCopied += Number(res.headers.get('X-Attachments-Copied') || 0)
-
-        // 6.16.0: replies ride along with their parent.
-        const replies = Array.isArray(item.replies) ? item.replies : []
-        if (replies.length === 0) continue
-        // The POST body is the whole project's comments (every caller relies on
-        // that), so the new row's id travels in a header instead — see the
-        // route. Without it we would be guessing which of N rows we just made.
-        const parentId = res.headers.get('X-Comment-Id')
-        if (!parentId) {
-          // Older server, or the header was stripped by a proxy. Post the
-          // parent and stop rather than re-adding the answers as orphaned
-          // top-level notes — that shape is what this feature exists to fix.
-          continue
-        }
-        for (const reply of replies) {
-          const replyBody: Record<string, unknown> = {
-            projectId,
-            videoId: selectedVideoId,
-            // A reply has no timeline position of its own; it inherits the
-            // parent's. Sending the parent's timecode keeps the server's
-            // validation happy without inventing a second marker.
-            timecode: item.timecode,
-            content: reply.content,
-            isInternal: !!isAdminView,
-            isCopied: true,
-            parentId,
-          }
-          if (reply.authorName) replyBody.authorName = reply.authorName
-          if (reply.annotations) replyBody.annotations = reply.annotations
-          if (reply.sourceCommentId && (reply.attachmentCount || 0) > 0) {
-            replyBody.copyAssetsFromCommentId = reply.sourceCommentId
-            filesExpected += reply.attachmentCount || 0
-          }
-          if (source) {
-            replyBody.sourceVideoId = source.videoId
-            replyBody.sourceVersionLabel = source.versionLabel
-          }
-          const replyRes = await postComment(replyBody)
-          if (replyRes.ok) {
-            created += 1
-            filesCopied += Number(replyRes.headers.get('X-Attachments-Copied') || 0)
-          }
-        }
-      }
+      // 7.1.0: the mechanics moved to src/lib/comments-paste.ts, so the folder
+      // browser's "paste onto every selected video" runs exactly this code
+      // instead of a second copy of it. What stays here is what only this
+      // component can do: refresh the list it is showing, and tell the rest of
+      // the page the comment set changed.
+      const result = await pasteClippedThreads({
+        projectId,
+        videoId: selectedVideoId,
+        items,
+        isInternal: !!isAdminView,
+        post: postComment,
+        source,
+      })
       await fetchComments()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('commentDeleted'))
       }
-      return { created, filesCopied, filesMissing: Math.max(0, filesExpected - filesCopied) }
+      return result
     },
     [projectId, selectedVideoId, isAdminView, postComment, fetchComments],
   )
@@ -2210,6 +2160,16 @@ export default function CommentSection({
                 return (
                   <div key={comment.id}>
                     <MessageBubble
+                      /* 7.1.0: per-comment Copy also loads the paste
+                         clipboard, so one note can be sent to other videos
+                         without copying the whole list. Same `toClipped`
+                         shape the sidebar kebab writes, so Paste — in the
+                         player or on a folder selection — cannot tell the
+                         two apart. */
+                      onCopyForPaste={(c) => {
+                        setClippedComments(projectId, toClipped([c]))
+                        setHasClipboardForProject(true)
+                      }}
                       comment={comment}
                       isReply={false}
                       onReply={(mentionName) => {

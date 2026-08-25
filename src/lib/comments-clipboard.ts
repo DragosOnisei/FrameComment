@@ -89,10 +89,44 @@ function hasStorage(): boolean {
   }
 }
 
+/**
+ * 7.1.0: every change to the clipboard announces itself.
+ *
+ * Two independent menus offer Paste — the sidebar kebab (CommentsKebabMenu, fed
+ * by CommentSection) and the title-bar kebab (PlayerTopMenu) — and each kept its
+ * own copy of "is there anything to paste". Each refreshed that copy on mount,
+ * on cross-tab `storage` events, and, in the title bar only, on the
+ * copy/paste bridge event. A `storage` event never fires in the tab that wrote
+ * the value, and the bridge event only fires when the copy was STARTED from the
+ * title bar. So copying from the sidebar — the natural place to copy, since that
+ * is where the comments are — left the title bar believing the clipboard was
+ * still empty, and its Paste stayed greyed for the rest of the page's life.
+ *
+ * That reads as "you cannot paste a comment into a different video", which was
+ * never true: the clipboard has been keyed per PROJECT since it was written, the
+ * paste posts to whichever video is open, and the server checks attachments
+ * against the project too. Nothing was scoped to a version stack; only the
+ * button's enabled state was wrong.
+ *
+ * Announcing from the one place that performs the write means no future caller
+ * has to remember to.
+ */
+export const CLIPBOARD_CHANGED_EVENT = 'commentClipboard:changed'
+
+function announceChange(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.dispatchEvent(new CustomEvent(CLIPBOARD_CHANGED_EVENT))
+  } catch {
+    // Nothing to recover from — a browser this old would have failed earlier.
+  }
+}
+
 export function setClippedComments(projectId: string, comments: ClippedComment[]): void {
   if (!hasStorage()) return
   try {
     window.localStorage.setItem(keyFor(projectId), JSON.stringify(comments))
+    announceChange()
   } catch {
     // Quota exceeded or storage disabled — silently drop.
   }
@@ -115,6 +149,7 @@ export function clearClippedComments(projectId: string): void {
   if (!hasStorage()) return
   try {
     window.localStorage.removeItem(keyFor(projectId))
+    announceChange()
   } catch {
     // Ignore
   }

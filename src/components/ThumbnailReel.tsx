@@ -4,7 +4,9 @@ import Image from 'next/image'
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { ArrowLeft, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Film, GitCompareArrows, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
-import { cn, formatDateTime } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { videoUploadMeta } from '@/lib/video-upload-meta'
+import { useNowMs } from '@/lib/use-now'
 import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -73,6 +75,8 @@ export default function ThumbnailReel({
   activeVersionsTokenized,
 }: ThumbnailReelProps) {
   const tShare = useTranslations('share')
+  // 7.1.0: drives the "(22 Hours ago)" tag under the title.
+  const nowMs = useNowMs()
   const tComments = useTranslations('comments')
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // 3.2.x: click-and-drag (mouse) horizontal panning of the version
@@ -367,48 +371,19 @@ export default function ThumbnailReel({
       (activeVideo?.name as string | undefined) ||
       ''
 
-  // 1.2.0+: surface the active version's upload timestamp directly
-  // under the title so the reviewer can see how long passed between
-  // v1, v2, v3… `createdAt` is the row's insertion time on Video,
-  // which is when the original file was uploaded.
-  const activeUploadedAt: Date | null = activeVideo?.createdAt
-    ? (activeVideo.createdAt instanceof Date
-        ? activeVideo.createdAt
-        : new Date(activeVideo.createdAt as any))
-    : null
-  const uploadedAtLabel =
-    activeUploadedAt && !isNaN(activeUploadedAt.getTime())
-      ? formatDateTime(activeUploadedAt)
-      : null
-  // 6.3.0: who delivered this version. Reads whatever the payload carries —
-  // the admin player has the uploader relation, the client share view does
-  // not, so on a share link the line stays exactly as it was (date only).
-  const uploaderName: string | null =
-    (activeVideo as any)?.createdBy?.name ||
-    (activeVideo as any)?.createdBy?.username ||
-    (activeVideo as any)?.createdBy?.email ||
-    (activeVideo as any)?.uploaderName ||
-    null
-  // Compact relative-time tag ("Just now", "5m ago", "2h ago",
-  // "3d ago", "1mo ago", "2y ago"). Frame.io-style — keeps the line
-  // short even when the timestamp is years old.
-  const relativeUploadedLabel = (() => {
-    if (!activeUploadedAt || isNaN(activeUploadedAt.getTime())) return null
-    const diffMs = Date.now() - activeUploadedAt.getTime()
-    if (diffMs < 0) return 'Just now'
-    const sec = Math.floor(diffMs / 1000)
-    if (sec < 45) return 'Just now'
-    const min = Math.floor(sec / 60)
-    if (min < 60) return `${min} ${min === 1 ? 'Minute' : 'Minutes'} ago`
-    const hr = Math.floor(min / 60)
-    if (hr < 24) return `${hr} ${hr === 1 ? 'Hour' : 'Hours'} ago`
-    const day = Math.floor(hr / 24)
-    if (day < 30) return `${day} ${day === 1 ? 'Day' : 'Days'} ago`
-    const mo = Math.floor(day / 30)
-    if (mo < 12) return `${mo} ${mo === 1 ? 'Month' : 'Months'} ago`
-    const yr = Math.floor(day / 365)
-    return `${yr} ${yr === 1 ? 'Year' : 'Years'} ago`
-  })()
+  // 1.2.0+: the active version's upload timestamp under the title, so the
+  // reviewer can see how long passed between v1, v2, v3…
+  //
+  // 7.1.0: the derivation lives in src/lib/video-upload-meta.ts because the
+  // comparison overlay prints the same line, and two copies of "the same line"
+  // is how they stop being the same. The clock comes from useNowMs rather than
+  // a Date.now() in render — see that hook for why, and note the side effect:
+  // the relative tag now ticks over on its own instead of freezing until some
+  // unrelated state change re-rendered the bar.
+  const { uploadedAtLabel, uploaderName, relativeUploadedLabel } = videoUploadMeta(
+    activeVideo,
+    nowMs,
+  )
 
   return (
     // 3.2.x: z-40 (was z-20). `relative` + z-index here creates a
@@ -481,8 +456,15 @@ export default function ThumbnailReel({
                   // reel opens from the Vx chip to its right instead, so
                   // this pill has no click behaviour and a default
                   // cursor.
+                  // 7.1.0: no surface behind the title, matching the compare
+                  // overlay — which is where Dragos saw it read better. It also
+                  // stops the title claiming to be a control: this element has
+                  // had no click behaviour since 3.2.x (the version reel opens
+                  // from the Vx chip), yet it wore the same glass pill as every
+                  // button beside it. The box metrics stay — h-9 keeps it
+                  // aligned with the buttons on either side.
                   "flex items-center gap-2 min-w-0 px-3 h-9 rounded-lg max-w-[40vw] sm:max-w-[50vw]",
-                  "bg-white/[0.06] ring-1 ring-white/10 cursor-default"
+                  "cursor-default"
                 )}
                 title={displayedHeaderName || undefined}
               >

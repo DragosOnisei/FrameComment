@@ -13,6 +13,15 @@ interface VideoComparisonSliderProps {
   posterA?: string
   posterB?: string
   onLoadedMetadata: () => void
+  /**
+   * 7.1.0: report the divider's position, 0-100, left to right.
+   *
+   * The parent uses it to decide which side is audible: whichever version
+   * occupies more of the frame is the one you are listening to. The position
+   * lives here because the drag does, so it is pushed up rather than lifted out
+   * — the slider stays in charge of its own gesture.
+   */
+  onPositionChange?: (percent: number) => void
 }
 
 export default function VideoComparisonSlider({
@@ -25,10 +34,18 @@ export default function VideoComparisonSlider({
   posterA,
   posterB,
   onLoadedMetadata,
+  onPositionChange,
 }: VideoComparisonSliderProps) {
   const [sliderPosition, setSliderPosition] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Fires on mount too, which is deliberate: the initial 50% has to establish
+  // the starting audio side rather than leaving it to whatever the parent
+  // happened to default to.
+  useEffect(() => {
+    onPositionChange?.(sliderPosition)
+  }, [sliderPosition, onPositionChange])
 
   const updatePosition = useCallback((clientX: number) => {
     if (!containerRef.current) return

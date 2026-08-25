@@ -14,6 +14,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.0] - 2026-08-25
+
+### Added
+
+- **A comment can be pasted onto other videos, including several at once.** A
+  folder often holds near-identical cuts of one edit — the same grade with a
+  different subtitle colour — and a note about the edit applies to all of them.
+  Select the videos in the folder, right-click, and the copied threads are
+  written onto each one.
+  - Copy on a single comment now feeds that clipboard too. It still puts the
+    comment's text on the system clipboard, as it always did, but the thread
+    also becomes what Paste will write — so one note can travel without copying
+    the whole list, which was the only option before.
+  - Pasting runs one video at a time on purpose. The comment endpoint is
+    rate-limited, and a parallel batch would have some of it refused, which here
+    would mean a few of the selected videos quietly receiving fewer notes than
+    the rest.
+- **Compare mode says who delivered each version and when**, under the
+  filename, in both the side-by-side and the overlaid layout — the same line the
+  player has always shown. Comparing two cuts without it meant comparing two
+  filenames and guessing which was the newer delivery, which is the question
+  compare mode exists to answer.
+- **In the overlaid comparison the sound follows the divider.** Drag it right
+  and the left version fills more of the frame, so the left version is what you
+  hear; drag it left and the right one takes over. A dead-centre split goes to
+  the left, so the audio never flickers while the divider sits on the middle.
+  Both sides carry the same audio badge the side-by-side layout has, and mute
+  stays independent — dragging the divider never starts playing sound at you.
+
+### Fixed
+
+- **"Paste comments" was greyed out on any video other than the one you copied
+  from.** Nothing was ever restricted to a version stack: the clipboard has been
+  per-project since it was written, the paste posts to whichever video is open,
+  and the server checks attachments against the project. Only the button's
+  enabled state was wrong.
+  - Two menus offer Paste — the sidebar kebab and the title-bar kebab — and each
+    kept its own copy of "is there anything to paste". The title bar refreshed
+    that copy on mount, on cross-tab `storage` events, and on a bridge event
+    fired only when the copy STARTED from the title bar. A `storage` event never
+    fires in the tab that wrote the value, so copying from the sidebar — the
+    natural place, since that is where the comments are — left the title bar
+    believing the clipboard was empty for the rest of the page's life. The
+    clipboard now announces its own changes and both menus listen.
+- **A share link no longer takes a signed-in viewer somewhere else.** Following
+  a link to one video used to drop anyone with a session into the admin folder
+  listing every video in it, so when a folder held several near-identical cuts
+  the person who followed the link could no longer tell which one had been
+  shared with them. The link now always shows what was shared; a banner offers
+  the trip to the folder instead.
+  - It also checks that the session can actually read the project, which the old
+    redirect did not. Someone signed into a different organisation was being sent
+    into a project their session cannot open, landing on a refused or empty page
+    — and the offer would have confirmed to an outsider that the project exists.
+- **The relative upload time stopped going stale.** "5 Minutes ago" was computed
+  while rendering, so it only changed when something else re-rendered the title
+  bar; a player left open kept the same figure for an hour. It now refreshes on
+  its own.
+
+### Changed
+
+- The title in the player has no surface behind it, matching the comparison
+  overlay. It also stops the title claiming to be a control — the element has
+  had no click behaviour since 3.2.x, the version reel opens from the version
+  chip, yet it wore the same glass pill as the buttons beside it.
+- The coloured dot beside each name in compare mode is gone. It marked which
+  side was which, a job the version label and the new uploader line do without
+  asking anyone to learn a colour.
+- A bulk paste no longer reports a summary. The pasted comments are the
+  confirmation, visible on opening any of the videos. Anything that did NOT land
+  is still recorded in the log rather than swallowed.
+
 ## [7.0.1] - 2026-08-24
 
 ### Fixed

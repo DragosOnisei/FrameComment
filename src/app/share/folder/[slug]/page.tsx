@@ -14,8 +14,8 @@ import {
 import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
+import ShareOpenInProjectBanner from '@/components/ShareOpenInProjectBanner'
 import { logError } from '@/lib/logging'
-import { detectLoggedInAdmin } from '@/lib/share-auth'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 import { shouldDownloadAsFiles } from '@/lib/download-mode'
@@ -152,28 +152,14 @@ function PublicFolderSharePageInner() {
   // 3.8.x: seamless routing — a logged-in admin opening a folder share
   // link is sent into the FULL admin folder view (Back reveals sibling
   // folders) instead of the limited client share. Guests (no token)
-  // stay on the share. Manual fetch (not apiFetch) so a 401 can't bounce
-  // a guest to /login.
-  const [isLoggedInAdmin, setIsLoggedInAdmin] = useState(false)
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      // Refresh-then-session check: the access token is memory-only and
-      // gone on a fresh load, so we mint one from the persisted refresh
-      // token before asking /api/auth/session (see share-auth.ts).
-      const ok = await detectLoggedInAdmin()
-      if (alive && ok) setIsLoggedInAdmin(true)
-    })()
-    return () => {
-      alive = false
-    }
-  }, [])
-  useEffect(() => {
-    if (!isLoggedInAdmin || !data?.folder) return
-    router.replace(
-      `/admin/projects/${data.folder.projectId}/folder/${data.folder.id}`,
-    )
-  }, [isLoggedInAdmin, data?.folder, router])
+  // 7.1.0: no longer redirects a signed-in viewer off the share.
+  //
+  // The folder share behaved like the per-video one: detect a session, then
+  // `router.replace()` into the admin folder view. Following a link and being
+  // taken somewhere else is disorienting even when the destination is richer,
+  // so the trip is now offered rather than taken — see
+  // ShareOpenInProjectBanner, which also checks that the session can actually
+  // read this project instead of merely that somebody is logged in.
   const [authMode, setAuthMode] = useState<AuthMode | null>(null)
   const [needsPassword, setNeedsPassword] = useState(false)
   const [password, setPassword] = useState('')
@@ -612,6 +598,11 @@ function PublicFolderSharePageInner() {
     // constraint so cards still align with the rest of the page.
     <div className="spotlight-bg-tr min-h-screen">
       <div className="max-w-screen-xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-5">
+        {/* 7.1.0: the offer that replaced the redirect. */}
+        <ShareOpenInProjectBanner
+          projectId={data?.folder?.projectId}
+          folderId={data?.folder?.id}
+        />
         {/* Header: in-scope breadcrumb + optional Back button.
             1.4.x+: the project title used to be rendered above as a
             hyperlink to /share/<projectSlug>, which let anyone with a

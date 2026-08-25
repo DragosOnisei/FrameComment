@@ -18,7 +18,7 @@ import { apiFetch } from '@/lib/api-client'
 import { copyToClipboard } from '@/lib/clipboard'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import { formatBytes } from '@/lib/video-qualities-format'
-import { hasClippedComments } from '@/lib/comments-clipboard'
+import { hasClippedComments, CLIPBOARD_CHANGED_EVENT } from '@/lib/comments-clipboard'
 import { ConfirmModal } from './ConfirmModal'
 import { ShareModal } from './ShareModal'
 
@@ -213,12 +213,17 @@ export default function PlayerTopMenu({
     }
     window.addEventListener('storage', onStorage)
     window.addEventListener('commentClipboard:result', recheck as EventListener)
+    // 7.1.0: the clipboard itself now says when it changed. `storage` only
+    // covers other tabs and the bridge event only covers copies started from
+    // THIS menu, so a copy made in the sidebar used to leave Paste greyed here.
+    window.addEventListener(CLIPBOARD_CHANGED_EVENT, recheck as EventListener)
     return () => {
       window.removeEventListener('storage', onStorage)
       window.removeEventListener(
         'commentClipboard:result',
         recheck as EventListener,
       )
+      window.removeEventListener(CLIPBOARD_CHANGED_EVENT, recheck as EventListener)
     }
   }, [projectId])
 

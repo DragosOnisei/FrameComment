@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import {
   ArrowUp,
   ArrowUpFromLine,
+  ClipboardPaste,
   Copy,
   Download,
   FolderUp,
@@ -73,6 +74,21 @@ export interface FolderContextMenuProps {
   /** 1.1.0+: real-file Duplicate. Creates a copy of every selected
    *  item in the current folder with a `(1)`, `(2)`… suffix. */
   onBulkDuplicate?: () => void
+  /**
+   * 7.1.0: write the copied comment threads onto every selected video.
+   *
+   * A folder often holds several near-identical cuts of one edit — same grade,
+   * different subtitle colour — and a note about the edit applies to all of
+   * them. Before this, saying it once meant opening each video in turn and
+   * pasting there. Shown only when the project clipboard actually holds
+   * something and at least one VIDEO is selected; pasting comments onto a
+   * folder means nothing.
+   */
+  canPasteComments?: boolean
+  /** Threads waiting on the clipboard — shown in the label so the click is not
+   *  a guess about how much is about to be written. */
+  pasteCommentsCount?: number
+  onPasteComments?: () => void
   /** 3.5.x: Split versions on a single selected video that has >1
    *  version. Shown only when `canSplitVersions` is true (single
    *  multi-version video selected). */
@@ -108,6 +124,9 @@ export default function FolderContextMenu({
   onBulkShare,
   onBulkRename,
   onBulkDuplicate,
+  canPasteComments = false,
+  pasteCommentsCount = 0,
+  onPasteComments,
   canSplitVersions = false,
   onSplitVersions,
   canRegenerateThumbnail = false,
@@ -259,6 +278,17 @@ export default function FolderContextMenu({
             }
             onClick={onBulkDuplicate}
           />
+          {canPasteComments && (
+            <Row
+              icon={<ClipboardPaste className="w-4 h-4" />}
+              label={
+                singleTarget
+                  ? `Paste ${pasteCommentsCount} comment${pasteCommentsCount === 1 ? '' : 's'}`
+                  : `Paste ${pasteCommentsCount} comment${pasteCommentsCount === 1 ? '' : 's'} to ${bulkSelectionCount} videos`
+              }
+              onClick={onPasteComments}
+            />
+          )}
           {singleTarget && (
             <Row
               icon={<Pencil className="w-4 h-4" />}
