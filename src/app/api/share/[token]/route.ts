@@ -12,7 +12,7 @@ import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logMessage } from '@/lib/logging'
-import { verifyVideoShareName } from '@/lib/share-video-sig'
+import { verifyVideoShareName, verifyVideoShareStack } from '@/lib/share-video-sig'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 export const runtime = 'nodejs'
 
@@ -191,12 +191,52 @@ export async function GET(
     // without `v` / `sig`.
     const singleVideoName = (request.nextUrl.searchParams.get('v') || '').trim()
     const singleVideoSig = (request.nextUrl.searchParams.get('sig') || '').trim()
+    /**
+     * 7.1.8: the stack signature, preferred over the name one.
+     *
+     * A stack takes the name of its newest delivery, so uploading a new cut
+     * renames every row and a link minted for the old name matches nothing —
+     * after which the block below served the whole project and the reviewer got
+     * a grid instead of the clip they were sent. `stackId` is the row's real
+     * identity and nothing renames it.
+     *
+     * Links minted before this release carry only the name signature and are
+     * still honoured, unchanged, further down.
+     */
+    const singleStackId = (request.nextUrl.searchParams.get('stack') || '').trim()
+    const singleStackSig = (request.nextUrl.searchParams.get('ssig') || '').trim()
+    const stackScopeActive =
+      singleStackId.length > 0 &&
+      singleStackSig.length > 0 &&
+      verifyVideoShareStack(token, singleStackId, singleStackSig)
+
     const singleVideoScopeActive =
+      // Skip the name path entirely once the stack has already scoped this —
+      // otherwise a stale name would "fail to match" inside an already-correct
+      // set and trip the widen-to-everything fallback.
+      !stackScopeActive &&
       singleVideoName.length > 0 &&
       singleVideoSig.length > 0 &&
       verifyVideoShareName(token, singleVideoName, singleVideoSig)
 
-    const videosSanitizedBase = project.videos.map((video: any) => ({
+    // 7.1.8: narrow to the signed stack BEFORE sanitising. `stackId` is not in
+    // the sanitised payload (and adding it would change how the client groups
+    // versions), so the filter has to happen on the raw rows. A stack that no
+    // longer exists falls through to the unscoped list rather than serving an
+    // empty page — the same choice 6.2.1 made, and it is logged either way.
+    const rawVideosForShare = (() => {
+      if (!stackScopeActive) return project.videos as any[]
+      const scoped = (project.videos as any[]).filter(
+        (v: any) => v.stackId === singleStackId,
+      )
+      if (scoped.length > 0) return scoped
+      logMessage(
+        `[share] stack scope "${singleStackId}" matches no video on ${token} — the stack was deleted; serving the project instead of an empty page`,
+      )
+      return project.videos as any[]
+    })()
+
+    const videosSanitizedBase = rawVideosForShare.map((video: any) => ({
       id: video.id,
       name: video.name,
       version: video.version,

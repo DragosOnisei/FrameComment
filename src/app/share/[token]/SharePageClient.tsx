@@ -1654,8 +1654,30 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // as a jarring flash of "all videos" between the share link and
   // the requested clip. The actual state still settles via the
   // effect; this is purely a guard against the in-between frame.
+  /**
+   * 7.1.8: a link scoped to one video opens that video, full stop.
+   *
+   * The old test was "does the `?video=` name exist in the payload", which
+   * stops being true the moment a new cut renames the stack — and then this
+   * page fell back to the grid, showing a client a tile to click instead of the
+   * clip they were sent. The link carries a signature, so `isSingleVideoShare`
+   * knows what kind of link it is regardless of whether the name still
+   * resolves; when the server has scoped the payload down to a single group,
+   * that group IS the video the link was for.
+   *
+   * Two conditions rather than one: the name match still wins when it works
+   * (it picks the right group in a multi-group payload), and the scoped-single
+   * case covers the rest.
+   */
+  const singleScopedGroupName = (() => {
+    if (!isSingleVideoShare) return null
+    const keys = Object.keys(
+      (project.videosByName as Record<string, any[]> | undefined) ?? {},
+    )
+    return keys.length === 1 ? keys[0] : null
+  })()
   const targetingSpecificVideo = !!(
-    urlVideoName && project.videosByName?.[urlVideoName]
+    (urlVideoName && project.videosByName?.[urlVideoName]) || singleScopedGroupName
   )
   const effectiveViewState: 'grid' | 'player' = targetingSpecificVideo
     ? 'player'

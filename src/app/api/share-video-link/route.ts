@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
-import { signVideoShareName } from '@/lib/share-video-sig'
+import { signVideoShareName, signVideoShareStack } from '@/lib/share-video-sig'
 import { safeParseBody } from '@/lib/validation'
 import { getAppUrl } from '@/lib/url'
 import { z } from 'zod'
@@ -53,6 +53,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
+    /**
+     * 7.1.8: bind the link to the stack as well as to the name.
+     *
+     * The name signature stays, so links already sent out keep resolving the
+     * way they always did. The stack signature is what the share route prefers,
+     * and it is what makes the link survive the next upload: a stack takes the
+     * name of its newest delivery, so uploading a new cut used to rename every
+     * row and leave the old link matching nothing — at which point the reviewer
+     * got the whole project's grid instead of the clip.
+     *
+     * Newest row wins the lookup because that is the row whose name is the
+     * group's display name, which is what the caller passed us.
+     */
+    let stackId: string | null = null
+    try {
+      const row = await prisma.video.findFirst({
+        where: { projectId, name: videoName },
+        orderBy: { version: 'desc' },
+        select: { stackId: true },
+      })
+      stackId = (row as any)?.stackId ?? null
+    } catch {
+      // A link with only the name signature is still a working link.
+    }
+
     const sig = signVideoShareName(project.slug, videoName)
     const params = new URLSearchParams({
       // `video` is the existing pre-select param — we keep using it so
@@ -61,6 +86,10 @@ export async function POST(request: NextRequest) {
       v: videoName, // signed param name kept short
       sig,
     })
+    if (stackId) {
+      params.set('stack', stackId)
+      params.set('ssig', signVideoShareStack(project.slug, stackId))
+    }
     if (folderId) params.set('folderId', folderId)
 
     // 2.2.1+: use the configured `appDomain` from Settings → Branding

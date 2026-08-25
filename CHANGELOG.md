@@ -14,6 +14,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.8] - 2026-08-26
+
+### Fixed
+
+- **A share link for one video opens that video.** It was supposed to already,
+  and usually did — until a new cut was uploaded over the shared clip. A version
+  stack takes the name of its newest delivery, so that upload renamed every row
+  in the stack, and the link, which was signed against the OLD name, matched
+  nothing. The share route then served the whole project rather than an empty
+  page, and the reviewer landed on a grid of tiles instead of the film they were
+  sent.
+  - Links now carry a second signature bound to the stack's id, which nothing
+    renames, and the share route prefers it. `CLAUDE.md` has warned since the
+    6.0.x bug family not to infer stack membership from names; this signature
+    was still doing exactly that.
+  - Links already in a client's inbox keep working. They carry only the old name
+    signature, which is still honoured on the same path it always was — the
+    stack check simply runs first when a link has one.
+  - The player also opens now even when the name in the URL has gone stale: a
+    link that says it is scoped to one video, on a payload the server has scoped
+    to one video, is that video. The page used to insist the URL's name match a
+    group key before it would show the player.
+  - **This closes a leak, not only an annoyance.** The widen-to-everything
+    fallback meant a link cryptographically scoped to a single clip quietly
+    became a link to the whole project the moment a new version landed. On a
+    project holding one video that was invisible; on a project holding ten, the
+    reviewer saw all ten.
+
 ## [7.1.7] - 2026-08-26
 
 ### Changed
