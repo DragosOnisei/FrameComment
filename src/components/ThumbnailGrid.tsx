@@ -2,7 +2,6 @@
 
 import Image from 'next/image'
 import { useMemo, useState } from 'react'
-import { useTranslations } from 'next-intl'
 import { Film, Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
@@ -41,7 +40,6 @@ export default function ThumbnailGrid({
   onVideoSelect,
   projectDescription,
 }: ThumbnailGridProps) {
-  const tv = useTranslations('videos')
   // Which tile is being scrubbed, and how far across it the pointer sits.
   // Keyed by name so moving quickly across several tiles cannot leave an old
   // one frozen mid-sprite.
@@ -117,9 +115,16 @@ export default function ThumbnailGrid({
               }}
               onMouseLeave={() => setScrub((cur) => (cur?.name === name ? null : cur))}
               className={cn(
-                'group relative rounded-lg overflow-hidden',
-                'bg-card border border-border',
-                'hover:border-primary/50 hover:shadow-elevation-lg',
+                'group relative rounded-xl overflow-hidden text-left',
+                // 7.1.4: the same translucent tint FolderCard uses on the folder
+                // share, instead of `bg-card` — which is a near-black slab that
+                // sat on the spotlight rather than in it, and was the last thing
+                // still making this page look like a different product. The
+                // strip under the thumbnail inherits it, which is the part
+                // Dragos was pointing at.
+                'bg-white/[0.04] ring-1 ring-white/10',
+                'hover:bg-white/[0.06] hover:ring-white/20',
+                'shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)]',
                 'transition-all duration-200',
                 'focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background'
               )}
@@ -182,13 +187,13 @@ export default function ThumbnailGrid({
                 )}
               </div>
 
-              {/* Info */}
+              {/* Info. 7.1.4: the "N versions" line is gone — the layers badge
+                  on the thumbnail already carries the count, and repeating it in
+                  words made the tile taller than the folder cards it sits
+                  alongside. */}
               <div className="p-3 sm:p-4">
-                <p className="text-sm font-medium text-foreground truncate text-left">
+                <p className="text-sm font-medium text-foreground truncate">
                   {name}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1 text-left">
-                  {versionCount} {versionCount === 1 ? tv('versions').slice(0, -1) : tv('versions')}
                 </p>
               </div>
             </button>

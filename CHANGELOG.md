@@ -14,6 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.4] - 2026-08-25
+
+### Changed
+
+- **The share grid now matches the folder share it sits beside.** Four things
+  Dragos listed after comparing the two side by side:
+  - The download button moved to the top right, where the folder share puts
+    "Download All", and it appears for a share holding a single video. It had
+    been gated behind two or more clips, so a one-video share offered no
+    download at all. One video gets its own wording rather than "Download All 1
+    Videos as ZIP".
+  - The AGPL-3.0 link is gone from the footer, leaving "Powered by
+    FrameComment" as the folder share has it. Worth recording what was traded:
+    6.7.1 added the link because a reviewer reaches this page without ever
+    seeing the public site, and AGPL §13 is about everyone who uses the software
+    over a network. The repository link beside it still reaches the source, and
+    /source serves it as well.
+  - The "N versions" line under each tile is gone. The layers badge on the
+    thumbnail already carries the count, and spelling it out made these tiles
+    taller than the folder cards they sit next to.
+  - The strip under each thumbnail carries the same translucent tint FolderCard
+    uses, instead of `bg-card` — a near-black slab that sat on the spotlight
+    rather than in it, and was the last piece still making this page look like a
+    different product.
+
 ## [7.1.3] - 2026-08-25
 
 ### Fixed

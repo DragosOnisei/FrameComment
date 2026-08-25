@@ -1678,8 +1678,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             very top of the page while the spotlight ran underneath it — the
             "bar left at the top" Dragos spotted after the rest was fixed. The
             controls stay; only the slab they sat on is gone. */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2 z-20 flex-shrink-0">
-          {/* Left: download all + reverse share upload */}
+        {/* 7.1.4: everything right-aligned, so the download sits top-right the
+            way "Download All" does on the folder share. It used to be split —
+            actions left, language right — which put the one button a client
+            looks for at the opposite end of the bar from where the other share
+            page puts it. */}
+        <div className="flex items-center justify-end gap-2 px-3 py-2 z-20 flex-shrink-0">
           <div className="flex items-center gap-2" data-tutorial="grid-actions">
             {(() => {
               if (isGuest) return null
@@ -1687,7 +1691,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               const downloadableCount = project.videosByName
                 ? Object.keys(project.videosByName as Record<string, any[]>).length
                 : 0
-              const showDownloadAll = project.allowAssetDownload && downloadableCount >= 2
+              // 7.1.4: one clip counts. The `>= 2` gate meant a share holding a
+              // single video offered no download at all, while the folder share
+              // beside it always shows its button — which is the difference
+              // Dragos was looking at.
+              const showDownloadAll = project.allowAssetDownload && downloadableCount >= 1
               const showUpload = project.allowReverseShare && shareToken
               if (!showDownloadAll && !showUpload) return null
               return (
@@ -1696,10 +1704,17 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                     <button
                       onClick={handleDownloadAll}
                       disabled={downloadingAll}
-                      className="p-2 rounded-lg border border-border bg-background hover:bg-accent transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                      className="h-9 px-3 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 active:scale-95 transition-colors flex items-center gap-1.5 disabled:opacity-50 text-sm font-medium"
                     >
-                      {downloadingAll ? <Loader2 className="h-5 w-5 text-foreground animate-spin" /> : <Download className="h-5 w-5 text-foreground" />}
-                      <span className="hidden sm:inline text-sm font-medium text-foreground">{t('downloadAllVideos', { count: downloadableCount })}</span>
+                      {downloadingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {/* 7.1.4: "Download All 1 Videos as ZIP" is what the
+                          plural string produced for a share holding one clip.
+                          One video gets its own wording. */}
+                      <span className="hidden sm:inline">
+                        {downloadableCount === 1
+                          ? t('downloadVideo')
+                          : t('downloadAllVideos', { count: downloadableCount })}
+                      </span>
                     </button>
                   )}
                   {showUpload && (
@@ -1716,7 +1731,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
           {/* Right: language, tutorial. 3.2.6+: theme toggle removed —
               the client share is dark-only, no light-mode switch. */}
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2">
             <LanguageToggle />
           </div>
         </div>
@@ -1742,11 +1757,14 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               folderId={urlFolderId || null}
             />
           </div>
-          {/* Powered by footer. 6.7.1: it now names the licence as well as
-              linking the repository — guests reach this page without ever
-              seeing the public site, and AGPL §13 is about everyone who uses
-              the software over the network, reviewers included. */}
-          <div className="pb-4 text-center space-x-2">
+          {/* Powered by footer.
+              7.1.4: the AGPL-3.0 link is gone at Dragos's request, so this
+              matches the folder share, which never carried one. Worth knowing
+              what was traded: 6.7.1 added it because a reviewer reaches this
+              page without ever seeing the public site, and AGPL §13 is about
+              everyone who uses the software over a network. The repository link
+              below still reaches the source, and /source serves it too. */}
+          <div className="pb-4 text-center">
             <a
               href="https://github.com/DragosOnisei/FrameComment"
               target="_blank"
@@ -1754,15 +1772,6 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
             >
               Powered by FrameComment
-            </a>
-            <span className="text-xs text-muted-foreground/40">·</span>
-            <a
-              href="https://www.gnu.org/licenses/agpl-3.0.html"
-              target="_blank"
-              rel="noopener noreferrer license"
-              className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-            >
-              AGPL-3.0
             </a>
           </div>
         </div>
