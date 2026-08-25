@@ -14,6 +14,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.1] - 2026-08-25
+
+### Fixed
+
+- **"Unfinished upload" cards appeared and vanished on their own during a
+  perfectly healthy upload.** Uploading a folder of four videos produced a
+  couple of them; nothing was actually wrong, and nothing needed resuming.
+  - The offer to resume is decided from two facts: metadata sitting in
+    localStorage, and the absence of that video from the list of uploads this
+    tab is running. Both are briefly true of every normal upload, because they
+    are written at different moments — the metadata lands synchronously the
+    instant the server hands over a video id, while the row in the list receives
+    that same id through a state update committed later, with an `await` in
+    between on the drop-onto-video path. In the gap the entry existed, the
+    server said UPLOADING, and no row carried the id yet, so a live transfer was
+    indistinguishable from one abandoned by a page reload.
+  - The scan re-runs whenever the pending list changes length, which is once per
+    file added — so a folder upload walked into that gap repeatedly.
+  - The guard now lives beside the metadata it shadows rather than inside one
+    component: it is set by the same function that writes the entry and released
+    by the one that removes it, so no caller can forget to take part. That also
+    covers the second upload component, which writes the same metadata and is
+    mounted at the same time by the video manager — a guard in either component
+    alone could not have covered the other.
+  - Resuming after a real page reload is unaffected. The set lives for the life
+    of the tab, so a reload starts with it empty, which is exactly the case the
+    offer exists for.
+
 ## [7.1.0] - 2026-08-25
 
 ### Added

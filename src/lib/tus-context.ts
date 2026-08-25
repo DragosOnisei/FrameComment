@@ -148,6 +148,39 @@ export function clearStaleContextData(): void {
 /**
  * Store upload metadata so we can resume with the same video record after refresh
  */
+/**
+ * 7.1.1 — video ids this tab is uploading RIGHT NOW.
+ *
+ * `listResumableUploads()` offers to resume anything whose metadata is sitting
+ * in localStorage and whose server row still says UPLOADING. Both are true of a
+ * healthy upload in progress, so the offer needed a third fact: is this tab
+ * already handling it?
+ *
+ * VideoUploadModal used to answer that by looking for the videoId on a row in
+ * its `pendingUploads` state. That answer is briefly wrong on every single
+ * upload, because the two are written at different moments: the metadata lands
+ * synchronously the instant the server hands over a videoId, while the row
+ * receives that same videoId through a React state update committed later —
+ * with an `await` in between on the drop-onto-video path. In the gap, the entry
+ * exists, the server says UPLOADING and no row carries the id, so a live
+ * transfer looked abandoned. The scan re-runs whenever the pending list changes
+ * length, i.e. on every file added, so uploading a folder of four videos hit
+ * that gap repeatedly: "Unfinished upload" cards appeared and vanished on their
+ * own while every transfer was in fact fine.
+ *
+ * Keeping the set HERE rather than in the component is what makes it correct
+ * rather than merely better. Two components write this metadata —
+ * VideoUploadModal and VideoUpload — and AdminVideoManager mounts both at once,
+ * so a guard living in one of them cannot cover the other. Marking is done by
+ * the same function that writes the entry and released by the one that removes
+ * it, so a caller cannot forget to participate.
+ *
+ * Module scope means one set per tab, which is exactly the question being
+ * asked. A reload starts a fresh module with an empty set — and a reload is
+ * precisely when the offer SHOULD appear.
+ */
+const uploadsInFlight = new Set<string>()
+
 export function storeUploadMetadata(
   file: File,
   metadata: Omit<StoredUploadMetadata, 'createdAt'>,
@@ -160,6 +193,7 @@ export function storeUploadMetadata(
       createdAt: Date.now(),
     }
     localStorage.setItem(key, JSON.stringify(payload))
+    if (payload.videoId) uploadsInFlight.add(payload.videoId)
   } catch {
     // Silent failure
   }
@@ -199,6 +233,17 @@ export function getUploadMetadata(file: File, endpoint?: string): StoredUploadMe
 export function clearUploadMetadata(file: File, endpoint?: string): void {
   try {
     const key = getUploadMetadataKey(file, endpoint)
+    // Read before removing: the videoId is only in the entry, and releasing it
+    // is what lets a genuinely abandoned upload be offered again later.
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        const meta = JSON.parse(raw) as StoredUploadMetadata
+        if (meta?.videoId) uploadsInFlight.delete(meta.videoId)
+      }
+    } catch {
+      // Unparseable entry — nothing to release.
+    }
     localStorage.removeItem(key)
   } catch {
     // Silent failure
@@ -251,6 +296,10 @@ export function listResumableUploads(projectId?: string): ResumableUpload[] {
         continue
       }
       if (!meta?.videoId) continue
+      // 7.1.1: this tab is uploading it at this moment — see `uploadsInFlight`.
+      // Without this, every normal upload was briefly indistinguishable from one
+      // abandoned by a reload.
+      if (uploadsInFlight.has(meta.videoId)) continue
       if (projectId && meta.projectId && meta.projectId !== projectId) continue
       // Assets and reverse-share uploads are not resumable this way.
       if (meta.assetId) continue
@@ -290,6 +339,10 @@ export function matchesResumable(file: File, entry: ResumableUpload): boolean {
 /** Forget an offer — the row is gone, or the user dismissed it. */
 export function forgetResumable(entry: ResumableUpload): void {
   if (typeof window === 'undefined') return
+  // 7.1.1: an offer that has been resumed or discarded is no longer in flight
+  // as far as THIS guard is concerned — the resume path re-marks it through
+  // storeUploadMetadata when it starts sending again.
+  uploadsInFlight.delete(entry.videoId)
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i)
