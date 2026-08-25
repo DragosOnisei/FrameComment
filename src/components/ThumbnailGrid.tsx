@@ -1,32 +1,51 @@
 'use client'
 
 import Image from 'next/image'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { CheckCircle2, Film, Layers } from 'lucide-react'
+import { Film, Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
 
 interface ThumbnailGridProps {
   videosByName: Record<string, any[]>
   thumbnailsByName: Map<string, string>
+  /**
+   * 7.1.3: sprite sheet per name, so a tile scrubs under the cursor the way
+   * every other thumbnail in the product does. Optional — a tile without one
+   * simply shows its still.
+   */
+  storyboardsByName?: Map<string, string>
   thumbnailsLoading: boolean
   onVideoSelect: (videoName: string) => void
-  projectTitle?: string
+  /**
+   * 7.1.3: the client name, the project title and "select a video to begin"
+   * used to head this grid. They are gone at Dragos's request, and the reason
+   * is worth recording: they were the visual signature of the share page this
+   * product started with, and seeing them told him he had been sent back to the
+   * old platform. The folder share — the newer surface, and the one he wants
+   * this to resemble — introduces itself with a breadcrumb and gets on with
+   * showing the work.
+   *
+   * `projectDescription` stays because it is not chrome: it is a sentence the
+   * studio wrote FOR this client.
+   */
   projectDescription?: string
-  clientName?: string
 }
 
 export default function ThumbnailGrid({
   videosByName,
   thumbnailsByName,
+  storyboardsByName,
   thumbnailsLoading,
   onVideoSelect,
-  projectTitle,
   projectDescription,
-  clientName,
 }: ThumbnailGridProps) {
-  const t = useTranslations('share')
   const tv = useTranslations('videos')
+  // Which tile is being scrubbed, and how far across it the pointer sits.
+  // Keyed by name so moving quickly across several tiles cannot leave an old
+  // one frozen mid-sprite.
+  const [scrub, setScrub] = useState<{ name: string; f: number } | null>(null)
 
   // 6.11.0: plain alphabetical. The list used to put "for review" before
   // "approved", which meant approving a clip moved it — the order shifted
@@ -38,32 +57,14 @@ export default function ThumbnailGrid({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {/* Project Info Header */}
-      <div className="text-center mb-8 sm:mb-12 pt-4">
-        {clientName && (
-          <p className="text-xs sm:text-sm text-muted-foreground mb-2">
-            {clientName}
-          </p>
-        )}
-        {projectTitle && (
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-foreground mb-4">
-            {projectTitle}
-          </h1>
-        )}
-        {projectDescription && (
-          <p className="text-sm sm:text-base text-muted-foreground max-w-xl mx-auto mb-6">
-            {projectDescription}
-          </p>
-        )}
-        {/* 6.2.1: only invite a selection when there IS something to select.
-            An empty grid used to render this line over blank space, which read
-            as a broken page to the client. */}
-        {videoNames.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {t('selectVideoToBegin')}
-          </p>
-        )}
-      </div>
+      {/* 7.1.3: no client name, no project title, no "select a video to
+          begin" — see the props above. What the studio actually wrote for this
+          client still shows. */}
+      {projectDescription && (
+        <p className="text-sm sm:text-base text-muted-foreground max-w-xl mx-auto mb-6 text-center pt-2">
+          {projectDescription}
+        </p>
+      )}
 
       {/* 6.2.1: honest empty state. Previously zero tiles meant zero feedback:
           the visitor saw a title and nothing else, with no way to tell whether
@@ -87,11 +88,34 @@ export default function ThumbnailGrid({
           const videos = videosByName[name]
           const versionCount = videos.length
           const thumbnailUrl = thumbnailsByName.get(name)
+          // 7.1.3: hover-scrub, the same gesture the version reel and the video
+          // cards inside the app use. The sprite geometry travels on the row
+          // (6.9.3 made the grid scale with duration), so it is read from the
+          // video rather than assumed to be 10x10.
+          const storyboardUrl = storyboardsByName?.get(name)
+          const isScrubbing = scrub?.name === name && !!storyboardUrl
+          // The geometry must come from the SAME row the sprite was minted for
+          // — the caller picks it by `thumbnailPath`, which is not always the
+          // newest version. Reading cols/rows off `videos[0]` instead would use
+          // one version's grid against another version's sheet, and since 6.9.3
+          // sized the grid by duration, two cuts of different lengths would then
+          // scrub to the wrong frames.
+          const spriteRow = videos.find((v: any) => v.thumbnailPath) ?? videos[0]
+          const scrubStyle = isScrubbing
+            ? storyboardCellStyle(storyboardUrl, scrub.f, storyboardGridOf(spriteRow))
+            : undefined
 
           return (
             <button
               key={name}
               onClick={() => onVideoSelect(name)}
+              onMouseMove={(e) => {
+                if (!storyboardUrl) return
+                const r = e.currentTarget.getBoundingClientRect()
+                const f = Math.min(0.999, Math.max(0, (e.clientX - r.left) / r.width))
+                setScrub({ name, f })
+              }}
+              onMouseLeave={() => setScrub((cur) => (cur?.name === name ? null : cur))}
               className={cn(
                 'group relative rounded-lg overflow-hidden',
                 'bg-card border border-border',
@@ -126,8 +150,28 @@ export default function ThumbnailGrid({
                   </div>
                 )}
 
-                {/* Hover overlay */}
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200" />
+                {/* Sprite layer — only painted while the pointer is over this
+                    tile. A CSS background-position swap, so there is no image
+                    load and no seek per frame. */}
+                {storyboardUrl && (
+                  <div
+                    className={cn(
+                      'absolute inset-0 transition-opacity duration-75',
+                      isScrubbing ? 'opacity-100' : 'opacity-0',
+                    )}
+                    style={scrubStyle}
+                    aria-hidden
+                  />
+                )}
+
+                {/* Hover overlay. Suppressed while scrubbing — darkening the
+                    frame the user is trying to read defeats the point. */}
+                <div
+                  className={cn(
+                    'absolute inset-0 transition-colors duration-200',
+                    isScrubbing ? 'bg-black/0' : 'bg-black/0 group-hover:bg-black/20',
+                  )}
+                />
 
                 {/* Version count badge */}
                 {versionCount > 1 && (

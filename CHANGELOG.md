@@ -14,6 +14,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.3] - 2026-08-25
+
+### Fixed
+
+- **The grid a share link can land on had no thumbnails at all.** The page
+  decided it was showing the player from the mere presence of `?video=<name>`
+  in the URL, not from that name resolving to something. When a single-video
+  link no longer matches — the server then serves the whole project rather than
+  an empty page — the test stayed true, so the thumbnail fetch was narrowed to a
+  name that is not there and returned nothing. The grid rendered anyway, every
+  tile blank. That empty grid, under the old header, is what read as "an older
+  platform".
+
+### Changed
+
+- **The share grid drops the client name, the project title and "select a video
+  to begin".** They were the visual signature of the share page this product
+  started with, and meeting them is what told Dragos he had been sent somewhere
+  old. The folder share — the newer surface, and the one this should resemble —
+  introduces itself with a breadcrumb and gets on with showing the work. The
+  project description stays: that is a sentence the studio wrote for this
+  client, not chrome.
+- **The strip across the top of the grid is transparent.** It carried
+  `bg-background/95` and a border, painting a band of the flat pre-2.5 #121212
+  over the spotlight that runs underneath. The controls are unchanged.
+- **Grid thumbnails scrub under the pointer**, the same gesture the version reel
+  and the cards inside the app use. The sprite geometry is read from the same
+  row the sprite was minted for, rather than from the newest version — since
+  6.9.3 sized that grid by duration, two cuts of different lengths would
+  otherwise scrub to the wrong frames.
+
+### Known
+
+- A single-video share link is still scoped by NAME, and a stack takes the name
+  of its newest delivery — so uploading a new version over an already-shared
+  video can stop the link resolving, after which the server serves the whole
+  project and the visitor gets the grid. The grid now looks like the rest of the
+  product, but the cause is untouched: the link should be bound to the stack's
+  identity, the way a folder share is bound to a slug that belongs to the folder
+  row. The server logs `[share] single-video scope "…" no longer matches` each
+  time it happens.
+
 ## [7.1.2] - 2026-08-25
 
 ### Fixed

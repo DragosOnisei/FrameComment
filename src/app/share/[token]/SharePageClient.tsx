@@ -168,6 +168,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const [hideComments, setHideComments] = useState(false)
   const [viewState, setViewState] = useState<'grid' | 'player'>('grid')
   const [thumbnailsByName, setThumbnailsByName] = useState<Map<string, string>>(new Map())
+  // 7.1.3: sprite sheet per grid tile, so a client can scrub a thumbnail with
+  // the mouse exactly as an admin can inside the app.
+  const [storyboardsByName, setStoryboardsByName] = useState<Map<string, string>>(new Map())
+  const storyboardUrlCacheRef = useRef<Map<string, string>>(new Map())
   const [thumbnailsLoading, setThumbnailsLoading] = useState(true)
   const [downloadingAll, setDownloadingAll] = useState(false)
   // 3.2.x: mobile-only vertical resize of the player vs comments. On
@@ -874,6 +878,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
       setThumbnailsLoading(true)
       const newThumbnails = new Map<string, string>()
+      const newStoryboards = new Map<string, string>()
 
       // 3.2.3+ CRITICAL FIX — mirror of the 3.2.2 admin-share fix, now
       // applied to the CLIENT share page. When we're in player view
@@ -890,7 +895,18 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       // empty, and the player is stuck on "Loading video…" forever. The
       // public share endpoint had the exact same fan-out the admin page
       // did before 3.2.2.
-      const inPlayerView = !!urlVideoName
+      // 7.1.3: "are we in player view" has to mean the targeted video actually
+      // EXISTS in this payload, not merely that the URL carries a name. When a
+      // single-video link no longer resolves — the server then serves the whole
+      // project rather than an empty page — the old test stayed true, so this
+      // filtered the fetch list down to a name that is not there and came back
+      // with NOTHING. The client was shown the grid, correctly, with every tile
+      // missing its thumbnail. That empty-looking grid is what read as "the old
+      // platform".
+      const inPlayerView = !!(
+        urlVideoName &&
+        (project.videosByName as Record<string, any[]> | undefined)?.[urlVideoName]
+      )
       // 4.7.x safety net: never eagerly mint more than this many thumbnail
       // tokens for a full-project grid. A client opening a project-wide share
       // of a multi-thousand-video project would otherwise fan out one signed
@@ -911,16 +927,31 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       const fetchOne = async ([name, videoWithThumb]: [string, any]) => {
         const cachedUrl = thumbnailUrlCacheRef.current.get(videoWithThumb.id)
         if (cachedUrl) {
-          if (isMounted) {
-            newThumbnails.set(name, cachedUrl)
+          if (isMounted) newThumbnails.set(name, cachedUrl)
+        } else {
+          const thumbToken = await fetchVideoTokenWithRetry(videoWithThumb.id, 'thumbnail')
+          if (thumbToken && isMounted) {
+            const url = `/api/content/${thumbToken}`
+            thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
+            newThumbnails.set(name, url)
           }
+        }
+
+        // 7.1.3: the sprite for hover-scrub. Grid only — the player has its own
+        // storyboard for the timeline, and doubling the token fan-out on the
+        // player path is exactly what 3.2.3 fixed. Skipped entirely when the
+        // row has no sprite, so nothing is requested that cannot exist.
+        if (inPlayerView || !videoWithThumb.storyboardPath) return
+        const cachedSprite = storyboardUrlCacheRef.current.get(videoWithThumb.id)
+        if (cachedSprite) {
+          if (isMounted) newStoryboards.set(name, cachedSprite)
           return
         }
-        const thumbToken = await fetchVideoTokenWithRetry(videoWithThumb.id, 'thumbnail')
-        if (thumbToken && isMounted) {
-          const url = `/api/content/${thumbToken}`
-          thumbnailUrlCacheRef.current.set(videoWithThumb.id, url)
-          newThumbnails.set(name, url)
+        const spriteToken = await fetchVideoTokenWithRetry(videoWithThumb.id, 'storyboard')
+        if (spriteToken && isMounted) {
+          const url = `/api/content/${spriteToken}`
+          storyboardUrlCacheRef.current.set(videoWithThumb.id, url)
+          newStoryboards.set(name, url)
         }
       }
 
@@ -953,6 +984,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             })
           } else {
             setThumbnailsByName(newThumbnails)
+            setStoryboardsByName(newStoryboards)
             lastThumbnailFingerprintRef.current = fingerprint
           }
         }
@@ -1641,7 +1673,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       <>
       <div className="spotlight-bg-tr fixed inset-0 flex flex-col overflow-hidden">
         {/* Grid view toolbar */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-background/95 backdrop-blur-sm z-20 flex-shrink-0">
+        {/* 7.1.3: transparent. This carried `bg-background/95` + a bottom
+            border, which painted a strip of the flat pre-2.5 #121212 across the
+            very top of the page while the spotlight ran underneath it — the
+            "bar left at the top" Dragos spotted after the rest was fixed. The
+            controls stay; only the slab they sat on is gone. */}
+        <div className="flex items-center justify-between gap-2 px-3 py-2 z-20 flex-shrink-0">
           {/* Left: download all + reverse share upload */}
           <div className="flex items-center gap-2" data-tutorial="grid-actions">
             {(() => {
@@ -1689,11 +1726,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             <ThumbnailGrid
               videosByName={effectiveVideosByName ?? project.videosByName}
               thumbnailsByName={thumbnailsByName}
+              storyboardsByName={storyboardsByName}
               thumbnailsLoading={thumbnailsLoading}
               onVideoSelect={handleVideoSelect}
-              projectTitle={project.title}
               projectDescription={isGuest ? undefined : project.description}
-              clientName={isGuest ? undefined : project.clientName}
             />
           </div>
           {/* 7.1.2: grid mode never had the "open in the full app" button —
