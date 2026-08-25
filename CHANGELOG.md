@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.6] - 2026-08-26
+
+### Changed
+
+- **The download button moved down beside "Open in project folder", and is
+  green.** Those two are the only things a visitor can DO on this page, so they
+  now sit together at the foot of it rather than at opposite corners. The green
+  comes from the palette's `success` token rather than a literal colour, so it
+  follows the theme instead of fighting it. A guest sees no "open in project
+  folder" button at all, in which case the download simply centres on its own.
+- The reverse-share upload stays in the top row, and the failure message moved
+  down with the download button it describes.
+
 ## [7.1.5] - 2026-08-26
 
 ### Fixed

@@ -1724,57 +1724,16 @@ function SharePageClientInner({ token }: SharePageClientProps) {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <LanguageToggle />
               <div className="flex items-center gap-2 flex-wrap" data-tutorial="grid-actions">
-            {(() => {
-              if (isGuest) return null
-              // 6.11.0: counts clips, not approved clips.
-              const downloadableCount = project.videosByName
-                ? Object.keys(project.videosByName as Record<string, any[]>).length
-                : 0
-              // 7.1.4: one clip counts. The `>= 2` gate meant a share holding a
-              // single video offered no download at all, while the folder share
-              // beside it always shows its button — which is the difference
-              // Dragos was looking at.
-              const showDownloadAll = project.allowAssetDownload && downloadableCount >= 1
-              const showUpload = project.allowReverseShare && shareToken
-              if (!showDownloadAll && !showUpload) return null
-              return (
-                <>
-                  {showDownloadAll && (
-                    // 7.1.5: the same <Button size="sm"> the folder share uses,
-                    // rather than the hand-rolled classes this carried in 7.1.4.
-                    // "Looks like the folder page" is a promise that only holds
-                    // if it IS the folder page's button.
-                    <Button
-                      size="sm"
-                      onClick={handleDownloadAll}
-                      disabled={downloadingAll}
-                      className="gap-1.5"
-                    >
-                      {downloadingAll ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Download className="w-4 h-4" />
-                      )}
-                      {/* 7.1.4: "Download All 1 Videos as ZIP" is what the
-                          plural string produced for a share holding one clip.
-                          One video gets its own wording. */}
-                      <span>
-                        {downloadableCount === 1
-                          ? t('downloadVideo')
-                          : t('downloadAllVideos', { count: downloadableCount })}
-                      </span>
-                    </Button>
-                  )}
-                  {showUpload && (
-                    <ReverseShareUploadPanel
-                      shareToken={shareToken}
-                      shareSlug={token}
-                      maxFiles={project.settings?.maxReverseShareFiles ?? 10}
-                    />
-                  )}
-                </>
-              )
-            })()}
+                {/* 7.1.6: only the reverse-share upload lives here now. The
+                    download moved to the foot of the page, beside "Open in
+                    project folder". */}
+                {!isGuest && project.allowReverseShare && shareToken && (
+                  <ReverseShareUploadPanel
+                    shareToken={shareToken}
+                    shareSlug={token}
+                    maxFiles={project.settings?.maxReverseShareFiles ?? 10}
+                  />
+                )}
                 {/* Item count, worded exactly as the folder share words it. */}
                 {(() => {
                   const itemCount = project.videosByName
@@ -1786,14 +1745,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                     </span>
                   )
                 })()}
-                {/* 7.1.5: a download that fails now says so. It used to fail
-                    into a silent catch, which is indistinguishable from a
-                    download that is merely slow. */}
-                {downloadError && (
-                  <span role="status" className="text-xs text-destructive">
-                    {downloadError}
-                  </span>
-                )}
+
               </div>
             </div>
 
@@ -1811,12 +1763,56 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           {/* 7.1.2: grid mode never had the "open in the full app" button —
               it was only wired into the player branch, so a project-level share
               (the case that lands here) had no way back. It goes above the
-              footer, out of the way of the thumbnails. */}
-          <div className="pb-3 text-center">
+              footer, out of the way of the thumbnails.
+
+              7.1.6: the download joins it here, to its right and in green. The
+              two are the only things on this page a visitor can DO, so they
+              belong together rather than at opposite corners. Green because it
+              is the one action that hands something over — `bg-success` from
+              the palette, not a literal colour, so it follows the theme.
+
+              A guest renders no banner at all, in which case the download
+              simply centres on its own. */}
+          <div className="pb-3 flex items-center justify-center gap-2 flex-wrap">
             <ShareOpenInProjectBanner
               projectId={project?.id}
               folderId={urlFolderId || null}
             />
+            {(() => {
+              if (isGuest) return null
+              const downloadableCount = project.videosByName
+                ? Object.keys(project.videosByName as Record<string, any[]>).length
+                : 0
+              if (!project.allowAssetDownload || downloadableCount < 1) return null
+              return (
+                <Button
+                  size="sm"
+                  onClick={handleDownloadAll}
+                  disabled={downloadingAll}
+                  className="gap-1.5 bg-success text-success-foreground hover:bg-success/90"
+                >
+                  {downloadingAll ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  <span>
+                    {downloadableCount === 1
+                      ? t('downloadVideo')
+                      : t('downloadAllVideos', { count: downloadableCount })}
+                  </span>
+                </Button>
+              )
+            })()}
+            {/* 7.1.5: a download that fails says so — beside the button it
+                describes, not in a different row. It used to fail into a silent
+                catch, which is indistinguishable from one that is merely
+                slow. */}
+            {downloadError && (
+              <span role="status" className="text-xs text-destructive w-full text-center">
+                {downloadError}
+              </span>
+            )}
           </div>
           {/* Powered by footer.
               7.1.4: the AGPL-3.0 link is gone at Dragos's request, so this
