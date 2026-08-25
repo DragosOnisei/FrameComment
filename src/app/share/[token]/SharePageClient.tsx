@@ -1769,11 +1769,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               only things on this page a visitor can DO, so they belong together
               rather than at opposite corners.
 
-              7.1.6: it went green for one release and came straight back — the
-              accent green read as a warning next to the blue beside it rather
-              than as the friendlier button it was meant to be. Both actions now
-              share the default primary, which is also what the folder share
-              uses.
+              7.1.7: green for exactly one release, then back. Against the blue
+              beside it the accent green read as a warning rather than as the
+              friendlier button it was meant to be. Both actions share the
+              default primary, which is what the folder share uses too.
 
               A guest renders no banner at all, in which case the download
               simply centres on its own. */}
@@ -1872,7 +1871,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           video. It is a single small button now, not the old full-width notice.
           Resolves the same target the removed `router.replace` computed: the
           folder holding the shared content, falling back to the project root. */}
-      {/* 7.1.6: only where there is no Back button.
+      {/* 7.1.7: only where there is no Back button.
           Reaching the player by clicking a tile in the grid, or from a folder
           share, leaves a Back arrow in the reel that already walks to the folder
           the clip lives in — so an "open in project folder" button beside it

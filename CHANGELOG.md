@@ -14,16 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [7.1.6] - 2026-08-26
+## [7.1.7] - 2026-08-26
 
 ### Changed
 
-- **The download button moved down beside "Open in project folder".** Those two
-  are the only things a visitor can DO on this page, so they now sit together at
-  the foot of it rather than at opposite corners. A guest sees no "open in
-  project folder" button at all, in which case the download simply centres on
-  its own. The reverse-share upload stays in the top row, and the download's
-  failure message moved down with the button it describes.
 - **"Open in project folder" no longer appears in the player when a Back button
   already does the job.** Reaching a clip by clicking a tile in the grid, or
   from a folder share, leaves a Back arrow in the reel that walks to the folder
@@ -31,7 +25,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same place and crowded the bar. A link locked to a single clip is the
   exception: it draws no Back arrow, because there is no grid behind it to
   return to, so there the button stays as the only way a signed-in admin reaches
-  the full app.
+  the full app. Both are gated on the same condition, so they can never both be
+  missing.
+- **The download button is blue again.** Against the blue beside it, 7.1.6's
+  accent green read as a warning rather than as the friendlier button it was
+  meant to be. Both actions share the default primary, which is what the folder
+  share uses too.
+
+## [7.1.6] - 2026-08-26
+
+### Changed
+
+- **The download button moved down beside "Open in project folder", and is
+  green.** Those two are the only things a visitor can DO on this page, so they
+  now sit together at the foot of it rather than at opposite corners. The green
+  comes from the palette's `success` token rather than a literal colour, so it
+  follows the theme instead of fighting it. A guest sees no "open in project
+  folder" button at all, in which case the download simply centres on its own.
+- The reverse-share upload stays in the top row, and the failure message moved
+  down with the download button it describes.
 
 ## [7.1.5] - 2026-08-26
 
