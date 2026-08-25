@@ -307,7 +307,7 @@ export default function ProjectFolderPage() {
     return (
       <>
         {topbarSlots}
-        <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+        <div className="flex-1 min-h-0 flex items-center justify-center">
           <Card>
             <CardContent className="py-12 text-center space-y-3">
               <p className="text-muted-foreground">{error || 'Folder not found'}</p>

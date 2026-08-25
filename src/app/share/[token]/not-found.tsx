@@ -12,7 +12,9 @@ export default function ShareNotFound() {
   const tc = useTranslations('common')
 
   return (
-    <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
+    // 7.1.2: spotlight rather than the flat legacy #121212, so a dead share
+    // link does not look like a different, older product.
+    <div className="spotlight-bg-tr flex-1 min-h-0 flex items-center justify-center p-4">
       {/* Language and theme toggles */}
       <div className="fixed top-3 right-3 z-20 flex items-center gap-2">
         <LanguageToggle />

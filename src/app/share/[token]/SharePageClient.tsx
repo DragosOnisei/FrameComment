@@ -1272,7 +1272,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   if (linkExpired) {
     const when = linkExpired.at ? new Date(linkExpired.at) : null
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-6">
+      // 7.1.2: see the grid branch below — flat `bg-background` is the pre-2.5
+      // #121212 surface, and "your link expired" should not also look like the
+      // product was abandoned.
+      <div className="spotlight-bg-tr flex-1 min-h-0 flex items-center justify-center p-6">
         <div className="max-w-md text-center space-y-3">
           <div className="mx-auto rounded-full bg-amber-500/10 p-3 w-fit">
             <Lock className="w-6 h-6 text-amber-500" />
@@ -1336,7 +1339,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // Show authentication prompt
   if (isPasswordProtected && !isAuthenticated) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
+      // 7.1.2: this is the FIRST thing a client ever sees of a protected share,
+      // so it gets the same surface as everything after it rather than the flat
+      // legacy one.
+      <div className="spotlight-bg-tr flex-1 min-h-0 flex items-center justify-center p-4">
         {/* Language toggle for auth view. 3.2.6+: theme toggle removed —
             the client share is dark-only, no light-mode switch. */}
         <div className="fixed top-3 right-3 z-20 flex items-center gap-2">
@@ -1620,10 +1626,20 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   }
 
   // Show thumbnail grid when in grid view (scrollable)
+  //
+  // 7.1.2: the wrapper was `bg-background`, which in dark mode is a flat
+  // #121212 — the surface this app looked like before 2.5. Every other screen a
+  // reviewer sees, including the player one branch below, paints
+  // `spotlight-bg-tr`. So the moment a client opened a multi-video share they
+  // met the old product, then stepped into the current one by picking a clip.
+  //
+  // It went unnoticed inside the org because a logged-in admin was redirected
+  // straight into the admin app; 7.1.0 removed that redirect, which is what put
+  // this page back in front of us. Clients had been seeing it all along.
   if (effectiveViewState === 'grid') {
     return (
       <>
-      <div className="fixed inset-0 bg-background flex flex-col overflow-hidden">
+      <div className="spotlight-bg-tr fixed inset-0 flex flex-col overflow-hidden">
         {/* Grid view toolbar */}
         <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-background/95 backdrop-blur-sm z-20 flex-shrink-0">
           {/* Left: download all + reverse share upload */}
@@ -1680,6 +1696,16 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               clientName={isGuest ? undefined : project.clientName}
             />
           </div>
+          {/* 7.1.2: grid mode never had the "open in the full app" button —
+              it was only wired into the player branch, so a project-level share
+              (the case that lands here) had no way back. It goes above the
+              footer, out of the way of the thumbnails. */}
+          <div className="pb-3 text-center">
+            <ShareOpenInProjectBanner
+              projectId={project?.id}
+              folderId={urlFolderId || null}
+            />
+          </div>
           {/* Powered by footer. 6.7.1: it now names the licence as well as
               linking the repository — guests reach this page without ever
               seeing the public site, and AGPL §13 is about everyone who uses
@@ -1733,22 +1759,28 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col select-none"
       style={{ height: '100dvh' }}
     >
-      {/* 7.1.0: the offer that replaced the redirect. Resolves the same target
-          the old `router.replace` computed — the folder holding the shared
-          content, falling back to the project root. */}
-      <ShareOpenInProjectBanner
-        projectId={project?.id}
-        folderId={
-          urlFolderId ||
-          ((project as any)?.videos as
-            | Array<{ id: string; folderId?: string | null }>
-            | undefined)?.find((v) => v.id === activeVideoId)?.folderId ||
-          ((project as any)?.videos as
-            | Array<{ id: string; folderId?: string | null }>
-            | undefined)?.[0]?.folderId ||
-          null
-        }
-      />
+      {/* 7.1.2: in the PLAYER branch this stays at the top, right-aligned.
+          There is no "Powered by" line to sit above here — the player is a
+          locked 100dvh layout with the reel, the video and the comments filling
+          it exactly — so a bottom row would have to steal height from the
+          video. It is a single small button now, not the old full-width notice.
+          Resolves the same target the removed `router.replace` computed: the
+          folder holding the shared content, falling back to the project root. */}
+      <div className="shrink-0 flex justify-end px-2 pt-2 sm:px-3 empty:hidden">
+        <ShareOpenInProjectBanner
+          projectId={project?.id}
+          folderId={
+            urlFolderId ||
+            ((project as any)?.videos as
+              | Array<{ id: string; folderId?: string | null }>
+              | undefined)?.find((v) => v.id === activeVideoId)?.folderId ||
+            ((project as any)?.videos as
+              | Array<{ id: string; folderId?: string | null }>
+              | undefined)?.[0]?.folderId ||
+            null
+          }
+        />
+      </div>
 
       {/* Thumbnail Reel - always visible, collapsible */}
         <ThumbnailReel

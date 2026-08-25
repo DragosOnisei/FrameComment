@@ -413,7 +413,11 @@ function PublicFolderSharePageInner() {
     if (expiredAt) {
       const when = new Date(expiredAt)
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        // 7.1.2: spotlight, not the flat legacy #121212. A client whose link has
+        // expired is the last person who should be shown a page that looks like
+        // a different, older product — it reads as "this thing is broken" on top
+        // of the news that the link is dead.
+        <div className="spotlight-bg-tr min-h-screen flex items-center justify-center p-6">
           <div className="max-w-md text-center space-y-3">
             <div className="mx-auto rounded-full bg-amber-500/10 p-3 w-fit">
               <Clock className="w-6 h-6 text-amber-500" />
@@ -438,7 +442,7 @@ function PublicFolderSharePageInner() {
       )
     }
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <div className="spotlight-bg-tr min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md text-center space-y-3">
           <h1 className="text-xl font-semibold">Can&apos;t open this folder</h1>
           <p className="text-sm text-muted-foreground">{fatalError}</p>
@@ -477,7 +481,9 @@ function PublicFolderSharePageInner() {
   if (needsPassword) {
     const folderName = data?.folder?.name || 'folder'
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      // The password prompt is often the FIRST thing a client ever sees of this
+      // product, so it carries the same surface as everything after it.
+      <div className="spotlight-bg-tr min-h-screen flex items-center justify-center p-6">
         <form
           onSubmit={handleSubmitPassword}
           className="w-full max-w-sm rounded-xl bg-card border border-border shadow-2xl p-6 space-y-4"
@@ -598,11 +604,7 @@ function PublicFolderSharePageInner() {
     // constraint so cards still align with the rest of the page.
     <div className="spotlight-bg-tr min-h-screen">
       <div className="max-w-screen-xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 space-y-5">
-        {/* 7.1.0: the offer that replaced the redirect. */}
-        <ShareOpenInProjectBanner
-          projectId={data?.folder?.projectId}
-          folderId={data?.folder?.id}
-        />
+
         {/* Header: in-scope breadcrumb + optional Back button.
             1.4.x+: the project title used to be rendered above as a
             hyperlink to /share/<projectSlug>, which let anyone with a
@@ -843,8 +845,17 @@ function PublicFolderSharePageInner() {
           </div>
         )}
 
-        <footer className="pt-6 text-[11px] text-muted-foreground text-center">
-          Powered by FrameComment
+        {/* 7.1.2: the admin's way into the full app sits down here, directly
+            above the "Powered by" line. It began life as a banner across the
+            top, which put a notice for one person on top of the content the
+            link was sent for. `space-y-3` rather than a wrapper with padding, so
+            a guest — who renders nothing here — gets no stray gap either. */}
+        <footer className="pt-6 text-[11px] text-muted-foreground text-center space-y-3">
+          <ShareOpenInProjectBanner
+            projectId={data?.folder?.projectId}
+            folderId={data?.folder?.id}
+          />
+          <div>Powered by FrameComment</div>
         </footer>
       </div>
     </div>

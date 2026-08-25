@@ -14,6 +14,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.2] - 2026-08-25
+
+### Fixed
+
+- **A share link could still land a client on the pre-2.5 design.** The grid a
+  reviewer meets when a share holds more than one video was painted with a flat
+  `bg-background`, which in dark mode is exactly the #121212 this app looked like
+  before the 2.5 refresh. Every other screen, including the player one branch
+  away, carries the spotlight wash — so a client opened the old product and
+  stepped into the current one by picking a clip.
+  - Seven more client-facing surfaces had the same flat background and are now
+    consistent: the expired-link and password screens on both the per-video and
+    the folder share, the "share not found" page, "can't open this folder", and
+    the admin's "project not found".
+  - The password prompt is worth calling out: for a protected share it is the
+    first thing a client ever sees of this product, and it was the old surface.
+  - This went unnoticed inside the company because a signed-in admin was
+    redirected straight into the admin app. 7.1.0 removed that redirect, which
+    put the page back in front of us. Clients had been seeing it all along.
+- **Eleven admin pages covered the dashboard's own background.** The admin shell
+  has carried `spotlight-bg` since 2.5.0, and the layout says in as many words
+  that inner pages must drop their own `bg-background` wrapper so the wash can
+  bleed across. Clients, Calendar, Analytics, Security, the new-project page and
+  several loading states never did, so they painted flat #121212 over it. This
+  enforces the existing rule rather than changing the design.
+- **Grid mode had no way back into the full app.** The "open in project folder"
+  button added in 7.1.0 was only wired into the player branch, so a
+  project-level share — the case that lands on the grid — offered nothing.
+
+### Changed
+
+- The "you're signed in, this is the client view" notice is gone; only its
+  button remains. The sentence told the one person who already knew, and the
+  banner ran across the top of the content the link existed to show. The button
+  now sits at the bottom, directly above the "Powered by" line, on both the
+  folder share and the grid. In the player it stays top-right: that layout is a
+  locked 100dvh with the reel, video and comments filling it exactly, so a
+  bottom row would have to take height from the video.
+
 ## [7.1.1] - 2026-08-25
 
 ### Fixed

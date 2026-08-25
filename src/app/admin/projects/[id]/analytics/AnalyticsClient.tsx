@@ -126,7 +126,7 @@ export default function AnalyticsClient({ id }: { id: string }) {
 
   if (loading) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+      <div className="flex-1 min-h-0 flex items-center justify-center">
         <p className="text-muted-foreground">{t('loadingAnalytics')}</p>
       </div>
     )
@@ -134,7 +134,7 @@ export default function AnalyticsClient({ id }: { id: string }) {
 
   if (error || !data) {
     return (
-      <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+      <div className="flex-1 min-h-0 flex items-center justify-center">
         <div className="text-center">
           <p className="text-muted-foreground mb-4">{tc('noResults')}</p>
           <Link href="/admin/projects">
@@ -148,7 +148,7 @@ export default function AnalyticsClient({ id }: { id: string }) {
   const { project, stats, videoStats, activity } = data
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
+    <div className="flex-1 min-h-0">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>

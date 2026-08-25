@@ -1272,7 +1272,7 @@ function AdminSharePageInner() {
   // Show project not found
   if (!project) {
     return (
-      <div className="fixed inset-0 bg-background flex items-center justify-center p-4">
+      <div className="spotlight-bg-tr fixed inset-0 flex items-center justify-center p-4">
         <Card className="bg-card">
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground mb-4">{t('projectNotFound')}</p>

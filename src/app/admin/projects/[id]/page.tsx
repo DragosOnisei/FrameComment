@@ -354,7 +354,7 @@ export default function ProjectPage() {
     return (
       <>
         {topbarSlots}
-        <div className="flex-1 min-h-0 bg-background flex items-center justify-center">
+        <div className="flex-1 min-h-0 flex items-center justify-center">
           <Card>
             <CardContent className="py-12 text-center">
               <p className="text-muted-foreground">{t('projectNotFound')}</p>

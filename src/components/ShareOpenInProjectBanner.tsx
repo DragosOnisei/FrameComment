@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, FolderOpen } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { detectLoggedInAdmin } from '@/lib/share-auth'
 import { getAccessToken } from '@/lib/token-store'
@@ -90,26 +90,31 @@ export default function ShareOpenInProjectBanner({
 
   if (!href) return null
 
+  /*
+   * 7.1.2: the button alone, with no surrounding notice.
+   *
+   * It shipped in 7.1.0 as a full-width banner explaining "you're signed in,
+   * this is the client view of what was shared with you". Dragos cut the
+   * sentence: he is the one person who does not need telling which view he is
+   * looking at, and the banner ran across the top of the very content the link
+   * existed to show. What remains is the part that does something.
+   *
+   * No wrapper either. The caller places it, because the right position differs
+   * per page — under the content, above the "Powered by" line — and only the
+   * caller knows the layout it lands in.
+   */
   return (
-    <div className="shrink-0 px-2 pt-2 sm:px-3">
-      <div className="flex items-center gap-3 rounded-lg bg-white/[0.06] ring-1 ring-white/10 px-3 py-2">
-        <FolderOpen className="w-4 h-4 shrink-0 text-white/60" aria-hidden />
-        <span className="flex-1 min-w-0 text-xs sm:text-sm text-white/70">
-          {t('signedInViewingClientPage')}
-        </span>
-        <Link
-          href={href}
-          className="
-            shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg
-            text-xs sm:text-sm font-medium
-            bg-primary text-primary-foreground shadow-sm
-            hover:bg-primary/90 active:scale-95 transition-colors
-          "
-        >
-          <span>{folderId ? t('openInProjectFolder') : t('openInProject')}</span>
-          <ArrowRight className="w-3.5 h-3.5" aria-hidden />
-        </Link>
-      </div>
-    </div>
+    <Link
+      href={href}
+      className="
+        inline-flex items-center gap-1.5 h-8 px-3 rounded-lg
+        text-xs sm:text-sm font-medium
+        bg-primary text-primary-foreground shadow-sm
+        hover:bg-primary/90 active:scale-95 transition-colors
+      "
+    >
+      <span>{folderId ? t('openInProjectFolder') : t('openInProject')}</span>
+      <ArrowRight className="w-3.5 h-3.5" aria-hidden />
+    </Link>
   )
 }

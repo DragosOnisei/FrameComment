@@ -505,7 +505,7 @@ export default function CalendarPage() {
   // ── Render ──
   if (loading) {
     return (
-      <div className="flex-1 min-h-0 bg-background">
+      <div className="flex-1 min-h-0">
         <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
           <div className="flex justify-between items-center gap-4 mb-4 sm:mb-6">
             <div>
@@ -523,7 +523,7 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 bg-background">
+    <div className="flex-1 min-h-0">
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="flex justify-between items-center gap-4 mb-4 sm:mb-6">
           <div>
