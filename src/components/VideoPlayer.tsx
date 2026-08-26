@@ -2534,7 +2534,40 @@ export default function VideoPlayer({
   useEffect(() => {
     const container = containerRef.current
 
-    const handleInteraction = () => {
+    /**
+     * 7.1.12: only a pointer that actually MOVED counts as interaction.
+     *
+     * Entering fullscreen resizes the viewport in steps while the OS animates
+     * it, and a browser synthesises `mousemove` when the layout shifts under a
+     * stationary cursor. Each one was read as "the user is here" and revived the
+     * bar, so the bar slid up and down by itself two or three times before the
+     * transition settled — with the hand nowhere near the mouse.
+     *
+     * Comparing coordinates fixes the whole class rather than this one symptom:
+     * any future layout change under a still cursor is ignored too. The 2px
+     * threshold keeps a genuine slow drag counting while absorbing the 0px
+     * events, and the first real move always passes because the stored position
+     * starts off-screen.
+     *
+     * A touch is always interaction — there is no such thing as a synthesised
+     * touchstart from a resize.
+     */
+    const anchor = { x: Number.NaN, y: Number.NaN }
+    const handleInteraction = (e: Event) => {
+      if (e.type === 'mousemove') {
+        const me = e as MouseEvent
+        const moved =
+          Number.isNaN(anchor.x) ||
+          Math.abs(me.clientX - anchor.x) >= 2 ||
+          Math.abs(me.clientY - anchor.y) >= 2
+        // The anchor only moves when the pointer genuinely did. Updating it on
+        // every event instead would let a slow drag — 1px per event, which is
+        // ordinary on a trackpad — never accumulate past the threshold, so the
+        // bar would refuse to appear for someone easing the mouse across.
+        if (!moved) return
+        anchor.x = me.clientX
+        anchor.y = me.clientY
+      }
       resetControlsTimeout()
     }
 

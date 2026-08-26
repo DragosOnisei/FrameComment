@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.12] - 2026-08-26
+
+### Fixed
+
+- **The control bar stopped sliding up and down by itself on entering
+  fullscreen.** It appeared, dropped away, appeared again and dropped again,
+  two or three times, with nobody touching the mouse.
+  - Entering fullscreen resizes the viewport in steps while the operating system
+    animates it, and a browser synthesises `mousemove` when the layout shifts
+    under a stationary cursor. Each of those was read as "the user is here" and
+    revived the bar, which then hid itself 500ms later, repeatedly, until the
+    transition settled.
+  - A mouse move now has to actually move the pointer — at least 2px from where
+    it was last seen — before it counts as interaction. That covers the whole
+    class rather than this one symptom: any future layout change under a still
+    cursor is ignored too. The reference position only advances on a genuine
+    move, so easing the mouse across at 1px per event still accumulates past the
+    threshold and still brings the bar back. A touch always counts; there is no
+    such thing as a synthesised touchstart from a resize.
+
 ## [7.1.11] - 2026-08-26
 
 ### Fixed
