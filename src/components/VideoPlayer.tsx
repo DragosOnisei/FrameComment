@@ -611,6 +611,23 @@ export default function VideoPlayer({
   // resetControlsTimeout can read the CURRENT value without re-creating the
   // callback / re-binding the mouse-move listener on every fullscreen toggle.
   const isFullscreenRef = useRef(false)
+  /**
+   * 7.1.13: mousemove is not trustworthy across a fullscreen transition.
+   *
+   * Entering fullscreen moves the viewport ORIGIN — the window used to sit at
+   * some offset on the desktop, and now it is the whole screen. A pointer that
+   * has not moved a millimetre therefore reports completely different
+   * clientX/clientY, off by however far the window was from the corner. The
+   * browser delivers that as a mousemove, and it reads exactly like a deliberate
+   * one.
+   *
+   * That is why 7.1.12's 2px threshold did nothing here: the jump is typically
+   * a hundred pixels or more. The delta cannot tell these apart; only the timing
+   * can. Movement is ignored until the transition has settled, and the anchor is
+   * still updated while ignoring so the first genuine move afterwards measures
+   * from where the pointer actually is.
+   */
+  const fullscreenSettleUntilRef = useRef(0)
   const hasInitiallySeenRef = useRef(false) // Track if initial seek already happened
   const lastTimeUpdateRef = useRef(0) // Throttle time updates
   const previousVideoNameRef = useRef<string | null>(null)
@@ -2381,6 +2398,10 @@ export default function VideoPlayer({
   // leaving it brings the bar back immediately.
   useEffect(() => {
     isFullscreenRef.current = isFullscreen
+    // 7.1.13: 800ms covers the OS's own fullscreen animation, which is when the
+    // spurious mousemove arrives. Entering AND leaving, because the origin moves
+    // back on the way out too.
+    fullscreenSettleUntilRef.current = Date.now() + 800
     if (isPlaying) resetControlsTimeout()
     else setShowControls(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2556,6 +2577,16 @@ export default function VideoPlayer({
     const handleInteraction = (e: Event) => {
       if (e.type === 'mousemove') {
         const me = e as MouseEvent
+        // 7.1.13: inside the settle window this is the transition talking, not
+        // the user — see `fullscreenSettleUntilRef`. The anchor is still moved
+        // to the new coordinates, so the first real gesture afterwards is
+        // measured from where the pointer actually sits rather than from where
+        // it appeared to be in the old viewport.
+        if (Date.now() < fullscreenSettleUntilRef.current) {
+          anchor.x = me.clientX
+          anchor.y = me.clientY
+          return
+        }
         const moved =
           Number.isNaN(anchor.x) ||
           Math.abs(me.clientX - anchor.x) >= 2 ||
@@ -2921,6 +2952,30 @@ export default function VideoPlayer({
                   comments={activeVersionComments}
                   videoFps={selectedVideo?.fps || 24}
                   videoId={selectedVideo?.id}
+                  /**
+                   * 7.x: a dragged marker asks for the note to be moved.
+                   *
+                   * Admins only — passing nothing leaves the timeline read-only,
+                   * so a reviewer on a share link cannot nudge somebody else's
+                   * note by brushing past its bead.
+                   *
+                   * A window event rather than a prop chain: this player does not
+                   * own comment mutations, CommentSection does, and threading a
+                   * PATCH down through here would put the player in the business
+                   * of editing comments. Same bridge the copy/paste and
+                   * comment-range features already use.
+                   */
+                  onCommentTimecodeChange={
+                    isAdmin
+                      ? (commentId, timecode, timestampMs) => {
+                          window.dispatchEvent(
+                            new CustomEvent('comment:moveTimecode', {
+                              detail: { commentId, timecode, timestampMs },
+                            }),
+                          )
+                        }
+                      : undefined
+                  }
                   storyboardUrl={(selectedVideo as any)?.storyboardUrl || null}
                   storyboardCols={(selectedVideo as any)?.storyboardCols ?? null}
                   storyboardRows={(selectedVideo as any)?.storyboardRows ?? null}

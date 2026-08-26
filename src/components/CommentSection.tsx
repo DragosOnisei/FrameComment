@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { Comment, Video } from '@prisma/client'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { CheckCircle2, MessageSquare, MessagesSquare, ClipboardPaste, ChevronDown, ChevronUp, PanelRightClose, Pencil, Check, X as XIcon, Send } from 'lucide-react'
+import { CheckCircle2, MessageSquare, MessagesSquare, ClipboardCopy, ClipboardPaste, ChevronDown, ChevronUp, PanelRightClose, Pencil, Check, Trash2, X as XIcon, Send } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import MessageBubble from './MessageBubble'
@@ -15,6 +15,7 @@ import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { formatDate } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { getClientId } from '@/lib/client-id'
+import { logError } from '@/lib/logging'
 import { formatCommentTimestamp, secondsToTimecode, timecodeToSeconds, timecodeToSeekSeconds } from '@/lib/timecode'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
@@ -1336,6 +1337,287 @@ export default function CommentSection({
   // with the same themed ConfirmDialog used elsewhere (project delete,
   // archive, etc.) for visual consistency.
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
+
+  /**
+   * 7.3.0 — select several comments and act on them at once.
+   *
+   * A review pass leaves twenty notes and then wants the same verdict applied to
+   * eight of them. One at a time is eight confirmations, eight menu openings and
+   * a lost place in the list. Selection lives here rather than in MessageBubble
+   * because the actions are the section's: it already owns delete, resolve and
+   * the paste clipboard.
+   *
+   * Threads only, never replies — see `selectable` on MessageBubble for why.
+   */
+  const [selectedCommentIds, setSelectedCommentIds] = useState<Set<string>>(new Set())
+  const toggleCommentSelected = useCallback((id: string) => {
+    setSelectedCommentIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+  const clearCommentSelection = useCallback(() => {
+    setSelectedCommentIds(new Set())
+    selectionAnchorRef.current = null
+  }, [])
+
+  /**
+   * 7.3.0 — Finder/Explorer selection, the same three gestures the folder
+   * browser uses, so one habit covers files and notes alike.
+   *
+   *   plain click  → this one only, and it becomes the anchor
+   *   ⌘/Ctrl click → add or remove this one, and it becomes the anchor
+   *   Shift click  → everything between the anchor and this one
+   *
+   * The anchor is a ref rather than state because nothing renders from it and a
+   * re-render between two clicks would be a bad time to lose it.
+   *
+   * Range is taken over the DISPLAYED order, not the stored one: shift-click
+   * means "everything between these two as I see them", and the list is sorted
+   * and filtered before it reaches the eye.
+   */
+  const selectionAnchorRef = useRef<string | null>(null)
+  const selectFromClick = useCallback(
+    (commentId: string, mods: { shift: boolean; toggle: boolean }) => {
+      const order = (displayComments as any[]).map((c: any) => c.id as string)
+
+      if (mods.shift && selectionAnchorRef.current) {
+        const a = order.indexOf(selectionAnchorRef.current)
+        const b = order.indexOf(commentId)
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a <= b ? [a, b] : [b, a]
+          setSelectedCommentIds(new Set(order.slice(lo, hi + 1)))
+          return
+        }
+      }
+
+      if (mods.toggle) {
+        toggleCommentSelected(commentId)
+        selectionAnchorRef.current = commentId
+        return
+      }
+
+      setSelectedCommentIds(new Set([commentId]))
+      selectionAnchorRef.current = commentId
+    },
+    [displayComments, toggleCommentSelected],
+  )
+
+  /**
+   * Right-click target. `ids` is resolved at open time, not at click time, and
+   * follows the Finder rule: right-clicking INSIDE the selection acts on the
+   * whole selection; right-clicking outside it acts on that one comment and
+   * leaves the selection alone. Guessing either way round is worse than
+   * deciding once and being predictable.
+   */
+  const [commentMenu, setCommentMenu] = useState<{
+    x: number
+    y: number
+    ids: string[]
+  } | null>(null)
+
+  /**
+   * 7.3.0: the menu measures itself instead of being positioned against a
+   * guess.
+   *
+   * It used to clamp with hardcoded numbers — 230px wide, 160px tall — which
+   * were wrong the moment the labels started carrying counts: "Mark 3 comments
+   * as completed" is far wider than 230, so the clamp let the menu run off the
+   * right edge and cut the label in half.
+   *
+   * Nothing needs to know the size in advance: render it at the pointer, read the
+   * real box, then move it only as far as it must to fit.
+   *
+   * Flipping the whole width to the left of the pointer — which is what a native
+   * desktop menu does, and what this tried first — overshoots badly here. The
+   * comments panel is narrow, so a 300px menu flipped left of a click inside it
+   * lands over the video on the other side of the screen. Shifting by the
+   * overflow instead keeps the menu under the pointer and merely tucks its edge
+   * inside the window.
+   *
+   * `visibility` rather than a conditional render for the unmeasured frame: the
+   * element has to be in the DOM to have a size, and hiding it means nobody sees
+   * the one frame where it sits at the raw pointer position.
+   */
+  const commentMenuRef = useRef<HTMLDivElement | null>(null)
+  const [commentMenuPos, setCommentMenuPos] = useState<{
+    top: number
+    left: number
+  } | null>(null)
+  useEffect(() => {
+    if (!commentMenu) {
+      setCommentMenuPos(null)
+      return
+    }
+    const el = commentMenuRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const margin = 8
+    setCommentMenuPos({
+      left: Math.max(
+        margin,
+        Math.min(commentMenu.x, window.innerWidth - rect.width - margin),
+      ),
+      top: Math.max(
+        margin,
+        Math.min(commentMenu.y, window.innerHeight - rect.height - margin),
+      ),
+    })
+  }, [commentMenu])
+  useEffect(() => {
+    if (!commentMenu) return
+    const close = () => setCommentMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [commentMenu])
+
+  const openCommentMenu = useCallback(
+    (e: React.MouseEvent, commentId: string) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const inSelection = selectedCommentIds.has(commentId)
+      setCommentMenu({
+        x: e.clientX,
+        y: e.clientY,
+        ids: inSelection ? Array.from(selectedCommentIds) : [commentId],
+      })
+    },
+    [selectedCommentIds],
+  )
+
+  /**
+   * 7.3.0 — the three batch actions, all sequential.
+   *
+   * Sequential for the reason comments-paste.ts is sequential: the comment
+   * endpoints are rate-limited, and firing eight resolves or eight deletes at
+   * once gets a share of them rejected. A batch that silently half-applied would
+   * be worse than a slow one, because the list would look done.
+   */
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [pendingBulkDeleteIds, setPendingBulkDeleteIds] = useState<string[] | null>(null)
+
+  /**
+   * 7.x — a comment's marker was dragged to a new moment on the timeline.
+   *
+   * CustomVideoControls does the gesture, VideoPlayer relays it, and the write
+   * lands here because this is where comment mutations live. Both fields go
+   * together: `timecode` is what a human reads and `timestampMs` is what
+   * positions the marker, and updating one without the other would leave the
+   * bead and the label disagreeing.
+   *
+   * A refetch rather than a local patch, so any other tab on the same video sees
+   * the note move too.
+   */
+  useEffect(() => {
+    const onMove = async (e: Event) => {
+      const d = (e as CustomEvent).detail || {}
+      const commentId = d.commentId as string | undefined
+      const timecode = d.timecode as string | undefined
+      const timestampMs = d.timestampMs as number | undefined
+      if (!commentId || !timecode) return
+      try {
+        const body = JSON.stringify({ timecode, timestampMs })
+        const res = isAdminView
+          ? await apiFetch(`/api/comments/${commentId}`, {
+              method: 'PATCH',
+              headers: buildAuthedHeaders(),
+              body,
+            })
+          : await fetch(`/api/comments/${commentId}`, {
+              method: 'PATCH',
+              headers: buildAuthedHeaders(),
+              body,
+            })
+        if (!res.ok) {
+          // Refetch anyway: the bead is sitting where the pointer left it, and
+          // leaving it there after a refusal would show a move that never
+          // happened.
+          logError('[CommentSection] moving a comment failed:', `HTTP ${res.status}`, commentId)
+        }
+      } catch (err) {
+        logError('[CommentSection] moving a comment failed:', err, commentId)
+      } finally {
+        await fetchComments()
+        // 7.x: and tell the PAGE, which is what actually feeds the player's
+        // markers. Refetching here only refreshes this sidebar — the timeline
+        // reads a `comments` prop that comes down from the page, so without this
+        // the bead sprang back to its old frame on the next render even though
+        // the database had moved it. `commentDeleted` is the existing
+        // "comments changed, reload" signal; pasteThreads uses it the same way.
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('commentDeleted'))
+        }
+      }
+    }
+    window.addEventListener('comment:moveTimecode', onMove as EventListener)
+    return () =>
+      window.removeEventListener('comment:moveTimecode', onMove as EventListener)
+  }, [isAdminView, buildAuthedHeaders, fetchComments])
+
+  const bulkCopyComments = useCallback(
+    (ids: string[]) => {
+      const wanted = new Set(ids)
+      // Ordered by the list, not by click order — a pasted batch should read the
+      // way it read on screen.
+      const chosen = (displayComments as any[]).filter((c: any) => wanted.has(c.id))
+      if (chosen.length === 0) return
+      setClippedComments(projectId, toClipped(chosen))
+      setHasClipboardForProject(true)
+      clearCommentSelection()
+    },
+    [displayComments, projectId, clearCommentSelection],
+  )
+
+  const bulkResolveComments = useCallback(
+    async (ids: string[], nextResolved: boolean) => {
+      if (bulkBusy) return
+      setBulkBusy(true)
+      try {
+        for (const id of ids) {
+          try {
+            await handleResolveToggle(id, nextResolved)
+          } catch (err) {
+            // One refusal must not abandon the rest of the batch; the list
+            // refetch at the end shows exactly which ones took.
+            logError('[CommentSection] bulk resolve failed for one comment:', err, id)
+          }
+        }
+        clearCommentSelection()
+      } finally {
+        setBulkBusy(false)
+      }
+    },
+    [bulkBusy, handleResolveToggle, clearCommentSelection],
+  )
+
+  const bulkDeleteComments = useCallback(
+    async (ids: string[]) => {
+      if (bulkBusy) return
+      setBulkBusy(true)
+      try {
+        for (const id of ids) {
+          try {
+            await handleDeleteComment(id)
+          } catch (err) {
+            logError('[CommentSection] bulk delete failed for one comment:', err, id)
+          }
+        }
+        clearCommentSelection()
+      } finally {
+        setBulkBusy(false)
+      }
+    },
+    [bulkBusy, handleDeleteComment, clearCommentSelection],
+  )
   useEffect(() => {
     setHasClipboardForProject(hasClippedComments(projectId))
     // React to other tabs (or our own clear() call) flipping the
@@ -1651,18 +1933,17 @@ export default function CommentSection({
                 <div
                   data-comments-filter
                   role="menu"
-                  className="fixed z-[200] min-w-[220px] rounded-lg ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1 text-sm text-white animate-in fade-in-0 slide-in-from-top-1 duration-150"
+                  /* 7.3.0: `brand-menu-surface`, same correction as the
+                     right-click menu below. This one was wearing the glass PANEL
+                     recipe at 0.35 opacity — a menu you could read the page
+                     through, in a fixed navy that ignored the workspace accent.
+                     Found while fixing the other; it is the dropdown directly
+                     above it, so the two would have disagreed with each other on
+                     screen. */
+                  className="brand-menu-surface fixed z-[200] min-w-[220px] rounded-lg ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] p-1 text-sm text-white animate-in fade-in-0 slide-in-from-top-1 duration-150"
                   style={{
                     left: filterMenuCoords.left,
                     top: filterMenuCoords.top,
-                    backgroundColor: 'rgba(22, 37, 51, 0.35)',
-                    backgroundImage:
-                      'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.20) 0%, hsl(var(--spotlight-tint) / 0.05) 45%, transparent 75%)',
-                    backdropFilter: 'blur(40px) saturate(180%)',
-                    WebkitBackdropFilter: 'blur(40px) saturate(180%)',
-                    transform: 'translate3d(0, 0, 0)',
-                    willChange: 'backdrop-filter, transform',
-                    isolation: 'isolate',
                   }}
                 >
                   {(
@@ -2158,8 +2439,30 @@ export default function CommentSection({
                 const hasAnnotation = !!(comment as any).annotations
 
                 return (
-                  <div key={comment.id}>
+                  <div
+                    key={comment.id}
+                    /* 7.3.0: right-click anywhere on the thread opens the batch
+                       menu. On the wrapper rather than inside MessageBubble so
+                       the whole bubble is the target, including its padding. */
+                    onContextMenu={
+                      isAdminView
+                        ? (e) => openCommentMenu(e, comment.id)
+                        : undefined
+                    }
+                  >
                     <MessageBubble
+                      /* 7.3.0: admin view only, deliberately. Two of the three
+                         batch actions are delete and resolve, and on the client
+                         share the server decides per comment who may do either —
+                         so a reviewer would get a menu whose items fail on
+                         somebody else's note. Offering it to clients is a
+                         separate decision with its own permission questions;
+                         this is the workflow Dragos asked for, which is his own
+                         review pass. */
+                      selectable={!!isAdminView}
+                      isSelected={selectedCommentIds.has(comment.id)}
+                      onToggleSelect={() => toggleCommentSelected(comment.id)}
+                      onSelectFromClick={(mods) => selectFromClick(comment.id, mods)}
                       /* 7.1.0: per-comment Copy also loads the paste
                          clipboard, so one note can be sent to other videos
                          without copying the whole list. Same `toClipped`
@@ -2298,6 +2601,149 @@ export default function CommentSection({
         old native window.confirm() ("localhost:3000 says...") so the
         delete prompt matches the rest of the app's UI (same Radix
         Dialog + theme tokens used for project delete, archive, etc.). */}
+    {/* 7.3.0: the batch menu. Fixed to the pointer, closed by any mousedown,
+        scroll or Escape — the effect that owns those listeners lives beside the
+        state. Nudged left/up near the edges so it never opens off-screen. */}
+    {commentMenu && typeof document !== 'undefined' && (() => {
+      const menuCount = commentMenu.ids.length
+      // 7.3.0: "all of them are done" decides the wording, which is the
+      // convention a mixed selection needs a rule for: offer the action that
+      // moves the batch somewhere, and only offer the undo when there is nothing
+      // left to complete.
+      const targeted = (displayComments as any[]).filter((c: any) =>
+        commentMenu.ids.includes(c.id),
+      )
+      const menuAllResolved =
+        targeted.length > 0 && targeted.every((c: any) => !!c.isResolved)
+      return createPortal(
+        <div
+          role="menu"
+          /* 7.3.0: `brand-menu-surface`, which is what CLAUDE.md says a menu
+             must use and what the first cut of this menu ignored. It is opaque and blends the
+             ACTIVE accent into the dark base via color-mix, so it follows the
+             organisation's colour; the hand-rolled recipe I used instead was the
+             fixed navy from the glass PANELS, which is why the menu turned up
+             blue in a brown workspace. `glass-panel` and its ingredients are for
+             page surfaces, never for menus. */
+          className="brand-menu-surface fixed z-[2147483600] min-w-[210px] rounded-lg p-1 text-white ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)]"
+          ref={commentMenuRef}
+          style={{
+            top: commentMenuPos?.top ?? commentMenu.y,
+            left: commentMenuPos?.left ?? commentMenu.x,
+            visibility: commentMenuPos ? 'visible' : 'hidden',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {/* 7.3.0: no header. "1 COMMENT" over a menu you opened on one comment
+              said nothing you did not already know. The count belongs in the
+              labels, where it changes what the item will DO, and only once there
+              is more than one. */}
+          <button
+            role="menuitem"
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => {
+              const ids = commentMenu.ids
+              setCommentMenu(null)
+              bulkCopyComments(ids)
+            }}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left disabled:opacity-40"
+          >
+            <ClipboardCopy className="w-4 h-4 shrink-0" />
+            <span className="flex-1 whitespace-nowrap">
+              {menuCount === 1 ? 'Copy' : `Copy ${menuCount} comments`}
+            </span>
+          </button>
+          {commentMenu.ids.length === 1 && (
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                const id = commentMenu.ids[0]
+                setCommentMenu(null)
+                // 7.3.0: the bubble owns its edit session, so it is asked rather
+                // than driven — see the listener in MessageBubble. Single
+                // comment only: "edit these eight" is not a thing.
+                window.dispatchEvent(
+                  new CustomEvent('comment:startEdit', { detail: { commentId: id } }),
+                )
+              }}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left"
+            >
+              <Pencil className="w-4 h-4 shrink-0" />
+              <span className="flex-1 whitespace-nowrap">Edit</span>
+            </button>
+          )}
+          <button
+            role="menuitem"
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => {
+              const ids = commentMenu.ids
+              setCommentMenu(null)
+              void bulkResolveComments(ids, !menuAllResolved)
+            }}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left disabled:opacity-40"
+          >
+            {menuAllResolved ? (
+              <XIcon className="w-4 h-4 shrink-0" />
+            ) : (
+              <Check className="w-4 h-4 shrink-0" />
+            )}
+            <span className="flex-1 whitespace-nowrap">
+              {menuAllResolved
+                ? menuCount === 1
+                  ? 'Mark as incomplete'
+                  : `Mark ${menuCount} comments as incomplete`
+                : menuCount === 1
+                  ? 'Mark as completed'
+                  : `Mark ${menuCount} comments as completed`}
+            </span>
+          </button>
+          <div className="my-1 h-px bg-white/10" role="separator" />
+          <button
+            role="menuitem"
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => {
+              const ids = commentMenu.ids
+              setCommentMenu(null)
+              setPendingBulkDeleteIds(ids)
+            }}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/15 text-destructive transition-colors text-left disabled:opacity-40"
+          >
+            <Trash2 className="w-4 h-4 shrink-0" />
+            <span className="flex-1 whitespace-nowrap">
+              {menuCount === 1 ? 'Delete' : `Delete ${menuCount} comments`}
+            </span>
+          </button>
+        </div>,
+        document.body,
+      )
+    })()}
+
+    {/* 7.3.0: deleting a batch asks once, and says how many. The single-comment
+        dialog below is untouched — a batch of one still comes through here, so
+        the count in the question is always the truth. */}
+    <ConfirmDialog
+      open={pendingBulkDeleteIds !== null}
+      onOpenChange={(next) => { if (!next) setPendingBulkDeleteIds(null) }}
+      variant="destructive"
+      title={
+        (pendingBulkDeleteIds?.length ?? 0) === 1
+          ? 'Delete this comment?'
+          : `Delete ${pendingBulkDeleteIds?.length ?? 0} comments?`
+      }
+      description="This cannot be undone."
+      confirmLabel={t('deleteComment')}
+      cancelLabel={t('cancel')}
+      onConfirm={async () => {
+        const ids = pendingBulkDeleteIds
+        setPendingBulkDeleteIds(null)
+        if (ids) await bulkDeleteComments(ids)
+      }}
+    />
+
     <ConfirmDialog
       open={pendingDeleteCommentId !== null}
       onOpenChange={(next) => { if (!next) setPendingDeleteCommentId(null) }}

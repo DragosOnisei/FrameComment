@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
 } from 'lucide-react'
 import DOMPurify from 'isomorphic-dompurify'
+import { cn } from '@/lib/utils'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachments from './CommentAttachments'
 import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
@@ -62,6 +63,28 @@ interface MessageBubbleProps {
    * rather than a direct write.
    */
   onCopyForPaste?: (comment: CommentWithReplies) => void
+  /**
+   * 7.3.0: multi-select.
+   *
+   * The avatar sits top-left of every bubble; this puts a hollow circle
+   * bottom-left, in the row that already holds Reply. Selecting several threads
+   * and right-clicking them is how you copy, resolve or delete a batch — the
+   * alternative was doing it one comment at a time down a list of twenty.
+   *
+   * Replies are not selectable. A batch of answers detached from their questions
+   * is not a thing anyone wants to copy, and deleting a reply out from under a
+   * thread is what the per-reply control is for.
+   */
+  selectable?: boolean
+  isSelected?: boolean
+  onToggleSelect?: () => void
+  /**
+   * 7.3.0: clicking the bubble itself selects it, so the tick is a target you
+   * can hit rather than the only one. Modifiers are forwarded because the
+   * parent owns the range anchor: Shift extends, ⌘/Ctrl toggles — the same
+   * three gestures the folder browser uses on videos.
+   */
+  onSelectFromClick?: (mods: { shift: boolean; toggle: boolean }) => void
   /** Called when the user saves an edited version of this comment */
   onEdit?: (newContent: string) => Promise<void> | void
   /** Called when the user saves an edited reply (only used in main bubble) */
@@ -121,6 +144,10 @@ export default function MessageBubble({
   onSeekToTimecode,
   onDelete,
   onCopyForPaste,
+  selectable,
+  isSelected,
+  onToggleSelect,
+  onSelectFromClick,
   onEdit,
   onEditReply,
   canEdit,
@@ -381,6 +408,21 @@ export default function MessageBubble({
     const target = e.target as HTMLElement
     if (target.closest('button, a, input, textarea, select')) return
 
+    // 7.3.0: the click selects first. A modified click (Shift, ⌘, Ctrl) is a
+    // selection gesture and nothing else — seeking the playhead and opening a
+    // drawing while somebody is building a range would be the player reacting to
+    // a request that was never about it. A plain click still does both: it picks
+    // the comment AND jumps to its moment, which is what clicking a note has
+    // always meant here.
+    const isRangeOrToggle = e.shiftKey || e.metaKey || e.ctrlKey
+    if (selectable && onSelectFromClick) {
+      onSelectFromClick({
+        shift: e.shiftKey,
+        toggle: e.metaKey || e.ctrlKey,
+      })
+    }
+    if (isRangeOrToggle) return
+
     // Seek the playhead to this comment's timecode whenever the bubble is
     // clicked, so the user can jump to the moment the comment was left
     // without having to hit the small timestamp badge. We forward the
@@ -472,6 +514,29 @@ export default function MessageBubble({
    */
   const isCarriedOver = isFromPreviousVersion || !!(comment as any).isCopied
 
+  /**
+   * 7.3.0: the right-click menu asks THIS bubble to start editing.
+   *
+   * Edit was in the kebab, which is gone for threads; the menu that replaced it
+   * lives in CommentSection and cannot reach in here, because the edit textarea
+   * and its draft are this component's own state. A window event addressed by id
+   * is the pattern the file already uses for the copy/paste bridge, and it
+   * beats hoisting an editing session up to the parent just so a menu item can
+   * open it.
+   */
+  useEffect(() => {
+    const onStartEdit = (e: Event) => {
+      const id = (e as CustomEvent).detail?.commentId
+      if (id !== comment.id) return
+      if (!canEdit || isCarriedOver) return
+      handleStartEdit()
+    }
+    window.addEventListener('comment:startEdit', onStartEdit as EventListener)
+    return () =>
+      window.removeEventListener('comment:startEdit', onStartEdit as EventListener)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comment.id, canEdit, isCarriedOver, comment.content])
+
   const threadReplies = !isReply && replies && replies.length > 0 ? replies : []
   const hasReplies = threadReplies.length > 0
 
@@ -488,6 +553,30 @@ export default function MessageBubble({
       id={`comment-${comment.id}`}
     >
       <div
+        /**
+         * 7.3.0: stop Shift-click from painting a text selection across the
+         * range.
+         *
+         * The browser extends a text selection on MOUSEDOWN, not on click, so by
+         * the time `handleBubbleClick` runs the highlight has already been drawn
+         * from wherever the caret last was to here — every comment in between
+         * turned blue behind the range that was being selected.
+         *
+         * Only for a Shift-click, and only where selection is offered. The
+         * comments panel deliberately re-enables text selection on itself so
+         * feedback stays copyable; suppressing it wholesale, or setting
+         * `user-select: none`, would take that away to fix a modifier.
+         *
+         * `removeAllRanges` clears a highlight left over from an earlier drag —
+         * preventDefault stops the extension but does not undo what is already
+         * on screen.
+         */
+        onMouseDown={(e) => {
+          if (selectable && e.shiftKey) {
+            e.preventDefault()
+            window.getSelection()?.removeAllRanges()
+          }
+        }}
         onClick={handleBubbleClick}
         // 2.5.1+: glass card. Drops `bg-card/50 + border` for the
         // v2.5 white-tint + hairline-ring pattern used everywhere
@@ -521,8 +610,44 @@ export default function MessageBubble({
         )}
 
         <div className="grid grid-cols-[28px_1fr] gap-x-2.5 gap-y-3 items-start">
-          <div className="flex justify-center pt-0.5">
+          {/* 7.3.0: the select circle belongs in THIS column, under the avatar,
+              not out in the content beside Reply — Dragos wants the two on the
+              same vertical line, which is the only way the ticks in a long list
+              read as a column you can run your eye down.
+
+              `self-stretch` keeps the stretching inside the parent comment's own
+              grid row: replies are separate rows, so the circle lands at the
+              bottom of the note it belongs to rather than at the foot of the
+              whole thread. */}
+          <div className="flex flex-col items-center justify-between self-stretch pt-0.5 pb-0.5">
             <InitialsAvatar name={effectiveAuthorName} size="sm" isInternal={comment.isInternal ?? false} />
+            {selectable && !isReply && onToggleSelect && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleSelect()
+                }}
+                aria-pressed={!!isSelected}
+                aria-label={isSelected ? 'Deselect comment' : 'Select comment'}
+                title={isSelected ? 'Deselect' : 'Select'}
+                className={cn(
+                  // `relative z-10` so the reply thread's vertical rule passes
+                  // behind it rather than through the ring.
+                  // 7.3.0: 20px, not the avatar's 28. Matching the avatar
+                  // exactly put two heavy discs at the two ends of every comment
+                  // and the list stopped looking like text. It still sits centred
+                  // in the avatar's column, which is the part that mattered.
+                  'relative z-10 shrink-0 inline-flex items-center justify-center h-5 w-5 rounded-full',
+                  'transition-colors',
+                  isSelected
+                    ? 'bg-primary text-primary-foreground ring-1 ring-primary'
+                    : 'ring-1 ring-white/30 hover:ring-white/60 opacity-60 group-hover:opacity-100',
+                )}
+              >
+                {isSelected && <Check className="w-3 h-3" strokeWidth={3} />}
+              </button>
+            )}
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
@@ -566,16 +691,31 @@ export default function MessageBubble({
                   </span>
                 ) : null}
                 {isResolved ? (
-                  <span
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-white shadow-sm"
+                  /* 7.3.0: the green tick undoes itself.
+                     It was a <span> — a label saying "done" with no way to say
+                     otherwise, now that the resolve button has left the hover
+                     row. Marking a comment complete by mistake had no undo
+                     except the right-click menu. As a <button> it is also
+                     excluded from the bubble's own click handler, which skips
+                     buttons, so undoing does not also seek the player. */
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleResolveToggle()
+                    }}
+                    disabled={resolving || !onResolveToggle}
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-white shadow-sm transition-colors hover:bg-emerald-400 disabled:opacity-60"
                     title={
                       (comment as any).resolvedBy
-                        ? `${t('resolved') || 'Done'} · ${(comment as any).resolvedBy}`
-                        : t('resolved') || 'Done'
+                        ? `${t('markUnresolved') || 'Mark as not done'} · ${(comment as any).resolvedBy}`
+                        : t('markUnresolved') || 'Mark as not done'
                     }
+                    aria-label={t('markUnresolved') || 'Mark as not done'}
+                    aria-pressed
                   >
                     <Check className="w-3 h-3" strokeWidth={3} />
-                  </span>
+                  </button>
                 ) : (
                   typeof sequenceNumber === 'number' &&
                   sequenceNumber > 0 && (
@@ -702,22 +842,34 @@ export default function MessageBubble({
             */}
             {!isEditing && (
               <div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground/80 min-w-0">
-                <div className="flex items-center gap-3">
-                  {!isReply && !commentsDisabled && onReply && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onReply(null)
-                      }}
-                      className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
-                    >
-                      {t('reply')}
-                    </button>
-                  )}
-                </div>
+                {/* 7.3.0: Reply takes the slot the kebab and the tick used to
+                    occupy — bottom right. Everything those two offered now lives
+                    on right-click, so the row carries one control instead of
+                    three, and it is always visible. Hiding the only remaining
+                    control until hover meant a comment showed no way to answer
+                    it, which is the one thing a comment is for. */}
+                {!isReply && !commentsDisabled && onReply && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onReply(null)
+                    }}
+                    className="ml-auto hover:text-foreground transition-colors font-medium whitespace-nowrap"
+                  >
+                    {t('reply')}
+                  </button>
+                )}
 
+                {/* The cluster survives for REPLIES only.
+                    A reply is not selectable — a batch of answers torn from
+                    their questions is not something anyone copies — so it is
+                    never covered by the right-click menu, and removing this from
+                    replies as well would have left them with no way to be edited
+                    or deleted at all. Threads get the menu; replies keep their
+                    kebab until they get one of their own. */}
+                {isReply && (
                 <div
-                  className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+                  className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {/*
@@ -877,6 +1029,7 @@ export default function MessageBubble({
                     </button>
                   )}
                 </div>
+                )}
               </div>
             )}
 

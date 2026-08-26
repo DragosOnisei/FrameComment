@@ -1984,3 +1984,59 @@ model ServiceOutage {
 
   @@index([service, startedAt])
 }
+
+/// 7.3.0 — in-app feedback from the people actually using the product.
+///
+/// Platform-level on purpose, like AccessAttempt and unlike every tenant table:
+/// the founder reads one inbox covering every organisation, so this sits
+/// OUTSIDE row-level security and is reached through `prismaPrivileged`. It must
+/// never be queried from a tenant route.
+model Feedback {
+  id      String @id @default(cuid())
+  /// BUG | IDEA — what the sender said it was, not a triage decision.
+  kind    String
+  message String
+  /// NEW | READ | DONE. Drives the unread count on the founder's nav.
+  status  String @default("NEW")
+
+  /// Who sent it, denormalised deliberately: an account that is later deleted
+  /// must not erase the provenance of a report that is still open. The ids stay
+  /// alongside the names so a live account can still be looked up.
+  userId           String?
+  userName         String?
+  userEmail        String?
+  organizationId   String?
+  organizationName String?
+
+  /// The context a bug report is nearly useless without — which build, which
+  /// screen, which browser. `client` is the coarse browser:os signature the rest
+  /// of the app uses, never the raw User-Agent.
+  appVersion String?
+  pageUrl    String?
+  client     String?
+
+  attachments FeedbackAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+
+/// A screenshot or short screen recording attached to a Feedback row. Same
+/// storage vocabulary as VideoAsset so the existing backends and the transfer
+/// tooling understand these files too.
+model FeedbackAttachment {
+  id             String   @id @default(cuid())
+  feedbackId     String
+  feedback       Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  fileName       String
+  fileType       String
+  fileSize       BigInt
+  storagePath    String
+  storageBackend String?
+  createdAt      DateTime @default(now())
+
+  @@index([feedbackId])
+}

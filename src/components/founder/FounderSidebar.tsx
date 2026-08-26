@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   User,
   Users2,
+  MessageSquarePlus,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import WordMark from '@/components/WordMark'
@@ -35,6 +36,7 @@ export const FOUNDER_NAV = [
   { href: '/founder/agents', label: 'AI Agents', icon: Bot },
   { href: '/founder/investors', label: 'Investors', icon: ShieldCheck },
   { href: '/founder/security', label: 'Security', icon: ShieldAlert },
+  { href: '/founder/feedback', label: 'Feedback', icon: MessageSquarePlus },
 ] as const
 
 export default function FounderSidebar() {

@@ -14,6 +14,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.0] - 2026-08-27
+
+### Added
+
+- **Select several comments and act on all of them at once.** A circle sits
+  bottom-left of every thread, under the avatar. Tick as many as you like and
+  right-click to copy them, mark them completed, or delete them together — a
+  review pass that leaves twenty notes and wants the same verdict on eight no
+  longer means eight trips through a menu.
+  - Selection works the way the folder browser works: click one, Shift-click for
+    the range, ⌘/Ctrl-click to add or drop. One habit covers files and notes
+    alike. The range runs over the order on screen, since the list is sorted and
+    filtered before anyone looks at it.
+  - The whole bubble is the target. A plain click still jumps the playhead to
+    that moment and opens its drawing, as it always has; a modified click only
+    selects, because assembling a range should not drag the player around.
+  - Copy writes the clipboard the existing paste already reads, so a batch goes
+    onto another video from the kebab beside "All comments", or onto several
+    videos at once from the folder. Neither needed new code.
+- **Drag a comment along the timeline to move it.** A note left a second late
+  could previously only be fixed by deleting it and writing it again, losing its
+  replies, its drawing and its files. Now you slide the bead: the video scrubs
+  with it, a timecode chip shows where it will land, and the hover popover gets
+  out of the way so you can see the stretch you are aiming at.
+  - The bead stays where you dropped it until the save comes back, instead of
+    snapping to its old moment for the few hundred milliseconds in between.
+  - Admin only. On a share link the timeline is read-only, so a reviewer cannot
+    move somebody else's note by brushing past it.
+- **A feedback button, and a founder inbox to read it in.** Bottom right of the
+  admin app: say whether something is broken or something should exist, attach a
+  screenshot or a short recording, send. Who, which build, which page and which
+  browser are collected without asking, because a report is far more useful with
+  them and nobody types them voluntarily.
+  - The inbox at `/founder/feedback` is one list across every organisation, with
+    an unread count — the tenth report of the same fault is only recognisable as
+    the tenth when they sit together.
+  - The tables are platform-level like `AccessAttempt`: no tenancy boundary, read
+    through the privileged role, and explicitly revoked from the app role so a
+    stray tenant query cannot reach another company's reports. Attachments are
+    served behind a founder session rather than a signed URL, which could be
+    forwarded.
+
+### Fixed
+
+- **In fullscreen, space no longer summons the control bar**, and the bar no
+  longer pumps up and down on its own while the transition animates. Entering
+  fullscreen moves the viewport origin, so a stationary pointer reports wildly
+  different coordinates and the browser delivers that as a mouse move; movement
+  is ignored for 800ms after the change. Other shortcuts still reveal the bar,
+  because with J/K/L and the arrows it is the thing you steer by.
+- **The playhead no longer escapes when dragged.** A horizontal drag is never
+  level, and the movement was read from a handler bound to a bar a few pixels
+  tall. It now follows the pointer across the document and reads only the X axis.
+- **The version tag on a thumbnail can be read on a pale frame.** It was white
+  tinted with white.
+- **The comment menus wear the workspace accent** and stay inside the window.
+  They were built from the glass PANEL recipe — a fixed navy that ignored the
+  accent — and positioned against a guessed width that stopped being true once
+  the labels carried counts.
+- **Shift-clicking comments no longer paints a text highlight across them.** A
+  browser extends a selection on mousedown, before the range handler ever runs.
+- **A comment marked complete can be un-marked.** The green tick was a label with
+  no way to say otherwise once the resolve button left the hover row.
+
+### Changed
+
+- A comment's actions live on right-click; Reply is the only control left on the
+  bubble. Replies keep their kebab, since they are not selectable and would
+  otherwise have no way to be edited or deleted at all.
+- `PATCH /api/comments/[id]` accepts a `timestampMs`, and its `content` is now
+  optional — moving a note must not require echoing its text back, which is a
+  race against a concurrent edit.
+- `CLAUDE.md`: `prisma generate` works in this environment again, so the note
+  about patching the generated client by hand after a schema change is gone.
+
 ## [7.1.12] - 2026-08-26
 
 ### Fixed

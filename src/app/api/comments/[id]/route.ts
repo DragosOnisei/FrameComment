@@ -32,7 +32,18 @@ export const dynamic = 'force-dynamic'
 // comment ends up with everything it should have had — without detonating the
 // conversation hanging off it.
 const editCommentSchema = z.object({
-  content: z.string().min(1).max(10000),
+  /**
+   * 7.x: optional, so a comment can be MOVED without resending its text.
+   *
+   * Dragging a note's bead along the timeline changes when it applies, not what
+   * it says. With content required, a move had to echo the whole body back —
+   * which is a race against a concurrent edit and, worse, would have stamped the
+   * comment as edited for a change nobody made to its words.
+   *
+   * Omitting it now leaves the text exactly as it was; sending it still
+   * overwrites, so every existing caller behaves identically.
+   */
+  content: z.string().min(1).max(10000).optional(),
   /** Assets uploaded during the edit, to be linked to this comment. */
   assetIds: z.array(z.string()).max(50).optional(),
   /**
@@ -53,6 +64,18 @@ const editCommentSchema = z.object({
     })
     .nullable()
     .optional(),
+  /**
+   * 7.x: the millisecond-precise moment, which is what actually positions a
+   * marker.
+   *
+   * `timecode` is frame-quantised, and since 1.0.3 the reader prefers
+   * `timestampMs` when a comment carries one, falling back to the timecode only
+   * when it does not. So updating the timecode alone would have moved nothing
+   * visible on a comment created with precision — the bead would have sprung
+   * straight back to the old frame, and the drag would have looked broken while
+   * the database had in fact changed.
+   */
+  timestampMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).optional(),
 })
 
 // DELETE /api/comments/[id]
@@ -197,7 +220,8 @@ export async function PATCH(
         { status: 400 }
       )
     }
-    const { content, timecode, timecodeEnd, assetIds, annotations } = validation.data
+    const { content, timecode, timecodeEnd, timestampMs, assetIds, annotations } =
+      validation.data
 
     // Look up the existing comment
     // 5.8: RLS — arm the owning org BEFORE this pre-auth lookup (post-flip
@@ -268,23 +292,30 @@ export async function PATCH(
       )
     }
 
-    // Sanitize new content (reuse the same logic as POST)
-    const contentValidation = await sanitizeAndValidateContent({
-      content,
-      authorName: existingComment.authorName,
-    })
-    if (!contentValidation.valid) {
-      return NextResponse.json(
-        { error: contentValidation.error },
-        { status: contentValidation.errorStatus || 400 }
-      )
+    // Sanitize new content (reuse the same logic as POST). Skipped entirely for
+    // a move-only PATCH: there is no text to sanitise, and running the profanity
+    // / length checks against `undefined` would reject a request that never
+    // claimed to touch the words.
+    let sanitizedContent: string | null = null
+    if (content !== undefined) {
+      const contentValidation = await sanitizeAndValidateContent({
+        content,
+        authorName: existingComment.authorName,
+      })
+      if (!contentValidation.valid) {
+        return NextResponse.json(
+          { error: contentValidation.error },
+          { status: contentValidation.errorStatus || 400 }
+        )
+      }
+      sanitizedContent = contentValidation.sanitizedContent!
     }
 
-    // Update — content is always overwritten; timecode / timecodeEnd
-    // are only included when the client passed them, so a plain text
-    // edit doesn't accidentally clobber the comment's range.
-    const updateData: any = {
-      content: contentValidation.sanitizedContent!,
+    // Update — every field is included only when the client passed it, so a
+    // move does not clobber the text and a text edit does not clobber the range.
+    const updateData: any = {}
+    if (sanitizedContent !== null) {
+      updateData.content = sanitizedContent
     }
     if (typeof timecode === 'string') {
       updateData.timecode = timecode
@@ -292,6 +323,9 @@ export async function PATCH(
     if (timecodeEnd !== undefined) {
       // null clears the end (range → single point); a string sets it.
       updateData.timecodeEnd = timecodeEnd
+    }
+    if (typeof timestampMs === 'number') {
+      updateData.timestampMs = timestampMs
     }
     // 6.16.0: an annotation drawn (or erased) during the edit. `undefined`
     // means the client never touched it, which must not wipe an existing

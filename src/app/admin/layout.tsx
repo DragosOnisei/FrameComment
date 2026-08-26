@@ -2,6 +2,7 @@
 
 import { AuthProvider, useAuth } from '@/components/AuthProvider'
 import AdminSidebar from '@/components/AdminSidebar'
+import FeedbackButton from '@/components/FeedbackButton'
 import AdminTopBar from '@/components/AdminTopBar'
 import SessionMonitor from '@/components/SessionMonitor'
 import { DownloadManagerProvider } from '@/contexts/DownloadManager'
@@ -175,6 +176,11 @@ export default function AdminLayout({
                 <main className="flex-1 min-h-0 flex flex-col">
                   {children}
                 </main>
+                {/* 7.3.0: the chromed branch only. The player-preview branch
+                    above is a video filling the screen, and a floating button
+                    over someone's frame is exactly the kind of chrome that
+                    branch exists to remove. */}
+                <FeedbackButton />
               </div>
               <SessionMonitor />
               <DownloadBanners />

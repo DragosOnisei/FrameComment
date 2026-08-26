@@ -35,6 +35,16 @@ interface CustomVideoControlsProps {
   onFrameStep: (direction: 'forward' | 'backward') => void
   comments?: CommentWithReplies[]
   videoFps?: number
+  /**
+   * 7.x: called when a comment's marker has been dragged to a new moment.
+   * Absent means the timeline is read-only — the client share passes nothing, so
+   * a reviewer cannot move somebody else's note by brushing past it.
+   */
+  onCommentTimecodeChange?: (
+    commentId: string,
+    timecode: string,
+    timestampMs: number,
+  ) => void | Promise<void>
   videoId?: string
   /** 3.8.x: signed URL of the storyboard sprite-sheet (10×10 grid of
    *  frames). When present the timeline shows a Frame.io-style
@@ -314,6 +324,7 @@ export default function CustomVideoControls({
   onFrameStep,
   comments = [],
   videoFps = 24,
+  onCommentTimecodeChange,
   videoId = '',
   storyboardUrl = null,
   storyboardCols = null,
@@ -1063,7 +1074,164 @@ export default function CustomVideoControls({
     }
   }, [isDragging, videoDuration, scrubSeek, flushScrub])
 
+  /**
+   * 7.x: drag a comment's marker along the timeline to move the note itself.
+   *
+   * A note left at the wrong frame — a second late because you were watching
+   * rather than typing — could only be fixed by deleting it and writing it
+   * again, losing its replies, its drawing and its files. Now you slide the
+   * bead.
+   *
+   * Document-level listeners from the outset, deliberately: this is the same
+   * gesture that escaped on the playhead until 7.1.11, for the same reason. The
+   * bead is 18px, a drag along it is never level, and a handler bound to the
+   * element stops being delivered the moment the pointer drifts off. Only X is
+   * read, so vertical travel is ignored entirely.
+   *
+   * Separating a drag from a click needs TWO flags, not one. `moved` says
+   * whether this gesture travelled; `suppressNextClick` survives past mouseup,
+   * because the click event fires AFTER it and by then the drag state is gone.
+   * With a single ref the guard read null at exactly the moment it mattered and
+   * every completed drag also seeked the playhead to where the note used to be.
+   */
+  const [draggingMarker, setDraggingMarker] = useState<{
+    commentId: string
+    pct: number
+  } | null>(null)
+  const markerDragRef = useRef<{
+    commentId: string
+    moved: boolean
+    /** Where the bead sat when it was grabbed — captured here rather than read
+     *  back at release, so the drag effect never has to close over `markers`
+     *  and re-bind its listeners mid-gesture. */
+    fromPct: number
+  } | null>(null)
+  const suppressNextMarkerClickRef = useRef(false)
+  /**
+   * 7.x: where the bead stays between letting go and the data catching up.
+   *
+   * Dropping it used to clear the drag state at once, so for the few hundred
+   * milliseconds the PATCH and the refetch take, the marker rendered from the
+   * `comments` prop — which still held the OLD moment. You saw it snap back to
+   * where it came from and then jump forward again.
+   *
+   * `fromPct` is what makes clearing this exact rather than a guess: it records
+   * where the note WAS at the moment of the drop, so the held position is
+   * released the instant the incoming data stops saying that. Comparing against
+   * the dropped position instead would need a tolerance, because the saved
+   * timecode is frame-quantised and never lands on the pointer exactly.
+   */
+  const [pendingMarkerPos, setPendingMarkerPos] = useState<{
+    commentId: string
+    pct: number
+    fromPct: number
+  } | null>(null)
+
+  const handleMarkerMouseDown = useCallback(
+    (marker: MarkerData, e: React.MouseEvent) => {
+      if (!onCommentTimecodeChange || !videoDuration) return
+      // Left button only; a right-click belongs to the context menu.
+      if (e.button !== 0) return
+      e.stopPropagation()
+      markerDragRef.current = {
+        commentId: marker.id,
+        moved: false,
+        fromPct: marker.position,
+      }
+      // 7.x: put the hover popover away for the duration. It sits directly over
+      // the timeline, so while dragging a bead it covers the very stretch you
+      // are aiming at — you cannot see where you are about to drop the note.
+      setHoveredMarkerId(null)
+      setDraggingMarker({ commentId: marker.id, pct: marker.position })
+    },
+    [onCommentTimecodeChange, videoDuration],
+  )
+
+  useEffect(() => {
+    if (!draggingMarker) return
+
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const isTouch = 'touches' in e
+      const clientX = isTouch
+        ? (e as TouchEvent).touches?.[0]?.clientX
+        : (e as MouseEvent).clientX
+      if (typeof clientX !== 'number') return
+      const rect = timelineRef.current?.getBoundingClientRect()
+      if (!rect || !videoDuration) return
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      if (markerDragRef.current) markerDragRef.current.moved = true
+      setDraggingMarker((cur) =>
+        cur ? { ...cur, pct: pct * 100 } : cur,
+      )
+      // The preview IS the video: scrubbing it shows the frame the note is
+      // about to belong to, which is the only preview that answers the
+      // question being asked. Throttled by scrubSeek so HLS keeps up.
+      scrubSeek(pct * videoDuration)
+    }
+
+    const onUp = () => {
+      const drag = markerDragRef.current
+      const current = draggingMarker
+      markerDragRef.current = null
+      setDraggingMarker(null)
+      flushScrub()
+      if (!drag || !drag.moved || !current || !videoDuration) return
+      // Outlives this handler on purpose — the click lands next.
+      suppressNextMarkerClickRef.current = true
+      setPendingMarkerPos({
+        commentId: drag.commentId,
+        pct: current.pct,
+        fromPct: drag.fromPct,
+      })
+      const seconds = (current.pct / 100) * videoDuration
+      const fps = videoFps && videoFps > 0 ? videoFps : 24
+      onCommentTimecodeChange?.(
+        drag.commentId,
+        secondsToTimecode(seconds, fps),
+        Math.round(seconds * 1000),
+      )
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.addEventListener('touchmove', onMove, { passive: false })
+    document.addEventListener('touchend', onUp)
+    document.addEventListener('touchcancel', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('touchmove', onMove)
+      document.removeEventListener('touchend', onUp)
+      document.removeEventListener('touchcancel', onUp)
+    }
+  }, [draggingMarker, videoDuration, videoFps, scrubSeek, flushScrub, onCommentTimecodeChange])
+
+  /**
+   * Release the held position the moment the refreshed data disagrees with where
+   * the note used to be — that is the save arriving. The five-second ceiling is
+   * for the case where it never does: a PATCH that failed must not leave the
+   * bead permanently claiming a moment the comment is not at.
+   */
+  useEffect(() => {
+    if (!pendingMarkerPos) return
+    const live = markers.find((m) => m.id === pendingMarkerPos.commentId)
+    if (!live || Math.abs(live.position - pendingMarkerPos.fromPct) > 0.01) {
+      setPendingMarkerPos(null)
+      return
+    }
+    const t = setTimeout(() => setPendingMarkerPos(null), 5000)
+    return () => clearTimeout(t)
+  }, [markers, pendingMarkerPos])
+
   const handleMarkerClick = useCallback((marker: MarkerData, e: React.MouseEvent) => {
+    // 7.x: the click that follows a completed drag is the browser's, not the
+    // user's — swallow it, or releasing the bead would seek the video to the
+    // note's old moment.
+    if (suppressNextMarkerClickRef.current) {
+      suppressNextMarkerClickRef.current = false
+      e.stopPropagation()
+      return
+    }
     e.stopPropagation()
     e.preventDefault()
     onSeek(marker.timestamp)
@@ -1092,6 +1260,9 @@ export default function CustomVideoControls({
   // popover and re-trigger `mouseenter`, which cancels the timer.
   const hoverCloseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const handleMarkerMouseEnter = useCallback((markerId: string) => {
+    // 7.x: passing over other beads mid-drag must not summon their popovers
+    // either — the pointer is travelling, not browsing.
+    if (markerDragRef.current) return
     if (hoverCloseTimeoutRef.current) {
       clearTimeout(hoverCloseTimeoutRef.current)
       hoverCloseTimeoutRef.current = null
@@ -1849,13 +2020,37 @@ export default function CustomVideoControls({
                 // this the orange/yellow ball at the start of the
                 // timeline would visually clip into the popover's
                 // top-left avatar.
-                className="absolute top-0 pointer-events-auto z-50"
+                className={`absolute top-0 pointer-events-auto ${
+                  draggingMarker?.commentId === primaryMarker.id ? 'z-[60]' : 'z-50'
+                }`}
                 style={{
-                  left: `${primaryMarker.position}%`,
+                  // 7.x: while this bead is being dragged its position comes from
+                  // the pointer, not from the stored timecode — so it stays under
+                  // the finger instead of springing back until the save lands.
+                  left: `${
+                    draggingMarker?.commentId === primaryMarker.id
+                      ? draggingMarker.pct
+                      : pendingMarkerPos?.commentId === primaryMarker.id
+                        ? pendingMarkerPos.pct
+                        : primaryMarker.position
+                  }%`,
                   transform: 'translateX(-50%)',
                 }}
                 data-comment-popover
               >
+                {/* 7.x: where the note is about to land. The video above is
+                    already scrubbing to the same frame — that is the real
+                    preview — so this only has to answer "which timecode", which
+                    a frame cannot. Sits above the bead and ignores the pointer so
+                    it can never intercept the drag it is describing. */}
+                {draggingMarker?.commentId === primaryMarker.id && (
+                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 pointer-events-none whitespace-nowrap rounded-md bg-black/80 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white ring-1 ring-white/20">
+                    {secondsToTimecode(
+                      (draggingMarker.pct / 100) * (videoDuration || 0),
+                      videoFps && videoFps > 0 ? videoFps : 24,
+                    )}
+                  </div>
+                )}
                 {/*
                   2.5.1+: glass v2.5 avatar — keep the saturated
                   user-colour identity but layer a soft white-glass
@@ -1884,6 +2079,7 @@ export default function CustomVideoControls({
                     if (el) markerRefs.current.set(primaryMarker.id, el)
                     else markerRefs.current.delete(primaryMarker.id)
                   }}
+                  onMouseDown={(e) => handleMarkerMouseDown(primaryMarker, e)}
                   onClick={(e) => handleMarkerClick(primaryMarker, e)}
                   onTouchEnd={(e) => handleMarkerTouchEnd(primaryMarker, e)}
                   onMouseEnter={() => handleMarkerMouseEnter(primaryMarker.id)}

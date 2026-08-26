@@ -43,12 +43,15 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
 
 ## Verifying changes in the Claude sandbox
 
-- `prisma generate` fails here (403 on binaries.prisma.sh), so local tsc checks
-  against a **stale generated client**. After schema changes: patch the new
-  fields into `node_modules/.prisma/client/index.d.ts` (back it up first), run
-  tsc, restore the backup. CI regenerates the client fresh — code that passes
-  locally can fail CI if it uses new columns through typed delegates; `as any`
-  on the data object plus this patching technique is the established pattern.
+- `prisma generate` **works** here again (verified 2026-08-27 while adding the
+  Feedback models). After a schema change just run it and the typed delegates
+  are real — no more patching `node_modules/.prisma/client/index.d.ts` by hand
+  and no `as any` on the data object. If it ever starts 403'ing on
+  binaries.prisma.sh again, that patch-and-restore trick is what to fall back to.
+- Hand-written migration SQL can be checked without a database:
+  `npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma
+  --script` prints what Prisma would generate, which is what the additive
+  `IF NOT EXISTS` version has to match column for column.
 - Typecheck: `NODE_OPTIONS=--max-old-space-size=2560 npx tsc --noEmit
   --incremental` (one bash call; it is slow). Then eslint on touched files only.
   Two pre-existing warnings in CommentSection/VideoPlayer are known noise.
