@@ -1,11 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Bug, Lightbulb, Loader2, Check, RefreshCw, Paperclip } from 'lucide-react'
+import { Bug, Lightbulb, Loader2, Check, RefreshCw, Trash2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
 import { logError } from '@/lib/logging'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { formatDateTime } from '@/lib/utils'
+import ClientBadge from '@/components/founder/ClientBadge'
+import FeedbackAttachment from '@/components/founder/FeedbackAttachment'
+import FeedbackReplyDialog, { type ReplyTarget } from '@/components/founder/FeedbackReplyDialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 /**
  * 7.3.0 — the founder's feedback inbox.
@@ -32,6 +36,7 @@ type FeedbackRow = {
   kind: 'BUG' | 'IDEA' | string
   message: string
   status: 'NEW' | 'READ' | 'DONE' | string
+  userId: string | null
   userName: string | null
   userEmail: string | null
   organizationName: string | null
@@ -47,6 +52,10 @@ export default function FounderFeedbackPage() {
   const [unread, setUnread] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // 7.3.1: marking a report handled goes through a dialog now, so this holds
+  // the one being answered. Deleting holds the one being confirmed.
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<FeedbackRow | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -67,13 +76,15 @@ export default function FounderFeedbackPage() {
     void load()
   }, [load])
 
-  const setStatus = async (id: string, status: FeedbackRow['status']) => {
+  const setStatus = async (id: string, status: FeedbackRow['status'], note?: string) => {
     setBusyId(id)
     try {
       const res = await apiFetch(`/api/feedback/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        // An empty note is left out entirely rather than sent as "": the route
+        // reads its absence as "tell nobody", which is what an empty box means.
+        body: JSON.stringify(note ? { status, note } : { status }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       // Patch locally AND recount, so the badge and the row never disagree.
@@ -83,6 +94,29 @@ export default function FounderFeedbackPage() {
       )
     } catch (err) {
       logError('[founder] changing feedback status failed:', err, id)
+      void load()
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  /**
+   * 7.3.1: throwing a report away, files and all.
+   *
+   * Removed from the list here rather than by reloading, so the row does not
+   * flash back in for the length of a round trip. The unread badge is corrected
+   * in the same breath — deleting the last NEW report has to leave the count at
+   * zero, or the header keeps promising something that is no longer there.
+   */
+  const deleteFeedback = async (row: FeedbackRow) => {
+    setBusyId(row.id)
+    try {
+      const res = await apiFetch(`/api/feedback/${row.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setItems((cur) => cur.filter((r) => r.id !== row.id))
+      if (row.status === 'NEW') setUnread((cur) => Math.max(0, cur - 1))
+    } catch (err) {
+      logError('[founder] deleting feedback failed:', err, row.id)
       void load()
     } finally {
       setBusyId(null)
@@ -165,44 +199,23 @@ export default function FounderFeedbackPage() {
                     {row.message}
                   </p>
 
-                  {(row.pageUrl || row.client) && (
-                    <p className="mt-2 truncate text-[11px] text-muted-foreground">
-                      {row.client}
-                      {row.client && row.pageUrl ? ' · ' : ''}
-                      {row.pageUrl}
-                    </p>
-                  )}
+                  <ClientBadge
+                    client={row.client}
+                    className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+                  />
 
                   {row.attachments.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {row.attachments.map((a) => {
-                        const url = `/api/feedback/${row.id}/attachments/${a.id}`
-                        const isImage = a.fileType.startsWith('image/')
-                        return isImage ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={a.id}
-                            src={url}
-                            alt={a.fileName}
-                            className="h-28 rounded-lg ring-1 ring-white/10 object-cover"
-                          />
-                        ) : (
-                          <video
-                            key={a.id}
-                            src={url}
-                            controls
-                            className="h-28 rounded-lg ring-1 ring-white/10 bg-black"
-                          />
-                        )
-                      })}
+                      {row.attachments.map((a) => (
+                        <FeedbackAttachment
+                          key={a.id}
+                          feedbackId={row.id}
+                          attachmentId={a.id}
+                          fileName={a.fileName}
+                          fileType={a.fileType}
+                        />
+                      ))}
                     </div>
-                  )}
-
-                  {row.attachments.length > 0 && (
-                    <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <Paperclip className="h-3 w-3" />
-                      {row.attachments.length}
-                    </p>
                   )}
                 </div>
 
@@ -211,7 +224,18 @@ export default function FounderFeedbackPage() {
                     <button
                       type="button"
                       disabled={busyId === row.id}
-                      onClick={() => void setStatus(row.id, 'DONE')}
+                      /* 7.3.1: the dialog, not the change. Closing a report is
+                         the moment the sender hears back, so it is worth one
+                         extra click. */
+                      onClick={() =>
+                        setReplyTarget({
+                          id: row.id,
+                          kind: row.kind,
+                          message: row.message,
+                          userId: row.userId,
+                          userName: row.userName,
+                        })
+                      }
                       className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/[0.06] px-2.5 text-xs text-white/80 ring-1 ring-white/10 hover:bg-white/[0.12] disabled:opacity-40"
                     >
                       {busyId === row.id ? (
@@ -225,6 +249,9 @@ export default function FounderFeedbackPage() {
                     <button
                       type="button"
                       disabled={busyId === row.id}
+                      /* Straight through, no dialog: putting a report back in
+                         the list corrects my own bookkeeping and is not news
+                         to the person who sent it. */
                       onClick={() => void setStatus(row.id, 'NEW')}
                       className="inline-flex h-8 items-center rounded-lg bg-emerald-500/15 px-2.5 text-xs text-emerald-300 ring-1 ring-emerald-400/30 hover:bg-emerald-500/25 disabled:opacity-40"
                       title="Put it back in the list"
@@ -232,12 +259,54 @@ export default function FounderFeedbackPage() {
                       Done
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    disabled={busyId === row.id}
+                    onClick={() => setPendingDelete(row)}
+                    title="Delete this report"
+                    aria-label="Delete this report"
+                    className="inline-flex h-8 items-center justify-center rounded-lg bg-white/[0.04] px-2.5 text-xs text-white/45 ring-1 ring-white/10 hover:bg-destructive/15 hover:text-destructive hover:ring-destructive/30 disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
             </article>
           )
         })}
       </div>
+
+      <FeedbackReplyDialog
+        target={replyTarget}
+        onCancel={() => setReplyTarget(null)}
+        onConfirm={async (note) => {
+          const id = replyTarget?.id
+          setReplyTarget(null)
+          if (id) await setStatus(id, 'DONE', note)
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDelete(null)
+        }}
+        variant="destructive"
+        title="Delete this report?"
+        description={
+          pendingDelete?.attachments.length
+            ? `The report and its ${pendingDelete.attachments.length === 1 ? 'attachment' : `${pendingDelete.attachments.length} attachments`} are removed for good. This cannot be undone.`
+            : 'This cannot be undone.'
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={async () => {
+          const row = pendingDelete
+          setPendingDelete(null)
+          if (row) await deleteFeedback(row)
+        }}
+      />
     </div>
   )
 }

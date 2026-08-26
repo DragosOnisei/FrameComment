@@ -14,6 +14,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.1] - 2026-08-27
+
+### Added
+
+- **A report can be deleted.** The attachment rows go with it through the
+  cascade, and so do the files — nothing else in the schema knows those exist,
+  so removing the row without unlinking them would leave bytes on the volume
+  with no record pointing at them. Asked for once, and the question says how
+  many attachments go with it.
+- **The person who sent a report hears back.** Marking one handled now opens a
+  dialog showing what they wrote, with a note prefilled for the kind of report
+  it is; the note is delivered to their own notification bell, where it reads
+  as "<name> replied to your feedback". Someone who takes the trouble to
+  describe a bug and attach a recording has no way of knowing whether it landed
+  on a desk or in a bin, and the second time they wonder that, they stop
+  reporting.
+  - Leaving the note empty marks the report handled and tells nobody, which is
+    the right behaviour for the ones filed against the app while testing it.
+  - Putting a report BACK in the list stays a single click with no dialog: that
+    corrects the founder's own bookkeeping and is not news to anyone.
+  - The notification is stamped with the recipient's CURRENT organisation, not
+    the one recorded on the report. `Notification` is an ordinary tenant table
+    read back through the armed client, so a row carrying a stale organisation
+    would be created successfully and then never be visible to the person it
+    was written for.
+
+### Fixed
+
+- **Feedback attachments now appear in the founder inbox.** Every screenshot and
+  recording sent with 7.3.0 came out as a broken-image icon. The endpoint was
+  put straight into `<img src>`, and this app authenticates with a bearer token
+  held in memory — a native `<img>` sends no header at all, so the request
+  arrived with no credentials and the founder guard answered 404. The bytes are
+  now pulled with `apiFetch` and handed over as a blob, the same way a project
+  cover has been served since 1.2.0. Nothing was ever lost: the files were
+  stored correctly the whole time and are visible on reload.
+- **The same endpoint was also returning its file wrongly.** `downloadFile`
+  hands back a Node stream, which was passed into the response behind a cast
+  that hid the mismatch; it is now bridged to a web stream like the cover route
+  does. The stored `Content-Length` header is gone with it — it was the size the
+  uploader reported, and a header that disagrees with the body by one byte fails
+  the whole response.
+
+### Changed
+
+- **A report says which browser and which kind of machine it came from, as
+  icons** — Chrome on a desktop, Safari on a phone — instead of printing the raw
+  `chrome:macos` signature. Chrome, Safari and Opera are drawn; lucide dropped
+  its brand icons, and a freehand Firefox or Edge logo reads as a mistake, so
+  those two get the shared globe in their brand colour.
+- **The page URL is no longer printed on the card.** A hundred characters of
+  admin link on every report buried the two facts worth reading at a glance. It
+  is still recorded with the report.
+- The paperclip and its count are gone from under each report. The attachments
+  are shown directly above it, so the number was counting what you could see.
+
 ## [7.3.0] - 2026-08-27
 
 ### Added

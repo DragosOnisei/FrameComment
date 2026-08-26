@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prismaPrivileged } from '@/lib/db'
 import { requirePlatformAdmin } from '@/lib/platform'
 import { downloadFile } from '@/lib/storage'
+import { Readable } from 'stream'
 import { logError } from '@/lib/logging'
 
 export const runtime = 'nodejs'
@@ -34,7 +35,6 @@ export async function GET(
         feedbackId: true,
         fileName: true,
         fileType: true,
-        fileSize: true,
         storagePath: true,
         storageBackend: true,
       },
@@ -45,15 +45,39 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
-    const stream = await downloadFile(
+    const nodeStream = await downloadFile(
       attachment.storagePath,
       (attachment.storageBackend as any) || undefined,
     )
 
-    return new NextResponse(stream as any, {
+    // 7.3.1: `downloadFile` hands back a Node Readable — an fs.ReadStream
+    // locally, an S3 body in the other mode — and this route used to pass it
+    // straight into NextResponse behind an `as any`, which is the cast covering
+    // up the fact that the two are not the same type. Bridged the way the
+    // project-cover route already bridges it, which is the version that has
+    // been serving bytes since 1.2.0.
+    const webStream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of nodeStream as Readable) {
+            controller.enqueue(chunk as Uint8Array)
+          }
+          controller.close()
+        } catch (err) {
+          controller.error(err)
+        }
+      },
+      cancel() {
+        nodeStream.destroy()
+      },
+    })
+
+    // No Content-Length. The stored size is what the uploader reported, and a
+    // header that disagrees with the body by one byte fails the whole response
+    // — the cover route has never sent one either.
+    return new NextResponse(webStream, {
       headers: {
         'Content-Type': attachment.fileType,
-        'Content-Length': attachment.fileSize.toString(),
         'Content-Disposition': `inline; filename="${encodeURIComponent(attachment.fileName)}"`,
         'Cache-Control': 'private, no-store',
       },

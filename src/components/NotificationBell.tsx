@@ -316,7 +316,26 @@ export default function NotificationBell() {
                           onClick={() => onRowClick(n)}
                           className="flex-1 min-w-0 text-left"
                         >
-                          {n.type === 'EARLY_ACCESS' ? (
+                          {n.type === 'FEEDBACK_UPDATE' ? (
+                            <>
+                              {/* 7.3.1: an answer to a report this person
+                                  sent from the feedback button. Like
+                                  EARLY_ACCESS it has no video to open, and
+                                  the message is the whole point of the row —
+                                  so it wraps instead of truncating. */}
+                              <div className="text-sm leading-snug text-white/80">
+                                {n.actorName
+                                  ? `${n.actorName} replied to your feedback`
+                                  : 'Your feedback was handled'}
+                              </div>
+                              <div className="text-sm font-medium whitespace-normal break-words">
+                                {n.message}
+                              </div>
+                              <div className="text-xs text-white/50 truncate mt-0.5">
+                                {relativeTime(n.createdAt)}
+                              </div>
+                            </>
+                          ) : n.type === 'EARLY_ACCESS' ? (
                             <>
                               {/* 5.14: landing-page access request — no
                                   video to open; the message carries
