@@ -872,9 +872,17 @@ export default function VideoCard({
             duration badge (bottom-right) overlay the cover. 2.5.0+:
             version tag picks up the v2.5 frosted-glass vocabulary
             so it visually composes with the rest of the chrome
-            instead of feeling like a heavy black tab. */}
+            instead of feeling like a heavy black tab.
+
+            7.1.11: the fill had to get darker. `bg-white/10` is white tinted
+            with white, so over a bright thumbnail — a logo on a pale
+            background, a white brick wall — the tag and the picture behind it
+            were the same colour and the version was simply not there. A dark
+            base reads on anything; the blur and the hairline ring stay, so it
+            still belongs to the same frosted vocabulary as the rest of the
+            chrome rather than going back to the heavy black tab. */}
         {versionTag && (
-          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-white/10 text-white text-[11px] font-medium tabular-nums ring-1 ring-white/15 backdrop-blur-md">
+          <span className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/65 text-white text-[11px] font-medium tabular-nums ring-1 ring-white/25 backdrop-blur-md shadow-sm">
             {versionTag}
           </span>
         )}

@@ -995,31 +995,73 @@ export default function CustomVideoControls({
 
     setHoveredTime(time)
 
-    if (isDragging) {
-      // 1.1.1+: dragging the playhead on the timeline only scrubs.
-      // The comment-range OUT point is set only when the user
-      // grabs the dedicated orange handle (see the
-      // `isDraggingOutHandle` effect above).
-      scrubSeek(time)
-    }
-  }, [isDragging, videoDuration, scrubSeek])
+    // 7.1.11: the scrub itself is NOT done here any more — see the
+    // document-level effect below. This handler only exists on the timeline
+    // element, so it stops firing the moment the pointer leaves it, which is
+    // exactly what made the playhead "escape" when the hand drifted a few
+    // pixels above or below the bar mid-drag.
+  }, [videoDuration])
 
   const handleTimelineMouseLeave = useCallback(() => {
     setHoveredTime(null)
   }, [])
 
+  /**
+   * 7.1.11: once the playhead is grabbed, follow the pointer across the whole
+   * document — not just across the timeline element.
+   *
+   * A horizontal drag is not horizontal. The hand rises or falls a few pixels,
+   * the pointer leaves the bar, and the React `onMouseMove` on the element stops
+   * firing: the playhead freezes where it was and the drag is silently over
+   * while the button is still down. The bar is a few pixels tall, so this
+   * happened constantly.
+   *
+   * Only the X axis is read, so vertical travel is simply ignored — drag as far
+   * off the bar as you like and the scrub keeps up. This is the same
+   * document-level shape the OUT-handle drag has used since it was written;
+   * that one got it right and the main playhead did not.
+   *
+   * `mouseup` was already global, which is why releasing outside the bar always
+   * ended the drag correctly. Only the movement was scoped.
+   */
   useEffect(() => {
-    const handleMouseUp = () => {
-      if (isDragging) {
-        setIsDragging(false)
-        // Apply the final drag position (the throttle may have skipped it).
-        flushScrub()
-      }
+    if (!isDragging) return
+
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const isTouch = 'touches' in e
+      const clientX = isTouch
+        ? (e as TouchEvent).touches?.[0]?.clientX
+        : (e as MouseEvent).clientX
+      if (typeof clientX !== 'number') return
+      const rect = timelineRef.current?.getBoundingClientRect()
+      if (!rect || !videoDuration) return
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      // Stamped for touch only. The timeline-click guard exists to swallow the
+      // synthetic click iOS fires after a touch drag; stamping it on a mouse
+      // drag would suppress the user's next honest click on the bar.
+      if (isTouch) lastTouchAtRef.current = Date.now()
+      scrubSeek(pct * videoDuration)
     }
 
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => window.removeEventListener('mouseup', handleMouseUp)
-  }, [isDragging, flushScrub])
+    const onUp = () => {
+      setIsDragging(false)
+      // Apply the final drag position (the throttle may have skipped it).
+      flushScrub()
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.addEventListener('touchmove', onMove, { passive: false })
+    document.addEventListener('touchend', onUp)
+    document.addEventListener('touchcancel', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('touchmove', onMove)
+      document.removeEventListener('touchend', onUp)
+      document.removeEventListener('touchcancel', onUp)
+    }
+  }, [isDragging, videoDuration, scrubSeek, flushScrub])
 
   const handleMarkerClick = useCallback((marker: MarkerData, e: React.MouseEvent) => {
     e.stopPropagation()

@@ -2410,7 +2410,12 @@ export default function VideoPlayer({
 
   // Start auto-hide timer when video starts playing
   useEffect(() => {
-    if (isPlaying || isFullscreenRef.current) {
+    // 7.1.11: in fullscreen a change of play state reveals nothing. This effect
+    // re-runs on every space press, so it was the second path that kept
+    // summoning the bar. The hide timer armed by the last mouse move is still
+    // running, and the mouse is the only thing that brings the bar back.
+    if (isFullscreenRef.current) return
+    if (isPlaying) {
       resetControlsTimeout()
     } else {
       // Windowed + paused: the bar is part of the layout, so it stays.
@@ -2428,7 +2433,11 @@ export default function VideoPlayer({
 
     const handlePlay = () => {
       setIsPlaying(true)
-      resetControlsTimeout()
+      // 7.1.11: not in fullscreen. Starting playback is not a request to see
+      // the controls — pressing space to watch used to slide the bar back over
+      // the frame every time. In fullscreen the bar answers to the mouse; this
+      // is one of three places that used to disagree.
+      if (!isFullscreenRef.current) resetControlsTimeout()
       /*
        * 6.26.0 — pressing play clears the selected comment.
        *
@@ -2543,9 +2552,16 @@ export default function VideoPlayer({
     }
 
     // 6.9.0: a keypress brings the bar back too. In fullscreen the mouse is
-    // often parked while you drive with the keyboard (space, J/K/L, arrows) —
-    // without this, every shortcut fired into an invisible interface.
-    const handleKeyInteraction = () => {
+    // often parked while you drive with the keyboard (J/K/L, arrows) — without
+    // this, every shortcut fired into an invisible interface.
+    //
+    // 7.1.11: except space, the third path. 6.9.0's reasoning holds for the keys
+    // that MOVE the playhead, where the bar is what you steer by; it does not
+    // hold for play/pause, which changes nothing you need to look at. Space is
+    // also the key pressed most often, so it was the one covering the frame you
+    // went fullscreen to watch.
+    const handleKeyInteraction = (e: KeyboardEvent) => {
+      if (e.code === 'Space') return
       if (isFullscreenRef.current) resetControlsTimeout()
     }
 

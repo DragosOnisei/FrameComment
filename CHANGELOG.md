@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.11] - 2026-08-26
+
+### Fixed
+
+- **The playhead no longer escapes when you drag it.** A horizontal drag is
+  never quite horizontal: the hand rises or falls a few pixels, the pointer
+  leaves a bar that is only a few pixels tall, and the scrub stopped following
+  while the button was still held. The movement was being read from a handler on
+  the timeline element; it now follows the pointer across the whole document and
+  reads only the X axis, so vertical travel is simply ignored. The OUT-handle
+  drag has worked this way since it was written — the main playhead was the one
+  that had not.
+- **The version tag on a thumbnail can be read on a pale frame.** It was white
+  tinted with white, so over a bright picture — a logo on a light background, a
+  white brick wall — the tag and the image behind it were the same colour and
+  the version was invisible. The fill is dark now; the blur and hairline ring
+  stay, so it still belongs with the rest of the frosted chrome.
+- **In fullscreen, space no longer summons the control bar.** Pressing space to
+  watch slid the timeline back over the frame every time. Three separate paths
+  were doing it — the keydown handler, the video's `play` event, and the effect
+  watching play state — and all three now leave the bar alone in fullscreen. The
+  mouse is what reveals it, and stillness is what hides it.
+  - The other keyboard shortcuts still reveal it. 6.9.0 added that deliberately,
+    because in fullscreen the mouse is often parked while you drive with J/K/L
+    and the arrows — and there the bar is the thing you are steering by. Space
+    changes nothing you need to look at, and it is the key pressed most.
+
 ## [7.1.10] - 2026-08-26
 
 ### Fixed
