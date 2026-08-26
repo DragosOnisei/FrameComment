@@ -10,7 +10,7 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
-import { detectAdminAccessToProject } from '@/lib/share-auth'
+import { detectAdminAccessToProject, detectLoggedInAdmin } from '@/lib/share-auth'
 import ResizableSidebar from '@/components/ResizableSidebar'
 import { OTPInput } from '@/components/OTPInput'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -160,18 +160,71 @@ function SharePageClientInner({ token }: SharePageClientProps) {
    * redirect asked the weaker question and threw such a visitor into a project
    * row-level security would refuse them.
    */
-  const [adminHasAccess, setAdminHasAccess] = useState(false)
+  /**
+   * 7.1.10: start asking "is anyone signed in" the moment we mount, not after
+   * the project has loaded.
+   *
+   * 7.1.9 chained them: fetch the project, THEN refresh the token, THEN read the
+   * session, THEN check project access, THEN redirect — five round trips end to
+   * end, with the client page rendering in full somewhere in the middle. What
+   * Dragos saw was a stack of pages flicking past on the way to the one he
+   * wanted.
+   *
+   * `null` means "still asking". The client UI is withheld while it is null or
+   * true, so a signed-in viewer never sees the page they are about to leave; a
+   * guest resolves to false almost at once, because `attemptRefresh` returns
+   * immediately when there is no refresh token to spend.
+   *
+   * The 2.5s ceiling matters: if the session endpoint hangs, a guest must not be
+   * held on a spinner for it. Expiry counts as "no session", which fails open to
+   * the client page — the right way round for a page whose whole job is to show
+   * a client their video.
+   */
+  const [hasAdminSession, setHasAdminSession] = useState<boolean | null>(null)
   useEffect(() => {
-    if (!project?.id) return
     let alive = true
     ;(async () => {
-      const ok = await detectAdminAccessToProject(project.id)
-      if (alive && ok) setAdminHasAccess(true)
+      const timeout = new Promise<boolean>((resolve) =>
+        setTimeout(() => resolve(false), 2500),
+      )
+      const signedIn = await Promise.race([detectLoggedInAdmin(), timeout])
+      if (alive) setHasAdminSession(signedIn)
     })()
     return () => {
       alive = false
     }
-  }, [project?.id])
+  }, [])
+
+  /**
+   * Authorisation, once the project id exists. Kept separate from the session
+   * check above precisely so the two do not serialise: this one needs the
+   * project, that one does not.
+   *
+   * A refusal here is what releases the loading screen — see `redirectPending`.
+   */
+  const [adminHasAccess, setAdminHasAccess] = useState(false)
+  const [adminAccessDenied, setAdminAccessDenied] = useState(false)
+  useEffect(() => {
+    if (hasAdminSession !== true || !project?.id) return
+    let alive = true
+    ;(async () => {
+      const ok = await detectAdminAccessToProject(project.id)
+      if (!alive) return
+      if (ok) setAdminHasAccess(true)
+      else setAdminAccessDenied(true)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [hasAdminSession, project?.id])
+
+  /**
+   * "We are on our way out of here." Drives both the loading screen and the
+   * decision to skip work whose results are about to be thrown away — the
+   * thumbnail tokens and the stream tokens, which are the expensive part of
+   * this page and were being minted in full before every redirect.
+   */
+  const redirectPending = hasAdminSession !== false && !adminAccessDenied
 
   useEffect(() => {
     if (!adminHasAccess || !project?.id) return
@@ -201,6 +254,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     }
     router.replace(target)
   }, [adminHasAccess, project, isSingleVideoShare, urlFolderId, router])
+
 
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
@@ -852,6 +906,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     let isMounted = true
 
     async function loadTokens() {
+      // 7.1.10: same reasoning as the thumbnails — these are the 480p/720p/1080p/
+      // 2160p/hls/original/thumbnail tokens for the active clip, and none of them
+      // are used if we are redirecting.
+      if (redirectPending) return
       if (!activeVideosRaw || activeVideosRaw.length === 0) {
         setTokensLoading(false)
         return
@@ -891,7 +949,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     return () => {
       isMounted = false
     }
-  }, [activeVideosRaw, shareToken, fetchTokensForVideos, isTokenizedVideoUsable])
+    // `redirectPending` belongs here: when the authorisation check refuses a
+    // session the flag flips back to false, and without it this effect would
+    // never re-run — leaving an outsider on a page whose player never loads.
+  }, [activeVideosRaw, shareToken, fetchTokensForVideos, isTokenizedVideoUsable, redirectPending])
 
   // Fetch thumbnails for all video groups (for grid and reel display).
   //
@@ -909,6 +970,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       if (!project?.videosByName || !shareToken) {
         return
       }
+      // 7.1.10: a signed-in viewer is leaving for the admin app; minting a signed
+      // token per tile first is pure latency on the way out. Up to 120 of them
+      // on a project-wide share.
+      if (redirectPending) return
 
       // 2.2.3+: fingerprint + per-videoId cache, as above.
       const entries = Object.entries(
@@ -1058,7 +1123,8 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     return () => {
       isMounted = false
     }
-  }, [project?.videosByName, shareToken, fetchVideoTokenWithRetry, urlVideoName])
+    // Same reason as the token effect above.
+  }, [project?.videosByName, shareToken, fetchVideoTokenWithRetry, urlVideoName, redirectPending])
 
   // Determine initial view state based on URL params
   useEffect(() => {
@@ -1647,7 +1713,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // seamless single screen instead of two distinct flat cards. Old
   // behaviour was: bare "Loading…" flash → "Loading video…" card
   // flash; new behaviour: one glass card the whole time.
-  if (!project) {
+  // 7.1.10: `redirectPending` keeps this screen up for a signed-in viewer all
+  // the way to the redirect, so the page they are leaving never renders. It
+  // stays true while the session answer is unknown too — a guest clears it in
+  // milliseconds, and the alternative is a frame of the client UI flashing past
+  // on every admin's screen.
+  if (!project || redirectPending) {
     return (
       <div className="spotlight-bg-tr h-screen overflow-hidden lg:fixed lg:inset-0 flex flex-col items-center justify-center p-4" style={{ height: '100dvh' }}>
         <div

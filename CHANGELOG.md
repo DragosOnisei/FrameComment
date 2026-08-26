@@ -14,6 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.10] - 2026-08-26
+
+### Fixed
+
+- **Following a share link while signed in no longer walks you through the
+  pages on the way.** It arrived where it should, eventually, but a stack of
+  screens flicked past first and the whole trip was slow.
+  - The steps ran one after another: fetch the share payload, then refresh the
+    access token, then read the session, then check project access, then
+    redirect. The session question does not need the payload, so it is now asked
+    on mount and the two run side by side.
+  - The client page no longer renders on the way out. A signed-in viewer sees
+    one loading screen from arrival to redirect. A guest clears it in
+    milliseconds — with no refresh token to spend, the check gives up
+    immediately — and a 2.5s ceiling means a hanging session endpoint cannot
+    strand anyone on a spinner; expiry counts as "no session", which fails open
+    to the client page.
+  - The signed tokens for the page being left are no longer minted at all:
+    thumbnail tokens, up to 120 of them on a project-wide share, and the
+    480p/720p/1080p/2160p/HLS/original set for the active clip. All of it was
+    being fetched and thrown away on every redirect.
+  - A viewer whose session cannot read the project still lands on the client
+    page, and now gets its thumbnails and its player — the effects re-run when
+    the redirect is called off.
+
 ## [7.1.9] - 2026-08-26
 
 ### Changed

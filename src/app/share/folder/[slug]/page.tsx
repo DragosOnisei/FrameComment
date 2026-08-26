@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
 import { logError } from '@/lib/logging'
-import { detectAdminAccessToProject } from '@/lib/share-auth'
+import { detectAdminAccessToProject, detectLoggedInAdmin } from '@/lib/share-auth'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 import { shouldDownloadAsFiles } from '@/lib/download-mode'
@@ -174,13 +174,46 @@ function PublicFolderSharePageInner() {
     let alive = true
     ;(async () => {
       const ok = await detectAdminAccessToProject(projectId)
-      if (!alive || !ok) return
+      if (!alive) return
+      if (!ok) {
+        setAdminAccessDenied(true)
+        return
+      }
       router.replace(`/admin/projects/${projectId}/folder/${folderId}`)
     })()
     return () => {
       alive = false
     }
   }, [data?.folder?.projectId, data?.folder?.id, router])
+  /**
+   * 7.1.10: ask "is anyone signed in" on mount, in parallel with the folder
+   * fetch, and hold the loading screen until the answer is in.
+   *
+   * 7.1.9 waited for the folder, then refreshed the token, then read the
+   * session, then checked project access, then redirected — so a signed-in
+   * viewer watched the client folder page render in full on the way to the admin
+   * one. `null` means still asking; a guest answers in milliseconds because
+   * `attemptRefresh` gives up at once with no refresh token to spend. The 2.5s
+   * ceiling stops a hanging session endpoint from holding a guest on a spinner,
+   * and expiry counts as "no session", which fails open to the client page.
+   */
+  const [hasAdminSession, setHasAdminSession] = useState<boolean | null>(null)
+  const [adminAccessDenied, setAdminAccessDenied] = useState(false)
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const timeout = new Promise<boolean>((resolve) =>
+        setTimeout(() => resolve(false), 2500),
+      )
+      const signedIn = await Promise.race([detectLoggedInAdmin(), timeout])
+      if (alive) setHasAdminSession(signedIn)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+  const redirectPending = hasAdminSession !== false && !adminAccessDenied
+
   const [authMode, setAuthMode] = useState<AuthMode | null>(null)
   const [needsPassword, setNeedsPassword] = useState(false)
   const [password, setPassword] = useState('')
@@ -476,7 +509,9 @@ function PublicFolderSharePageInner() {
   // instead of bare loader on flat `bg-background`. Same recipe as
   // the public/admin share initial-load cards so the client never
   // sees the legacy #121212 surface before the folder grid renders.
-  if (loading && !data) {
+  // 7.1.10: `redirectPending` keeps this up for a signed-in viewer all the way
+  // to the redirect, so the page they are leaving never renders.
+  if ((loading && !data) || redirectPending) {
     return (
       <div className="spotlight-bg-tr min-h-screen flex items-center justify-center p-4">
         <div
