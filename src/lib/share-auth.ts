@@ -50,3 +50,38 @@ export async function detectLoggedInAdmin(): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * 7.1.9: logged in AND allowed into this particular project.
+ *
+ * `detectLoggedInAdmin()` answers only "is somebody signed in", which is not
+ * the question a share page needs before it sends someone into the admin app.
+ * Pre-7.1.0 the redirect used the weaker test, so a person signed into a
+ * DIFFERENT organisation who followed a link was thrown into a project their
+ * session cannot read — an empty or refused page under row-level security,
+ * which also confirmed to an outsider that the project exists.
+ *
+ * A `false` here is not an error: it means "treat this visitor as the client
+ * they are", which is the correct answer for a guest and for an outsider alike.
+ * Manual fetch throughout, never apiFetch, so a 401 cannot bounce a genuine
+ * guest to /login.
+ */
+export async function detectAdminAccessToProject(
+  projectId: string | null | undefined,
+): Promise<boolean> {
+  if (!projectId) return false
+  if (!(await detectLoggedInAdmin())) return false
+
+  const accessToken = getAccessToken()
+  if (!accessToken) return false
+
+  try {
+    const res = await fetch(`/api/projects/${projectId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}

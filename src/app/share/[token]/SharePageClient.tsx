@@ -10,7 +10,7 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
-import ShareOpenInProjectBanner from '@/components/ShareOpenInProjectBanner'
+import { detectAdminAccessToProject } from '@/lib/share-auth'
 import ResizableSidebar from '@/components/ResizableSidebar'
 import { OTPInput } from '@/components/OTPInput'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -134,19 +134,73 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // onVideoStateChange. Used by ThumbnailReel to highlight the active row
   // in the version dropdown.
   const [activeVideoId, setActiveVideoId] = useState<string | undefined>(undefined)
-  // 7.1.0: a signed-in viewer is no longer redirected off this page.
-  //
-  // 3.8.x through 7.0.1 detected an admin session here and immediately
-  // `router.replace()`d into the admin app, aiming at the folder holding the
-  // shared content. For a link scoped to ONE video that meant landing in a
-  // folder listing every video in it — and when a folder holds several
-  // near-identical cuts, the person who followed the link could no longer tell
-  // which one was shared with them. The link failed precisely by succeeding.
-  //
-  // The share now always shows what was shared. ShareOpenInProjectBanner offers
-  // the trip to the folder instead, and only to a session that has proved it can
-  // actually read this project — see the component for why authentication alone
-  // was the wrong test.
+  /**
+   * 7.1.9: a signed-in viewer goes straight into the admin app again — but to
+   * the VIDEO, not to the folder around it.
+   *
+   * 3.8.x through 7.0.1 did redirect, and aimed at the folder holding the
+   * shared content. That is what broke it: a link to ONE clip landed you in a
+   * folder listing every clip in it, and with several near-identical cuts in
+   * there you could no longer tell which one you had been sent. 7.1.0 removed
+   * the redirect altogether and offered a button instead, which cured the
+   * confusion by taking away the convenience.
+   *
+   * So the redirect is back, and for a single-video link it targets the admin
+   * player for that clip — `?videoId=` rather than `?video=`, because an id
+   * cannot go stale the way a stack's display name does (see 7.1.8). Landing in
+   * the player is the point: it is where comments are left.
+   *
+   * A share that is NOT scoped to one clip keeps the old destination — the
+   * folder, or the project root — because that is what such a link is about.
+   *
+   * Guests are untouched: no session, no redirect, and the client page is the
+   * right answer for them. So is an outsider signed into another organisation.
+   * `detectAdminAccessToProject` asks whether this session can actually READ
+   * this project rather than merely whether somebody is logged in; the old
+   * redirect asked the weaker question and threw such a visitor into a project
+   * row-level security would refuse them.
+   */
+  const [adminHasAccess, setAdminHasAccess] = useState(false)
+  useEffect(() => {
+    if (!project?.id) return
+    let alive = true
+    ;(async () => {
+      const ok = await detectAdminAccessToProject(project.id)
+      if (alive && ok) setAdminHasAccess(true)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [project?.id])
+
+  useEffect(() => {
+    if (!adminHasAccess || !project?.id) return
+
+    const groups = Object.values(
+      (project.videosByName as Record<string, any[]> | undefined) ?? {},
+    )
+    // Newest version of the shared stack — the server sorts each group desc.
+    const onlyVideo = groups.length === 1 ? (groups[0]?.[0] as any) : null
+    const folderId =
+      urlFolderId ||
+      (onlyVideo?.folderId as string | null | undefined) ||
+      ((project as any)?.videos as
+        | Array<{ id: string; folderId?: string | null }>
+        | undefined)?.[0]?.folderId ||
+      null
+
+    let target: string
+    if (isSingleVideoShare && onlyVideo?.id) {
+      const params = new URLSearchParams({ videoId: String(onlyVideo.id) })
+      if (folderId) params.set('folderId', folderId)
+      target = `/admin/projects/${project.id}/share?${params.toString()}`
+    } else if (folderId) {
+      target = `/admin/projects/${project.id}/folder/${folderId}`
+    } else {
+      target = `/admin/projects/${project.id}`
+    }
+    router.replace(target)
+  }, [adminHasAccess, project, isSingleVideoShare, urlFolderId, router])
 
   const [activeVideos, setActiveVideos] = useState<any[]>([])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
@@ -1796,13 +1850,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               friendlier button it was meant to be. Both actions share the
               default primary, which is what the folder share uses too.
 
-              A guest renders no banner at all, in which case the download
-              simply centres on its own. */}
+              7.1.9: "Open in project folder" is gone from here entirely. A
+              signed-in viewer is redirected into the admin app before this row
+              ever renders, so the button could only ever have been shown to
+              somebody who had no use for it. The download is the only action
+              left, and it centres. */}
           <div className="pb-3 flex items-center justify-center gap-2 flex-wrap">
-            <ShareOpenInProjectBanner
-              projectId={project?.id}
-              folderId={urlFolderId || null}
-            />
             {(() => {
               if (isGuest) return null
               const downloadableCount = project.videosByName
@@ -1893,34 +1946,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           video. It is a single small button now, not the old full-width notice.
           Resolves the same target the removed `router.replace` computed: the
           folder holding the shared content, falling back to the project root. */}
-      {/* 7.1.7: only where there is no Back button.
-          Reaching the player by clicking a tile in the grid, or from a folder
-          share, leaves a Back arrow in the reel that already walks to the folder
-          the clip lives in — so an "open in project folder" button beside it
-          offers a second route to the same place and just crowds the bar.
-          `showBackButton={!isSingleVideoShare}` below is the same condition, so
-          the two can never both be missing.
-          A link locked to a single clip is the exception: it draws no Back
-          arrow, because there is no grid behind it to return to. There, this
-          button is the only way a signed-in admin gets into the full app, and it
-          stays. */}
-      {isSingleVideoShare && (
-      <div className="shrink-0 flex justify-end px-2 pt-2 sm:px-3 empty:hidden">
-        <ShareOpenInProjectBanner
-          projectId={project?.id}
-          folderId={
-            urlFolderId ||
-            ((project as any)?.videos as
-              | Array<{ id: string; folderId?: string | null }>
-              | undefined)?.find((v) => v.id === activeVideoId)?.folderId ||
-            ((project as any)?.videos as
-              | Array<{ id: string; folderId?: string | null }>
-              | undefined)?.[0]?.folderId ||
-            null
-          }
-        />
-      </div>
-      )}
+      {/* 7.1.9: no "open in project folder" here either. A viewer who could
+          use it never reaches this page any more — the redirect above takes them
+          into the admin player instead — so it existed only for people it could
+          not help. The reel's own Back arrow is the way out for a client. */}
 
       {/* Thumbnail Reel - always visible, collapsible */}
         <ThumbnailReel

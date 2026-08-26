@@ -14,8 +14,8 @@ import {
 import { Button } from '@/components/ui/button'
 import VideoCard from '@/components/VideoCard'
 import FolderCard from '@/components/FolderCard'
-import ShareOpenInProjectBanner from '@/components/ShareOpenInProjectBanner'
 import { logError } from '@/lib/logging'
+import { detectAdminAccessToProject } from '@/lib/share-auth'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 import { shouldDownloadAsFiles } from '@/lib/download-mode'
@@ -152,14 +152,35 @@ function PublicFolderSharePageInner() {
   // 3.8.x: seamless routing — a logged-in admin opening a folder share
   // link is sent into the FULL admin folder view (Back reveals sibling
   // folders) instead of the limited client share. Guests (no token)
-  // 7.1.0: no longer redirects a signed-in viewer off the share.
-  //
-  // The folder share behaved like the per-video one: detect a session, then
-  // `router.replace()` into the admin folder view. Following a link and being
-  // taken somewhere else is disorienting even when the destination is richer,
-  // so the trip is now offered rather than taken — see
-  // ShareOpenInProjectBanner, which also checks that the session can actually
-  // read this project instead of merely that somebody is logged in.
+  /**
+   * 7.1.9: a signed-in viewer is taken into the admin folder again.
+   *
+   * This is what the folder share did before 7.1.0, and for a FOLDER link it
+   * was never the problem: the destination shows the same folder the link points
+   * at, so nothing is lost in the move. What went wrong was the per-VIDEO link
+   * landing in a folder full of near-identical cuts — a different case, fixed
+   * differently, in SharePageClient.
+   *
+   * `detectAdminAccessToProject` rather than `detectLoggedInAdmin`: the old
+   * redirect only asked whether SOMEBODY was signed in, so a person signed into
+   * another organisation was sent into a project row-level security would refuse
+   * them. A guest, and an outsider, both stay on the client page — the correct
+   * answer for them.
+   */
+  useEffect(() => {
+    const projectId = data?.folder?.projectId
+    const folderId = data?.folder?.id
+    if (!projectId || !folderId) return
+    let alive = true
+    ;(async () => {
+      const ok = await detectAdminAccessToProject(projectId)
+      if (!alive || !ok) return
+      router.replace(`/admin/projects/${projectId}/folder/${folderId}`)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [data?.folder?.projectId, data?.folder?.id, router])
   const [authMode, setAuthMode] = useState<AuthMode | null>(null)
   const [needsPassword, setNeedsPassword] = useState(false)
   const [password, setPassword] = useState('')
@@ -850,12 +871,11 @@ function PublicFolderSharePageInner() {
             top, which put a notice for one person on top of the content the
             link was sent for. `space-y-3` rather than a wrapper with padding, so
             a guest — who renders nothing here — gets no stray gap either. */}
-        <footer className="pt-6 text-[11px] text-muted-foreground text-center space-y-3">
-          <ShareOpenInProjectBanner
-            projectId={data?.folder?.projectId}
-            folderId={data?.folder?.id}
-          />
-          <div>Powered by FrameComment</div>
+        {/* 7.1.9: the "open in project folder" button is gone. A viewer who
+            could use it is redirected into the admin app before this renders, so
+            it only ever appeared for people it could not help. */}
+        <footer className="pt-6 text-[11px] text-muted-foreground text-center">
+          Powered by FrameComment
         </footer>
       </div>
     </div>

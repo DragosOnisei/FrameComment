@@ -958,9 +958,7 @@
     "maxFilesReached": "Maximum files reached",
     "dragDropFiles": "Drop files here or click to browse",
     "supportedFileTypes": "Images, audio, video, documents, subtitles, project files, and archives",
-    "allFilesUploaded": "All files submitted successfully",
-    "openInProjectFolder": "Open in project folder",
-    "openInProject": "Open in project"
+    "allFilesUploaded": "All files submitted successfully"
   },
   "settings": {
     "title": "Global Settings",

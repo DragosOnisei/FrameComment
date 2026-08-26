@@ -14,6 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.9] - 2026-08-26
+
+### Changed
+
+- **A signed-in viewer following a share link is taken into the app again —
+  and a single-video link lands on the video, not the folder around it.** This
+  restores what happened before 7.1.0, with the one correction that made it
+  worth removing in the first place.
+  - A link to one clip opens the admin player for that clip, addressed by
+    `videoId` rather than by name, so it cannot go stale when a new version
+    renames the stack. Landing in the player is the point: it is where comments
+    are left.
+  - A folder link opens that folder, exactly as it always did. For a folder link
+    the old destination was never wrong — the same folder the link points at.
+  - Nothing changes for a visitor who is not signed in. They see the client
+    page, which is the correct answer for them.
+  - The redirect now asks whether the session can actually READ this project,
+    not merely whether somebody is signed in. Before 7.1.0 it asked the weaker
+    question, so a person signed into a different organisation was thrown into a
+    project row-level security would refuse them.
+- **"Open in project folder" is gone**, along with the component behind it. A
+  viewer who could use it is redirected before either share page renders, so it
+  only ever appeared to people it could not help.
+
 ## [7.1.8] - 2026-08-26
 
 ### Fixed
