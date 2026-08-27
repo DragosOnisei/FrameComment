@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.2] - 2026-08-27
+
+### Added
+
+- **A feedback attachment opens full size.** Clicking a screenshot enlarges it,
+  and pressing play on a recording opens it large and plays it there rather than
+  in a box 144 pixels tall — which is a size at which a screen recording of a
+  bug shows nothing. Escape, the close button or a click outside puts it away.
+  The enlarged copy reuses the bytes the card already holds, so nothing is
+  fetched twice.
+
 ## [7.3.1] - 2026-08-27
 
 ### Added
