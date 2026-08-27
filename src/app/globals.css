@@ -729,6 +729,39 @@
     -webkit-backdrop-filter: blur(20px) saturate(140%);
     border: 1px solid hsl(var(--glass-border));
   }
+  /* 7.3.4: a small surface nested INSIDE another one, carrying the workspace
+     accent. For the inline reply box, which was flat `bg-card` — the one input
+     in the panel that looked like it belonged to a different application.
+     
+     Not `glass-panel`: that is a page-level surface with a 20px blur, and
+     stacking one inside a comment card that is itself on glass reads as mud.
+     Not `brand-menu-surface` either — CLAUDE.md is explicit that the opaque
+     menu recipe is for menus and nothing else.
+     
+     The gradient stops are lifted verbatim from the two places this app already
+     tints a small surface with the accent: `.comment-card.is-selected` below,
+     and the confirm dialog's inline style. Same geometry, same ramp, so the
+     three read as one idea. They are not folded into a single class only
+     because those two have constraints this one does not — the card needs
+     `!important` to beat a Tailwind background, and the dialog needs its
+     backdrop-filter inline for Safari. If a fourth appears, that refactor is
+     worth doing.
+     
+     The ring rides in `box-shadow` rather than `border` so it costs no layout
+     and can be tinted in the same declaration. */
+  .accent-panel {
+    background-color: hsl(0 0% 100% / 0.06);
+    background-image: radial-gradient(
+      140% 80% at 0% 0%,
+      hsl(var(--spotlight-tint, 217 91% 60%) / 0.20) 0%,
+      hsl(var(--spotlight-tint, 217 91% 60%) / 0.06) 45%,
+      transparent 75%
+    );
+    box-shadow:
+      0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.32),
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.08);
+  }
+
   /* Lighter blur variant — used for inputs / pills where a full
      panel blur would feel heavy. */
   .glass-pill {

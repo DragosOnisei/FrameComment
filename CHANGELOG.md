@@ -14,6 +14,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.4] - 2026-08-27
+
+### Added
+
+- **The classic text faces become emoji as they are typed.** `:)` `:D` `;)` and
+  the rest of the well-known set, including the versions with a nose (`:-)`), in
+  the composer, in an inline reply, and while editing a comment. Everyone types
+  these without thinking and every other chat turns them into a face; a review
+  tool that leaves them as punctuation reads as though it is not listening.
+  - A face only converts when what precedes it is whitespace or the start of the
+    text, which is what lets a URL survive: `:/` lives inside every `http://`.
+    And only what was just typed converts — editing a word in the middle of a
+    finished sentence never rewrites something further along that happens to
+    look like a face.
+  - `8)` is deliberately not in the set, though `8-)` is. People write numbered
+    lists, and "point 8) is wrong" turning into sunglasses is a worse trade than
+    a face nobody can type.
+- **Right-clicking a video offers Download with its encoded versions**, the same
+  list the player's kebab has offered since 6.9.1. The same file used to give a
+  choice of renditions in one place and only the original in another, which
+  reads as a missing feature rather than a moved one. It is also on the card's
+  three-dot menu, which is a different component and needed the same fix.
+  - Still one click for a batch, because renditions are per-video and offering
+    "1080p" across differently-encoded files is a promise this app cannot keep,
+    and for a still image, which has none.
+
+### Changed
+
+- **The inline reply box carries the workspace accent** instead of being flat
+  dark grey. It was the one surface in the comments panel that looked the same
+  in every organisation while everything around it — the menus, the selected
+  card, the Send button beside it — followed the accent.
+
+### Fixed
+
+- **The watcher that catches system-level text insertions no longer goes blind
+  at the moment it is needed.** It stopped on any blur, and opening the macOS
+  emoji panel takes focus away from the browser window — so it switched itself
+  off exactly when an insertion was about to land. It now keeps watching while
+  the window is unfocused and reads the box the instant focus returns.
+  - Worth recording plainly: the macOS emoji panel failing to insert is a
+    documented macOS Sequoia fault reported across many applications, not
+    something in this app, and the in-app emoji button has existed since 1.1.1
+    for that reason. Switching the panel to the full Character Viewer (the icon
+    at its top right) is the workaround Apple's own forums land on.
+
 ## [7.3.3] - 2026-08-27
 
 ### Added

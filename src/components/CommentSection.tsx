@@ -26,6 +26,7 @@ import {
   type ClippedComment,
 } from '@/lib/comments-clipboard'
 import { pasteClippedThreads } from '@/lib/comments-paste'
+import { emoticonOnChange } from '@/lib/emoticons'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -127,11 +128,18 @@ function InlineReplyForm({
   }
 
   return (
-    <div className="rounded-lg ring-1 ring-border bg-card/60 backdrop-blur-sm p-2">
+    // 7.3.4: `accent-panel` instead of a flat `bg-card` with a grey ring. The
+    // reply box was the one surface in the comments panel that ignored the
+    // workspace accent — dark grey in a blue workspace and dark grey in a brown
+    // one. The ring comes from the utility's box-shadow, so `ring-border` goes.
+    <div className="accent-panel rounded-lg backdrop-blur-sm p-2">
       <textarea
         ref={textareaRef}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        // 7.3.4: same faces here as in the main composer. Writing a reply is
+        // writing a comment; having `:)` convert in one box and not the other
+        // would read as a bug in whichever one the user tried second.
+        onChange={(e) => emoticonOnChange(e.currentTarget, setText)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()

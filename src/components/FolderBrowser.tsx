@@ -1252,6 +1252,26 @@ function FolderBrowserInner(
   // 3.9.x: mirror the grouped videos into a ref so async pollers
   // (thumbnail-regenerate completion watcher) can read the freshest
   // grid state without capturing a stale closure.
+  /**
+   * 7.3.4: the one selected video whose renditions the right-click menu can
+   * offer, or null.
+   *
+   * Three conditions, and each one is a case where a version list would be a
+   * lie: more than one thing selected (renditions are per-video, so "1080p"
+   * across eight differently-encoded files is a promise this app cannot keep),
+   * a folder in the selection, or a still image, which has no renditions at
+   * all. Computed here because this is the only place that knows both what is
+   * selected and what type it is — the menu itself is handed the answer.
+   */
+  const downloadVideoId = useMemo<string | null>(() => {
+    if (selectedVideoIds.size !== 1 || selectedFolderIds.size !== 0) return null
+    const id = selectedVideoIds.values().next().value as string | undefined
+    if (!id) return null
+    const group = videoGroups.find((g) => g.id === id)
+    if (!group || group.mediaType === 'IMAGE') return null
+    return id
+  }, [selectedVideoIds, selectedFolderIds, videoGroups])
+
   const videoGroupsRef = useRef<VideoGroup[]>([])
   useEffect(() => {
     videoGroupsRef.current = videoGroups
@@ -4137,6 +4157,7 @@ function FolderBrowserInner(
       />
 
       <FolderContextMenu
+        downloadVideoId={downloadVideoId}
         open={ctxMenu.open}
         x={ctxMenu.x}
         y={ctxMenu.y}

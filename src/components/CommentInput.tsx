@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { isRangeEditActive, toggleRangeEdit, setRangeEditActive } from '@/lib/comment-range-edit'
+import { emoticonOnChange } from '@/lib/emoticons'
 import { Comment } from '@prisma/client'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
@@ -274,15 +275,80 @@ export default function CommentInput({
       Promise.resolve().then(sync)
       requestAnimationFrame(sync)
     }
+    /**
+     * 7.3.4: and a poll, while the box is focused, that depends on no event at
+     * all.
+     *
+     * Every listener above is a bet on WHICH event the OS emoji panel emits,
+     * and that bet has now been lost twice — the comment above says
+     * `beforeinput` is the one it "reliably" emits, and Dragos reports the
+     * panel inserting nothing again. Chrome and macOS keep moving; the set of
+     * events they dispatch for a system insertion is not a contract.
+     *
+     * Comparing a string every 200ms is not a clever fix, and that is the
+     * point: it cannot be broken by a browser update, because it does not ask
+     * the browser to tell us anything. It only runs while the caret is in this
+     * box, which is precisely when a system insertion can land, and it uses the
+     * same divergence test as `sync` — the DOM differing from what React last
+     * committed — so it can never fight a render or replay a stale value.
+     */
+    let poll: ReturnType<typeof setInterval> | null = null
+    const startPoll = () => {
+      if (poll === null) poll = setInterval(sync, 200)
+    }
+    const stopPoll = () => {
+      if (poll !== null) {
+        clearInterval(poll)
+        poll = null
+      }
+    }
+
+    /**
+     * 7.3.4: the blur that matters is not every blur.
+     *
+     * Opening the system emoji panel takes focus AWAY from the browser window,
+     * and Chrome may fire `blur` on this textarea when that happens. The first
+     * version of this poll stopped on any blur — which switched the watcher off
+     * at exactly the moment it existed to watch. `document.hasFocus()` tells
+     * the two cases apart: false means the WINDOW lost focus and the caret is
+     * still notionally here, so keep watching; true means focus moved somewhere
+     * else inside the page and there is nothing left to catch.
+     */
+    const onBlur = () => {
+      if (!document.hasFocus()) return
+      stopPoll()
+    }
+    /**
+     * And the moment the window comes back — which is what happens when the
+     * panel closes — read the element once, immediately, rather than waiting up
+     * to 200ms for the next tick. If the emoji did land, this is the earliest
+     * anything in the page can find out.
+     */
+    const onWindowFocus = () => {
+      sync()
+      if (document.activeElement !== el) stopPoll()
+    }
+
     el.addEventListener('input', sync)
     el.addEventListener('compositionend', sync)
     el.addEventListener('beforeinput', syncSoon)
     el.addEventListener('paste', syncSoon)
+    el.addEventListener('focus', startPoll)
+    el.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onWindowFocus)
+    // Already focused when this effect (re)bound — the listeners are rebuilt
+    // whenever `onCommentChange` changes identity, which happens mid-typing.
+    if (document.activeElement === el) startPoll()
+
     return () => {
+      stopPoll()
       el.removeEventListener('input', sync)
       el.removeEventListener('compositionend', sync)
       el.removeEventListener('beforeinput', syncSoon)
       el.removeEventListener('paste', syncSoon)
+      el.removeEventListener('focus', startPoll)
+      el.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onWindowFocus)
     }
   }, [onCommentChange])
 
@@ -855,7 +921,26 @@ export default function CommentInput({
                   ref={textareaRef}
                   placeholder=""
                   value={newComment}
-                  onChange={(e) => onCommentChange(e.target.value)}
+                  /**
+                   * 7.3.4: the classic faces turn into emoji as they are typed.
+                   *
+                   * `el.value` is written synchronously as well as pushed through
+                   * onCommentChange, and that is not belt-and-braces — it is
+                   * required. The native `input` listener above syncs the DOM
+                   * back into React state whenever the two diverge (it exists to
+                   * catch OS-level insertions), and if it read the element after
+                   * this handler had converted the state but before React had
+                   * re-rendered, it would find `:)` in the DOM, decide React was
+                   * out of date, and push the unconverted text straight back —
+                   * undoing the conversion on every single face. Writing the
+                   * element too means there is no window in which the DOM holds
+                   * the old text, whatever order the two listeners run in.
+                   *
+                   * The caret is restored on the next frame for the reason
+                   * `insertAtCursor` documents: React sets `value` after this
+                   * returns, which would drop the caret at the end.
+                   */
+                  onChange={(e) => emoticonOnChange(e.currentTarget, onCommentChange)}
                   onKeyDown={handleKeyDown}
                   onPaste={handlePaste}
                   onFocus={onInputFocus}

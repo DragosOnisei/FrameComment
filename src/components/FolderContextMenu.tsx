@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
 import {
   ArrowUp,
   ArrowUpFromLine,
@@ -102,6 +103,17 @@ export interface FolderContextMenuProps {
    *  regenerate thumbnail. */
   canCreateTranscript?: boolean
   onCreateTranscript?: () => void
+  /**
+   * 7.3.4: id of the one selected VIDEO, when the selection is exactly one and
+   * it is not a still. Set, Download becomes a submenu of encoded versions —
+   * the same list the player's kebab offers. Null, it stays the single-click
+   * item it has always been, which is the right answer for a batch (renditions
+   * are per-video) and for an image (it has none).
+   *
+   * The parent passes the id rather than this menu deriving it, because the
+   * parent is the only thing that knows what is selected and what type it is.
+   */
+  downloadVideoId?: string | null
 }
 
 export default function FolderContextMenu({
@@ -133,6 +145,7 @@ export default function FolderContextMenu({
   onRegenerateThumbnail,
   canCreateTranscript = false,
   onCreateTranscript,
+  downloadVideoId = null,
 }: FolderContextMenuProps) {
   const hasSelection = bulkSelectionCount > 0
   // 1.1.0+: Share + Rename are single-target only — they don't make
@@ -252,15 +265,28 @@ export default function FolderContextMenu({
         //   3. Move up one folder, New Folder with selection
         //   4. Delete
         <>
-          <Row
-            icon={<Download className="w-4 h-4" />}
-            label={
-              singleTarget
-                ? 'Download'
-                : `Download ${bulkSelectionCount} items`
-            }
-            onClick={onBulkDownload}
-          />
+          {/* 7.3.4: one video → the version list; anything else → one click.
+              See `downloadVideoId` for why the parent decides. */}
+          {singleTarget && downloadVideoId ? (
+            <DownloadQualitiesRow
+              videoId={downloadVideoId}
+              rowClassName="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-left transition-colors whitespace-nowrap text-white hover:bg-white/[0.08] disabled:opacity-40 disabled:cursor-not-allowed"
+              onStart={onClose}
+              /* No toast in this menu either. Falling back to the bulk path is
+                 exactly what clicking Download did before this release. */
+              onError={() => onBulkDownload?.()}
+            />
+          ) : (
+            <Row
+              icon={<Download className="w-4 h-4" />}
+              label={
+                singleTarget
+                  ? 'Download'
+                  : `Download ${bulkSelectionCount} items`
+              }
+              onClick={onBulkDownload}
+            />
+          )}
           {singleTarget && (
             <Row
               icon={<Share2 className="w-4 h-4" />}

@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachments from './CommentAttachments'
 import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
+import { emoticonOnChange } from '@/lib/emoticons'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -1227,7 +1228,8 @@ function EditTextarea({
       disabled={disabled}
       aria-label={ariaLabel}
       rows={1}
-      onChange={(e) => onChange(e.target.value)}
+      // 7.3.4: and while editing one, for the same reason.
+      onChange={(e) => emoticonOnChange(e.currentTarget, onChange)}
       onKeyDown={(e) => {
         // Enter saves; Shift+Enter is a newline; Esc cancels.
         if (e.key === 'Enter' && !e.shiftKey) {

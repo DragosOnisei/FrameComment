@@ -54,6 +54,7 @@ function highestTierLabel(completedTiers?: string[] | null): string | null {
 }
 import { fetchActiveBackendInfo, type ActiveBackendInfo } from '@/lib/active-backend-client'
 import { apiPost } from '@/lib/api-client'
+import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -1063,19 +1064,44 @@ export default function VideoCard({
                   2. Duplicate · Rename · Split versions (single-only)
                   3. Move up · New Folder with selection
                   4. Delete                                          */}
+              {/* 7.3.4: for ONE video, Download opens the list of encoded
+                  versions — the same list the player's kebab has offered since
+                  6.9.1. The same file used to give you a choice of renditions
+                  in one place and only the original in the other, which is the
+                  kind of inconsistency that makes people think a feature is
+                  missing rather than moved.
+
+                  Still the plain one-click item in two cases, both deliberate:
+                  a BULK selection, because renditions are per-video and
+                  offering "1080p" for eight files that were encoded differently
+                  would be a promise this app cannot keep; and a still IMAGE,
+                  which has no renditions to choose between. */}
               {showDownload && (
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onDownload!(id)
-                  }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
-                >
-                  <Download className="w-4 h-4 shrink-0" />
-                  {isBulk ? `Download ${bulkSelectionCount} items` : 'Download'}
-                </button>
+                isBulk || isImage ? (
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onDownload!(id)
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] text-left whitespace-nowrap"
+                  >
+                    <Download className="w-4 h-4 shrink-0" />
+                    {isBulk ? `Download ${bulkSelectionCount} items` : 'Download'}
+                  </button>
+                ) : (
+                  <DownloadQualitiesRow
+                    videoId={id}
+                    onStart={() => setMenuOpen(false)}
+                    /* This card has no toast, and adding a dialog for a failed
+                       token mint would be furniture. Falling back to the card's
+                       existing download path is what would have happened before
+                       this change anyway: the click still produces a download,
+                       through the folder's own handling, instead of nothing. */
+                    onError={() => onDownload!(id)}
+                  />
+                )
               )}
               {showShare && (
                 <button
