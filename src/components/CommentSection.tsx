@@ -1950,6 +1950,7 @@ export default function CommentSection({
     async (
       items: ClippedComment[],
       source?: { videoId: string; versionLabel: string },
+      onProgress?: (state: { kind: 'waiting'; seconds: number }) => void,
     ) => {
       if (!selectedVideoId) throw new Error('No video selected')
       // 7.1.0: the mechanics moved to src/lib/comments-paste.ts, so the folder
@@ -1964,6 +1965,7 @@ export default function CommentSection({
         isInternal: !!isAdminView,
         post: postComment,
         source,
+        onProgress,
       })
       await fetchComments()
       if (typeof window !== 'undefined') {
@@ -2046,27 +2048,77 @@ export default function CommentSection({
   }, [isAdminView, selectedVideoId, displayComments.length, mergedComments, videos])
 
   const [pastingPrevious, setPastingPrevious] = useState(false)
+  /** Seconds left of a rate-limit wait, so the button can say what it is doing. */
+  const [pasteWaitSeconds, setPasteWaitSeconds] = useState<number | null>(null)
+  /** What went wrong, in the user's words, under the button. */
+  const [pasteNote, setPasteNote] = useState<string | null>(null)
+  /**
+   * 7.3.5 — say what happened.
+   *
+   * This used to await the paste and throw the result away. `POST /api/comments`
+   * allows 10 per 60 seconds and locks out for a further 60 on the eleventh, a
+   * cap meant to stop a reviewer spamming; a paste trips it just by being one
+   * action that makes one request per thread and one per reply. Every refused
+   * post was skipped with a bare `continue`, so the button showed "Pasting…",
+   * finished, and left the empty state exactly as it was — with no way to tell a
+   * paste that did nothing from a paste that had nothing to do.
+   *
+   * Now the batch waits the lockout out once and finishes, and anything still
+   * refused is named. Slow and honest beats instant and wrong.
+   */
   const handlePastePreviousVersion = useCallback(async () => {
     if (!previousCommentSource || pastingPrevious) return
     setPastingPrevious(true)
+    setPasteNote(null)
+    setPasteWaitSeconds(null)
     try {
-      await pasteThreads(toClipped(previousCommentSource.comments), {
-        videoId: previousCommentSource.videoId,
-        versionLabel: previousCommentSource.versionLabel,
-      })
+      const r = await pasteThreads(
+        toClipped(previousCommentSource.comments),
+        {
+          videoId: previousCommentSource.videoId,
+          versionLabel: previousCommentSource.versionLabel,
+        },
+        (state) => setPasteWaitSeconds(state.seconds),
+      )
+      const total = r.created + r.failed
+      if (r.failed > 0) {
+        setPasteNote(
+          r.created === 0
+            ? t('pasteFailedAll')
+            : r.rateLimited
+              ? t('pastePartial', { done: r.created, total })
+              : t('pasteSomeRefused', { done: r.created, total }),
+        )
+      }
+    } catch (err) {
+      logError('[CommentSection] pasting the previous version failed:', err)
+      setPasteNote(t('pasteFailedAll'))
     } finally {
       setPastingPrevious(false)
+      setPasteWaitSeconds(null)
     }
-  }, [previousCommentSource, pastingPrevious, pasteThreads])
+  }, [previousCommentSource, pastingPrevious, pasteThreads, t])
 
   const handlePasteComments = useCallback(async () => {
     const items = getClippedComments(projectId)
     if (!items || items.length === 0) {
       throw new Error('Nothing to paste')
     }
-    const { created, filesMissing } = await pasteThreads(items)
+    const { created, filesMissing, failed, rateLimited } = await pasteThreads(items)
+    // 7.3.5: a partial paste is not a success. The toast this feeds only knows
+    // how to say "pasted N", which for 6-of-12 is a reassuring lie; throwing
+    // puts the honest sentence in front of the user through the same channel.
+    if (failed > 0) {
+      throw new Error(
+        created === 0
+          ? t('pasteFailedAll')
+          : rateLimited
+            ? t('pastePartial', { done: created, total: created + failed })
+            : t('pasteSomeRefused', { done: created, total: created + failed }),
+      )
+    }
     return { count: created, filesMissing }
-  }, [projectId, pasteThreads])
+  }, [projectId, pasteThreads, t])
 
   // 1.3.2+: bridge between this section and the top-level PlayerTopMenu.
   // The menu lives outside CommentSection (in the title bar) but Copy /
@@ -2648,8 +2700,21 @@ export default function CommentSection({
                   className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-xs font-semibold text-primary-foreground hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
                 >
                   <ClipboardPaste className="w-3.5 h-3.5" />
-                  {pastingPrevious ? t('pastingFromVersion') : t('pasteFromVersion')}
+                  {/* 7.3.5: while the batch is sitting out the server's
+                      per-minute cap, say so. A silent "Pasting…" that lasts a
+                      minute is indistinguishable from a hang — which is exactly
+                      how this was reported. */}
+                  {pastingPrevious
+                    ? pasteWaitSeconds !== null
+                      ? t('pasteWaitingForLimit', { seconds: pasteWaitSeconds })
+                      : t('pastingFromVersion')
+                    : t('pasteFromVersion')}
                 </button>
+                {pasteNote && (
+                  <p className="mt-3 max-w-[280px] text-[11px] leading-relaxed text-muted-foreground">
+                    {pasteNote}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="text-center py-12">

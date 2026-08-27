@@ -14,6 +14,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.5] - 2026-08-27
+
+### Fixed
+
+- **"Paste them here" no longer does nothing without saying so.** Pasting a
+  previous version's notes would show "Pasting…", finish, and leave the list
+  exactly as it was — most of the time, with no explanation, and working again
+  after a few page refreshes.
+  - The cause: `POST /api/comments` allows 10 requests per 60 seconds and sets a
+    further 60-second lockout on the eleventh, a cap written to stop a reviewer
+    spamming. A paste trips it simply by being one action that makes one request
+    per thread plus one per reply. `apiFetch` retries a 429 once with at most a
+    five-second delay, which accomplishes nothing against a sixty-second
+    lockout, and the paste loop then skipped every refused post with a bare
+    `continue`. The caller never looked at the count, so a paste that lost
+    everything was indistinguishable from a paste with nothing to do. Refreshing
+    "fixed" it only because it passed the time.
+  - The batch now sits out the lockout — once per lockout rather than once per
+    batch, because the window allows another ten after it resets, so waiting a
+    single time rescued exactly one comment and dropped the rest. Capped at
+    three waits, which covers a batch of about thirty; past that the honest
+    answer is a count of what did not make it, not a five-minute spinner.
+  - Anything still refused is counted and named: how many of how many arrived,
+    and that the server's per-minute limit is why. The button says "Waiting
+    47s…" while it waits, because a silent minute-long spinner is
+    indistinguishable from a hang, which is how this was reported.
+  - The kebab's "Paste comments" no longer reports a partial paste as a success.
+    Six of twelve announced as "pasted" is a reassuring lie.
+
+### Known
+
+- The comment-creation limit is keyed by IP + User-Agent with no per-user key,
+  so a review team behind one office connection on the same browser version
+  shares a single ten-comments-per-minute budget — two people typing notes
+  throttle each other. Raising `maxRequests` for `comments-create`, or passing a
+  per-user `customKey`, is the real fix; it is left as a deliberate decision
+  rather than a side effect of this one, because it is an abuse-protection
+  setting on a live multi-tenant deployment.
+
 ## [7.3.4] - 2026-08-27
 
 ### Added

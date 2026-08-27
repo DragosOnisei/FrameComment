@@ -53,6 +53,22 @@ export interface PasteResult {
    * stripped it) — the paste still happened, it just cannot be pointed at.
    */
   createdIds: string[]
+  /**
+   * 7.3.5: how many posts the server refused.
+   *
+   * This used to be nothing at all: a refused POST was skipped with a bare
+   * `continue` and the caller was handed a `created` count it never looked at.
+   * So a paste that lost half its comments — or all of them — looked exactly
+   * like a paste that worked, which is how a rate-limit collision turned into
+   * "sometimes the button does nothing".
+   */
+  failed: number
+  /**
+   * True when at least one refusal was a 429. Worth separating from any other
+   * failure because it is the one the user can do something about, and because
+   * the honest message names a wait rather than an error.
+   */
+  rateLimited: boolean
 }
 
 export interface PasteArgs {
@@ -65,6 +81,13 @@ export interface PasteArgs {
   post: CommentPoster
   /** Recorded on the new rows when the threads came from a known version. */
   source?: PasteSource
+  /**
+   * 7.3.5: told when the batch has to sit out a rate-limit lockout, so the
+   * button can say so instead of showing an unexplained "Pasting…" for a
+   * minute. A silent one-minute spinner is indistinguishable from a hang, which
+   * is precisely how this bug was experienced.
+   */
+  onProgress?: (state: { kind: 'waiting'; seconds: number }) => void
 }
 
 /**
@@ -82,11 +105,54 @@ export async function pasteClippedThreads({
   isInternal,
   post,
   source,
+  onProgress,
 }: PasteArgs): Promise<PasteResult> {
   let created = 0
   let filesExpected = 0
   let filesCopied = 0
   const createdIds: string[] = []
+  let failed = 0
+  let rateLimited = false
+  /**
+   * 7.3.5: the batch waits out a rate limit ONCE rather than dropping its
+   * remaining comments on the floor.
+   *
+   * `POST /api/comments` allows 10 per 60 seconds and sets a 60-second lockout
+   * on the eleventh — a cap written to stop a reviewer spamming, which a paste
+   * trips simply by being one action that creates many comments (one request
+   * per thread, plus one per reply). apiFetch's own 429 retry waits at most 5
+   * seconds, so against a 60-second lockout it accomplishes nothing.
+   *
+   * Waiting is not elegant and a minute-long paste is not nice. It is however
+   * the truth about what the server will accept, and finishing slowly beats
+   * losing six notes silently. Once per batch, so a genuinely throttled account
+   * cannot be walked into an unbounded wait.
+   */
+  let waitsUsed = 0
+  /**
+   * Once per lockout, not once per batch. The server's window allows another
+   * ten after it resets, so a batch of 25 needs to sit out two or three of them
+   * — waiting only the first time rescues exactly one comment and drops the
+   * rest, which is barely better than dropping them all.
+   *
+   * Capped at three, which covers a batch of about thirty. Past that the wait
+   * is longer than anyone will sit through and the honest answer is the count
+   * of what did not make it, not a five-minute spinner. The cap is also what
+   * stops a genuinely throttled account from being walked into an unbounded
+   * wait by a big paste.
+   */
+  const MAX_WAITS = 3
+  const waitForLimit = async (res: Response): Promise<boolean> => {
+    if (res.status !== 429) return false
+    rateLimited = true
+    if (waitsUsed >= MAX_WAITS) return false
+    waitsUsed += 1
+    const header = Number(res.headers.get('Retry-After'))
+    const seconds = Number.isFinite(header) && header > 0 ? Math.min(header, 65) : 61
+    onProgress?.({ kind: 'waiting', seconds })
+    await new Promise((r) => setTimeout(r, seconds * 1000))
+    return true
+  }
 
   for (const item of items) {
     const body: Record<string, unknown> = {
@@ -115,8 +181,15 @@ export async function pasteClippedThreads({
     // but changing what gets written to the database is a separate decision
     // with its own testing, not a side effect of moving code.
 
-    const res = await post(body)
-    if (!res.ok) continue
+    let res = await post(body)
+    if (!res.ok && (await waitForLimit(res))) {
+      // The lockout has expired; the same post is worth exactly one more try.
+      res = await post(body)
+    }
+    if (!res.ok) {
+      failed += 1
+      continue
+    }
     created += 1
     filesCopied += Number(res.headers.get('X-Attachments-Copied') || 0)
 
@@ -165,10 +238,15 @@ export async function pasteClippedThreads({
         replyBody.sourceVideoId = source.videoId
         replyBody.sourceVersionLabel = source.versionLabel
       }
-      const replyRes = await post(replyBody)
+      let replyRes = await post(replyBody)
+      if (!replyRes.ok && (await waitForLimit(replyRes))) {
+        replyRes = await post(replyBody)
+      }
       if (replyRes.ok) {
         created += 1
         filesCopied += Number(replyRes.headers.get('X-Attachments-Copied') || 0)
+      } else {
+        failed += 1
       }
     }
   }
@@ -178,5 +256,7 @@ export async function pasteClippedThreads({
     filesCopied,
     filesMissing: Math.max(0, filesExpected - filesCopied),
     createdIds,
+    failed,
+    rateLimited,
   }
 }
