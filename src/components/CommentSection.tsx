@@ -1065,6 +1065,34 @@ export default function CommentSection({
     const onPointerDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
       if (!target) return
+      /**
+       * 7.3.3: three places are NOT "outside the comment", even though none of
+       * them is a comment card.
+       *
+       *   [data-comment-popover]  the note's own bead on the timeline. Clicking
+       *                           it selects that note (see the focus effect) —
+       *                           clearing first would flicker, and re-clicking
+       *                           the SAME bead would end up deselected,
+       *                           because `focusCommentId` never changes so
+       *                           nothing re-selects it.
+       *   [data-range-handle]     the yellow handle for that note's range.
+       *                           Resizing a note is working ON it.
+       *   [role="dialog"|"menu"]  the confirm dialog and the batch menu. The
+       *                           batch actions already stopPropagation on
+       *                           mousedown, but the dialog is portalled to
+       *                           <body> and would otherwise wipe the ticks
+       *                           behind a box asking "Delete 3 comments?".
+       *
+       * The rest of the timeline is deliberately NOT excluded: scrubbing the
+       * track is moving on from the note, and deselecting is right there.
+       */
+      if (
+        target.closest(
+          '[data-comment-popover], [data-range-handle], [role="dialog"], [role="menu"]',
+        )
+      ) {
+        return
+      }
       const card = target.closest<HTMLElement>('.comment-card')
       if (card) {
         // Skip if the user is interacting with form-ish controls
@@ -1099,6 +1127,21 @@ export default function CommentSection({
       document
         .querySelectorAll('.comment-card.is-selected')
         .forEach((el) => el.classList.remove('is-selected'))
+      /**
+       * 7.3.3: and drop the real selection with it — the ticked circles, which
+       * until now only cleared after a batch action ran. Leaving eight notes
+       * ticked while the user has plainly moved on meant the next right-click
+       * anywhere offered to delete eight things they had stopped thinking
+       * about. This listener already owned the question "did the click land
+       * outside every comment", so the answer is given once here rather than
+       * twice in two places that could drift apart.
+       *
+       * Written through the setter and the ref rather than `clearCommentSelection`:
+       * both are stable, so this effect keeps its empty dependency array and
+       * the listener is installed exactly once for the life of the panel.
+       */
+      setSelectedCommentIds((cur) => (cur.size === 0 ? cur : new Set()))
+      selectionAnchorRef.current = null
     }
     document.addEventListener('mousedown', onPointerDown)
     return () => document.removeEventListener('mousedown', onPointerDown)
@@ -1374,14 +1417,28 @@ export default function CommentSection({
    * The anchor is a ref rather than state because nothing renders from it and a
    * re-render between two clicks would be a bad time to lose it.
    *
-   * Range is taken over the DISPLAYED order, not the stored one: shift-click
-   * means "everything between these two as I see them", and the list is sorted
-   * and filtered before it reaches the eye.
+   * Range is taken over `sortedComments` — what is actually on screen, in the
+   * order it is on screen. Shift-click means "everything between these two as I
+   * see them", and getting that list wrong is not a cosmetic error: it selects
+   * comments the user did not point at and misses ones they did.
+   *
+   * 7.3.3: it used to read `displayComments`, which is the list BEFORE the
+   * completed/open filter and before the timecode sort. The claim in this
+   * comment was that the two were the same thing, and they are — right up until
+   * someone's comments were not written in timeline order. The list is rendered
+   * by TIMECODE (see commentSortKey, 3.6.x) while the API returns rows by
+   * createdAt ascending, so a note left on 00:22 a day before the notes on
+   * 00:11 and 00:15 sits first in `displayComments` and last on screen.
+   * Shift-clicking from the top comment to the bottom one then sliced the wrong
+   * two indices out of the wrong array and selected exactly those two, skipping
+   * everything the user had dragged across. It looked like a live-only fault
+   * because it is a DATA fault: test comments written in timecode order make
+   * both arrays identical, which is what local had.
    */
   const selectionAnchorRef = useRef<string | null>(null)
   const selectFromClick = useCallback(
     (commentId: string, mods: { shift: boolean; toggle: boolean }) => {
-      const order = (displayComments as any[]).map((c: any) => c.id as string)
+      const order = (sortedComments as any[]).map((c: any) => c.id as string)
 
       if (mods.shift && selectionAnchorRef.current) {
         const a = order.indexOf(selectionAnchorRef.current)
@@ -1402,8 +1459,37 @@ export default function CommentSection({
       setSelectedCommentIds(new Set([commentId]))
       selectionAnchorRef.current = commentId
     },
-    [displayComments, toggleCommentSelected],
+    [sortedComments, toggleCommentSelected],
   )
+
+  /**
+   * 7.3.3 — clicking a bead on the timeline selects its note in the list.
+   *
+   * `focusCommentId` is already the id of the marker that was clicked: the
+   * player hands it up through `onCommentFocus` and the page passes it back
+   * down, which is how the list has scrolled to the right card since 1.3.1. It
+   * scrolled and lifted the card but never SELECTED it, so the timeline and the
+   * list disagreed about what was picked — the tick was empty for a note that
+   * was plainly the one being looked at, and the batch actions on right-click
+   * did not apply to it.
+   *
+   * Replaces the selection rather than adding to it, because that is what a
+   * plain click on a card does; the anchor moves too, so a Shift-click in the
+   * list afterwards ranges from the note you picked on the timeline.
+   *
+   * Admin only — selection is admin only (see `selectable` on MessageBubble),
+   * and ticking a box a reviewer has no actions for would be furniture.
+   *
+   * A separate effect from the one that scrolls, deliberately: that one is
+   * guarded by `lastFocusedCommentRef` and full of retry/mobile logic that has
+   * nothing to do with this, and this one has to live below the selection state
+   * it writes to.
+   */
+  useEffect(() => {
+    if (!isAdminView || !focusCommentId) return
+    setSelectedCommentIds(new Set([focusCommentId]))
+    selectionAnchorRef.current = focusCommentId
+  }, [focusCommentId, isAdminView])
 
   /**
    * Right-click target. `ids` is resolved at open time, not at click time, and
@@ -1416,6 +1502,13 @@ export default function CommentSection({
     x: number
     y: number
     ids: string[]
+    /**
+     * 7.3.3: how many threads are on the clipboard, read when the menu opens.
+     * Snapshotted for the same reason `ids` is: the menu shows what was true
+     * when it was summoned, and a label that changed underneath the pointer
+     * would be lying about what clicking it does.
+     */
+    pasteCount?: number
   } | null>(null)
 
   /**
@@ -1495,6 +1588,42 @@ export default function CommentSection({
   )
 
   /**
+   * 7.3.3 — right-click on the empty space in the list.
+   *
+   * `ids: []` is what makes it a different menu: with nothing pointed at,
+   * the only sensible offer is Paste, and when there is nothing on the
+   * clipboard either, saying so out loud beats a menu that does not appear.
+   * A right-click that produces no response is indistinguishable from a
+   * right-click that was not registered.
+   *
+   * Deliberately on the LIST container and not on the whole section: the
+   * composer below it is a textarea, and a textarea must keep the browser's
+   * own context menu — replacing it would take away native cut/copy/paste and
+   * spellcheck from the one place in this panel where they matter.
+   *
+   * A right-click on a thread never reaches this. `openCommentMenu` stops
+   * propagation, which is what keeps the two menus from fighting over the
+   * same gesture.
+   */
+  const openEmptyAreaMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      // No video selected means there is nowhere to paste INTO — `pasteThreads`
+      // throws 'No video selected' — so the offer is withheld rather than made
+      // and then silently swallowed by the catch. A menu item that does nothing
+      // when clicked is worse than one that is not there.
+      const clipped = selectedVideoId ? getClippedComments(projectId) : null
+      setCommentMenu({
+        x: e.clientX,
+        y: e.clientY,
+        ids: [],
+        pasteCount: clipped?.length ?? 0,
+      })
+    },
+    [projectId, selectedVideoId],
+  )
+
+  /**
    * 7.3.0 — the three batch actions, all sequential.
    *
    * Sequential for the reason comments-paste.ts is sequential: the comment
@@ -1523,9 +1652,28 @@ export default function CommentSection({
       const commentId = d.commentId as string | undefined
       const timecode = d.timecode as string | undefined
       const timestampMs = d.timestampMs as number | undefined
-      if (!commentId || !timecode) return
+      const hasEnd = 'timecodeEnd' in d
+      // 7.3.3: dragging the END of a range sends no start at all. Rebuilding
+      // the start from its on-screen percentage and writing it back would move
+      // it by up to a frame on every resize — small, cumulative, and exactly
+      // the kind of drift that shows up as the bead and the strip parting
+      // company. An absent `timecode` means "leave the start alone".
+      if (!commentId) return
+      if (!timecode && !hasEnd) return
       try {
-        const body = JSON.stringify({ timecode, timestampMs })
+        /**
+         * 7.3.3: a range comment moves as a whole, so the end travels with the
+         * start. Presence, not truthiness, decides whether it is sent: the
+         * route accepts `null` to shrink a range back to a point, and a point
+         * comment sends no key at all so its (absent) end is left alone. A
+         * `timecodeEnd: undefined` in the body would serialise away anyway, but
+         * being explicit here is what stops a future edit from turning "do not
+         * touch the end" into "clear the end".
+         */
+        const body = JSON.stringify({
+          ...(timecode ? { timecode, timestampMs } : {}),
+          ...(hasEnd ? { timecodeEnd: d.timecodeEnd ?? null } : {}),
+        })
         const res = isAdminView
           ? await apiFetch(`/api/comments/${commentId}`, {
               method: 'PATCH',
@@ -1567,14 +1715,17 @@ export default function CommentSection({
     (ids: string[]) => {
       const wanted = new Set(ids)
       // Ordered by the list, not by click order — a pasted batch should read the
-      // way it read on screen.
-      const chosen = (displayComments as any[]).filter((c: any) => wanted.has(c.id))
+      // way it read on screen. 7.3.3: which means `sortedComments`, the list as
+      // rendered; `displayComments` is in createdAt order and would paste a
+      // batch shuffled out of timeline order. Same mistake as the range above,
+      // milder consequence.
+      const chosen = (sortedComments as any[]).filter((c: any) => wanted.has(c.id))
       if (chosen.length === 0) return
       setClippedComments(projectId, toClipped(chosen))
       setHasClipboardForProject(true)
       clearCommentSelection()
     },
-    [displayComments, projectId, clearCommentSelection],
+    [sortedComments, projectId, clearCommentSelection],
   )
 
   const bulkResolveComments = useCallback(
@@ -1718,6 +1869,75 @@ export default function CommentSection({
    * twenty in parallel gets half of them rejected; and a reply cannot be
    * posted until its parent exists and has an id.
    */
+  /**
+   * 7.3.3 — point at the notes a paste just added.
+   *
+   * The list is sorted by TIMECODE, so pasted notes land wherever their moments
+   * put them — scattered through forty existing comments, never conveniently at
+   * the bottom. Before this, a paste changed a number and nothing else: you had
+   * to read the whole list to find out what arrived.
+   *
+   * Two things, in the order they matter. The first pasted note is scrolled to,
+   * because an animation nobody is looking at is not an answer. Then every
+   * pasted note is washed with the accent for a couple of seconds, so once the
+   * scroll lands the eye can pick out all of them, not just the one at the
+   * centre.
+   *
+   * The classList-plus-retry shape is deliberate rather than React state: it is
+   * exactly how `.is-selected` and `.is-focus-pulse` already decorate these
+   * cards, and a transient two-second flourish has no business causing every
+   * bubble in a long list to re-render. The retry exists because `fetchComments`
+   * resolving does not mean React has painted the new rows yet.
+   *
+   * Skips the scroll on phones for the same reason the focus effect does: the
+   * list sits below the video there, so scrolling to a comment shoves the
+   * player off screen. The wash still plays.
+   */
+  const flashPastedComments = useCallback((ids: string[]) => {
+    if (ids.length === 0 || typeof document === 'undefined') return
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
+    let attempts = 0
+
+    const tryFlash = () => {
+      attempts += 1
+      const cards = ids
+        .map((id) => document.getElementById(`comment-${id}`))
+        .map((el) => el?.querySelector<HTMLElement>('.comment-card') ?? null)
+        .filter((el): el is HTMLElement => !!el)
+
+      if (cards.length === 0) {
+        // Six tries at 200ms covers a slow refetch; past that the paste
+        // happened but something else is wrong and retrying forever would just
+        // leave a timer running for the life of the page.
+        if (attempts < 6) setTimeout(tryFlash, 200)
+        return
+      }
+
+      if (!isMobile) {
+        cards[0].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+
+      for (const card of cards) {
+        // Remove-reflow-add, the same dance `.is-focus-pulse` needs: without
+        // the forced reflow the browser coalesces the two class changes and the
+        // animation never restarts, so a second paste onto the same note would
+        // be silent.
+        card.classList.remove('is-paste-flash')
+        void card.offsetWidth
+        card.classList.add('is-paste-flash')
+        const clear = () => card.classList.remove('is-paste-flash')
+        card.addEventListener('animationend', clear, { once: true })
+        // Reduced-motion gets no animationend, because it gets no animation —
+        // so the class has to come off on a timer instead, or the wash would
+        // stay on those cards for good. Kept just past the animation's own
+        // 1400ms so it never cuts a playing flash short.
+        setTimeout(clear, 1800)
+      }
+    }
+
+    setTimeout(tryFlash, 100)
+  }, [])
+
   const pasteThreads = useCallback(
     async (
       items: ClippedComment[],
@@ -1741,9 +1961,30 @@ export default function CommentSection({
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('commentDeleted'))
       }
+      /**
+       * 7.3.3: the notes that just arrived come in already selected.
+       *
+       * A paste is almost never the last step — the batch usually wants
+       * resolving, or moving, or deleting again once it has been read. Having
+       * them selected means the very next right-click acts on exactly them,
+       * with no hunting through a re-sorted list to tick eight boxes that were
+       * a single set two seconds ago.
+       *
+       * Replaces whatever was selected, and the anchor lands on the first, so a
+       * Shift-click afterwards extends from the top of the pasted batch. Admin
+       * only, like every other selection here.
+       */
+      if (isAdminView && result.createdIds.length > 0) {
+        setSelectedCommentIds(new Set(result.createdIds))
+        selectionAnchorRef.current = result.createdIds[0]
+      }
+      // Every local paste route goes through here — the kebab, the right-click
+      // menu on the empty area, and "paste the previous version's notes" — so
+      // this is the one place the highlight has to be hooked in.
+      flashPastedComments(result.createdIds)
       return result
     },
-    [projectId, selectedVideoId, isAdminView, postComment, fetchComments],
+    [projectId, selectedVideoId, isAdminView, postComment, fetchComments, flashPastedComments],
   )
 
   /**
@@ -2360,12 +2601,16 @@ export default function CommentSection({
             column there). */}
         <div
           ref={messagesContainerRef}
+          onContextMenu={isAdminView ? openEmptyAreaMenu : undefined}
           className={cn(
             // 1.9.1+: space-y-3 (12px) between comment cards — about
             // half of the old space-y-6 (24px). 4 px was too tight,
             // 24 px too airy; 12 px reads as deliberate separation
             // without wasting vertical space in the list.
-            "flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-3 min-h-0 bg-muted/20",
+            // 7.3.3: `custom-scrollbar`, which the overlays have used since
+            // 2.5.0 and this list never got — so a long thread showed the raw
+            // OS bar, a bright white slab against a brown workspace.
+            "flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-3 min-h-0 bg-muted/20 custom-scrollbar",
             mobileCollapsible && "order-3 lg:order-1",
             mobileCollapsible && isMobileCollapsed && "hidden lg:block"
           )}
@@ -2638,85 +2883,126 @@ export default function CommentSection({
               said nothing you did not already know. The count belongs in the
               labels, where it changes what the item will DO, and only once there
               is more than one. */}
-          <button
-            role="menuitem"
-            type="button"
-            disabled={bulkBusy}
-            onClick={() => {
-              const ids = commentMenu.ids
-              setCommentMenu(null)
-              bulkCopyComments(ids)
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left disabled:opacity-40"
-          >
-            <ClipboardCopy className="w-4 h-4 shrink-0" />
-            <span className="flex-1 whitespace-nowrap">
-              {menuCount === 1 ? 'Copy' : `Copy ${menuCount} comments`}
-            </span>
-          </button>
-          {commentMenu.ids.length === 1 && (
+          {menuCount === 0 ? (
+            /* 7.3.3: the empty-area menu. Right-clicking the list where there is
+               no comment offers the one thing that makes sense with nothing
+               selected — and when the clipboard is empty too, it says so rather
+               than not opening. A gesture that produces nothing looks broken. */
+            commentMenu.pasteCount ? (
+              <button
+                role="menuitem"
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => {
+                  setCommentMenu(null)
+                  // Errors are swallowed exactly as CommentsKebabMenu swallows
+                  // them for the same action: `pasteThreads` refetches the list
+                  // and fires `commentDeleted`, so the result is visible in the
+                  // list itself and there is no toast in this panel to route a
+                  // failure to.
+                  void handlePasteComments().catch(() => {})
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left disabled:opacity-40"
+              >
+                <ClipboardPaste className="w-4 h-4 shrink-0" />
+                <span className="flex-1 whitespace-nowrap">
+                  {commentMenu.pasteCount === 1
+                    ? 'Paste comment'
+                    : `Paste ${commentMenu.pasteCount} comments`}
+                </span>
+              </button>
+            ) : (
+              <div
+                role="menuitem"
+                aria-disabled="true"
+                className="px-2 py-1.5 text-sm text-white/40 whitespace-nowrap"
+              >
+                No actions available
+              </div>
+            )
+          ) : (
+            <>
             <button
               role="menuitem"
               type="button"
+              disabled={bulkBusy}
               onClick={() => {
-                const id = commentMenu.ids[0]
+                const ids = commentMenu.ids
                 setCommentMenu(null)
-                // 7.3.0: the bubble owns its edit session, so it is asked rather
-                // than driven — see the listener in MessageBubble. Single
-                // comment only: "edit these eight" is not a thing.
-                window.dispatchEvent(
-                  new CustomEvent('comment:startEdit', { detail: { commentId: id } }),
-                )
+                bulkCopyComments(ids)
               }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left"
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left disabled:opacity-40"
             >
-              <Pencil className="w-4 h-4 shrink-0" />
-              <span className="flex-1 whitespace-nowrap">Edit</span>
+              <ClipboardCopy className="w-4 h-4 shrink-0" />
+              <span className="flex-1 whitespace-nowrap">
+                {menuCount === 1 ? 'Copy' : `Copy ${menuCount} comments`}
+              </span>
             </button>
-          )}
-          <button
-            role="menuitem"
-            type="button"
-            disabled={bulkBusy}
-            onClick={() => {
-              const ids = commentMenu.ids
-              setCommentMenu(null)
-              void bulkResolveComments(ids, !menuAllResolved)
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left disabled:opacity-40"
-          >
-            {menuAllResolved ? (
-              <XIcon className="w-4 h-4 shrink-0" />
-            ) : (
-              <Check className="w-4 h-4 shrink-0" />
+            {commentMenu.ids.length === 1 && (
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  const id = commentMenu.ids[0]
+                  setCommentMenu(null)
+                  // 7.3.0: the bubble owns its edit session, so it is asked rather
+                  // than driven — see the listener in MessageBubble. Single
+                  // comment only: "edit these eight" is not a thing.
+                  window.dispatchEvent(
+                    new CustomEvent('comment:startEdit', { detail: { commentId: id } }),
+                  )
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left"
+              >
+                <Pencil className="w-4 h-4 shrink-0" />
+                <span className="flex-1 whitespace-nowrap">Edit</span>
+              </button>
             )}
-            <span className="flex-1 whitespace-nowrap">
-              {menuAllResolved
-                ? menuCount === 1
-                  ? 'Mark as incomplete'
-                  : `Mark ${menuCount} comments as incomplete`
-                : menuCount === 1
-                  ? 'Mark as completed'
-                  : `Mark ${menuCount} comments as completed`}
-            </span>
-          </button>
-          <div className="my-1 h-px bg-white/10" role="separator" />
-          <button
-            role="menuitem"
-            type="button"
-            disabled={bulkBusy}
-            onClick={() => {
-              const ids = commentMenu.ids
-              setCommentMenu(null)
-              setPendingBulkDeleteIds(ids)
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/15 text-destructive transition-colors text-left disabled:opacity-40"
-          >
-            <Trash2 className="w-4 h-4 shrink-0" />
-            <span className="flex-1 whitespace-nowrap">
-              {menuCount === 1 ? 'Delete' : `Delete ${menuCount} comments`}
-            </span>
-          </button>
+            <button
+              role="menuitem"
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => {
+                const ids = commentMenu.ids
+                setCommentMenu(null)
+                void bulkResolveComments(ids, !menuAllResolved)
+              }}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] transition-colors text-left disabled:opacity-40"
+            >
+              {menuAllResolved ? (
+                <XIcon className="w-4 h-4 shrink-0" />
+              ) : (
+                <Check className="w-4 h-4 shrink-0" />
+              )}
+              <span className="flex-1 whitespace-nowrap">
+                {menuAllResolved
+                  ? menuCount === 1
+                    ? 'Mark as incomplete'
+                    : `Mark ${menuCount} comments as incomplete`
+                  : menuCount === 1
+                    ? 'Mark as completed'
+                    : `Mark ${menuCount} comments as completed`}
+              </span>
+            </button>
+            <div className="my-1 h-px bg-white/10" role="separator" />
+            <button
+              role="menuitem"
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => {
+                const ids = commentMenu.ids
+                setCommentMenu(null)
+                setPendingBulkDeleteIds(ids)
+              }}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-destructive/15 text-destructive transition-colors text-left disabled:opacity-40"
+            >
+              <Trash2 className="w-4 h-4 shrink-0" />
+              <span className="flex-1 whitespace-nowrap">
+                {menuCount === 1 ? 'Delete' : `Delete ${menuCount} comments`}
+              </span>
+            </button>
+            </>
+          )}
         </div>,
         document.body,
       )

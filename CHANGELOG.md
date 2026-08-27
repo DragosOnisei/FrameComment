@@ -14,6 +14,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.3] - 2026-08-27
+
+### Added
+
+- **A comment's range can be adjusted on the timeline.** Until now a range could
+  only be set while writing the note; fixing one that was a beat too short meant
+  deleting the comment and writing it again, losing its replies, its drawing and
+  its files. Click a note with a range and the yellow handle moves to the end of
+  it: drag the avatar to slide the whole stretch, drag the handle to change where
+  it finishes.
+  - It arms off the comment in focus rather than a mode, so it turns on when you
+    click a note and off when you click it again, pick another, or press play —
+    no new state, and no new way to exit to learn.
+  - Sliding a range rebuilds its end from the start plus the length captured when
+    it was grabbed, so the length is arithmetically identical after fifty moves
+    instead of breathing by a frame each time. Dragging the handle sends no start
+    at all, so the beginning is never rewritten from a screen position.
+  - The whole thing stops when its tail reaches the end of the film, and the end
+    can never pass the start.
+- **Right-clicking the empty space in the comment list offers Paste**, or says
+  "No actions available" when there is nothing to paste. A gesture that produced
+  no response at all was indistinguishable from one that had not registered.
+- **A paste says what it just added.** The first pasted note is scrolled to and
+  all of them wash with the workspace accent for a moment, because the list is
+  ordered by timecode — pasted notes land wherever their moments put them,
+  scattered through everything already there, and before this a paste changed a
+  number and nothing else. They also arrive already selected, since a paste is
+  rarely the last step.
+- **Clicking a marker on the timeline selects its note in the list.** It scrolled
+  to the card and lifted it but never selected it, so the timeline and the list
+  disagreed about what was picked and the batch actions did not apply to it.
+
+### Fixed
+
+- **Shift-clicking a range of comments selected the wrong ones.** The list is
+  drawn in timecode order but the range was measured against the order the server
+  returned, which is by creation time. Those two agree only while everybody
+  writes their notes front to back; one note written a day earlier about a later
+  moment was enough to make Shift-click pick two comments and skip everything
+  dragged across. It looked like a fault that only happened on the live site
+  because it is a fault in the DATA, and local test comments happened to be in
+  timecode order.
+- **The comment count on a stacked marker stays inside the player.** Two notes on
+  the last frame pushed it onto the sidebar.
+- **A pasted comment can no longer be re-timed by dragging it.** These have never
+  been editable in the thread, but the timeline did not know, so the one property
+  of a carried-over note you could still change was the one that matters most:
+  when it applies.
+- **A click outside the comments deselects them.** They only cleared after a batch
+  action ran, so notes stayed ticked long after the user had moved on and the next
+  right-click offered to act on all of them.
+- A copied batch pastes in the order it was read on screen rather than the order
+  it was created.
+- The id of a pasted note is recorded even when it has no replies. It was read
+  from the response header only on the path that attaches answers to a parent,
+  which is the minority of pastes.
+
+### Changed
+
+- **The scrollbar follows the workspace accent.** The comment list never had the
+  themed bar the overlays have used since 2.5.0 and showed the raw system one — a
+  bright slab against a dark workspace. The shared utility is now accent-tinted,
+  so every scrollbar in the app takes the organisation's colour instead of being
+  the one piece of chrome that looked the same everywhere.
+- `PATCH /api/comments/[id]` accepts a range change without a start, so moving
+  the end of a range does not rewrite its beginning.
+
 ## [7.3.2] - 2026-08-27
 
 ### Added

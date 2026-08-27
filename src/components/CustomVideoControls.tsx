@@ -9,6 +9,7 @@ import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
 import { isRangeEditActive } from '@/lib/comment-range-edit'
+import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 import { storyboardCellStyle, storyboardFraction, storyboardGridOf } from '@/lib/storyboard-grid'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
@@ -42,8 +43,18 @@ interface CustomVideoControlsProps {
    */
   onCommentTimecodeChange?: (
     commentId: string,
-    timecode: string,
-    timestampMs: number,
+    /**
+     * 7.3.3: `null` when only the range's END moved — the start is then left
+     * exactly as stored rather than rewritten from a percentage.
+     */
+    timecode: string | null,
+    timestampMs: number | null,
+    /**
+     * 7.3.3: the new END of a range comment, when the gesture moved one.
+     * `undefined` means "this comment has no range, leave it alone"; the write
+     * path only sends the field when it is present.
+     */
+    timecodeEnd?: string | null,
   ) => void | Promise<void>
   videoId?: string
   /** 3.8.x: signed URL of the storyboard sprite-sheet (10×10 grid of
@@ -277,6 +288,15 @@ interface MarkerData {
   colorKey: string
   content: string
   position: number
+  /**
+   * 7.3.3: pasted, or carried over from an earlier cut.
+   *
+   * The colour and the "C" already said so; the flag exists because the
+   * TIMELINE now has to refuse to re-time these, and the drag handler has only
+   * the marker to go on. Same predicate as the grey — one definition, so the
+   * pin that looks carried-over is exactly the pin that cannot be moved.
+   */
+  isCarriedOver: boolean
   /** 2.5.1+: if the comment carries a voice/audio attachment we
    *  surface it on the marker so the timeline popover can render an
    *  inline player. We only need enough info for the AudioAttachment
@@ -306,6 +326,8 @@ interface RangeBarData {
   startPosition: number
   endPosition: number
   colorKey: string
+  /** 7.3.3: see MarkerData.isCarriedOver — a pasted range is not resizable. */
+  isCarriedOver: boolean
 }
 
 export default function CustomVideoControls({
@@ -797,6 +819,7 @@ export default function CustomVideoControls({
           authorName: effectiveAuthorName,
           initials: markerInitials(comment, initialsFromName(effectiveAuthorName)),
           colorKey,
+          isCarriedOver: isCarriedOverComment(comment),
           // 3.8.x: timeline popover preview — up to 300 chars, with a
         // trailing " [...]" marker when the comment was actually longer
         // so the reader knows there's more in the full thread.
@@ -868,6 +891,7 @@ export default function CustomVideoControls({
 
         return {
           id: comment.id,
+          isCarriedOver: isCarriedOverComment(comment),
           startPosition: Math.max(0, (start / videoDuration) * 100),
           endPosition: Math.min(100, (end / videoDuration) * 100),
           colorKey,
@@ -1097,6 +1121,15 @@ export default function CustomVideoControls({
   const [draggingMarker, setDraggingMarker] = useState<{
     commentId: string
     pct: number
+    /**
+     * 7.3.3: the range's length in percent, when the note being dragged has
+     * one. Carried through the gesture so the yellow bar slides WITH the bead
+     * instead of staying behind and rubber-banding on release — a range comment
+     * moves as one object, which is what Dragos asked for and also the only
+     * reading of the gesture that makes sense: the note applies to a stretch of
+     * film, and dragging it picks a different stretch, not a different length.
+     */
+    spanPct: number | null
   } | null>(null)
   const markerDragRef = useRef<{
     commentId: string
@@ -1105,6 +1138,8 @@ export default function CustomVideoControls({
      *  back at release, so the drag effect never has to close over `markers`
      *  and re-bind its listeners mid-gesture. */
     fromPct: number
+    /** 7.3.3: same snapshot discipline for the range length. */
+    spanPct: number | null
   } | null>(null)
   const suppressNextMarkerClickRef = useRef(false)
   /**
@@ -1125,6 +1160,8 @@ export default function CustomVideoControls({
     commentId: string
     pct: number
     fromPct: number
+    /** 7.3.3: so the yellow bar holds its new place too, not just the bead. */
+    spanPct: number | null
   } | null>(null)
 
   const handleMarkerMouseDown = useCallback(
@@ -1132,19 +1169,45 @@ export default function CustomVideoControls({
       if (!onCommentTimecodeChange || !videoDuration) return
       // Left button only; a right-click belongs to the context menu.
       if (e.button !== 0) return
+      /**
+       * 7.3.3: a pasted note is not re-timed by dragging it.
+       *
+       * These are already not editable in the thread — the rule has been there
+       * since they were introduced — but the timeline never knew about it, so
+       * the one property of a pasted note you could still change was the one
+       * that matters most: WHEN it applies. A note pasted from the previous cut
+       * says "this was the problem at 00:12 last round"; dragging it to 00:30
+       * makes it a claim about the new cut that nobody made, and quietly
+       * destroys the only thing the paste was for — comparing like with like.
+       *
+       * Refused here rather than dimmed: the pin still seeks and still opens
+       * its popover, because working THROUGH these notes is the whole point.
+       * It simply does not come loose when you press on it.
+       */
+      if (marker.isCarriedOver) return
       e.stopPropagation()
+      // 7.3.3: does this note cover a stretch? `rangeBars` is the one place
+      // that already knows, and it computes its start from exactly the same
+      // `timestampMs`-first arithmetic the bead uses — so the width taken from
+      // it cannot drift against the bead by a rounding step.
+      const bar = rangeBars.find((b) => b.id === marker.id)
+      const spanPct =
+        bar && bar.endPosition > bar.startPosition
+          ? bar.endPosition - bar.startPosition
+          : null
       markerDragRef.current = {
         commentId: marker.id,
         moved: false,
         fromPct: marker.position,
+        spanPct,
       }
       // 7.x: put the hover popover away for the duration. It sits directly over
       // the timeline, so while dragging a bead it covers the very stretch you
       // are aiming at — you cannot see where you are about to drop the note.
       setHoveredMarkerId(null)
-      setDraggingMarker({ commentId: marker.id, pct: marker.position })
+      setDraggingMarker({ commentId: marker.id, pct: marker.position, spanPct })
     },
-    [onCommentTimecodeChange, videoDuration],
+    [onCommentTimecodeChange, videoDuration, rangeBars],
   )
 
   useEffect(() => {
@@ -1158,7 +1221,14 @@ export default function CustomVideoControls({
       if (typeof clientX !== 'number') return
       const rect = timelineRef.current?.getBoundingClientRect()
       if (!rect || !videoDuration) return
-      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      // 7.3.3: a range is clamped by its FAR end, not just its start. Dragging
+      // a two-second note to the last frame would otherwise push its end past
+      // the end of the film, and the saved `timecodeEnd` would describe a
+      // moment that does not exist. The note stops when its tail reaches the
+      // end instead — the gesture runs out of room, which is the truth.
+      const span = markerDragRef.current?.spanPct ?? null
+      const maxPct = span === null ? 1 : Math.max(0, 1 - span / 100)
+      const pct = Math.max(0, Math.min(maxPct, (clientX - rect.left) / rect.width))
       if (markerDragRef.current) markerDragRef.current.moved = true
       setDraggingMarker((cur) =>
         cur ? { ...cur, pct: pct * 100 } : cur,
@@ -1182,13 +1252,30 @@ export default function CustomVideoControls({
         commentId: drag.commentId,
         pct: current.pct,
         fromPct: drag.fromPct,
+        spanPct: drag.spanPct,
       })
       const seconds = (current.pct / 100) * videoDuration
       const fps = videoFps && videoFps > 0 ? videoFps : 24
+      // 7.3.3: the end is rebuilt from the new start plus the width that was
+      // captured at grab time, rather than from a stored end shifted by a
+      // delta. Same result, but this way the length is arithmetically identical
+      // before and after the move — a delta computed from percentages would
+      // let the range breathe by a frame every time it was dragged.
+      const endTimecode =
+        drag.spanPct === null
+          ? undefined
+          : secondsToTimecode(
+              Math.min(
+                videoDuration,
+                ((current.pct + drag.spanPct) / 100) * videoDuration,
+              ),
+              fps,
+            )
       onCommentTimecodeChange?.(
         drag.commentId,
         secondsToTimecode(seconds, fps),
         Math.round(seconds * 1000),
+        endTimecode,
       )
     }
 
@@ -1223,6 +1310,206 @@ export default function CustomVideoControls({
     return () => clearTimeout(t)
   }, [markers, pendingMarkerPos])
 
+  /**
+   * 7.3.3 — editing an existing comment's RANGE on the timeline.
+   *
+   * Until now a range could only be set while writing the comment: the yellow
+   * ball belonged to the composer, sat on the playhead, and once the note was
+   * posted its stretch was frozen. Fixing a range that was a beat too short
+   * meant deleting the note and writing it again, losing its replies and its
+   * drawing — the same trap that moving a note used to be before 7.3.0.
+   *
+   * WHAT ARMS IT
+   *
+   * The selected comment, not a mode. `activeCommentId` is already the app's
+   * answer to "which note am I looking at" — clicking a bubble sets it, clicking
+   * it again clears it, and playing clears it too. So a range becomes editable
+   * exactly when its comment is the one in focus, and stops being editable the
+   * moment it is not. No new state to get out of step, and no new way to exit
+   * that a user would have to learn.
+   *
+   * Derived rather than stored for the same reason: there is nothing to keep in
+   * sync. If the comment is refetched with a different range, the handle is
+   * simply somewhere else on the next render.
+   *
+   * Read-only when `onCommentTimecodeChange` is absent, which is how the client
+   * share passes through — a reviewer must not be able to re-time someone
+   * else's note by dragging.
+   */
+  const annotationCtx = useOptionalAnnotation()
+  const activeCommentId = annotationCtx?.activeCommentId ?? null
+  const activeRange = useMemo(() => {
+    if (!activeCommentId || !onCommentTimecodeChange) return null
+    const bar = rangeBars.find((b) => b.id === activeCommentId)
+    if (!bar || bar.endPosition <= bar.startPosition) return null
+    // 7.3.3: and a pasted range is not resizable, for the same reason its bead
+    // does not come loose — see the note in handleMarkerMouseDown. The strip
+    // still draws, grey, because the note still means something; there is just
+    // no handle on the end of it.
+    if (bar.isCarriedOver) return null
+    return {
+      commentId: activeCommentId,
+      inPct: bar.startPosition,
+      outPct: bar.endPosition,
+    }
+  }, [activeCommentId, rangeBars, onCommentTimecodeChange])
+
+  const [rangeOutDrag, setRangeOutDrag] = useState<{
+    commentId: string
+    pct: number
+  } | null>(null)
+  const rangeOutDragRef = useRef<{
+    commentId: string
+    inPct: number
+    fromPct: number
+    moved: boolean
+  } | null>(null)
+  /** The same hold-until-the-save-lands trick the bead uses. */
+  const [pendingRangeOut, setPendingRangeOut] = useState<{
+    commentId: string
+    pct: number
+    fromPct: number
+  } | null>(null)
+
+  /**
+   * Where the yellow handle is drawn.
+   *
+   * Four cases, in the order they take precedence, because two different
+   * gestures can be moving this thing and a stale answer is visible as lag:
+   *
+   *   1. the handle itself is being dragged      → follow the pointer
+   *   2. it was just dropped, save in flight     → hold where it was dropped
+   *   3. the BEAD is sliding the whole range     → start + the captured length
+   *   4. nothing is happening                    → as stored
+   *
+   * 7.3.3: case 3 is the one that was missing. The strip already travelled with
+   * the bead, but the handle read its position from the STORED range, so it sat
+   * at the old end for the whole drag and only caught up on release — the range
+   * looked like it was stretching, then snapping. It has to be derived from the
+   * same two numbers the strip uses, or the two ends of one object disagree
+   * about where that object is.
+   */
+  const activeOutPct = useMemo(() => {
+    if (!activeRange) return null
+    const id = activeRange.commentId
+    if (rangeOutDrag?.commentId === id) return rangeOutDrag.pct
+    if (pendingRangeOut?.commentId === id) return pendingRangeOut.pct
+    const held =
+      draggingMarker?.commentId === id
+        ? draggingMarker
+        : pendingMarkerPos?.commentId === id
+          ? pendingMarkerPos
+          : null
+    if (held && held.spanPct !== null) return held.pct + held.spanPct
+    return activeRange.outPct
+  }, [activeRange, rangeOutDrag, pendingRangeOut, draggingMarker, pendingMarkerPos])
+
+  /**
+   * 7.3.3: exactly one yellow ball on the track, always.
+   *
+   * One boolean decides which, so the two renders cannot both fire or both
+   * abstain. The fullscreen term matters: the beads and the range strips are
+   * hidden there (6.9.0, because a stray yellow dash with nothing to explain it
+   * looked like a glitch), so a range handle would be pointing at something
+   * invisible — but the composer's ball is a playback control and must stay.
+   * Gating them on the same value is what keeps "hide mine in fullscreen" from
+   * silently meaning "hide both".
+   */
+  const showRangeHandle =
+    !isFullscreen && activeRange !== null && activeOutPct !== null
+
+  const handleRangeOutDown = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => {
+      if (!activeRange) return
+      e.preventDefault()
+      e.stopPropagation()
+      // The popover sits over the very stretch being resized.
+      setHoveredMarkerId(null)
+      rangeOutDragRef.current = {
+        commentId: activeRange.commentId,
+        inPct: activeRange.inPct,
+        fromPct: activeRange.outPct,
+        moved: false,
+      }
+      setRangeOutDrag({ commentId: activeRange.commentId, pct: activeRange.outPct })
+    },
+    [activeRange],
+  )
+
+  useEffect(() => {
+    if (!rangeOutDrag) return
+
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const isTouch = 'touches' in e
+      const clientX = isTouch
+        ? (e as TouchEvent).touches?.[0]?.clientX
+        : (e as MouseEvent).clientX
+      if (typeof clientX !== 'number') return
+      const rect = timelineRef.current?.getBoundingClientRect()
+      const grab = rangeOutDragRef.current
+      if (!rect || !grab || !videoDuration) return
+      // Never before its own start. A range that inverted would describe a
+      // negative stretch of film; dragged all the way left it collapses to zero
+      // width and stays a range, which is undoable by dragging right again.
+      // Clearing the range outright on an accidental overshoot would not be.
+      const raw = ((clientX - rect.left) / rect.width) * 100
+      const pct = Math.max(grab.inPct, Math.min(100, raw))
+      grab.moved = true
+      setRangeOutDrag((cur) => (cur ? { ...cur, pct } : cur))
+      // The video scrubs to the frame the range now ends ON — same reasoning as
+      // the bead drag: the only preview that answers the question being asked.
+      scrubSeek((pct / 100) * videoDuration)
+    }
+
+    const onUp = () => {
+      const grab = rangeOutDragRef.current
+      const current = rangeOutDrag
+      rangeOutDragRef.current = null
+      setRangeOutDrag(null)
+      flushScrub()
+      if (!grab || !grab.moved || !current || !videoDuration) return
+      setPendingRangeOut({
+        commentId: grab.commentId,
+        pct: current.pct,
+        fromPct: grab.fromPct,
+      })
+      const fps = videoFps && videoFps > 0 ? videoFps : 24
+      const endSeconds = Math.min(videoDuration, (current.pct / 100) * videoDuration)
+      // `null` start: only the end moved, so the start is not rewritten at all.
+      onCommentTimecodeChange?.(
+        grab.commentId,
+        null,
+        null,
+        secondsToTimecode(endSeconds, fps),
+      )
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.addEventListener('touchmove', onMove, { passive: false })
+    document.addEventListener('touchend', onUp)
+    document.addEventListener('touchcancel', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('touchmove', onMove)
+      document.removeEventListener('touchend', onUp)
+      document.removeEventListener('touchcancel', onUp)
+    }
+  }, [rangeOutDrag, videoDuration, videoFps, scrubSeek, flushScrub, onCommentTimecodeChange])
+
+  /** Release the held end once the refreshed range disagrees with the old one. */
+  useEffect(() => {
+    if (!pendingRangeOut) return
+    const live = rangeBars.find((b) => b.id === pendingRangeOut.commentId)
+    if (!live || Math.abs(live.endPosition - pendingRangeOut.fromPct) > 0.01) {
+      setPendingRangeOut(null)
+      return
+    }
+    const t = setTimeout(() => setPendingRangeOut(null), 5000)
+    return () => clearTimeout(t)
+  }, [rangeBars, pendingRangeOut])
+
   const handleMarkerClick = useCallback((marker: MarkerData, e: React.MouseEvent) => {
     // 7.x: the click that follows a completed drag is the browser's, not the
     // user's — swallow it, or releasing the bead would seek the video to the
@@ -1235,21 +1522,29 @@ export default function CustomVideoControls({
     e.stopPropagation()
     e.preventDefault()
     onSeek(marker.timestamp)
+    // 7.3.3: the bead becomes the comment in focus, which is what clicking its
+    // card in the list already does. That one piece of state is what draws the
+    // drawing, lifts the card, and — since 7.3.3 — puts the yellow handle on
+    // the note's range, so a bead click and a card click now arrive at the same
+    // place. SET rather than toggle, unlike the card: a marker on the timeline
+    // always means "take me to this note", and there is no un-going.
+    annotationCtx?.setActiveCommentId(marker.id)
     // Notify parent to scroll to comment
     if (onMarkerClick) {
       onMarkerClick(marker.id)
     }
-  }, [onSeek, onMarkerClick])
+  }, [onSeek, onMarkerClick, annotationCtx])
 
   const handleMarkerTouchEnd = useCallback((marker: MarkerData, e: React.TouchEvent) => {
     e.stopPropagation()
     e.preventDefault()
     onSeek(marker.timestamp)
+    annotationCtx?.setActiveCommentId(marker.id)
     // Notify parent to scroll to comment
     if (onMarkerClick) {
       onMarkerClick(marker.id)
     }
-  }, [onSeek, onMarkerClick])
+  }, [onSeek, onMarkerClick, annotationCtx])
 
   // 1.3.1+: debounce the hover-close. The popover sits ~8 px above
   // the marker — when the mouse traverses that gap on its way from
@@ -1549,7 +1844,43 @@ export default function CustomVideoControls({
               hidden in fullscreen. The bars were not, so a stray yellow dash
               hung under the progress bar with nothing to explain it. */}
           {!isFullscreen && rangeBars.map((bar) => {
-            const width = bar.endPosition - bar.startPosition
+            /**
+             * 7.3.3: while its bead is being dragged — and through the hold
+             * after release, until the save comes back — the bar travels with
+             * it, keeping its length. Without this the yellow strip stayed at
+             * the old moment during the whole gesture and then snapped, which
+             * read as the range having been left behind.
+             *
+             * The same two-step override the bead uses, in the same order, so
+             * the two can never disagree about where the note is.
+             */
+            const held =
+              draggingMarker?.commentId === bar.id
+                ? draggingMarker
+                : pendingMarkerPos?.commentId === bar.id
+                  ? pendingMarkerPos
+                  : null
+            const startPosition =
+              held && held.spanPct !== null ? held.pct : bar.startPosition
+            /**
+             * 7.3.3: and when the END is the thing being dragged, the strip
+             * grows and shrinks from its fixed start. The two gestures are
+             * mutually exclusive — one grabs the bead, the other the yellow
+             * handle — so checking the end first is safe and reads in the order
+             * the user thinks: where does it end now, else how wide was it.
+             */
+            const liveOut =
+              rangeOutDrag?.commentId === bar.id
+                ? rangeOutDrag.pct
+                : pendingRangeOut?.commentId === bar.id
+                  ? pendingRangeOut.pct
+                  : null
+            const width =
+              liveOut !== null
+                ? Math.max(liveOut - startPosition, 0)
+                : held && held.spanPct !== null
+                  ? held.spanPct
+                  : bar.endPosition - bar.startPosition
             return (
               <div
                 key={`range-${bar.id}`}
@@ -1561,7 +1892,7 @@ export default function CustomVideoControls({
                 // flagged it as noise.)
                 className="absolute top-[38px] sm:top-[47px] -translate-y-1/2 h-[2px] rounded-full pointer-events-none bg-warning"
                 style={{
-                  left: `${bar.startPosition}%`,
+                  left: `${startPosition}%`,
                   width: `${Math.max(width, 0.5)}%`,
                   opacity: 0.9,
                 }}
@@ -1789,7 +2120,14 @@ export default function CustomVideoControls({
                   />
                 )}
                 {/* Draggable YELLOW BALL — always visible, sits on top
-                    of the white ball at rest. */}
+                    of the white ball at rest.
+                    7.3.3: except while an existing comment's range is in focus.
+                    There is one yellow handle in this design and it means "the
+                    end of the range you are working on"; leaving the composer's
+                    copy parked on the playhead at the same time would put two
+                    identical balls on the track meaning two different things.
+                    Deselecting the comment brings it straight back. */}
+                {!showRangeHandle && (
                 <button
                   type="button"
                   onMouseDown={(e) => {
@@ -1890,9 +2228,55 @@ export default function CustomVideoControls({
                     "
                   />
                 </button>
+                )}
               </>
             )
           })()}
+
+          {/* 7.3.3: the yellow handle for the range of the comment in focus.
+              Same ball, same size, same grab affordance as the composer's —
+              deliberately, because it does the same job: it is the end of the
+              stretch being defined. It just belongs to a note that already
+              exists. Dragging it resizes; dragging the note's avatar moves the
+              whole range; and the two cannot run at once because each starts
+              from its own element. */}
+          {showRangeHandle && activeOutPct !== null && (
+            <button
+              type="button"
+              onMouseDown={handleRangeOutDown}
+              onTouchStart={handleRangeOutDown}
+              className={`
+                absolute -top-1 sm:-top-1.5 z-40
+                w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full
+                bg-warning ring-2 ring-black/40
+                shadow-md cursor-ew-resize
+                hover:scale-110 active:scale-100
+                touch-none
+                ${rangeOutDrag ? 'scale-125 shadow-lg' : ''}
+              `}
+              style={{
+                left: `${activeOutPct}%`,
+                transform: 'translateX(-50%)',
+                transition: 'transform 150ms ease',
+              }}
+              title="Drag to change where this comment's range ends"
+              aria-label="Drag to change the end of this comment's range"
+              /* 7.3.3: read by CommentSection's outside-click listener, which
+                 must not treat grabbing this handle as "the user moved on from
+                 the comment" — resizing a note is working on it. */
+              data-range-handle
+            >
+              {/* Same invisible phone hit-zone the composer's ball carries, and
+                  for the same reason — a 14px target is not a thumb target. */}
+              <span
+                aria-hidden="true"
+                className="
+                  sm:hidden absolute
+                  -top-5 -left-3 -right-3 bottom-0
+                "
+              />
+            </button>
+          )}
 
           {/* Playhead. Uses `displayedProgress` (not raw `progress`)
               so it stays frozen at the IN position while the user is
@@ -2005,6 +2389,45 @@ export default function CustomVideoControls({
             const colors = COLOR_MAP[primaryMarker.colorKey] || COLOR_MAP['border-gray-500']
             const isHovered = group.some((m) => m.id === hoveredMarkerId)
             const isStacked = group.length > 1
+            /**
+             * 7.3.3: the live position — dragged, pending, or stored — hoisted
+             * out of the style prop because two things need it now: where the
+             * bead sits, and which side its count badge hangs off.
+             */
+            const markerPct =
+              draggingMarker?.commentId === primaryMarker.id
+                ? draggingMarker.pct
+                : pendingMarkerPos?.commentId === primaryMarker.id
+                  ? pendingMarkerPos.pct
+                  : primaryMarker.position
+            /**
+             * 7.3.3: the count badge on a stacked bead normally hangs 4px off
+             * the bead's RIGHT edge, which puts its right edge 13px past the
+             * bead's centre — and the bead's centre sits exactly on the
+             * timeline at `markerPct`. Two comments on the last frame therefore
+             * pushed that white "2" 13px outside the player, onto the sidebar.
+             *
+             * Past this point the badge is anchored to the bead's centre
+             * instead (`right-1/2`), which is the version that measures clean.
+             * Mirroring it to `-left-1` was the obvious move and is NOT enough:
+             * the badge is 14px wide, so hanging it 4px left of an 18px bead
+             * still lands its right edge 1px past the centre — measured, at
+             * every width, not reasoned about. Anchoring at the centre puts the
+             * right edge exactly ON the marker, so the worst case is zero
+             * overflow while the badge still overlaps the bead's top corner the
+             * way it does everywhere else.
+             *
+             * The 90% threshold can only ever fire EARLY, never late: a badge
+             * needs at most 13px of track to its right, and 10% of any timeline
+             * wide enough to be usable is more than that. Firing early costs
+             * nothing — the badge is still on its bead, just on the other
+             * corner.
+             *
+             * The bead itself still overhangs by half its width at 100%, as it
+             * always has; that is the marker pointing at the frame it belongs
+             * to, and pulling it inward would make it point at the wrong one.
+             */
+            const badgeAtCentre = isStacked && markerPct > 90
 
             return (
               <div
@@ -2027,13 +2450,7 @@ export default function CustomVideoControls({
                   // 7.x: while this bead is being dragged its position comes from
                   // the pointer, not from the stored timecode — so it stays under
                   // the finger instead of springing back until the save lands.
-                  left: `${
-                    draggingMarker?.commentId === primaryMarker.id
-                      ? draggingMarker.pct
-                      : pendingMarkerPos?.commentId === primaryMarker.id
-                        ? pendingMarkerPos.pct
-                        : primaryMarker.position
-                  }%`,
+                  left: `${markerPct}%`,
                   transform: 'translateX(-50%)',
                 }}
                 data-comment-popover
@@ -2131,7 +2548,11 @@ export default function CustomVideoControls({
                   </span>
 
                   {isStacked && (
-                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 bg-white text-black text-[8px] font-bold rounded-full flex items-center justify-center shadow-md ring-1 ring-black/30 z-10">
+                    <span
+                      className={`absolute -top-1 ${
+                        badgeAtCentre ? 'right-1/2' : '-right-1'
+                      } min-w-[14px] h-[14px] px-0.5 bg-white text-black text-[8px] font-bold rounded-full flex items-center justify-center shadow-md ring-1 ring-black/30 z-10`}
+                    >
                       {group.length}
                     </span>
                   )}

@@ -40,6 +40,19 @@ export interface PasteResult {
    * admits it.
    */
   filesMissing: number
+  /**
+   * 7.3.3: the ids of the THREADS that were created, in paste order.
+   *
+   * Threads only, not replies: a reply has no card of its own in the list, it
+   * is drawn inside its parent's, so highlighting one would mean highlighting
+   * something the reader cannot point at. The caller uses these to say "these
+   * are the ones that just arrived", which on a cut with forty comments is the
+   * difference between a paste you can see and a number that went up.
+   *
+   * Empty when the server did not return the header (older build, or a proxy
+   * stripped it) — the paste still happened, it just cannot be pointed at.
+   */
+  createdIds: string[]
 }
 
 export interface PasteArgs {
@@ -73,6 +86,7 @@ export async function pasteClippedThreads({
   let created = 0
   let filesExpected = 0
   let filesCopied = 0
+  const createdIds: string[] = []
 
   for (const item of items) {
     const body: Record<string, unknown> = {
@@ -106,14 +120,21 @@ export async function pasteClippedThreads({
     created += 1
     filesCopied += Number(res.headers.get('X-Attachments-Copied') || 0)
 
+    // The POST response body is the whole project's comments (every caller
+    // relies on that), so the new row's id travels in a header instead. Without
+    // it we would be guessing which of N rows we just made.
+    //
+    // 7.3.3: read for EVERY thread now, not only the ones that have replies to
+    // attach. It used to sit below the early return further down, so a pasted
+    // note without answers never had its id recorded — and those are most of
+    // them.
+    const parentId = res.headers.get('X-Comment-Id')
+    if (parentId) createdIds.push(parentId)
+
     // 6.16.0: replies ride along with their parent.
     const replies = Array.isArray(item.replies) ? item.replies : []
     if (replies.length === 0) continue
 
-    // The POST response body is the whole project's comments (every caller
-    // relies on that), so the new row's id travels in a header instead. Without
-    // it we would be guessing which of N rows we just made.
-    const parentId = res.headers.get('X-Comment-Id')
     if (!parentId) {
       // Older server, or a proxy stripped the header. Stop rather than re-adding
       // the answers as orphaned top-level notes — that shape is the thing this
@@ -156,5 +177,6 @@ export async function pasteClippedThreads({
     created,
     filesCopied,
     filesMissing: Math.max(0, filesExpected - filesCopied),
+    createdIds,
   }
 }

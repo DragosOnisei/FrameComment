@@ -538,6 +538,74 @@
     }
   }
 
+  /* 7.3.3: after a paste, the notes that just arrived say so.
+     
+     Pasting a batch onto a cut that already has forty comments used to be
+     silent: the count went up, the list re-sorted by timecode, and the new
+     notes landed wherever their timecodes put them — which is anywhere but the
+     bottom. There was no way to see what had just been added short of reading
+     the whole list.
+     
+     Drawn on an ::after overlay rather than on the card itself, so nothing of
+     the card's own background, ring or opacity is touched — the animation
+     cannot leave a card mid-transition if it is interrupted, and there is no
+     frame where the card's real background has been animated to `transparent`
+     and not yet restored. `pointer-events: none` because a 2-second overlay
+     that swallowed clicks on the very notes it is pointing at would be worse
+     than no animation at all.
+     
+     Colour only, no transform: these cards can be anywhere in a long list and
+     a scale beat on several at once, mid-scroll, is noise. The accent is the
+     same --spotlight-tint the selection uses, so it reads as this app's idea
+     of "look here" rather than a new one.
+     
+     The alphas look high read on their own, and they are: they are calibrated
+     for a card at 60% opacity, because that is what a pasted note always is.
+     Carried-over notes are deliberately dimmed so fresh feedback reads first
+     (see MessageBubble), and the card's opacity multiplies straight through to
+     this overlay — 0.48 on the card lands at ~0.29 on screen. Tuned at the
+     opacity these cards actually have, not the one they would have if the
+     dimming did not exist. */
+  @keyframes comment-paste-flash {
+    0% {
+      background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.48);
+      box-shadow: inset 0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.95);
+    }
+    60% {
+      background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.36);
+      box-shadow: inset 0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.70);
+    }
+    100% {
+      background-color: transparent;
+      box-shadow: inset 0 0 0 1px transparent;
+    }
+  }
+
+  .comment-card.is-paste-flash {
+    position: relative;
+  }
+
+  .comment-card.is-paste-flash::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    animation: comment-paste-flash 1400ms ease-out both;
+  }
+
+  /* Reduced motion still gets an ANSWER, just not a moving one: a steady wash
+     for as long as the class is on, which JS removes on the same schedule.
+     `animation: none` alone would have left these users with no indication of
+     what had been pasted, which is the whole point of the thing. */
+  @media (prefers-reduced-motion: reduce) {
+    .comment-card.is-paste-flash::after {
+      animation: none;
+      background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.36);
+      box-shadow: inset 0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.75);
+    }
+  }
+
   .comment-card.is-selected {
     background-color: hsl(0 0% 100% / 0.10) !important;
     background-image: radial-gradient(
@@ -672,12 +740,24 @@
 
   /* 2.5.0+: themed scrollbar for the dark glass UI. Default
      Webkit / OS chrome bars come up gray-on-white and clash with
-     the frosted-glass surfaces; this class swaps in a soft white
+     the frosted-glass surfaces; this class swaps in a soft
      thumb on a transparent track so the bar reads as part of the
-     surface. Apply with `className="custom-scrollbar"`. */
+     surface. Apply with `className="custom-scrollbar"`.
+     
+     7.3.3: the thumb follows the workspace accent instead of being flat white.
+     Every other surface that says "this is yours" already does — the menus
+     blend the accent through color-mix, the selected comment card washes with
+     it — and a white bar was the one piece of chrome that stayed the same in
+     every organisation. It is the SHARED utility, so this changes the bar
+     everywhere it is applied (the comment list, quick preview, global search),
+     which is the point: one bar, one colour, the workspace's.
+     
+     Alphas kept low. The scrollbar is furniture: it has to be findable and
+     unmistakably part of the theme, not a coloured stripe competing with the
+     content it is scrolling. */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+    scrollbar-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.42) transparent;
   }
   .custom-scrollbar::-webkit-scrollbar {
     width: 10px;
@@ -687,7 +767,7 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.12);
+    background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.34);
     border-radius: 9999px;
     /* Inset border via background-clip trick so the thumb floats
        inside the track without touching the edges. */
@@ -695,11 +775,11 @@
     background-clip: padding-box;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.22);
+    background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.55);
     background-clip: padding-box;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:active {
-    background-color: rgba(255, 255, 255, 0.32);
+    background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.72);
     background-clip: padding-box;
   }
   /* Hide the small square where vertical + horizontal tracks

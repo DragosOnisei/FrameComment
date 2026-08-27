@@ -2967,10 +2967,17 @@ export default function VideoPlayer({
                    */
                   onCommentTimecodeChange={
                     isAdmin
-                      ? (commentId, timecode, timestampMs) => {
+                      ? (commentId, timecode, timestampMs, timecodeEnd) => {
                           window.dispatchEvent(
                             new CustomEvent('comment:moveTimecode', {
-                              detail: { commentId, timecode, timestampMs },
+                              // 7.3.3: the fourth argument only rides along when
+                              // the controls actually sent one — see the note on
+                              // `'timecodeEnd' in d` at the listener.
+                              detail: {
+                                commentId,
+                                ...(timecode ? { timecode, timestampMs } : {}),
+                                ...(timecodeEnd === undefined ? {} : { timecodeEnd }),
+                              },
                             }),
                           )
                         }
