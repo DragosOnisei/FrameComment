@@ -14,6 +14,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.7] - 2026-08-27
+
+### Added
+
+- **A comment that has no range can be given one on the timeline.** Selecting a
+  note without a range used to leave the COMPOSER's yellow ball on the track, so
+  dragging it set a range for the comment you were about to write rather than
+  the one you had just clicked — the gesture looked like it worked, drew a
+  yellow stretch, and attached it to nothing. The handle now parks on the note's
+  own bead at zero width, which is the honest position: it ends where it begins
+  until somebody says otherwise. Dragging right gives it a range, and from that
+  moment the two travel together.
+  - A provisional strip is drawn while the drag is in progress. The saved-range
+    strips are built from saved comments, so a note being given its first range
+    has none — without this you moved a lone ball across the track with nothing
+    between it and the bead.
+
+### Fixed
+
+- **A range created a second ago now travels with its bead.** Two separate
+  faults, both only visible in the order Dragos wrote down: give a point comment
+  a range, then immediately drag it.
+  - The held end position is absolute — "the end is at 35%" — and was checked
+    before the bead's held position, which describes the whole object. So the
+    bead walked away and the range stayed pinned to a number until the save came
+    back, which made it look intermittent rather than wrong. Active gestures are
+    now resolved first, then the held ones with the bead ahead of the end.
+  - The bead reads its width from the saved comments, which still describe the
+    note as a point while the save is in flight, so it slid away leaving the new
+    range behind. It now prefers the live width when there is one.
+- **Clicking a marker selects its note in the list every time, not just once.**
+  7.3.3 drove this from a piece of page state that the list watched: clicking
+  the same bead twice writes the value that state already holds, React bails out
+  of the render, and the effect never runs. Since clicking empty space clears
+  the selection, the second click on any bead did nothing at all — which reads
+  as the feature never having been built. It is an event now, and an event has
+  no previous value to be equal to.
+- **Pressing and dragging a marker selects it too.** The claim happened on
+  click, and a click never arrives when the press turns into a drag — the
+  trailing click is swallowed so releasing a bead does not also seek the video.
+  Grabbing a note left it unselected while tapping it selected it: the same
+  gesture, one press longer, with a different result. Both the list selection
+  and the annotation focus are now claimed on the first pointer event, together,
+  since splitting them would only move the inconsistency somewhere quieter.
+
 ## [7.3.6] - 2026-08-27
 
 ### Added

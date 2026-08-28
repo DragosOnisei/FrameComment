@@ -1473,13 +1473,18 @@ export default function CommentSection({
   /**
    * 7.3.3 — clicking a bead on the timeline selects its note in the list.
    *
-   * `focusCommentId` is already the id of the marker that was clicked: the
-   * player hands it up through `onCommentFocus` and the page passes it back
-   * down, which is how the list has scrolled to the right card since 1.3.1. It
-   * scrolled and lifted the card but never SELECTED it, so the timeline and the
-   * list disagreed about what was picked — the tick was empty for a note that
-   * was plainly the one being looked at, and the batch actions on right-click
-   * did not apply to it.
+   * The list has scrolled to the clicked marker's card since 1.3.1 via
+   * `focusCommentId`, but never SELECTED it, so the timeline and the list
+   * disagreed about what was picked: the tick sat empty for a note that was
+   * plainly the one being looked at, and the batch actions on right-click did
+   * not apply to it.
+   *
+   * 7.3.7: driven by an EVENT rather than by watching `focusCommentId`. That
+   * state changes only the first time a given bead is clicked — click the same
+   * one again and the parent writes the value it already holds, React bails out
+   * of the render, and the effect never runs. Since clicking empty space clears
+   * the selection, the second click on any bead did nothing at all, which reads
+   * as the feature never having been built.
    *
    * Replaces the selection rather than adding to it, because that is what a
    * plain click on a card does; the anchor moves too, so a Shift-click in the
@@ -1494,10 +1499,17 @@ export default function CommentSection({
    * it writes to.
    */
   useEffect(() => {
-    if (!isAdminView || !focusCommentId) return
-    setSelectedCommentIds(new Set([focusCommentId]))
-    selectionAnchorRef.current = focusCommentId
-  }, [focusCommentId, isAdminView])
+    if (!isAdminView) return
+    const onSelect = (e: Event) => {
+      const id = (e as CustomEvent).detail?.commentId
+      if (typeof id !== 'string') return
+      setSelectedCommentIds(new Set([id]))
+      selectionAnchorRef.current = id
+    }
+    window.addEventListener('comment:selectFromTimeline', onSelect as EventListener)
+    return () =>
+      window.removeEventListener('comment:selectFromTimeline', onSelect as EventListener)
+  }, [isAdminView])
 
   /**
    * Right-click target. `ids` is resolved at open time, not at click time, and

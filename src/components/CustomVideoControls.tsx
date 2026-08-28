@@ -1130,6 +1130,19 @@ export default function CustomVideoControls({
   } | null>(null)
   const suppressNextMarkerClickRef = useRef(false)
   /**
+   * 7.3.7: the width of the range currently being worked on, kept in a ref so
+   * `handleMarkerMouseDown` can see it.
+   *
+   * The bead drag reads its span from `rangeBars`, which is built from the
+   * SAVED comments. That is correct for a range the server already knows about
+   * and wrong for one that was dragged into existence a second ago: the save is
+   * still in flight, `rangeBars` still says the note is a point, and the bead
+   * would slide away leaving the new range behind. Written from the session
+   * below, read here — the declaration has to sit above the handler, the value
+   * cannot be computed until well after it.
+   */
+  const liveRangeRef = useRef<{ commentId: string; spanPct: number } | null>(null)
+  /**
    * 7.x: where the bead stays between letting go and the data catching up.
    *
    * Dropping it used to clear the drag state at once, so for the few hundred
@@ -1151,11 +1164,54 @@ export default function CustomVideoControls({
     spanPct: number | null
   } | null>(null)
 
+  /**
+   * Declared up here rather than beside the range session that also reads it:
+   * `claimMarker` below needs it in its dependency array, and a dependency
+   * array is evaluated during render — a const declared further down would be
+   * in the temporal dead zone at that point, which is a runtime crash rather
+   * than a style question.
+   */
+  const annotationCtx = useOptionalAnnotation()
+
+  /**
+   * 7.3.7: pick a note the moment the pointer lands on its bead.
+   *
+   * This used to happen on CLICK, which never arrives when the press turns into
+   * a drag — `suppressNextMarkerClickRef` swallows the browser's trailing click
+   * so releasing a bead does not also seek the video. So grabbing a note and
+   * moving it left it unselected, while merely tapping it selected it: the same
+   * gesture, one press longer, produced a different result.
+   *
+   * Mousedown is the first thing both gestures have in common, and there is
+   * nothing to tell them apart at that point — both mean "this note". Both
+   * halves live here: the id the LIST selects, and the id the annotation
+   * context holds as in focus, which is also what puts the yellow range handle
+   * on this note. Doing one on press and the other on click would only move the
+   * inconsistency somewhere quieter.
+   */
+  const claimMarker = useCallback(
+    (markerId: string) => {
+      annotationCtx?.setActiveCommentId(markerId)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('comment:selectFromTimeline', { detail: { commentId: markerId } }),
+        )
+      }
+    },
+    [annotationCtx],
+  )
+
   const handleMarkerMouseDown = useCallback(
     (marker: MarkerData, e: React.MouseEvent) => {
-      if (!onCommentTimecodeChange || !videoDuration) return
-      // Left button only; a right-click belongs to the context menu.
+      // Left button only; a right-click belongs to the context menu, which
+      // resolves its own target.
       if (e.button !== 0) return
+      // Before every other consideration: the press means this note. Above the
+      // read-only and duration guards on purpose — a reviewer on a share link
+      // cannot DRAG a bead, but pressing one still says which note they mean,
+      // and the list ignores the event outside the admin view anyway.
+      claimMarker(marker.id)
+      if (!onCommentTimecodeChange || !videoDuration) return
       /**
        * 7.3.6: a pasted note can be dragged again.
        *
@@ -1178,10 +1234,17 @@ export default function CustomVideoControls({
       // `timestampMs`-first arithmetic the bead uses — so the width taken from
       // it cannot drift against the bead by a rounding step.
       const bar = rangeBars.find((b) => b.id === marker.id)
-      const spanPct =
+      const savedSpan =
         bar && bar.endPosition > bar.startPosition
           ? bar.endPosition - bar.startPosition
           : null
+      // The live width wins when it is about THIS note: it is either the same
+      // number, or it is the range that has not finished saving yet.
+      const live =
+        liveRangeRef.current?.commentId === marker.id
+          ? liveRangeRef.current.spanPct
+          : null
+      const spanPct = live !== null && live > 0 ? live : savedSpan
       markerDragRef.current = {
         commentId: marker.id,
         moved: false,
@@ -1194,7 +1257,7 @@ export default function CustomVideoControls({
       setHoveredMarkerId(null)
       setDraggingMarker({ commentId: marker.id, pct: marker.position, spanPct })
     },
-    [onCommentTimecodeChange, videoDuration, rangeBars],
+    [onCommentTimecodeChange, videoDuration, rangeBars, claimMarker],
   )
 
   useEffect(() => {
@@ -1323,22 +1386,43 @@ export default function CustomVideoControls({
    * share passes through — a reviewer must not be able to re-time someone
    * else's note by dragging.
    */
-  const annotationCtx = useOptionalAnnotation()
   const activeCommentId = annotationCtx?.activeCommentId ?? null
   const activeRange = useMemo(() => {
     if (!activeCommentId || !onCommentTimecodeChange) return null
+    // 7.3.6: a pasted range gets its handle too. Blocking only the resize while
+    // allowing the move would be an odd half-state — you could slide a stretch
+    // but not say where it ends — and both refusals came from the one decision
+    // that has now been reversed. See handleMarkerMouseDown.
     const bar = rangeBars.find((b) => b.id === activeCommentId)
-    if (!bar || bar.endPosition <= bar.startPosition) return null
-    // 7.3.6: a pasted range gets its handle back too. Blocking only the resize
-    // while allowing the move would be an odd half-state — you could slide a
-    // stretch but not say where it ends — and both refusals came from the one
-    // decision that has now been reversed. See handleMarkerMouseDown.
+    if (bar && bar.endPosition > bar.startPosition) {
+      return {
+        commentId: activeCommentId,
+        inPct: bar.startPosition,
+        outPct: bar.endPosition,
+      }
+    }
+    /**
+     * 7.3.7: a note with NO range still gets the handle, parked on its bead.
+     *
+     * Before this, selecting a point comment left the COMPOSER's yellow ball on
+     * the track, and dragging it set a range for the comment you were about to
+     * write — not the one you had just clicked. So the gesture looked like
+     * "give this note a range", produced a yellow stretch on screen, and
+     * attached it to nothing. Moving the bead afterwards then moved the bead
+     * alone, which is what Dragos saw and reported.
+     *
+     * Starting at zero width, on the bead, is the honest position: the note
+     * ends where it begins until somebody says otherwise. Dragging right is
+     * what gives it a range, and from that moment the two travel together.
+     */
+    const marker = markers.find((m) => m.id === activeCommentId)
+    if (!marker) return null
     return {
       commentId: activeCommentId,
-      inPct: bar.startPosition,
-      outPct: bar.endPosition,
+      inPct: marker.position,
+      outPct: marker.position,
     }
-  }, [activeCommentId, rangeBars, onCommentTimecodeChange])
+  }, [activeCommentId, rangeBars, markers, onCommentTimecodeChange])
 
   const [rangeOutDrag, setRangeOutDrag] = useState<{
     commentId: string
@@ -1378,17 +1462,60 @@ export default function CustomVideoControls({
   const activeOutPct = useMemo(() => {
     if (!activeRange) return null
     const id = activeRange.commentId
+
+    // ACTIVE gestures first. The two can never run at once — each starts from
+    // its own element — so this pair is really "whichever one the pointer is
+    // holding right now".
+    if (draggingMarker?.commentId === id && draggingMarker.spanPct !== null) {
+      return draggingMarker.pct + draggingMarker.spanPct
+    }
     if (rangeOutDrag?.commentId === id) return rangeOutDrag.pct
+
+    /**
+     * Then the HELD ones, bead before end — and that order is the whole of
+     * 7.3.7's second bug.
+     *
+     * `pendingRangeOut` holds an ABSOLUTE position: "the end is at 35%", true
+     * only for as long as the start has not moved. It used to be checked before
+     * the bead, so the sequence Dragos wrote down — give a note a range, then
+     * immediately drag its bead — hit a held end that was pinned to a number
+     * while the bead walked away from it. The range stayed behind, which is
+     * exactly what he saw, and it lasted until the save came back (or five
+     * seconds, whichever came first) so it looked intermittent rather than
+     * wrong.
+     *
+     * The bead's held position describes the whole object and therefore wins.
+     */
+    if (pendingMarkerPos?.commentId === id && pendingMarkerPos.spanPct !== null) {
+      return pendingMarkerPos.pct + pendingMarkerPos.spanPct
+    }
     if (pendingRangeOut?.commentId === id) return pendingRangeOut.pct
-    const held =
-      draggingMarker?.commentId === id
-        ? draggingMarker
-        : pendingMarkerPos?.commentId === id
-          ? pendingMarkerPos
-          : null
-    if (held && held.spanPct !== null) return held.pct + held.spanPct
+
     return activeRange.outPct
   }, [activeRange, rangeOutDrag, pendingRangeOut, draggingMarker, pendingMarkerPos])
+
+  /**
+   * Publish the live width for `handleMarkerMouseDown` — see `liveRangeRef`.
+   *
+   * Silent while the bead is moving, and that guard is load-bearing rather than
+   * an optimisation. During a bead drag `activeOutPct` is computed AS
+   * `bead + width`, while `activeRange.inPct` is still the saved start — so
+   * subtracting one from the other measures the distance the bead has been
+   * dragged plus the width, and grows with every mouse move. Writing that back
+   * would leave the next grab holding a width that was never real. The width
+   * cannot change while the bead is what is moving, so there is nothing to
+   * publish until it stops.
+   */
+  useEffect(() => {
+    if (draggingMarker || pendingMarkerPos) return
+    liveRangeRef.current =
+      activeRange && activeOutPct !== null && activeOutPct > activeRange.inPct
+        ? {
+            commentId: activeRange.commentId,
+            spanPct: activeOutPct - activeRange.inPct,
+          }
+        : null
+  }, [activeRange, activeOutPct, draggingMarker, pendingMarkerPos])
 
   /**
    * 7.3.3: exactly one yellow ball on the track, always.
@@ -1508,29 +1635,24 @@ export default function CustomVideoControls({
     e.stopPropagation()
     e.preventDefault()
     onSeek(marker.timestamp)
-    // 7.3.3: the bead becomes the comment in focus, which is what clicking its
-    // card in the list already does. That one piece of state is what draws the
-    // drawing, lifts the card, and — since 7.3.3 — puts the yellow handle on
-    // the note's range, so a bead click and a card click now arrive at the same
-    // place. SET rather than toggle, unlike the card: a marker on the timeline
-    // always means "take me to this note", and there is no un-going.
-    annotationCtx?.setActiveCommentId(marker.id)
+    // 7.3.7: focus and selection are claimed on PRESS now — see `claimMarker`.
+    // Leaving a copy here would fire it twice for every plain click and, worse,
+    // would suggest the click is where it happens.
     // Notify parent to scroll to comment
     if (onMarkerClick) {
       onMarkerClick(marker.id)
     }
-  }, [onSeek, onMarkerClick, annotationCtx])
+  }, [onSeek, onMarkerClick])
 
   const handleMarkerTouchEnd = useCallback((marker: MarkerData, e: React.TouchEvent) => {
     e.stopPropagation()
     e.preventDefault()
     onSeek(marker.timestamp)
-    annotationCtx?.setActiveCommentId(marker.id)
     // Notify parent to scroll to comment
     if (onMarkerClick) {
       onMarkerClick(marker.id)
     }
-  }, [onSeek, onMarkerClick, annotationCtx])
+  }, [onSeek, onMarkerClick])
 
   // 1.3.1+: debounce the hover-close. The popover sits ~8 px above
   // the marker — when the mouse traverses that gap on its way from
@@ -1579,7 +1701,8 @@ export default function CustomVideoControls({
     setStackIndex(0)
     setStackSlideDir(null)
     setHoveredMarkerId(markerId)
-  }, [])
+    claimMarker(markerId)
+  }, [claimMarker])
 
   // 1.3.1+: dismiss the timeline-comment popover when the user taps
   // outside it (or any marker that owns one). Without this the
@@ -2218,6 +2341,28 @@ export default function CustomVideoControls({
               </>
             )
           })()}
+
+          {/* 7.3.7: the strip for a range that does not exist yet.
+              `rangeBars` is built from saved comments, so a note being given
+              its first range has no entry there — and without this the drag
+              moved a lone ball across the track with nothing between it and the
+              bead. You could not see the stretch you were defining until the
+              save came back. Only rendered while there is no saved bar to
+              override; once there is, the code above owns it. */}
+          {!isFullscreen &&
+            activeRange &&
+            activeOutPct !== null &&
+            activeOutPct > activeRange.inPct &&
+            !rangeBars.some((b) => b.id === activeRange.commentId) && (
+              <div
+                className="absolute top-[38px] sm:top-[47px] -translate-y-1/2 h-[2px] rounded-full pointer-events-none bg-warning"
+                style={{
+                  left: `${activeRange.inPct}%`,
+                  width: `${Math.max(activeOutPct - activeRange.inPct, 0.5)}%`,
+                  opacity: 0.9,
+                }}
+              />
+            )}
 
           {/* 7.3.3: the yellow handle for the range of the comment in focus.
               Same ball, same size, same grab affordance as the composer's —
