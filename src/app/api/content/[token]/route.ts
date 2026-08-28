@@ -9,6 +9,7 @@ import { resolveReadTarget } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
+import { armOrgForVideoId } from '@/lib/share-org'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { EXACT_DOWNLOAD_TIERS, exactPreviewPath } from '@/lib/video-qualities'
 import { logError } from '@/lib/logging'
@@ -213,6 +214,24 @@ export async function GET(
       }
     }
 
+    /**
+     * 7.3.9: arm the owning org before the lookup, exactly as the sibling ZIP
+     * route has since 5.8.1.
+     *
+     * The Redis token is what authorises this request; there is no session on
+     * it, because it arrives as a plain browser navigation. `prisma` is the
+     * ARMED client, so with nothing in the AsyncLocalStorage the RLS policies
+     * match zero rows and this lookup returns null — the route then answers 404
+     * and the download simply does not happen, with nothing in the UI to say
+     * why. That is the failure mode CLAUDE.md describes: not an error, just
+     * silence.
+     *
+     * `/api/content/zip/[token]` was fixed in 5.8.1 and this one was missed,
+     * which is why a folder download works and a single video does not. On a
+     * dev database running as superuser the policies are not enforced, so this
+     * is one of the bugs that is invisible locally and real on production.
+     */
+    await armOrgForVideoId(verifiedToken.videoId)
     const video = await getVideoWithProjectCached(verifiedToken.videoId)
 
     if (!video || video.projectId !== verifiedToken.projectId) {

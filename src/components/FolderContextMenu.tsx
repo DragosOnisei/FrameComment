@@ -157,6 +157,14 @@ export default function FolderContextMenu({
     if (!open) return
     const onPointerDown = (e: MouseEvent | TouchEvent) => {
       if (!menuRef.current) return
+      // 7.3.9: the Download submenu is portalled to <body>, so it is not
+      // inside this menu's element and every check below would call it an
+      // outside click. Pressing a resolution then closed this menu on
+      // MOUSEDOWN, React unmounted the portal with it, and the click never
+      // landed on a mounted button — so nothing happened and no request was
+      // ever made. Marked with a data attribute rather than another ref
+      // because the panel belongs to a child component.
+      if ((e.target as HTMLElement | null)?.closest?.('[data-download-submenu]')) return
       if (!menuRef.current.contains(e.target as Node)) onClose()
     }
     const onKey = (e: KeyboardEvent) => {

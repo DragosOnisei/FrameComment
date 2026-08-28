@@ -25,6 +25,7 @@ import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
 import { AssetCopyMoveModal } from './AssetCopyMoveModal'
+import { triggerDownload } from '@/lib/trigger-download'
 
 interface VideoAsset {
   id: string
@@ -177,16 +178,6 @@ export function VideoAssetList({ videoId, videoName, versionLabel, projectId, on
     return <File className="h-5 w-5 text-muted-foreground flex-shrink-0" />
   }
 
-  const triggerDownload = (url: string) => {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = ''
-    link.rel = 'noopener'
-    link.style.display = 'none'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
 
   const handleDownload = async (assetId: string, _fileName: string) => {
     // Generate download token in background without blocking UI

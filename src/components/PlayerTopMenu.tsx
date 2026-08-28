@@ -21,6 +21,7 @@ import { formatBytes } from '@/lib/video-qualities-format'
 import { hasClippedComments, CLIPBOARD_CHANGED_EVENT } from '@/lib/comments-clipboard'
 import { ConfirmModal } from './ConfirmModal'
 import { ShareModal } from './ShareModal'
+import { triggerDownload } from '@/lib/trigger-download'
 
 /**
  * 1.3.2+: top-right "..." menu that lives on the admin share page only.
@@ -236,6 +237,14 @@ export default function PlayerTopMenu({
       const target = e.target as Node
       if (wrapperRef.current && wrapperRef.current.contains(target)) return
       if (popoverRef.current && popoverRef.current.contains(target)) return
+      // 7.3.9: the Download submenu is portalled to <body>, so it is not
+      // inside this menu's element and every check below would call it an
+      // outside click. Pressing a resolution then closed this menu on
+      // MOUSEDOWN, React unmounted the portal with it, and the click never
+      // landed on a mounted button — so nothing happened and no request was
+      // ever made. Marked with a data attribute rather than another ref
+      // because the panel belongs to a child component.
+      if ((target as HTMLElement | null)?.closest?.('[data-download-submenu]')) return
       setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
@@ -429,7 +438,10 @@ export default function PlayerTopMenu({
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as { url?: string }
       if (!data.url) throw new Error('No download URL returned')
-      window.open(data.url, '_blank', 'noopener,noreferrer')
+      // 7.3.9: an anchor, not a new window. `window.open` after awaiting the
+      // token is popup-blocked when the click's activation has lapsed, and it
+      // fails by returning null — no error, no tab, no download.
+      triggerDownload(data.url)
     } catch (err) {
       setToast({
         kind: 'error',
@@ -666,6 +678,9 @@ export default function PlayerTopMenu({
                    identical, which is the whole point. */
                 onMouseEnter={openQualities}
                 onMouseLeave={scheduleCloseQualities}
+                /* 7.3.9: see the click-outside handler above — this panel lives
+                   at body level and would otherwise be treated as outside. */
+                data-download-submenu
                 className="
                   fixed z-[110] min-w-[230px] text-white
                   ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)]

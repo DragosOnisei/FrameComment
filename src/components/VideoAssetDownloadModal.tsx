@@ -7,6 +7,7 @@ import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog'
 import { formatFileSize } from '@/lib/utils'
 import { getAccessToken } from '@/lib/token-store'
+import { triggerDownload } from '@/lib/trigger-download'
 
 interface VideoAsset {
   id: string
@@ -161,7 +162,8 @@ export function VideoAssetDownloadModal({
 
       const { url: downloadUrl } = await response.json()
 
-      // Direct download via window.open (streaming, non-blocking, supports multiple simultaneous downloads)
+      // Streaming, non-blocking, and safe to fire several times — see
+      // triggerDownload for why it is an anchor and not a window.
       triggerDownload(downloadUrl)
 
       // Close modal shortly after initiating download
@@ -221,16 +223,6 @@ export function VideoAssetDownloadModal({
     return category.charAt(0).toUpperCase() + category.slice(1)
   }
 
-  const triggerDownload = (url: string) => {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = ''
-    link.rel = 'noopener'
-    link.style.display = 'none'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
 
   if (!isOpen) return null
 

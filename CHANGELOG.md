@@ -14,6 +14,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.9] - 2026-08-27
+
+### Fixed
+
+- **Downloads work again for a signed-in user.** Picking a resolution did
+  nothing at all — no error, no file, and no request even left the browser. The
+  parent menus close on `mousedown` when the press lands outside their own
+  element, and the resolution list is portalled to `<body>`, so it counts as
+  outside: pressing a resolution closed the menu, React unmounted the portalled
+  list with it, and the click never landed on a mounted button. The list is now
+  marked and the three menus that host it treat it as inside.
+  - Not new. The player's kebab has had this since 6.9.2, when its submenu was
+    portalled; 7.3.4 reproduced the same structure for the card menu and the
+    right-click menu, which turned one broken menu into three. A folder download
+    kept working because it is a plain menu item, and the share page kept
+    working because it is a plain button.
+- **The single-video content route arms its organisation before looking the
+  video up.** It uses the RLS-wrapped client but never set the org context, and
+  the request arrives as a plain browser navigation with no session to derive it
+  from — so on production the policies match zero rows, the lookup returns
+  nothing, and the route answers 404 while the UI says nothing at all. The
+  sibling ZIP route was fixed in 5.8.1 and this one was missed, which is exactly
+  why a folder download worked and a single video did not.
+  - Invisible on a development database, which runs as a superuser and does not
+    enforce the policies. That asymmetry is the one CLAUDE.md warns about, and
+    it is why this shipped alongside a fix that could be reproduced locally.
+
+### Changed
+
+- Every download now hands the file to the browser through one shared helper
+  instead of five copies of it and three callers that used `window.open`. The
+  anchor was already the proven mechanism — FolderBrowser's copy carries the
+  comment "to avoid the popup blocker" — and it downloads in place rather than
+  flashing a tab open and shut.
+
 ## [7.3.8] - 2026-08-27
 
 ### Fixed

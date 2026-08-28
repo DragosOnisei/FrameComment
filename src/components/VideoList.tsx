@@ -13,6 +13,7 @@ import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
 import { logError } from '@/lib/logging'
 import { storageLocationLabels } from '@/lib/storage-labels'
+import { triggerDownload } from '@/lib/trigger-download'
 
 interface VideoListProps {
   videos: Video[]
@@ -151,16 +152,6 @@ export default function VideoList({ videos: initialVideos, isAdmin = true, onRef
     }
   }
 
-  const triggerDownload = (url: string) => {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = ''
-    link.rel = 'noopener'
-    link.style.display = 'none'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
 
   const handleDownloadVideo = async (videoId: string) => {
     // Prevent multiple simultaneous download requests

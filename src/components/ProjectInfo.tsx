@@ -17,6 +17,7 @@ import {
 import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import { getAccessToken } from '@/lib/token-store'
 import { cn } from '@/lib/utils'
+import { triggerDownload } from '@/lib/trigger-download'
 
 interface ProjectInfoProps {
   selectedVideo: Video & { name?: string; downloadUrl?: string; cleanPreview720Path?: string | null; cleanPreview1080Path?: string | null; cleanPreview2160Path?: string | null }
@@ -81,16 +82,6 @@ export default function ProjectInfo({
     return headers
   }
 
-  const triggerDownload = (url: string) => {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = ''
-    link.rel = 'noopener'
-    link.style.display = 'none'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
 
   const handleDownload = async () => {
     const downloadUrl = (selectedVideo as any).downloadUrl

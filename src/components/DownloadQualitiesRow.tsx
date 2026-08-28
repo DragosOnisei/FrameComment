@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronRight, Download, Loader2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
+import { triggerDownload } from '@/lib/trigger-download'
 
 /**
  * 7.3.4 — a "Download ▸" menu row that opens the list of encoded versions.
@@ -160,7 +161,8 @@ export default function DownloadQualitiesRow({
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = (await res.json()) as { url?: string }
         if (!data.url) throw new Error('No download URL returned')
-        window.open(data.url, '_blank', 'noopener,noreferrer')
+        // 7.3.9: see triggerDownload — `window.open` here was silently blocked.
+        triggerDownload(data.url)
       } catch (err) {
         onError?.(err instanceof Error ? err.message : 'Failed to download')
       } finally {
@@ -208,6 +210,9 @@ export default function DownloadQualitiesRow({
                out washed out. As a sibling at body level both sample the real
                page and look identical, which is the point. */
             className="brand-menu-surface fixed z-[2147483600] min-w-[230px] rounded-lg p-1 text-white ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)]"
+            /* Read by the parent menus' click-outside handlers — without it
+               they close on the mousedown that is trying to pick a file. */
+            data-download-submenu
             style={{ top: anchor.top, left: anchor.left }}
             onClick={(e) => e.stopPropagation()}
           >

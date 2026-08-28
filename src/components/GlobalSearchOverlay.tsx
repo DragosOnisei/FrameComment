@@ -7,6 +7,7 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
+import { triggerDownload } from '@/lib/trigger-download'
 import {
   Search,
   X,
@@ -433,7 +434,8 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
       if (!res.ok) return
       const data = await res.json()
       if (data?.url) {
-        window.open(data.url, '_blank', 'noopener,noreferrer')
+        // 7.3.9: see triggerDownload — `window.open` here was silently blocked.
+        triggerDownload(data.url)
       }
     } catch {
       /* retry will be by user */
