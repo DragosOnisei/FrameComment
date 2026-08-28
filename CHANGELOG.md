@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.8] - 2026-08-27
+
+### Fixed
+
+- **The yellow handle follows the bead on a comment that has no range.** It sat
+  at the note's saved position while the bead was dragged away from it. On a
+  note with no range the handle IS the bead — zero width — so leaving it behind
+  was the one case the previous release had not covered.
+  - Fixed at the source rather than patched: the live position of the note is
+    now resolved ONCE, and both ends read from it. Three rounds of this feature
+    have broken the same way, each time because a value was half live and half
+    stored — the handle, the strip and the clamp on the out-drag each decided
+    for themselves whether to trust the drag or the saved comment, and disagreed
+    while a save was in flight.
+  - The change makes the surrounding code smaller, not larger: the end-position
+    chain loses two of its cases, and a guard added a release ago is no longer
+    needed. It existed because the start came from the saved comment while the
+    end came from the drag, so the difference between them grew with every mouse
+    move; both now come from the same place.
+
 ## [7.3.7] - 2026-08-27
 
 ### Added

@@ -1393,13 +1393,32 @@ export default function CustomVideoControls({
     // allowing the move would be an odd half-state — you could slide a stretch
     // but not say where it ends — and both refusals came from the one decision
     // that has now been reversed. See handleMarkerMouseDown.
+    /**
+     * 7.3.8: both ends read LIVE while the bead is held.
+     *
+     * Three rounds of this feature have now broken the same way: a value that
+     * was half live and half stored. `rangeBars` and `markers` describe where
+     * the server thinks the note is, which is the wrong answer for the whole
+     * duration of a drag and for the hold that follows it. Resolving the bead's
+     * position once, here, means everything downstream — the handle, the strip,
+     * the clamp on the out-drag — is talking about the same note in the same
+     * place, instead of each deciding for itself which of the two to trust.
+     */
+    const held =
+      draggingMarker?.commentId === activeCommentId
+        ? draggingMarker
+        : pendingMarkerPos?.commentId === activeCommentId
+          ? pendingMarkerPos
+          : null
+
     const bar = rangeBars.find((b) => b.id === activeCommentId)
     if (bar && bar.endPosition > bar.startPosition) {
-      return {
-        commentId: activeCommentId,
-        inPct: bar.startPosition,
-        outPct: bar.endPosition,
-      }
+      const inPct = held ? held.pct : bar.startPosition
+      const width =
+        held && held.spanPct !== null
+          ? held.spanPct
+          : bar.endPosition - bar.startPosition
+      return { commentId: activeCommentId, inPct, outPct: inPct + width }
     }
     /**
      * 7.3.7: a note with NO range still gets the handle, parked on its bead.
@@ -1417,12 +1436,19 @@ export default function CustomVideoControls({
      */
     const marker = markers.find((m) => m.id === activeCommentId)
     if (!marker) return null
-    return {
-      commentId: activeCommentId,
-      inPct: marker.position,
-      outPct: marker.position,
-    }
-  }, [activeCommentId, rangeBars, markers, onCommentTimecodeChange])
+    // Zero width, so the handle IS the bead — and it has to follow it. Reading
+    // `marker.position` alone is what left the ball behind on a note with no
+    // range while the bead walked off.
+    const inPct = held ? held.pct : marker.position
+    return { commentId: activeCommentId, inPct, outPct: inPct }
+  }, [
+    activeCommentId,
+    rangeBars,
+    markers,
+    onCommentTimecodeChange,
+    draggingMarker,
+    pendingMarkerPos,
+  ])
 
   const [rangeOutDrag, setRangeOutDrag] = useState<{
     commentId: string
@@ -1463,51 +1489,37 @@ export default function CustomVideoControls({
     if (!activeRange) return null
     const id = activeRange.commentId
 
-    // ACTIVE gestures first. The two can never run at once — each starts from
-    // its own element — so this pair is really "whichever one the pointer is
-    // holding right now".
-    if (draggingMarker?.commentId === id && draggingMarker.spanPct !== null) {
-      return draggingMarker.pct + draggingMarker.spanPct
-    }
+    // An active handle drag is the pointer speaking; nothing outranks it.
     if (rangeOutDrag?.commentId === id) return rangeOutDrag.pct
 
     /**
-     * Then the HELD ones, bead before end — and that order is the whole of
-     * 7.3.7's second bug.
-     *
-     * `pendingRangeOut` holds an ABSOLUTE position: "the end is at 35%", true
-     * only for as long as the start has not moved. It used to be checked before
-     * the bead, so the sequence Dragos wrote down — give a note a range, then
-     * immediately drag its bead — hit a held end that was pinned to a number
-     * while the bead walked away from it. The range stayed behind, which is
-     * exactly what he saw, and it lasted until the save came back (or five
-     * seconds, whichever came first) so it looked intermittent rather than
-     * wrong.
-     *
-     * The bead's held position describes the whole object and therefore wins.
+     * `pendingRangeOut` holds an ABSOLUTE position — "the end is at 35%" — and
+     * that is only true while the START has not moved. It is therefore ignored
+     * whenever the bead is being held, which is 7.3.7's second bug: give a note
+     * a range and immediately drag its bead, and the end stayed pinned to a
+     * number while the bead walked away from it, until the save came back or
+     * five seconds passed, whichever was first. That is why it looked
+     * intermittent rather than simply wrong.
      */
-    if (pendingMarkerPos?.commentId === id && pendingMarkerPos.spanPct !== null) {
-      return pendingMarkerPos.pct + pendingMarkerPos.spanPct
-    }
-    if (pendingRangeOut?.commentId === id) return pendingRangeOut.pct
+    const beadHeld =
+      draggingMarker?.commentId === id || pendingMarkerPos?.commentId === id
+    if (!beadHeld && pendingRangeOut?.commentId === id) return pendingRangeOut.pct
 
+    // Otherwise `activeRange` already carries the live position, bead included.
     return activeRange.outPct
   }, [activeRange, rangeOutDrag, pendingRangeOut, draggingMarker, pendingMarkerPos])
 
   /**
    * Publish the live width for `handleMarkerMouseDown` — see `liveRangeRef`.
    *
-   * Silent while the bead is moving, and that guard is load-bearing rather than
-   * an optimisation. During a bead drag `activeOutPct` is computed AS
-   * `bead + width`, while `activeRange.inPct` is still the saved start — so
-   * subtracting one from the other measures the distance the bead has been
-   * dragged plus the width, and grows with every mouse move. Writing that back
-   * would leave the next grab holding a width that was never real. The width
-   * cannot change while the bead is what is moving, so there is nothing to
-   * publish until it stops.
+   * No guard against running mid-drag, and that is now safe rather than
+   * overlooked: `activeRange` resolves BOTH ends from the same held position,
+   * so the subtraction below is width-minus-nothing whatever the bead is doing.
+   * An earlier version needed the guard because the start came from the saved
+   * comment while the end came from the drag, and the difference between the
+   * two grew with every mouse move.
    */
   useEffect(() => {
-    if (draggingMarker || pendingMarkerPos) return
     liveRangeRef.current =
       activeRange && activeOutPct !== null && activeOutPct > activeRange.inPct
         ? {
@@ -1515,7 +1527,7 @@ export default function CustomVideoControls({
             spanPct: activeOutPct - activeRange.inPct,
           }
         : null
-  }, [activeRange, activeOutPct, draggingMarker, pendingMarkerPos])
+  }, [activeRange, activeOutPct])
 
   /**
    * 7.3.3: exactly one yellow ball on the track, always.
