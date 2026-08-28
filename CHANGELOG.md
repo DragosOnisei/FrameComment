@@ -14,6 +14,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.6] - 2026-08-27
+
+### Added
+
+- **Edit is a visible control again, to the left of Reply.** 7.3.0 folded it
+  into the right-click menu with everything else the kebab used to hold, which
+  suits Delete and Copy — actions you reach for occasionally and can hunt for.
+  Fixing a typo in a note you just wrote is the most ordinary thing anyone does
+  to a comment, and it was behind a gesture with no visible hint that it
+  existed. It stays on right-click too; this is a shortcut, not a move.
+  - Same conditions as everywhere else: not offered on a pasted note, which has
+    never been editable, and not offered without permission to edit, where the
+    button would lead nowhere.
+
+### Changed
+
+- **A pasted comment can be dragged along the timeline again.** 7.3.3
+  deliberately stopped it, on the argument that a carried-over note's timecode
+  records where the problem sat in the previous cut. In use that turns out to be
+  backwards: carrying notes forward is not archiving them, it is a worklist for
+  the new cut, and the edit has moved — so a pin frozen where the old version
+  had it points at the wrong frame in every version after the first. The range
+  handle comes back with it, since allowing a stretch to be slid but not resized
+  is a half-state rather than a rule.
+  - Editing the words stays shut, and the two are not the same rule. The text is
+    a record of what was said last round and rewriting it would falsify that
+    record. The timecode is only where the note applies now.
+
 ## [7.3.5] - 2026-08-27
 
 ### Fixed

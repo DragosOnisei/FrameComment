@@ -849,16 +849,43 @@ export default function MessageBubble({
                     three, and it is always visible. Hiding the only remaining
                     control until hover meant a comment showed no way to answer
                     it, which is the one thing a comment is for. */}
-                {!isReply && !commentsDisabled && onReply && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onReply(null)
-                    }}
-                    className="ml-auto hover:text-foreground transition-colors font-medium whitespace-nowrap"
-                  >
-                    {t('reply')}
-                  </button>
+                {/* 7.3.6: Edit comes back, as a visible control to the left of
+                    Reply. 7.3.0 moved it onto the right-click menu along with
+                    everything else the kebab used to hold, which is fine for
+                    Delete and Copy — actions you reach for occasionally and can
+                    hunt for — but fixing your own typo is the most ordinary
+                    thing anyone does to a comment they just wrote, and it was
+                    behind a gesture with no visible hint that it existed. It
+                    stays on right-click too; this is a shortcut, not a move. */}
+                {!isReply && (
+                  <div className="ml-auto flex items-center gap-3">
+                    {/* Same gate the right-click menu and the reply kebab use.
+                        A pasted note is not editable — that rule predates all
+                        of this — and without `onEdit` there is nowhere to save
+                        to, so offering the button would be a dead end. */}
+                    {canEdit && onEdit && !isCarriedOver && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleStartEdit()
+                        }}
+                        className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
+                      >
+                        {t('editComment')}
+                      </button>
+                    )}
+                    {!commentsDisabled && onReply && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onReply(null)
+                        }}
+                        className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
+                      >
+                        {t('reply')}
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {/* The cluster survives for REPLIES only.

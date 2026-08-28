@@ -288,15 +288,6 @@ interface MarkerData {
   colorKey: string
   content: string
   position: number
-  /**
-   * 7.3.3: pasted, or carried over from an earlier cut.
-   *
-   * The colour and the "C" already said so; the flag exists because the
-   * TIMELINE now has to refuse to re-time these, and the drag handler has only
-   * the marker to go on. Same predicate as the grey — one definition, so the
-   * pin that looks carried-over is exactly the pin that cannot be moved.
-   */
-  isCarriedOver: boolean
   /** 2.5.1+: if the comment carries a voice/audio attachment we
    *  surface it on the marker so the timeline popover can render an
    *  inline player. We only need enough info for the AudioAttachment
@@ -326,8 +317,6 @@ interface RangeBarData {
   startPosition: number
   endPosition: number
   colorKey: string
-  /** 7.3.3: see MarkerData.isCarriedOver — a pasted range is not resizable. */
-  isCarriedOver: boolean
 }
 
 export default function CustomVideoControls({
@@ -819,7 +808,6 @@ export default function CustomVideoControls({
           authorName: effectiveAuthorName,
           initials: markerInitials(comment, initialsFromName(effectiveAuthorName)),
           colorKey,
-          isCarriedOver: isCarriedOverComment(comment),
           // 3.8.x: timeline popover preview — up to 300 chars, with a
         // trailing " [...]" marker when the comment was actually longer
         // so the reader knows there's more in the full thread.
@@ -891,7 +879,6 @@ export default function CustomVideoControls({
 
         return {
           id: comment.id,
-          isCarriedOver: isCarriedOverComment(comment),
           startPosition: Math.max(0, (start / videoDuration) * 100),
           endPosition: Math.min(100, (end / videoDuration) * 100),
           colorKey,
@@ -1170,21 +1157,21 @@ export default function CustomVideoControls({
       // Left button only; a right-click belongs to the context menu.
       if (e.button !== 0) return
       /**
-       * 7.3.3: a pasted note is not re-timed by dragging it.
+       * 7.3.6: a pasted note can be dragged again.
        *
-       * These are already not editable in the thread — the rule has been there
-       * since they were introduced — but the timeline never knew about it, so
-       * the one property of a pasted note you could still change was the one
-       * that matters most: WHEN it applies. A note pasted from the previous cut
-       * says "this was the problem at 00:12 last round"; dragging it to 00:30
-       * makes it a claim about the new cut that nobody made, and quietly
-       * destroys the only thing the paste was for — comparing like with like.
+       * 7.3.3 deliberately stopped it, on the argument that a carried-over
+       * note's timecode is a record of where the problem sat in the OLD cut and
+       * that moving it makes a claim about the new one that nobody made. Dragos
+       * asked for that rule and then changed his mind, and using it for a week
+       * shows why: carrying notes forward is not archiving them, it is a
+       * worklist for the new cut. The edit moved, so the moment each note
+       * applies to moved with it, and a pin frozen where the old cut had it
+       * points at the wrong frame in every version after the first.
        *
-       * Refused here rather than dimmed: the pin still seeks and still opens
-       * its popover, because working THROUGH these notes is the whole point.
-       * It simply does not come loose when you press on it.
+       * Editing the WORDS stays shut, and the two are not the same rule. The
+       * text is a record of what was said last round and rewriting it would
+       * falsify that. The timecode is just where it applies now.
        */
-      if (marker.isCarriedOver) return
       e.stopPropagation()
       // 7.3.3: does this note cover a stretch? `rangeBars` is the one place
       // that already knows, and it computes its start from exactly the same
@@ -1342,11 +1329,10 @@ export default function CustomVideoControls({
     if (!activeCommentId || !onCommentTimecodeChange) return null
     const bar = rangeBars.find((b) => b.id === activeCommentId)
     if (!bar || bar.endPosition <= bar.startPosition) return null
-    // 7.3.3: and a pasted range is not resizable, for the same reason its bead
-    // does not come loose — see the note in handleMarkerMouseDown. The strip
-    // still draws, grey, because the note still means something; there is just
-    // no handle on the end of it.
-    if (bar.isCarriedOver) return null
+    // 7.3.6: a pasted range gets its handle back too. Blocking only the resize
+    // while allowing the move would be an odd half-state — you could slide a
+    // stretch but not say where it ends — and both refusals came from the one
+    // decision that has now been reversed. See handleMarkerMouseDown.
     return {
       commentId: activeCommentId,
       inPct: bar.startPosition,
