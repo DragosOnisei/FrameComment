@@ -14,6 +14,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.0] - 2026-08-28
+
+### Added
+
+- **A slider in the bottom-left corner makes the thumbnails bigger.** Projects,
+  folders, videos and stills all follow it, and it is one setting rather than
+  one per page: the size you like for a thumbnail is the size you like
+  everywhere. Grid view only — the table has its own row height and a thumbnail
+  control there would govern nothing. Remembered per browser.
+  - A level removes a column from whatever the layout would otherwise use at
+    that breakpoint, rather than setting a card width and letting the browser
+    fit what it can. The first approach reads better on paper and fails in the
+    hand: at any given window two adjacent settings can round to the same number
+    of columns, so a step of the slider changed nothing on screen. Subtracting a
+    column cannot do that — every drag is visible at every window size.
+  - Level 0 sets nothing at all, so the default density is exactly what shipped
+    before and cannot drift from it.
+
+### Changed
+
+- **The selection checkbox is gone from folder, video and comment cards.** It
+  was never the only way to select — clicking the card has always done it, with
+  Cmd to extend and Shift for a range — so it was a second control for something
+  the whole card already did, parked permanently on top of the frame you were
+  trying to look at. What it signalled is now said by a ring around the card,
+  and comments use the same ring a picked video does.
+  - The comment ring is declared after the existing focus highlight and with the
+    same weight, deliberately: that rule paints with `box-shadow`, which is also
+    how a Tailwind ring is drawn, so a comment that was both focused and selected
+    would have had its ring silently swallowed — and in a range of five, the one
+    clicked last would have looked different from the other four.
+  - One thing this costs: on a touch device with no modifier keys, the checkbox
+    was the only way to add to a selection without replacing it.
+
+### Fixed
+
+- **Dragging one of two comments stacked on the same moment no longer appears to
+  drag both.** The grouping that draws them as a single bead is built from their
+  saved positions, so while a drag was in progress both stayed in the stack and
+  the bead did not move at all. The note being dragged is now pulled out of the
+  grouping and drawn at the position under the pointer, so it visibly leaves the
+  stack; it rejoins on its own if it is dropped near another note.
+- **Paging a stacked marker with the popover's arrows changes what a press acts
+  on.** The bead's handlers always used the first note in the stack, so after
+  arrowing to the second one, grabbing the bead moved the first — the one note
+  you could see you had not chosen.
+
 ## [7.3.9] - 2026-08-27
 
 ### Fixed

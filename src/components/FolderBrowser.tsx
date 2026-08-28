@@ -52,6 +52,8 @@ import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import { useIsMobile } from '@/lib/use-is-mobile'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { shouldDownloadAsFiles } from '@/lib/download-mode'
+import GridZoomSlider, { useGridZoomLevel } from '@/components/GridZoomSlider'
+import { gridZoomAttr } from '@/lib/grid-zoom'
 import {
   snapshotDataTransferEntries,
   walkSnapshotEntries,
@@ -384,6 +386,8 @@ function FolderBrowserInner(
   }: FolderBrowserProps,
   ref: React.Ref<FolderBrowserHandle>,
 ) {
+  /** 7.4.0: thumbnail size, shared with every other grid in the app. */
+  const gridZoom = useGridZoomLevel()
   const router = useRouter()
   // 4.x: phones always use the grid (the list/table view is desktop-only), so
   // force grid below `md` regardless of the saved view preference.
@@ -3863,7 +3867,13 @@ function FolderBrowserInner(
         // cards don't fill the entire screen each. 2 fits a 360-414px
         // viewport comfortably; we step up to 3 → 4 → 5 → 6 on bigger
         // viewports.
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 items-start">
+        // 7.4.0: `grid-zoom` takes over the column count from `sm` up, driven
+        // by the slider. The Tailwind classes stay as the phone layout and as
+        // the fallback if the stylesheet ever fails to load.
+        <div
+          className="grid-zoom grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 items-start"
+          data-zoom={gridZoomAttr(gridZoom)}
+        >
           {sortedFolders.map((f) => (
             <FolderCard
               key={`folder:${f.id}`}
@@ -4481,6 +4491,10 @@ function FolderBrowserInner(
         onClose={() => setQuickPreview(null)}
         projectId={projectId}
       />
+      {/* 7.4.0: grid view only, as asked — the table has its own row height and
+          a thumbnail slider there would control nothing. It renders on the same
+          condition the grid does, so switching to the table takes it away. */}
+      {(viewMode !== 'table' || isMobile) && <GridZoomSlider />}
     </div>
   )
 }

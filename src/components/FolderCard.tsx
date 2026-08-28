@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowUpFromLine,
-  Check,
   Copy,
   Download,
   Folder as FolderIcon,
@@ -476,32 +475,8 @@ export default function FolderCard({
             </span>
           </div>
         )}
-        {/* Multi-select checkbox (1.1.0+). Always visible on folder
-            cards — request from the user so picking folders is one
-            tap away regardless of hover state. The empty checkbox
-            still sits comfortably on top of the cover thanks to the
-            backdrop-blur + outline. */}
-        {onToggleSelect && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              // Checkbox = explicit multi-select affordance → always
-              // toggle (additive), never collapse the selection.
-              onToggleSelect(id, true, false)
-            }}
-            className={`absolute top-2 left-2 z-10 inline-flex items-center justify-center w-5 h-5 rounded transition-colors ${
-              isSelected
-                ? 'bg-primary text-white'
-                : 'bg-black/40 text-white border border-white/60 backdrop-blur-sm hover:bg-black/60'
-            }`}
-            aria-pressed={isSelected}
-            aria-label={isSelected ? 'Deselect folder' : 'Select folder'}
-            title={isSelected ? 'Deselect' : 'Select'}
-          >
-            {isSelected && <Check className="w-3.5 h-3.5" />}
-          </button>
-        )}
+        {/* 7.4.0: checkbox removed — see the note on VideoCard. Clicking the
+            card selects it, and the ring says which one is picked. */}
       </div>
 
       {/* Info row — name + count on the left, kebab on the right. */}

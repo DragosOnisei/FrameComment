@@ -623,6 +623,28 @@
       background-image 220ms ease-out,
       box-shadow 220ms ease-out;
   }
+
+  /* 7.4.0: a SELECTED comment wears the same ring a selected video or folder
+     card does. The tick that used to say this lived under the avatar, and a
+     column of half-empty circles down a long thread was more furniture than
+     signal.
+     
+     Declared after `.is-selected` and with `!important` for a reason that is
+     not stylistic. That rule paints its focus state with `box-shadow`, which is
+     also how Tailwind draws a ring — so a card that is both focused and
+     selected would have had its ring silently swallowed, and in a range of five
+     the one you clicked last would look different from the other four. Same
+     property, later in the file, same weight: this wins, predictably, and every
+     card in a selection looks identical.
+     
+     Focus without selection keeps the wash below; the two states are different
+     things and still say so. */
+  .comment-card.is-picked {
+    box-shadow:
+      0 0 0 2px hsl(var(--spotlight-tint, 217 91% 60%) / 0.55),
+      0 10px 26px -12px hsl(var(--spotlight-tint, 217 91% 60%) / 0.30) !important;
+  }
+
 }
 
 /* ─── 2.5.0+ Global "Spotlight" + Frosted Glass system ────────────
@@ -729,6 +751,71 @@
     -webkit-backdrop-filter: blur(20px) saturate(140%);
     border: 1px solid hsl(var(--glass-border));
   }
+  /* 7.4.0: the grid zoom — a COLUMN COUNT, not a card width.
+     
+     The first draft fed auto-fill a minimum card width and let the browser
+     decide how many fit. At any given window two adjacent settings can round to
+     the same number of columns, so a step of the slider changed nothing on
+     screen; at Dragos's window the top two both landed on two columns and the
+     last move was dead. A count cannot do that: every level removes exactly one
+     column, at every breakpoint, so every drag is visible.
+     
+     Level 0 is absent on purpose — no attribute, no rule, so each grid keeps
+     its own Tailwind ladder and the default cannot drift from what shipped.
+     The two grids have slightly different ladders at the middle breakpoints;
+     they share these numbers only once you have asked for something bigger,
+     where being consistent with each other matters more than matching a
+     default nobody is looking at any more.
+     
+     `!important` because this overrides Tailwind's own grid-template-columns
+     utility on the very same element. */
+  @media (min-width: 640px) {
+    .grid-zoom[data-zoom='1'] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    .grid-zoom[data-zoom='2'] { grid-template-columns: repeat(1, minmax(0, 1fr)) !important; }
+  }
+  @media (min-width: 768px) {
+    .grid-zoom[data-zoom='1'] { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+    .grid-zoom[data-zoom='2'] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  }
+  @media (min-width: 1280px) {
+    .grid-zoom[data-zoom='1'] { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+    .grid-zoom[data-zoom='2'] { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  }
+  @media (min-width: 1536px) {
+    .grid-zoom[data-zoom='1'] { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; }
+    .grid-zoom[data-zoom='2'] { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+  }
+
+  /* Where the slider sits. It is fixed to the viewport, and the viewport's left
+     edge is behind the sidebar — which is why it was sitting on top of the
+     account row. Pushed past the sidebar from `md` up, which is exactly where
+     AdminSidebar stops being `hidden`. */
+  .grid-zoom-slider { --grid-zoom-left: 1rem; }
+  @media (min-width: 768px) {
+    .grid-zoom-slider { --grid-zoom-left: calc(var(--sidebar-width) + 1rem); }
+  }
+
+  /* The slider itself. Styled here rather than with utilities because the
+     thumb pseudo-elements cannot be reached from Tailwind. */
+  .grid-zoom-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: hsl(var(--spotlight-tint, 217 91% 60%));
+    box-shadow: 0 0 0 1px hsl(0 0% 100% / 0.35);
+    cursor: ew-resize;
+  }
+  .grid-zoom-range::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border: none;
+    border-radius: 9999px;
+    background: hsl(var(--spotlight-tint, 217 91% 60%));
+    box-shadow: 0 0 0 1px hsl(0 0% 100% / 0.35);
+    cursor: ew-resize;
+  }
+
   /* 7.3.4: a small surface nested INSIDE another one, carrying the workspace
      accent. For the inline reply box, which was flat `bg-card` — the one input
      in the panel that looked like it belonged to a different application.

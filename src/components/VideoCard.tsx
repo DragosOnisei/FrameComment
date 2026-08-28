@@ -17,7 +17,6 @@ import {
   Share2,
   Trash2,
   MessageSquare,
-  Check,
   UploadCloud,
   FileText,
 } from 'lucide-react'
@@ -895,31 +894,14 @@ export default function VideoCard({
             {versionTag}
           </span>
         )}
-        {/* Multi-select checkbox (1.0.6+). 2.5.0+: glass when idle
-            (transparent + hairline ring + backdrop-blur), brand
-            blue when active — matches the FolderCard checkbox so
-            the two card types pair visually in a mixed selection. */}
-        {onToggleSelect && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              // The checkbox is the explicit multi-select affordance —
-              // always toggle (additive), never collapse the selection.
-              onToggleSelect(id, true, false)
-            }}
-            className={`absolute top-2 left-2 z-10 inline-flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
-              isSelected
-                ? 'bg-primary text-white ring-1 ring-primary/60'
-                : 'bg-white/10 text-white ring-1 ring-white/40 backdrop-blur-md hover:bg-white/20'
-            }`}
-            aria-pressed={isSelected}
-            aria-label={isSelected ? 'Deselect video' : 'Select video'}
-            title={isSelected ? 'Deselect' : 'Select'}
-          >
-            {isSelected && <Check className="w-3.5 h-3.5" />}
-          </button>
-        )}
+        {/* 7.4.0: the checkbox is gone from the corner of the cover.
+            
+            It was never the only way to select — a plain click on the card has
+            always done it, Cmd extends and Shift takes a range — so it was a
+            second control for something the whole card already does, sitting
+            permanently on top of the frame you are trying to look at. The ring
+            that marks a selected card stays; that is the part that was doing
+            the work. */}
         {/* Comment count + duration row sits along the bottom of the
             cover, like Frame.io. */}
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent text-white">

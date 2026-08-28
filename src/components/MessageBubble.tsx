@@ -587,7 +587,20 @@ export default function MessageBubble({
         className={`group relative cursor-pointer transition-colors py-3 px-3 ${
           isReply
             ? 'rounded-md hover:bg-white/[0.04]'
-            : 'rounded-xl bg-white/[0.04] ring-1 ring-white/10 hover:bg-white/[0.08] hover:ring-white/15 shadow-[0_6px_18px_-12px_rgba(0,0,0,0.5)]'
+            : `rounded-xl bg-white/[0.04] hover:bg-white/[0.08] shadow-[0_6px_18px_-12px_rgba(0,0,0,0.5)] ${
+                /* 7.4.0: selection is a RING now, the same one a selected video
+                   or folder card wears, instead of a tick in the corner. One
+                   visual language for "this is picked", whether the thing
+                   picked is a clip or a note about one.
+
+                   Written as one either/or rather than adding `ring-2` next to
+                   the existing `ring-1`: two ring widths on the same element
+                   resolve by stylesheet order, not by the order they appear in
+                   the class string, so which one won would be a coincidence. */
+                isSelected
+                  ? 'is-picked'
+                  : 'ring-1 ring-white/10 hover:ring-white/15'
+              }`
         } ${
           // 2.5.1+: drop hard-coded primary tint here — the
           // `.comment-card.is-selected` global rule paints the
@@ -611,45 +624,13 @@ export default function MessageBubble({
         )}
 
         <div className="grid grid-cols-[28px_1fr] gap-x-2.5 gap-y-3 items-start">
-          {/* 7.3.0: the select circle belongs in THIS column, under the avatar,
-              not out in the content beside Reply — Dragos wants the two on the
-              same vertical line, which is the only way the ticks in a long list
-              read as a column you can run your eye down.
-
-              `self-stretch` keeps the stretching inside the parent comment's own
-              grid row: replies are separate rows, so the circle lands at the
-              bottom of the note it belongs to rather than at the foot of the
-              whole thread. */}
-          <div className="flex flex-col items-center justify-between self-stretch pt-0.5 pb-0.5">
-            <InitialsAvatar name={effectiveAuthorName} size="sm" isInternal={comment.isInternal ?? false} />
-            {selectable && !isReply && onToggleSelect && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggleSelect()
-                }}
-                aria-pressed={!!isSelected}
-                aria-label={isSelected ? 'Deselect comment' : 'Select comment'}
-                title={isSelected ? 'Deselect' : 'Select'}
-                className={cn(
-                  // `relative z-10` so the reply thread's vertical rule passes
-                  // behind it rather than through the ring.
-                  // 7.3.0: 20px, not the avatar's 28. Matching the avatar
-                  // exactly put two heavy discs at the two ends of every comment
-                  // and the list stopped looking like text. It still sits centred
-                  // in the avatar's column, which is the part that mattered.
-                  'relative z-10 shrink-0 inline-flex items-center justify-center h-5 w-5 rounded-full',
-                  'transition-colors',
-                  isSelected
-                    ? 'bg-primary text-primary-foreground ring-1 ring-primary'
-                    : 'ring-1 ring-white/30 hover:ring-white/60 opacity-60 group-hover:opacity-100',
-                )}
-              >
-                {isSelected && <Check className="w-3 h-3" strokeWidth={3} />}
-              </button>
-            )}
-          </div>
+          {/* 7.4.0: the tick that used to sit under the avatar is gone, and
+              with it the column of half-empty circles running down a long
+              thread. Clicking the bubble has selected it since 7.3.0 — Shift
+              takes a range, Cmd adds one — so the circle was a second control
+              for something the whole card already did. What it signalled is now
+              said by the ring, which is also what a picked video says. */}
+          <InitialsAvatar name={effectiveAuthorName} size="sm" isInternal={comment.isInternal ?? false} />
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-sm font-semibold text-white truncate">

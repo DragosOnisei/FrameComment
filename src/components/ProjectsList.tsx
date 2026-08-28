@@ -15,6 +15,8 @@ import ProjectCardKebab from '@/components/ProjectCardKebab'
 import { formatDate } from '@/lib/utils'
 import { projectGradient, formatBytes, formatRelativeTime } from '@/lib/project-gradient'
 import ProjectCoverImage from '@/components/ProjectCoverImage'
+import GridZoomSlider, { useGridZoomLevel } from '@/components/GridZoomSlider'
+import { gridZoomAttr } from '@/lib/grid-zoom'
 
 interface Project {
   id: string
@@ -52,6 +54,8 @@ interface ProjectsListProps {
 }
 
 export default function ProjectsList({ projects, onProjectMutated, onNewProject }: ProjectsListProps) {
+  /** 7.4.0: thumbnail size, shared with the folder grid. */
+  const gridZoom = useGridZoomLevel()
   const t = useTranslations('projects')
   const tc = useTranslations('common')
   const tn = useTranslations('nav')
@@ -191,7 +195,11 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
         // (lg→4, xl→5, 2xl→6) so wide displays can pack 6 tiles
         // per row instead of 5. Cards stay the same shape — they
         // just shrink proportionally to fit the extra column.
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        // 7.4.0: same zoom as the folder grid — one setting, every grid.
+        <div
+          className="grid-zoom grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
+          data-zoom={gridZoomAttr(gridZoom)}
+        >
           {sortedProjects.map((project) => {
             const folderCount = project._count?.folders ?? 0
             const sizeLabel = formatBytes(project.totalSize)
@@ -527,6 +535,8 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
           </div>
         </div>
       )}
+      {/* 7.4.0: the dashboard is always a grid, so this is always offered. */}
+      <GridZoomSlider />
     </>
   )
 }

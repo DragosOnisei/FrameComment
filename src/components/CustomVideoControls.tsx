@@ -887,6 +887,34 @@ export default function CustomVideoControls({
   }, [comments, videoDuration, videoFps, videoId])
 
   // Group markers that are close together
+  /**
+   * Declared above `groupedMarkers` rather than beside the rest of the drag
+   * machinery: that memo now reads them, and a memo's dependency array is
+   * evaluated during render, so a const declared further down would be in the
+   * temporal dead zone at that point. A crash, not a style question.
+   */
+  const [draggingMarker, setDraggingMarker] = useState<{
+    commentId: string
+    pct: number
+    /**
+     * 7.3.3: the range's length in percent, when the note being dragged has
+     * one. Carried through the gesture so the yellow bar slides WITH the bead
+     * instead of staying behind and rubber-banding on release — a range comment
+     * moves as one object, which is what Dragos asked for and also the only
+     * reading of the gesture that makes sense: the note applies to a stretch of
+     * film, and dragging it picks a different stretch, not a different length.
+     */
+    spanPct: number | null
+  } | null>(null)
+
+  const [pendingMarkerPos, setPendingMarkerPos] = useState<{
+    commentId: string
+    pct: number
+    fromPct: number
+    /** 7.3.3: so the yellow bar holds its new place too, not just the bead. */
+    spanPct: number | null
+  } | null>(null)
+
   const groupedMarkers = useMemo(() => {
     if (markers.length === 0) return []
 
@@ -897,7 +925,25 @@ export default function CustomVideoControls({
     // For long videos (>600s): 1.5% threshold
     const threshold = videoDuration < 60 ? 3 : videoDuration < 600 ? 2 : 1.5
 
+    /**
+     * 7.4.0: a note being dragged is its own group, at its live position.
+     *
+     * Two notes on the same moment are drawn as one bead. Dragging one of them
+     * out therefore had nothing to show: the grouping is built from the SAVED
+     * positions, so both stayed in the same stack until the save landed and the
+     * bead simply did not move. It looked like dragging one dragged both.
+     *
+     * Pulling the held note out of the grouping and giving it its own entry at
+     * the position under the pointer means you watch it leave the stack, which
+     * is the whole point of the gesture. It rejoins on its own once the data
+     * comes back — if it was dropped somewhere that is still within the
+     * threshold of another note, the next render groups them again.
+     */
+    const heldId = draggingMarker?.commentId ?? pendingMarkerPos?.commentId ?? null
+    const heldPct = draggingMarker?.pct ?? pendingMarkerPos?.pct ?? null
+
     markers.forEach((marker) => {
+      if (marker.id === heldId) return
       const lastGroup = groups[groups.length - 1]
       if (lastGroup && Math.abs(marker.position - lastGroup[0].position) < threshold) {
         lastGroup.push(marker)
@@ -906,8 +952,13 @@ export default function CustomVideoControls({
       }
     })
 
+    if (heldId && heldPct !== null) {
+      const held = markers.find((m) => m.id === heldId)
+      if (held) groups.push([{ ...held, position: heldPct }])
+    }
+
     return groups
-  }, [markers, videoDuration])
+  }, [markers, videoDuration, draggingMarker, pendingMarkerPos])
 
   // 1.3.2+: suppress the synthetic click that touch devices dispatch
   // after a touchend. On phones the playhead was jumping forward or
@@ -1105,19 +1156,6 @@ export default function CustomVideoControls({
    * With a single ref the guard read null at exactly the moment it mattered and
    * every completed drag also seeked the playhead to where the note used to be.
    */
-  const [draggingMarker, setDraggingMarker] = useState<{
-    commentId: string
-    pct: number
-    /**
-     * 7.3.3: the range's length in percent, when the note being dragged has
-     * one. Carried through the gesture so the yellow bar slides WITH the bead
-     * instead of staying behind and rubber-banding on release — a range comment
-     * moves as one object, which is what Dragos asked for and also the only
-     * reading of the gesture that makes sense: the note applies to a stretch of
-     * film, and dragging it picks a different stretch, not a different length.
-     */
-    spanPct: number | null
-  } | null>(null)
   const markerDragRef = useRef<{
     commentId: string
     moved: boolean
@@ -1156,13 +1194,6 @@ export default function CustomVideoControls({
    * the dropped position instead would need a tolerance, because the saved
    * timecode is frame-quantised and never lands on the pointer exactly.
    */
-  const [pendingMarkerPos, setPendingMarkerPos] = useState<{
-    commentId: string
-    pct: number
-    fromPct: number
-    /** 7.3.3: so the yellow bar holds its new place too, not just the bead. */
-    spanPct: number | null
-  } | null>(null)
 
   /**
    * Declared up here rather than beside the range session that also reads it:
@@ -2533,6 +2564,25 @@ export default function CustomVideoControls({
             const isHovered = group.some((m) => m.id === hoveredMarkerId)
             const isStacked = group.length > 1
             /**
+             * 7.4.0: which note in the stack a press acts on.
+             *
+             * The popover pages through a stack with its Prev / Next buttons,
+             * and `stackIndex` says which one you are reading. The bead's
+             * handlers used `group[0]` regardless — so after arrowing to the
+             * second note, grabbing the bead moved the FIRST one, which is the
+             * one note you could see you had not chosen.
+             *
+             * Only while the popover is open, because `stackIndex` is a single
+             * piece of state shared by every stack and means nothing once the
+             * pointer has left. Identity, the ref and the hover target stay on
+             * `group[0]`: changing the key mid-hover would remount the bead and
+             * take the popover down with it.
+             */
+            const pressTarget =
+              isHovered && group.length > 1
+                ? group[Math.min(stackIndex, group.length - 1)] ?? primaryMarker
+                : primaryMarker
+            /**
              * 7.3.3: the live position — dragged, pending, or stored — hoisted
              * out of the style prop because two things need it now: where the
              * bead sits, and which side its count badge hangs off.
@@ -2639,9 +2689,9 @@ export default function CustomVideoControls({
                     if (el) markerRefs.current.set(primaryMarker.id, el)
                     else markerRefs.current.delete(primaryMarker.id)
                   }}
-                  onMouseDown={(e) => handleMarkerMouseDown(primaryMarker, e)}
-                  onClick={(e) => handleMarkerClick(primaryMarker, e)}
-                  onTouchEnd={(e) => handleMarkerTouchEnd(primaryMarker, e)}
+                  onMouseDown={(e) => handleMarkerMouseDown(pressTarget, e)}
+                  onClick={(e) => handleMarkerClick(pressTarget, e)}
+                  onTouchEnd={(e) => handleMarkerTouchEnd(pressTarget, e)}
                   onMouseEnter={() => handleMarkerMouseEnter(primaryMarker.id)}
                   onMouseLeave={handleMarkerMouseLeave}
                   onTouchStart={(e) => handleMarkerTouchStart(primaryMarker.id, e)}
