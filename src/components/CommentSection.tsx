@@ -20,6 +20,7 @@ import { formatCommentTimestamp, secondsToTimecode, timecodeToSeconds, timecodeT
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   getClippedComments,
+  toClipped,
   hasClippedComments,
   setClippedComments,
   CLIPBOARD_CHANGED_EVENT,
@@ -173,26 +174,6 @@ function InlineReplyForm({
       </div>
     </div>
   )
-}
-
-/**
- * 6.22.0 — only carry an annotation the server will actually accept.
- *
- * `annotationDataSchema` requires `version: 1` and at least one shape, and a
- * rejected field fails the WHOLE request. So a comment whose drawing was stored
- * by an older build, or whose shapes array ended up empty, would come back as a
- * 400 and be dropped from the paste entirely. Losing a drawing is a shame;
- * losing the note it belonged to is a bug, so the drawing is what gives way.
- *
- * Module scope, not component scope: it depends on nothing but its argument, and
- * defining it inside the component would make `toClipped` a new value on every
- * render and drag every hook that uses it into re-running.
- */
-function carryableAnnotations(raw: any) {
-  if (!raw || typeof raw !== 'object') return null
-  if (raw.version !== 1) return null
-  if (!Array.isArray(raw.shapes) || raw.shapes.length === 0) return null
-  return raw
 }
 
 export default function CommentSection({
@@ -1809,42 +1790,6 @@ export default function CommentSection({
     }
   }, [projectId])
 
-  /**
-   * Turn thread rows into clipboard records.
-   *
-   * 6.16.0: replies come along. They used to be dropped, so pasting into a new
-   * version produced a wall of orphaned questions — including ones already
-   * answered with "fixed, see 0:14". Carrying the note without its answer does
-   * not just lose detail, it actively misleads the next reviewer.
-   */
-  const toClipped = (list: any[]) =>
-    list.map((c: any) => ({
-      content: c.content,
-      timecode: c.timecode,
-      timecodeEnd: c.timecodeEnd ?? null,
-      timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
-      authorName: c.authorName ?? null,
-      // 6.22.0: the drawing and the files come too.
-      //
-      // "The logo is wrong, see the screenshot" is useless on the new cut if the
-      // screenshot stayed on the old one, and a voice message is nothing BUT its
-      // attachment — pasting one used to produce an empty bubble. Annotations
-      // travel as data; attachments travel as a reference to the source comment,
-      // which the server resolves (the browser must not pick which files it may
-      // copy).
-      annotations: carryableAnnotations(c.annotations),
-      sourceCommentId: c.id ?? null,
-      attachmentCount: Array.isArray(c.assets) ? c.assets.length : 0,
-      replies: Array.isArray(c.replies)
-        ? c.replies.map((r: any) => ({
-            content: r.content,
-            authorName: r.authorName ?? null,
-            annotations: carryableAnnotations(r.annotations),
-            sourceCommentId: r.id ?? null,
-            attachmentCount: Array.isArray(r.assets) ? r.assets.length : 0,
-          }))
-        : [],
-    }))
 
   const handleCopyComments = useCallback(() => {
     // Snapshot what's currently visible in the sidebar (already filtered to

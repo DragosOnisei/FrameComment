@@ -14,6 +14,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.2] - 2026-08-28
+
+### Added
+
+- **Right-clicking a video can copy its comments**, directly above Paste. Paste
+  has been in that menu since 7.1.0 while the only way to FILL the clipboard was
+  to open a video and use the kebab beside "All comments" — so the folder
+  offered half a gesture. Copying in the folder now lights Paste up immediately,
+  there and in the player.
+  - Offered for exactly one selected video that actually has notes. Copying from
+    a batch would be ambiguous about whose notes reached the clipboard, and
+    copying nothing is a menu entry that does nothing.
+  - It is the same operation the player's kebab performs, not a second one:
+    `toClipped` — what a copied comment carries, replies and drawings and
+    attachment references included — moved out of CommentSection into the
+    clipboard library. Two definitions of that would have drifted the first time
+    one of them learned a new field.
+
+### Changed
+
+- The paste entry says "Paste 2 comments" rather than "Paste 2 comments to 2
+  videos". The count worth reading is how many notes are about to be written;
+  how many videos are selected is already on every other line of that menu.
+- The context menu's row component is defined once, at module scope, instead of
+  being recreated inside the menu on every render — which made React discard and
+  rebuild each item's DOM rather than update it. That file goes from 17 lint
+  errors to none.
+
 ## [7.4.1] - 2026-08-28
 
 ### Added

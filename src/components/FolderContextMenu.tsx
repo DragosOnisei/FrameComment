@@ -5,6 +5,7 @@ import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
 import {
   ArrowUp,
   ArrowUpFromLine,
+  ClipboardCopy,
   ClipboardPaste,
   Copy,
   Download,
@@ -114,6 +115,71 @@ export interface FolderContextMenuProps {
    * parent is the only thing that knows what is selected and what type it is.
    */
   downloadVideoId?: string | null
+  /**
+   * 7.4.2: how many notes the one selected video has, so its comments can be
+   * put on the clipboard from here. Zero — a batch, a folder, or a video with
+   * no notes — and the entry is not offered: copying nothing is a menu item
+   * that does nothing, and copying from a batch would be ambiguous about whose
+   * notes ended up on the clipboard.
+   */
+  copyCommentsCount?: number
+  onCopyComments?: () => void
+}
+
+/**
+ * 7.4.2: hoisted out of FolderContextMenu.
+ *
+ * It was declared inside the component, which makes it a NEW component type on
+ * every render — React then throws away each menu item's DOM and rebuilds it
+ * rather than updating it, and eslint reported one error per usage. Eighteen of
+ * them, which is enough noise to hide a real one. `onClose` was the only thing
+ * it closed over, so it becomes a prop and the rest is unchanged.
+ */
+function Row({
+  icon,
+  label,
+  onClick,
+  onClose,
+  disabled,
+  destructive,
+}: {
+  icon: React.ReactNode
+  label: string
+  onClick?: () => void
+  onClose: () => void
+  disabled?: boolean
+  destructive?: boolean
+}) {
+  return (
+    <button
+      role="menuitem"
+      type="button"
+      onClick={() => {
+        if (disabled) return
+        onClose()
+        onClick?.()
+      }}
+      disabled={disabled || !onClick}
+      className={`
+        w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-left
+        transition-colors whitespace-nowrap
+        ${disabled || !onClick
+          ? 'opacity-40 cursor-not-allowed text-white/40'
+          : destructive
+            ? 'hover:bg-destructive/15 text-destructive'
+            : 'hover:bg-white/[0.08] text-white'}
+      `}
+    >
+      <span
+        className={`shrink-0 ${
+          destructive ? 'text-destructive' : 'text-white/55'
+        }`}
+      >
+        {icon}
+      </span>
+      <span className="flex-1">{label}</span>
+    </button>
+  )
 }
 
 export default function FolderContextMenu({
@@ -146,6 +212,8 @@ export default function FolderContextMenu({
   canCreateTranscript = false,
   onCreateTranscript,
   downloadVideoId = null,
+  copyCommentsCount = 0,
+  onCopyComments,
 }: FolderContextMenuProps) {
   const hasSelection = bulkSelectionCount > 0
   // 1.1.0+: Share + Rename are single-target only — they don't make
@@ -201,48 +269,6 @@ export default function FolderContextMenu({
   const left = Math.min(x, Math.max(8, viewportW - MENU_W - 8))
   const top = Math.min(y, Math.max(8, viewportH - MENU_H - 8))
 
-  const Row = ({
-    icon,
-    label,
-    onClick,
-    disabled,
-    destructive,
-  }: {
-    icon: React.ReactNode
-    label: string
-    onClick?: () => void
-    disabled?: boolean
-    destructive?: boolean
-  }) => (
-    <button
-      role="menuitem"
-      type="button"
-      onClick={() => {
-        if (disabled) return
-        onClose()
-        onClick?.()
-      }}
-      disabled={disabled || !onClick}
-      className={`
-        w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-left
-        transition-colors whitespace-nowrap
-        ${disabled || !onClick
-          ? 'opacity-40 cursor-not-allowed text-white/40'
-          : destructive
-            ? 'hover:bg-destructive/15 text-destructive'
-            : 'hover:bg-white/[0.08] text-white'}
-      `}
-    >
-      <span
-        className={`shrink-0 ${
-          destructive ? 'text-destructive' : 'text-white/55'
-        }`}
-      >
-        {icon}
-      </span>
-      <span className="flex-1">{label}</span>
-    </button>
-  )
 
   return (
     <div
@@ -286,6 +312,7 @@ export default function FolderContextMenu({
             />
           ) : (
             <Row
+              onClose={onClose}
               icon={<Download className="w-4 h-4" />}
               label={
                 singleTarget
@@ -297,6 +324,7 @@ export default function FolderContextMenu({
           )}
           {singleTarget && (
             <Row
+              onClose={onClose}
               icon={<Share2 className="w-4 h-4" />}
               label="Share"
               onClick={onBulkShare}
@@ -304,6 +332,7 @@ export default function FolderContextMenu({
           )}
           <div className="my-1 h-px bg-white/10" role="separator" />
           <Row
+              onClose={onClose}
             icon={<Copy className="w-4 h-4" />}
             label={
               singleTarget
@@ -312,19 +341,34 @@ export default function FolderContextMenu({
             }
             onClick={onBulkDuplicate}
           />
+          {/* 7.4.2: Copy sits directly above Paste. Paste has been here since
+              7.1.0 while the only way to FILL the clipboard was to open a video
+              and use the kebab beside "All comments" — so this menu offered
+              half a gesture. The two belong next to each other, in that order,
+              because that is the order they are used in. */}
+          {singleTarget && copyCommentsCount > 0 && onCopyComments && (
+            <Row
+              onClose={onClose}
+              icon={<ClipboardCopy className="w-4 h-4" />}
+              label={`Copy ${copyCommentsCount} comment${copyCommentsCount === 1 ? '' : 's'}`}
+              onClick={onCopyComments}
+            />
+          )}
           {canPasteComments && (
             <Row
+              onClose={onClose}
               icon={<ClipboardPaste className="w-4 h-4" />}
-              label={
-                singleTarget
-                  ? `Paste ${pasteCommentsCount} comment${pasteCommentsCount === 1 ? '' : 's'}`
-                  : `Paste ${pasteCommentsCount} comment${pasteCommentsCount === 1 ? '' : 's'} to ${bulkSelectionCount} videos`
-              }
+              /* 7.4.2: no "to N videos" tail. The count that matters is how
+                 many notes are about to be written; how many videos are
+                 selected is already on every other line of this menu and on
+                 the cards behind it. */
+              label={`Paste ${pasteCommentsCount} comment${pasteCommentsCount === 1 ? '' : 's'}`}
               onClick={onPasteComments}
             />
           )}
           {singleTarget && (
             <Row
+              onClose={onClose}
               icon={<Pencil className="w-4 h-4" />}
               label="Rename"
               onClick={onBulkRename}
@@ -332,6 +376,7 @@ export default function FolderContextMenu({
           )}
           {singleTarget && canSplitVersions && (
             <Row
+              onClose={onClose}
               icon={<Layers className="w-4 h-4" />}
               label="Split versions"
               onClick={onSplitVersions}
@@ -341,6 +386,7 @@ export default function FolderContextMenu({
             <>
               <div className="my-1 h-px bg-white/10" role="separator" />
               <Row
+              onClose={onClose}
                 icon={<FileText className="w-4 h-4" />}
                 label="Create transcript"
                 onClick={onCreateTranscript}
@@ -349,6 +395,7 @@ export default function FolderContextMenu({
           )}
           <div className="my-1 h-px bg-white/10" role="separator" />
           <Row
+              onClose={onClose}
             icon={<ArrowUpFromLine className="w-4 h-4" />}
             label={
               singleTarget
@@ -359,6 +406,7 @@ export default function FolderContextMenu({
             disabled={!canBulkMoveUp}
           />
           <Row
+              onClose={onClose}
             icon={<FolderPlus className="w-4 h-4" />}
             label={
               singleTarget
@@ -370,12 +418,14 @@ export default function FolderContextMenu({
           <div className="my-1 h-px bg-white/10" role="separator" />
           {singleTarget && canRegenerateThumbnail && (
             <Row
+              onClose={onClose}
               icon={<RefreshCw className="w-4 h-4" />}
               label="Regenerate thumbnail"
               onClick={onRegenerateThumbnail}
             />
           )}
           <Row
+              onClose={onClose}
             icon={<Trash2 className="w-4 h-4" />}
             label={
               singleTarget
@@ -388,11 +438,15 @@ export default function FolderContextMenu({
         </>
       ) : (
         <>
-          <Row icon={<ArrowUp className="w-4 h-4" />} label="Upload Asset" onClick={onUploadAsset} />
-          <Row icon={<FolderUp className="w-4 h-4" />} label="Upload Folder" onClick={onUploadFolder} />
-          <div className="my-1 h-px bg-white/10" role="separator" />
-          <Row icon={<FolderPlus className="w-4 h-4" />} label="New Folder" onClick={onNewFolder} />
           <Row
+              onClose={onClose} icon={<ArrowUp className="w-4 h-4" />} label="Upload Asset" onClick={onUploadAsset} />
+          <Row
+              onClose={onClose} icon={<FolderUp className="w-4 h-4" />} label="Upload Folder" onClick={onUploadFolder} />
+          <div className="my-1 h-px bg-white/10" role="separator" />
+          <Row
+              onClose={onClose} icon={<FolderPlus className="w-4 h-4" />} label="New Folder" onClick={onNewFolder} />
+          <Row
+              onClose={onClose}
             icon={<FolderLock className="w-4 h-4" />}
             label="New Restricted Folder"
             onClick={onNewRestrictedFolder}
@@ -400,11 +454,13 @@ export default function FolderContextMenu({
           <div className="my-1 h-px bg-white/10" role="separator" />
           {/* 3.8.x: one-click folder-structure templates. */}
           <Row
+              onClose={onClose}
             icon={<Smartphone className="w-4 h-4" />}
             label="UGC Template"
             onClick={onUgcTemplate}
           />
           <Row
+              onClose={onClose}
             icon={<Youtube className="w-4 h-4" />}
             label="YT Template"
             onClick={onYtTemplate}

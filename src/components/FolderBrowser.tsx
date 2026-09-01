@@ -33,6 +33,8 @@ import { logError } from '@/lib/logging'
 import {
   getClippedComments,
   CLIPBOARD_CHANGED_EVENT,
+  setClippedComments,
+  toClipped,
 } from '@/lib/comments-clipboard'
 import { pasteClippedThreads } from '@/lib/comments-paste'
 import { useDownloadManager } from '@/contexts/DownloadManager'
@@ -1853,6 +1855,34 @@ function FolderBrowserInner(
    * whether any attachments failed to come across. A bulk action that says
    * "done" while having half worked is worse than one that admits the shortfall.
    */
+  /**
+   * 7.4.2 — copy one video's comments without opening it.
+   *
+   * Paste has been here since 7.1.0, but the only way to FILL the clipboard was
+   * to open a video and use the kebab beside "All comments" — so the folder
+   * offered half a gesture. Notes are carried between near-identical cuts often
+   * enough that both halves belong in the same menu.
+   *
+   * Fetches the project's comments and keeps the ones on this video: the list
+   * endpoint is per project, and the card is not showing a thread it could read
+   * from. Roots only — replies travel with their parent, and counting them
+   * separately would promise more than the paste writes.
+   */
+  const handleCopyCommentsFromVideo = useCallback(async (videoId: string) => {
+    try {
+      const res = await apiFetch(`/api/comments?projectId=${projectId}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const all = await res.json()
+      const mine = (Array.isArray(all) ? all : []).filter(
+        (c: any) => !c.parentId && c.videoId === videoId,
+      )
+      if (mine.length === 0) return
+      setClippedComments(projectId, toClipped(mine))
+    } catch (err) {
+      logError('[FolderBrowser] copying comments failed:', err, videoId)
+    }
+  }, [projectId])
+
   const handleBulkPasteComments = useCallback(async () => {
     if (pastingComments) return
     const items = getClippedComments(projectId)
@@ -4276,6 +4306,20 @@ function FolderBrowserInner(
         // — a folder has no comment list to paste into.
         canPasteComments={clippedCount > 0 && selectedVideoIds.size > 0 && !pastingComments}
         pasteCommentsCount={clippedCount}
+        /**
+         * 7.4.2: offered for exactly one selected video that actually has
+         * notes on it. Copying from a batch would be ambiguous about which
+         * video's notes landed on the clipboard, and copying nothing is a menu
+         * entry that does nothing.
+         */
+        copyCommentsCount={
+          downloadVideoId
+            ? (videoGroups.find((g) => g.id === downloadVideoId)?.commentCount ?? 0)
+            : 0
+        }
+        onCopyComments={() => {
+          if (downloadVideoId) void handleCopyCommentsFromVideo(downloadVideoId)
+        }}
         onPasteComments={() => {
           void handleBulkPasteComments()
         }}
