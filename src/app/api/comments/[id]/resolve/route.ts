@@ -111,7 +111,7 @@ export async function PATCH(
         resolvedBy: isResolved ? (resolvedBy?.trim() || (isAdmin ? 'Admin' : 'Client')) : null,
       } as any,
       include: {
-        user: { select: { id: true, name: true, username: true, email: true } },
+        user: { select: { id: true, name: true, username: true, email: true, avatarUrl: true } },
         assets: {
           select: {
             id: true,

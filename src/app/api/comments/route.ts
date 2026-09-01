@@ -133,6 +133,9 @@ export async function GET(request: NextRequest) {
             name: true,
             username: true,
             email: true,
+            // 7.4.1: the author's photo, so a comment and its timeline pin can
+            // show a face instead of two letters.
+            avatarUrl: true,
           }
         },
         assets: assetSelect,
@@ -145,6 +148,7 @@ export async function GET(request: NextRequest) {
                 name: true,
                 username: true,
                 email: true,
+                avatarUrl: true,
               }
             },
             assets: assetSelect,
@@ -391,6 +395,9 @@ export async function POST(request: NextRequest) {
             name: true,
             username: true,
             email: true,
+            // 7.4.1: the author's photo, so a comment and its timeline pin can
+            // show a face instead of two letters.
+            avatarUrl: true,
           }
         },
         replies: {
@@ -401,6 +408,7 @@ export async function POST(request: NextRequest) {
                 name: true,
                 username: true,
                 email: true,
+                avatarUrl: true,
               }
             }
           },

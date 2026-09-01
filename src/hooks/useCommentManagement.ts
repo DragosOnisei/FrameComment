@@ -629,7 +629,34 @@ export function useCommentManagement({
       createdAt: new Date(),
       updatedAt: new Date(),
       parentId: replyingToCommentId,
-      userId: null,
+      /**
+       * 7.4.1: the optimistic row carries who wrote it.
+       *
+       * It used to say `userId: null` with no `user` at all, which was harmless
+       * while an author was only ever a name and a colour. Once a comment shows
+       * a FACE it stopped being harmless: your own note appeared with your
+       * initials and only turned into your photo when the page was reloaded,
+       * because the row on screen genuinely did not know it was yours.
+       *
+       * `hasAvatar` rather than the image, matching what the server sends —
+       * UserAvatar then pulls the bytes from the same per-session cache every
+       * other comment by this person already uses, so in practice the picture
+       * is there in the same frame.
+       *
+       * Only for an internal comment: a guest on a share link has no account,
+       * so there is nothing truthful to put here.
+       */
+      userId: isInternalComment && adminUser ? adminUser.id : null,
+      ...(isInternalComment && adminUser
+        ? {
+            user: {
+              id: adminUser.id,
+              name: adminUser.name ?? null,
+              email: adminUser.email ?? null,
+              hasAvatar: !!adminUser.avatarUrl,
+            },
+          }
+        : {}),
       editorSessionId: null,
       // 1.2.0+: resolved bookkeeping defaults — a brand-new comment is
       // never resolved at creation time.

@@ -14,6 +14,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.1] - 2026-08-28
+
+### Added
+
+- **A comment shows its author's photo, on the note and on its timeline pin.**
+  Three separate things stopped it: the avatar component could only ever draw
+  two letters, the comment queries never selected `avatarUrl`, and the response
+  sanitiser rebuilt the author as `{ id, name, email }` and dropped the rest —
+  so even with the first two fixed it would not have arrived.
+  - The image is fetched once per person per session through a shared cache and
+    reused by the note, its replies and its pin. Avatars are stored as base64
+    data URIs — 27KB on this deployment — so putting one on each comment would
+    have meant 27KB per note: a thread of fifty from one person is 1.3MB of
+    JSON, re-sent on every refetch, and the list refetches after every paste,
+    resolve and delete. The server sends a flag; the bytes come from their own
+    route.
+  - That route reads through the RLS-armed client, so "may this viewer see this
+    person" is answered by the policies rather than by a check that could be
+    forgotten: an id from another organisation matches no row.
+  - Carried-over notes keep their grey "C". Telling leftovers apart from
+    feedback written on this cut is the whole point of that treatment, and a
+    face would say the opposite. Share viewers are unchanged — the sanitiser
+    does not expose the author object to them, and this did not widen that.
+
+### Fixed
+
+- **A note you have just posted shows your photo straight away.** The optimistic
+  row — the one drawn before the server answers — was built with no author on
+  it at all, which was harmless while an author was a name and a colour and
+  stopped being harmless the moment a comment showed a face: your own note
+  appeared with your initials and only became your photo after a reload,
+  because the row on screen genuinely did not know it was yours. It carries
+  who wrote it now.
+  - Your own avatar is taken from the session rather than fetched. It is
+    already in memory — it is what draws the account menu — so asking the
+    server for it again to put the same face on your own comment was a round
+    trip for something already held. Everyone else's still comes from the
+    route, once per person per session.
+- **Dragging a timeline pin works again.** An `<img>` is draggable by default,
+  so the moment a pin had a face on it, pressing it started the browser's own
+  image drag and the marker never moved. The initials it replaced were a
+  `<span>`, which is why nothing was wrong until there was a photo. Avatars are
+  now transparent to the pointer and not independently draggable, wherever they
+  appear — the cards own drag gestures of their own.
+
 ## [7.4.0] - 2026-08-28
 
 ### Added

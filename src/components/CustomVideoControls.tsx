@@ -10,6 +10,7 @@ import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
 import { isRangeEditActive } from '@/lib/comment-range-edit'
 import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
+import { useAvatarUrl } from '@/components/UserAvatar'
 import { storyboardCellStyle, storyboardFraction, storyboardGridOf } from '@/lib/storyboard-grid'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
@@ -280,11 +281,79 @@ function formatTimeWithMode(
   })
 }
 
+/**
+ * 7.4.1: the two halves of a pin's face, as components rather than inline JSX.
+ *
+ * The avatar comes from a hook, and hooks cannot be called inside the
+ * `groupedMarkers.map()` that draws the pins — the number of calls would change
+ * with the number of notes. A component boundary per pin makes that legal and
+ * costs nothing.
+ *
+ * Two of them because the photo sits INSIDE the glass dome and the initials sit
+ * on top of it, so they are not siblings in the tree.
+ */
+function MarkerFace({ userId, hasAvatar }: { userId: string | null; hasAvatar: boolean }) {
+  const url = useAvatarUrl(userId, hasAvatar)
+  if (!url) return null
+  /**
+   * `draggable={false}` and `pointer-events-none`, and neither is optional.
+   *
+   * An <img> is natively draggable, so the moment a face appeared on the pin,
+   * pressing it started the browser's own image drag and the marker never
+   * moved — you dragged a picture of a person around the page. The initials it
+   * replaced were a <span>, which is why this only broke once there was a
+   * photo. `pointer-events-none` hands every press through to the button
+   * underneath, which is what owns the gesture; `draggable={false}` is the
+   * belt to that braces, because a native drag can start before a click does.
+   */
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={url}
+      alt=""
+      draggable={false}
+      className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+    />
+  )
+}
+
+function MarkerInitials({
+  userId,
+  hasAvatar,
+  initials,
+  className,
+}: {
+  userId: string | null
+  hasAvatar: boolean
+  initials: string
+  className: string
+}) {
+  const url = useAvatarUrl(userId, hasAvatar)
+  if (url) return null
+  return (
+    <span
+      className={`relative text-[8px] sm:text-[9px] font-semibold leading-none ${className}`}
+      style={{ textShadow: '0 1px 1px rgba(0,0,0,0.35)' }}
+    >
+      {initials}
+    </span>
+  )
+}
+
 interface MarkerData {
   id: string
   timestamp: number
   authorName: string | null
   initials: string
+  /**
+   * 7.4.1: who wrote it and whether they have a photo — never the photo
+   * itself. Avatars are 27KB base64 blobs on the User row, so the pin asks for
+   * one through the shared cache instead of carrying it. A carried-over note
+   * keeps its grey "C": the whole point of that treatment is telling leftovers
+   * apart from feedback written on this cut, and a face would say the opposite.
+   */
+  authorUserId: string | null
+  authorHasAvatar: boolean
   colorKey: string
   content: string
   position: number
@@ -807,6 +876,11 @@ export default function CustomVideoControls({
           timestamp,
           authorName: effectiveAuthorName,
           initials: markerInitials(comment, initialsFromName(effectiveAuthorName)),
+          authorUserId: isCarriedOverComment(comment)
+            ? null
+            : (((comment as any).user?.id as string | null | undefined) ?? null),
+          authorHasAvatar:
+            !isCarriedOverComment(comment) && !!(comment as any).user?.hasAvatar,
           colorKey,
           // 3.8.x: timeline popover preview — up to 300 chars, with a
         // trailing " [...]" marker when the comment was actually longer
@@ -2720,6 +2794,18 @@ export default function CustomVideoControls({
                         : 'inset 0 0 0 1px rgba(255,255,255,0.85), 0 0 0 1px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.4)',
                     }}
                   >
+                    {/* 7.4.1: the face goes INSIDE the circle and BEFORE the
+                        sheen, so the same glass dome sits over a photo as over
+                        a pair of initials and the two kinds of pin read as one
+                        object. As a later sibling it would have covered the
+                        sheen instead. `inset-0` rather than a fixed size: the
+                        bead is 16px on a phone and 18 on a desktop, and one
+                        rule that fills whatever it is beats two that have to be
+                        kept in step with it. */}
+                    <MarkerFace
+                      userId={primaryMarker.authorUserId}
+                      hasAvatar={primaryMarker.authorHasAvatar}
+                    />
                     {/* Translucent white sheen tilted from the
                         top-left, so the bead reads as a glass dome. */}
                     <span
@@ -2731,14 +2817,12 @@ export default function CustomVideoControls({
                       }}
                     />
                   </span>
-                  <span
-                    className={`relative text-[8px] sm:text-[9px] font-semibold leading-none ${colors.text}`}
-                    style={{
-                      textShadow: '0 1px 1px rgba(0,0,0,0.35)',
-                    }}
-                  >
-                    {primaryMarker.initials}
-                  </span>
+                  <MarkerInitials
+                    userId={primaryMarker.authorUserId}
+                    hasAvatar={primaryMarker.authorHasAvatar}
+                    initials={primaryMarker.initials}
+                    className={colors.text}
+                  />
 
                   {isStacked && (
                     <span

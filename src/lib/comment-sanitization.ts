@@ -165,7 +165,13 @@ export function sanitizeComment(
       sanitized.user = {
         id: comment.user.id,
         name: comment.user.name,
-        email: comment.user.email
+        email: comment.user.email,
+        // 7.4.1: a flag, never the bytes. Avatars are stored as base64 data
+        // URIs — 27KB on this deployment — so putting one on every comment
+        // would have meant re-sending it per note, on every refetch. The
+        // client asks /api/users/[id]/avatar once and caches it; this only
+        // says whether asking is worth it.
+        hasAvatar: !!comment.user.avatarUrl,
       }
     }
   } else if (isAuthenticated) {

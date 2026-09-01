@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+
 import { cn, getUserColor } from '@/lib/utils'
 
 type AvatarSize = 'sm' | 'md' | 'lg'
@@ -252,25 +254,53 @@ export function InitialsAvatar(props: {
   className?: string
   title?: string
   isInternal?: boolean // True if this is an internal/admin user (sender), false for client (receiver)
+  /**
+   * 7.4.1: the person's photo, when there is one.
+   *
+   * This component could only ever draw two letters, which is why a comment
+   * showed initials while the same person's face was in the account menu three
+   * inches above it. Optional, and the initials remain the answer whenever it
+   * is absent — a guest on a share link has no account and therefore no photo,
+   * and that is most of the people leaving notes on a client review.
+   */
+  imageUrl?: string | null
 }) {
-  const { name, size = 'md', className, title, isInternal = false } = props
+  const { name, size = 'md', className, title, isInternal = false, imageUrl } = props
+  // Falls back the moment the image fails. A broken avatar is a hole in the
+  // layout; initials are never wrong, only less personal.
+  const [failed, setFailed] = useState(false)
 
   const color = getUserColor(name, isInternal)
   const classes = COLOR_MAP[color.border] || COLOR_MAP['border-gray-500']
+  const showImage = !!imageUrl && !failed
 
   return (
     <div
       title={title || (name || undefined)}
       className={cn(
-        'flex items-center justify-center rounded-full font-semibold ring-1 ring-inset select-none',
+        'flex items-center justify-center rounded-full font-semibold ring-1 ring-inset select-none overflow-hidden',
         sizeClasses(size),
-        classes.bg,
-        classes.ring,
-        classes.text,
+        // The tinted background is the initials' backdrop; behind a photo it
+        // would only show as a rim where the circle crops the corners.
+        showImage ? 'bg-transparent ring-white/15' : cn(classes.bg, classes.ring, classes.text),
         className
       )}
     >
-      {initialsFromName(name)}
+      {showImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imageUrl as string}
+          alt=""
+          /* Never independently draggable: an avatar sits inside cards and pins
+             that own their own drag gestures, and a native image drag would
+             steal the press from them. */
+          draggable={false}
+          className="w-full h-full object-cover pointer-events-none"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        initialsFromName(name)
+      )}
     </div>
   )
 }

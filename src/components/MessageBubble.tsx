@@ -16,6 +16,7 @@ import {
 import DOMPurify from 'isomorphic-dompurify'
 import { cn } from '@/lib/utils'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
+import UserAvatar from '@/components/UserAvatar'
 import CommentAttachments from './CommentAttachments'
 import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 import { emoticonOnChange } from '@/lib/emoticons'
@@ -397,6 +398,16 @@ export default function MessageBubble({
     (comment.isInternal && (comment as any).user ?
       ((comment as any).user.name || (comment as any).user.email) :
       null)
+  /**
+   * 7.4.1: whether the author has a photo, and who they are.
+   *
+   * Only for a note whose `user` relation is populated — a guest on a share
+   * link types a name and has no account behind it, so the initials stay. The
+   * server sends a flag rather than the image; UserAvatar fetches the bytes
+   * once per person and shares them with every other place that draws them.
+   */
+  const authorUserId: string | null = ((comment as any).user?.id as string | null) ?? null
+  const authorHasAvatar: boolean = !!(comment as any).user?.hasAvatar
 
   // Drawing-annotation focus: click anywhere on the bubble to surface this
   // comment's drawing on the video. Toggles off when clicking the same
@@ -630,7 +641,13 @@ export default function MessageBubble({
               takes a range, Cmd adds one — so the circle was a second control
               for something the whole card already did. What it signalled is now
               said by the ring, which is also what a picked video says. */}
-          <InitialsAvatar name={effectiveAuthorName} size="sm" isInternal={comment.isInternal ?? false} />
+          <UserAvatar
+            userId={authorUserId}
+            hasAvatar={authorHasAvatar}
+            name={effectiveAuthorName}
+            size="sm"
+            isInternal={comment.isInternal ?? false}
+          />
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-sm font-semibold text-white truncate">
@@ -1062,7 +1079,13 @@ export default function MessageBubble({
             return (
               <div key={reply.id} className="contents">
                 <div className="flex justify-center pt-0.5">
-                  <InitialsAvatar name={replyEffectiveName} size="sm" isInternal={reply.isInternal ?? false} />
+                  <UserAvatar
+                    userId={((reply as any).user?.id as string | null) ?? null}
+                    hasAvatar={!!(reply as any).user?.hasAvatar}
+                    name={replyEffectiveName}
+                    size="sm"
+                    isInternal={reply.isInternal ?? false}
+                  />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 min-w-0">

@@ -376,7 +376,7 @@ export async function PATCH(
       where: { id },
       data: updateData,
       include: {
-        user: { select: { id: true, name: true, username: true, email: true } },
+        user: { select: { id: true, name: true, username: true, email: true, avatarUrl: true } },
         assets: {
           select: {
             id: true,

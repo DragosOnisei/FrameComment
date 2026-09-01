@@ -95,7 +95,7 @@ async function loadAndReturn(commentId: string, isAdmin: boolean, viewerSessionI
   const updated = await prisma.comment.findUnique({
     where: { id: commentId },
     include: {
-      user: { select: { id: true, name: true, username: true, email: true } },
+      user: { select: { id: true, name: true, username: true, email: true, avatarUrl: true } },
       assets: {
         select: {
           id: true,
