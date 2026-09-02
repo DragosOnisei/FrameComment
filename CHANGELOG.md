@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.4] - 2026-09-02
+
+### Changed
+
+- **The "Retry payment" button is hidden by default** — the September 2026
+  re-collection it was added for (7.4.3) is done. The functionality is kept,
+  not removed: pressed by accident the button would double-charge, so it now
+  renders only when the Billing page is opened with `?retry-payment=1`
+  (`/admin/settings?retry-payment=1`). The `/api/billing/charge-now` route
+  stays live behind the same protections as always — settings-admin auth,
+  rate limiting, and the line-by-line verification gate in front of every
+  charge — so the next refund-and-recollect needs no redeploy, just the URL
+  parameter.
+
 ## [7.4.3] - 2026-09-02
 
 ### Fixed

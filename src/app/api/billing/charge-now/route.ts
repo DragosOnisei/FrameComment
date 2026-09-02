@@ -12,13 +12,14 @@ export const dynamic = 'force-dynamic'
  * 7.4.3: POST /api/billing/charge-now — charge the card on file for the
  * CURRENT usage, unconditionally minting a fresh invoice.
  *
- * TEMPORARY, at Dragos's request (2026-09-02): the September invoice
- * under-collected ($392.70 against a Billing page showing $574.30 — the
- * old average-over-the-period bug, fixed in this release). He refunds the
- * wrong payment in the Stripe dashboard and presses "Retry payment" on the
- * Billing pane, which calls this route to collect the correct amount. The
- * button gets removed once he says the re-collection is done; the route can
- * go with it.
+ * Built 2026-09-02, when the September invoice under-collected ($392.70
+ * against a Billing page showing $574.30 — the old average-over-the-period
+ * bug, fixed the same release): the wrong payment was refunded in the
+ * Stripe dashboard and this route re-collected the correct amount. KEPT
+ * afterwards on purpose — re-collecting a refunded month will happen again.
+ * 7.4.4: the "Retry payment" button that calls this is hidden by default;
+ * it renders only when the Billing page is opened with ?retry-payment=1
+ * (an accidental press would double-charge, so it stays out of sight).
  *
  * This deliberately does NOT reuse /api/billing/retry: retry short-circuits
  * with "Invoice is already paid" when the last invoice is paid — and a

@@ -253,13 +253,27 @@ export function BillingSection({
     }
   }, [loadStatus])
 
-  // 7.4.3, TEMPORARY — remove together with /api/billing/charge-now once
-  // Dragos confirms the September 2026 re-collection is done. Mints a fresh
-  // invoice for the CURRENT usage (exactly the total this pane shows). The
-  // flow it exists for: the September invoice under-collected (the old
-  // average-over-the-period bug), the wrong payment gets refunded in the
-  // Stripe dashboard, and this button collects the correct amount. Two-step
-  // confirm — the first press arms the button and shows the exact amount.
+  // 7.4.3/7.4.4: "Retry payment" mints a fresh invoice for the CURRENT
+  // usage (exactly the total this pane shows) via /api/billing/charge-now.
+  // Built for the September 2026 re-collection (refund the wrong payment in
+  // the Stripe dashboard, press this, the correct amount is collected) and
+  // KEPT for the next time a payment needs re-collecting. 7.4.4: the button
+  // is hidden by default — pressed by accident it double-charges, so it only
+  // renders when the page is opened with ?retry-payment=1. Read AFTER mount:
+  // the server render has no URL to look at, and deciding the initial state
+  // from `window` would make the first client render disagree with it
+  // (hydration mismatch); starting hidden and flipping in an effect keeps
+  // both renders identical.
+  const [showChargeNow, setShowChargeNow] = useState(false)
+  useEffect(() => {
+    try {
+      setShowChargeNow(
+        new URLSearchParams(window.location.search).get('retry-payment') === '1',
+      )
+    } catch {
+      /* stay hidden */
+    }
+  }, [])
   const [chargeNowArmed, setChargeNowArmed] = useState(false)
   const [chargeNowMsg, setChargeNowMsg] = useState<string | null>(null)
   const [chargeNowDone, setChargeNowDone] = useState(false)
@@ -553,9 +567,10 @@ export function BillingSection({
             </div>
           )}
 
-          {/* 7.4.3, TEMPORARY (see handleChargeNow): manual re-collection
-              of a refunded invoice at the CURRENT page total. */}
-          {card && (usage.breakdown?.totalCents ?? 0) > 0 && (
+          {/* Hidden unless the page is opened with ?retry-payment=1 (see
+              handleChargeNow): manual re-collection of a refunded invoice
+              at the CURRENT page total. */}
+          {showChargeNow && card && (usage.breakdown?.totalCents ?? 0) > 0 && (
             <div className="flex items-center gap-3 rounded-xl ring-1 ring-amber-400/25 bg-amber-500/[0.06] p-3">
               <RefreshCw className="w-4 h-4 text-amber-300 shrink-0" />
               <div className="flex-1 min-w-0">
