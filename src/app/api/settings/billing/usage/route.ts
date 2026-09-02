@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiManageSettings } from '@/lib/auth'
 import { logError } from '@/lib/logging'
-import { computeBillingUsage, computeTotalStorageBytes } from '@/lib/billing'
+import {
+  computeCurrentBillable,
+  computeTotalStorageBytes,
+  FREE_TIER,
+} from '@/lib/billing'
 import { getActiveBackend, backendLabel } from '@/lib/storage-backends'
 
 export const runtime = 'nodejs'
@@ -10,10 +14,12 @@ export const runtime = 'nodejs'
  * 1.9.1+: GET /api/settings/billing/usage
  *
  * Returns the running totals that drive the Billing pane in
- * Global Settings. Pricing is currently a flat tariff applied
- * client-side (UI-only — no Stripe connection yet):
- *   $25 / user / month
- *   $0.10 / GB / month
+ * Global Settings. 7.4.3: the response now carries the PRICED
+ * breakdown too (billable quantities + cents), computed by
+ * computeCurrentBillable — the same function the monthly invoice
+ * charges. The pane displays these numbers verbatim instead of
+ * redoing the math client-side, so what the page shows and what
+ * the card is charged can no longer be two different formulas.
  *
  * Storage covers EVERY file the app holds (VideoAsset +
  * ProjectUpload), INCLUDING soft-deleted projects/folders in
@@ -33,11 +39,12 @@ export async function GET(request: NextRequest) {
     // / AWS are the customer's own storage). computeBillingUsage applies that
     // filter. We also return the customer's TOTAL storage across all backends
     // + the active backend so the Billing pane can explain why per-GB may be $0.
-    const [usage, totalStorageBytes, activeBackend] = await Promise.all([
-      computeBillingUsage(),
-      computeTotalStorageBytes(),
-      getActiveBackend(),
-    ])
+    const [{ usage, bill }, totalStorageBytes, activeBackend] =
+      await Promise.all([
+        computeCurrentBillable(),
+        computeTotalStorageBytes(),
+        getActiveBackend(),
+      ])
 
     return NextResponse.json({
       userCount: usage.userCount,
@@ -46,6 +53,17 @@ export async function GET(request: NextRequest) {
       activeBackend,
       activeBackendLabel: backendLabel(activeBackend),
       storageBilledOnBackend: 'fc',
+      // 7.4.3: the priced breakdown, straight from the function the invoice
+      // uses. The client renders these; it computes nothing.
+      breakdown: {
+        freeUsers: FREE_TIER.users,
+        freeGiB: FREE_TIER.gib,
+        billableUsers: bill.billableUsers,
+        billableGiB: bill.billableGiB,
+        userCents: bill.userCents,
+        storageCents: bill.storageCents,
+        totalCents: bill.totalCents,
+      },
       // Echo the unit prices so the client doesn't have to hard-code
       // them — keeping the source of truth here makes a future
       // pricing change a single-file edit.

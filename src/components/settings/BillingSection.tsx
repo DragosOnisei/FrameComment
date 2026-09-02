@@ -9,6 +9,7 @@ import {
   Loader2,
   AlertTriangle,
   Gift,
+  RefreshCw,
 } from 'lucide-react'
 import { CollapsibleSection } from '@/components/ui/collapsible-section'
 import { apiFetch } from '@/lib/api-client'
@@ -25,6 +26,19 @@ interface UsageResponse {
   totalStorageBytes?: number // all backends — display context
   activeBackend?: string
   activeBackendLabel?: string
+  /** 7.4.3: the priced breakdown, computed SERVER-side by the same
+   *  computeCurrentBillable the monthly invoice charges. This pane renders
+   *  these numbers verbatim — it does no money math of its own, so what the
+   *  page shows and what the card is charged cannot be two formulas. */
+  breakdown: {
+    freeUsers: number
+    freeGiB: number
+    billableUsers: number
+    billableGiB: number
+    userCents: number
+    storageCents: number
+    totalCents: number
+  }
   pricing: {
     currency: string
     perUserPerMonth: number
@@ -63,10 +77,13 @@ function formatCountdown(ms: number): string {
 /**
  * 3.8.0+: Billing pane.
  *
- * Usage-based, prorated (averaged over the period) with a free tier
- * (1 user + 10 GB). You pay only for usage ABOVE the tier. A card is
- * required only once you exceed the tier; if it's unpaid/missing for
- * 5 business days the admin is suspended (billing wall).
+ * Usage-based with a free tier (1 user + 10 GB); you pay only for usage
+ * ABOVE the tier. 7.4.3: the invoice charges the CURRENT usage — exactly
+ * the total this pane shows at the moment of billing (it used to charge
+ * the period's daily average, which drifted $181.60 under the page for a
+ * customer whose storage tripled mid-month). A card is required only once
+ * you exceed the tier; if it's unpaid/missing for 5 business days the
+ * admin is suspended (billing wall).
  */
 export function BillingSection({
   show,
@@ -236,19 +253,65 @@ export function BillingSection({
     }
   }, [loadStatus])
 
-  const bytesPerGiB = 1024 ** 3
-  const usedGiB = usage ? usage.storageBytes / bytesPerGiB : 0
-  const freeUsers = billing?.freeTier.users ?? 1
-  const freeGiB = billing?.freeTier.gib ?? 10
+  // 7.4.3, TEMPORARY — remove together with /api/billing/charge-now once
+  // Dragos confirms the September 2026 re-collection is done. Mints a fresh
+  // invoice for the CURRENT usage (exactly the total this pane shows). The
+  // flow it exists for: the September invoice under-collected (the old
+  // average-over-the-period bug), the wrong payment gets refunded in the
+  // Stripe dashboard, and this button collects the correct amount. Two-step
+  // confirm — the first press arms the button and shows the exact amount.
+  const [chargeNowArmed, setChargeNowArmed] = useState(false)
+  const [chargeNowMsg, setChargeNowMsg] = useState<string | null>(null)
+  const [chargeNowDone, setChargeNowDone] = useState(false)
+  const handleChargeNow = useCallback(async () => {
+    if (!chargeNowArmed) {
+      setChargeNowArmed(true)
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setChargeNowMsg(null)
+    try {
+      const res = await apiFetch('/api/billing/charge-now', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.ok) {
+        setChargeNowMsg(data.message || 'Payment succeeded.')
+        setChargeNowDone(true)
+        loadStatus()
+        return
+      }
+      if (data.requiresAction && data.hostedInvoiceUrl) {
+        window.open(data.hostedInvoiceUrl as string, '_blank', 'noopener')
+        setChargeNowMsg(
+          'Your bank requires confirmation — finish the payment in the Stripe tab, then this page will update.',
+        )
+        ;[5000, 15000, 30000].forEach((ms) => setTimeout(loadStatus, ms))
+        return
+      }
+      setError(data.error || 'Charge failed.')
+    } catch {
+      setError('Charge failed.')
+    } finally {
+      setBusy(false)
+      setChargeNowArmed(false)
+    }
+  }, [chargeNowArmed, loadStatus])
 
-  // Free tier subtracted: pay only for usage above the allowance.
-  const billableUsers = usage ? Math.max(0, usage.userCount - freeUsers) : 0
-  const billableGiB = Math.max(0, Math.round(usedGiB - freeGiB))
-  const userCost = usage ? billableUsers * usage.pricing.perUserPerMonth : 0
-  const storageCost = usage
-    ? billableGiB * usage.pricing.perGigabytePerMonth
-    : 0
-  const totalCost = userCost + storageCost
+  // 7.4.3: every priced number below comes from the server's breakdown —
+  // the output of the very function the monthly invoice charges. This
+  // component used to redo the arithmetic from raw usage, which meant the
+  // page and the invoice could (and did) disagree.
+  // The `?.` on breakdown is not paranoia about our own types: for the
+  // minute a deploy takes, a fresh client can read a cached response from
+  // the previous server that has no breakdown yet — the pane must degrade
+  // to zeros, not crash.
+  const freeUsers = usage?.breakdown?.freeUsers ?? billing?.freeTier.users ?? 1
+  const freeGiB = usage?.breakdown?.freeGiB ?? billing?.freeTier.gib ?? 10
+  const billableUsers = usage?.breakdown?.billableUsers ?? 0
+  const billableGiB = usage?.breakdown?.billableGiB ?? 0
+  const userCost = (usage?.breakdown?.userCents ?? 0) / 100
+  const storageCost = (usage?.breakdown?.storageCents ?? 0) / 100
+  const totalCost = (usage?.breakdown?.totalCents ?? 0) / 100
 
   const overTier = billing?.overFreeTier ?? totalCost > 0
   const withinFreeTier = !overTier
@@ -490,13 +553,50 @@ export function BillingSection({
             </div>
           )}
 
+          {/* 7.4.3, TEMPORARY (see handleChargeNow): manual re-collection
+              of a refunded invoice at the CURRENT page total. */}
+          {card && (usage.breakdown?.totalCents ?? 0) > 0 && (
+            <div className="flex items-center gap-3 rounded-xl ring-1 ring-amber-400/25 bg-amber-500/[0.06] p-3">
+              <RefreshCw className="w-4 h-4 text-amber-300 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white">Retry payment</p>
+                <p className="text-xs text-white/55">
+                  Charges the card on file {formatCurrency(totalCost)} — the
+                  current total shown above.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleChargeNow}
+                disabled={busy || chargeNowDone}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/15 hover:bg-amber-500/25 ring-1 ring-amber-400/40 text-amber-300 transition-colors disabled:opacity-60"
+              >
+                {busy ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : chargeNowDone ? (
+                  'Charged'
+                ) : chargeNowArmed ? (
+                  `Charge ${formatCurrency(totalCost)} now?`
+                ) : (
+                  'Retry payment'
+                )}
+              </button>
+            </div>
+          )}
+          {chargeNowMsg && (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 ring-1 ring-emerald-400/25 px-3 py-2 text-xs text-emerald-300">
+              {chargeNowMsg}
+            </div>
+          )}
+
           {/* Pricing footnote */}
           <p className="text-[11px] text-white/55">
             Free tier: {freeUsers} user{freeUsers === 1 ? '' : 's'} +{' '}
             {freeGiB} GB. Beyond that:{' '}
             {formatCurrency(usage.pricing.perUserPerMonth)} per extra user
             per month + {formatCurrency(usage.pricing.perGigabytePerMonth)} per
-            extra GB per month, prorated over the period. Per-GB storage is
+            extra GB per month, measured at the billing date — the invoice
+            always equals the total this page shows at that moment. Per-GB storage is
             billed only for files stored on the FrameComment Server backend —
             Local, Cloudflare R2 and AWS are your own storage and are billed per
             user only. Storage counts every file on FrameComment Server,

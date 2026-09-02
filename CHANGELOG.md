@@ -14,6 +14,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.3] - 2026-09-02
+
+### Fixed
+
+- **The monthly invoice now charges exactly what the Billing page shows.** On
+  2026-09-02 a customer was invoiced $392.70 while their Billing page said
+  $574.30. The two numbers came from two different definitions of "usage":
+  the page priced the storage of the moment, while the invoice priced the
+  AVERAGE of the daily snapshots over the period — and a company that tripled
+  its storage during the month landed $181.60 apart on the two. The average
+  is gone from the money path: the invoice bills current usage through
+  `computeCurrentBillable`, the same function whose numbers the page
+  displays. Daily snapshots are still recorded, but only the founder history
+  charts read them.
+  - The Billing pane no longer does money math in the browser at all — the
+    usage endpoint returns the priced breakdown (billable quantities and
+    cents) computed server-side, and the pane renders it verbatim. One
+    formula, two readers.
+  - The pricing footnote stops saying "prorated over the period", which
+    would now be a lie; it says the invoice always equals the total the page
+    shows at the billing moment.
+
+### Added
+
+- **A verification gate in front of every charge** (`billing-verify.ts`).
+  After the Stripe draft invoice is assembled and before any money moves,
+  the draft is read back and compared — line by line and in total — against
+  a second, independent recomputation of the bill. Anything off (a missing
+  line, the historical "$0 invoice" item-attach failure, a foreign product's
+  line on the shared Stripe account, quantities or totals that differ, the
+  wrong currency, a customer balance that would bend the collected amount)
+  deletes the draft, charges NOTHING, and logs `CHARGE BLOCKED` with the
+  exact mismatch. The monthly cycle then re-arms 30 minutes out instead of a
+  month out, so a transient cause clears on the next attempt and a systemic
+  one repeats in the log until someone looks. A post-payment tripwire also
+  logs loudly if the amount Stripe collected ever differs from the verified
+  total.
+- **Temporary: a "Retry payment" button on the Billing pane** (with
+  `POST /api/billing/charge-now`), so the under-collected September invoice
+  can be refunded in Stripe and re-collected at the correct, current amount.
+  Two-step confirm — the first press shows the exact amount ("Charge $574.30
+  now?"), the second charges, through the same verification gate. It does not
+  touch the regular billing anchor. To be removed once the re-collection is
+  confirmed done.
+
 ## [7.4.2] - 2026-08-28
 
 ### Added

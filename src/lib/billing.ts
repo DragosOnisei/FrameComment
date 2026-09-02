@@ -3,6 +3,7 @@ import { prisma, orgSettingsWhere, currentOrgId } from '@/lib/db'
 import { getStripe } from '@/lib/stripe'
 import { logError, logMessage } from '@/lib/logging'
 import { legacyBackend } from '@/lib/storage-backends'
+import { verifyDraftInvoice, type ExpectedInvoice } from '@/lib/billing-verify'
 
 /**
  * 3.7.0+: usage-based billing.
@@ -17,6 +18,14 @@ import { legacyBackend } from '@/lib/storage-backends'
  * a Stripe Invoice generated + charged automatically each month for the
  * computed total. Amounts vary month to month, which is exactly why we
  * bill via a fresh invoice each cycle rather than a fixed subscription.
+ *
+ * 7.4.3: the invoice bills CURRENT usage — computeCurrentBillable, the very
+ * numbers the Billing pane displays — never an average. It used to average
+ * daily snapshots over the period, which made CPC's September 2026 invoice
+ * collect $392.70 while their Billing page said $574.30: storage tripled
+ * during August, so the month's average sat far below the month's end. The
+ * page is the promise; the charge now keeps it, and a line-by-line
+ * verification gate (billing-verify.ts) blocks any invoice that differs.
  */
 
 export const BILLING_PRICING = {
@@ -121,8 +130,8 @@ export async function computeTotalStorageBytes(): Promise<number> {
 }
 
 export interface BillableBreakdown {
-  avgUsers: number
-  avgGiB: number
+  userCount: number
+  gib: number
   billableUsers: number
   billableGiB: number
   userCents: number
@@ -130,29 +139,47 @@ export interface BillableBreakdown {
   totalCents: number
 }
 
-/** Apply the free-tier allowance to (averaged) usage and price it. Only
- *  users/GB ABOVE the free tier are billed. 5.7.6: billable quantities are
+/** Apply the free-tier allowance to usage and price it. Only users/GB
+ *  ABOVE the free tier are billed. 5.7.6: billable quantities are
  *  ROUNDED TO WHOLE NUMBERS (user request) — the invoice reads "12 × $25.00"
  *  instead of "12.142857 × $25.00", and quantity × unit price equals the
  *  line amount exactly. */
 export function computeBillable(
-  avgUsers: number,
-  avgStorageBytes: number,
+  userCount: number,
+  storageBytes: number,
 ): BillableBreakdown {
-  const avgGiB = avgStorageBytes / BYTES_PER_GIB
-  const billableUsers = Math.round(Math.max(0, avgUsers - FREE_TIER.users))
-  const billableGiB = Math.round(Math.max(0, avgGiB - FREE_TIER.gib))
+  const gib = storageBytes / BYTES_PER_GIB
+  const billableUsers = Math.round(Math.max(0, userCount - FREE_TIER.users))
+  const billableGiB = Math.round(Math.max(0, gib - FREE_TIER.gib))
   const userCents = billableUsers * BILLING_PRICING.perUserPerMonthCents
   const storageCents = billableGiB * BILLING_PRICING.perGibPerMonthCents
   return {
-    avgUsers,
-    avgGiB,
+    userCount,
+    gib,
     billableUsers,
     billableGiB,
     userCents,
     storageCents,
     totalCents: userCents + storageCents,
   }
+}
+
+export interface CurrentBillable {
+  usage: BillingUsage
+  bill: BillableBreakdown
+}
+
+/**
+ * 7.4.3: THE billing number. This is the one place where usage becomes an
+ * amount of money, and BOTH readers go through it: the Billing pane
+ * (/api/settings/billing/usage) displays this breakdown, and chargeInstance
+ * puts these exact quantities on the Stripe invoice. Anything else computing
+ * a bill is a bug — two definitions of "what you owe" is how a customer got
+ * charged $392.70 under a page that said $574.30.
+ */
+export async function computeCurrentBillable(): Promise<CurrentBillable> {
+  const usage = await computeBillingUsage()
+  return { usage, bill: computeBillable(usage.userCount, usage.storageBytes) }
 }
 
 /** True when CURRENT usage exceeds the free tier → a card is required. */
@@ -165,7 +192,8 @@ export function isOverFreeTier(usage: BillingUsage): boolean {
 
 /** Record today's usage snapshot once per calendar day PER ORGANIZATION
  *  (idempotent — the unique(organizationId, day) index + create-if-missing
- *  guards double inserts). */
+ *  guards double inserts). 7.4.3: snapshots feed the founder history charts
+ *  ONLY — the invoice bills current usage and never reads them. */
 export async function recordDailySnapshotIfNeeded(): Promise<void> {
   const organizationId = currentOrgId()
   const day = new Date()
@@ -185,34 +213,6 @@ export async function recordDailySnapshotIfNeeded(): Promise<void> {
       },
     })
     .catch(() => {}) // ignore unique-violation race
-}
-
-/** Average user count + storage bytes over the daily snapshots on/after
- *  `since`. Falls back to current usage when no snapshots exist yet. */
-export async function computeAveragedUsage(
-  since: Date,
-): Promise<{ avgUsers: number; avgStorageBytes: number; days: number }> {
-  const sinceDay = new Date(since)
-  sinceDay.setUTCHours(0, 0, 0, 0)
-  const snaps: Array<{ userCount: number; storageBytes: bigint }> =
-    await (prisma as any).billingSnapshot
-      .findMany({ where: { day: { gte: sinceDay }, organizationId: currentOrgId() } })
-      .catch(() => [])
-  if (!snaps.length) {
-    const usage = await computeBillingUsage()
-    return {
-      avgUsers: usage.userCount,
-      avgStorageBytes: usage.storageBytes,
-      days: 0,
-    }
-  }
-  const totalUsers = snaps.reduce((s, r) => s + r.userCount, 0)
-  const totalBytes = snaps.reduce((s, r) => s + Number(r.storageBytes), 0)
-  return {
-    avgUsers: totalUsers / snaps.length,
-    avgStorageBytes: totalBytes / snaps.length,
-    days: snaps.length,
-  }
 }
 
 /**
@@ -240,14 +240,18 @@ export interface ChargeResult {
   message: string
   invoiceId?: string
   amountCents?: number
+  /** 7.4.3: the pre-charge verification gate refused the draft. Nothing was
+   *  charged; the draft was deleted. Retrying is safe — the monthly cycle
+   *  re-arms itself 30 minutes out instead of a month out. */
+  verifyFailed?: boolean
 }
 
 /**
  * Charge the instance for its CURRENT usage right now: build the two
  * invoice line items, create + finalize a Stripe invoice, and pay it
- * off-session on the saved default card. Used by both the monthly cycle
- * and the (test-mode-only) "Test charge now" button. Requires a Stripe
- * customer with a default payment method (i.e. a card was connected).
+ * off-session on the saved default card. Used by the monthly cycle, the
+ * dunning retry, and the admin "Retry payment" button (charge-now).
+ * Requires a Stripe customer with a default payment method.
  */
 export async function chargeInstance(): Promise<ChargeResult> {
   const stripe = getStripe()
@@ -266,13 +270,16 @@ export async function chargeInstance(): Promise<ChargeResult> {
   let finalizedInvoice = false
 
   try {
-    // Prorate: average usage over the period since the last charge,
-    // then subtract the free tier — only the excess is billed.
+    // 7.4.3: bill the CURRENT usage — the same computeCurrentBillable the
+    // Billing pane displays, so the invoice IS the page. (This used to
+    // average the daily snapshots since the last charge, which collected
+    // $392.70 under a page showing $574.30 after a month of heavy uploads —
+    // the average lagged the truth. periodStart survives only as the label
+    // on the invoice: it still names the month being paid for.)
     const periodStart = settings.lastChargedAt
       ? new Date(settings.lastChargedAt)
       : new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
-    const avg = await computeAveragedUsage(periodStart)
-    const bill = computeBillable(avg.avgUsers, avg.avgStorageBytes)
+    const { bill } = await computeCurrentBillable()
     const totalCents = bill.totalCents
 
     if (totalCents <= 0) {
@@ -342,6 +349,64 @@ export async function chargeInstance(): Promise<ChargeResult> {
         description: `FrameComment App — storage GB over free tier (${FREE_TIER.gib} GB free)`,
       })
     }
+    // ================= 7.4.3: the verification gate =================
+    // Before ANY money can move, read the draft back from Stripe and
+    // compare it — line by line, and in total — against a SECOND,
+    // independent recomputation of the bill. The two DB reads must agree
+    // with each other, and the draft must carry exactly those quantities
+    // and amounts and nothing else: nothing missing (the historical "$0
+    // invoice" failure), nothing foreign (another product's pending items
+    // on a shared Stripe account), no customer balance bending the
+    // collected amount. On ANY mismatch the draft is deleted and nothing
+    // is charged — a blocked invoice is recoverable, a wrong charge is a
+    // refund and an apology.
+    const draft = await stripe.invoices.retrieve(invoiceId)
+    const customer = await stripe.customers.retrieve(customerId)
+    const second = await computeCurrentBillable()
+    const asExpected = (b: BillableBreakdown): ExpectedInvoice => ({
+      billableUsers: b.billableUsers,
+      billableGiB: b.billableGiB,
+      userCents: b.userCents,
+      storageCents: b.storageCents,
+      totalCents: b.totalCents,
+      currency: BILLING_PRICING.currency,
+    })
+    const problems = verifyDraftInvoice({
+      first: asExpected(bill),
+      second: asExpected(second.bill),
+      lines: (draft.lines?.data ?? []).map((l) => ({
+        quantity: l.quantity,
+        amount: l.amount,
+        currency: l.currency,
+        description: l.description,
+        unitAmountDecimal:
+          l.pricing?.unit_amount_decimal != null
+            ? String(l.pricing.unit_amount_decimal)
+            : null,
+      })),
+      linesComplete: !draft.lines?.has_more,
+      invoiceTotalCents: draft.total,
+      invoiceCurrency: draft.currency,
+      customerBalanceCents:
+        customer && !('deleted' in customer && customer.deleted)
+          ? ((customer as Stripe.Customer).balance ?? 0)
+          : 0,
+    })
+    if (problems.length > 0) {
+      await stripe.invoices.del(invoiceId).catch(() => {})
+      createdInvoiceId = null
+      const detail = problems.join('; ')
+      logError(
+        `[billing] CHARGE BLOCKED — invoice draft did not match the Billing page: ${detail}`,
+      )
+      return {
+        ok: false,
+        verifyFailed: true,
+        message: `Charge blocked — the invoice did not match the Billing page (nothing was charged): ${detail}`,
+      }
+    }
+    // ================================================================
+
     // Finalizing a `charge_automatically` invoice that has a default
     // card makes Stripe attempt payment IMMEDIATELY — so the invoice
     // may already be 'paid' by the time finalize returns. Only call
@@ -361,6 +426,17 @@ export async function chargeInstance(): Promise<ChargeResult> {
       }
     }
     const wasPaid = invoiceObj.status === 'paid'
+
+    // The gate above makes a wrong amount unreachable on any path we
+    // control; this is the tripwire for the paths we don't. If Stripe
+    // collected anything other than the verified total, it can't be undone
+    // here — but it must never pass silently.
+    if (wasPaid && invoiceObj.amount_paid !== totalCents) {
+      logError(
+        `[billing] PAID AMOUNT MISMATCH on ${invoiceId}: collected $${((invoiceObj.amount_paid ?? 0) / 100).toFixed(2)}, ` +
+          `the verified total was $${(totalCents / 100).toFixed(2)}`,
+      )
+    }
 
     await prisma.settings.update({
       where: orgSettingsWhere(),
@@ -435,6 +511,19 @@ export async function runBillingCycleIfDue(): Promise<string> {
   })
 
   const result = await chargeInstance()
+  if (result.verifyFailed) {
+    // The gate refused the draft. Nothing moved, so retrying is safe —
+    // re-arm the anchor 30 minutes out instead of a month out, and keep
+    // re-arming until it passes: a transient cause (usage moving while the
+    // invoice was built) clears on the next attempt, a systemic one repeats
+    // in the log every half hour until someone looks.
+    await prisma.settings
+      .update({
+        where: orgSettingsWhere(),
+        data: { nextBillingAt: new Date(Date.now() + 30 * 60 * 1000) } as any,
+      })
+      .catch(() => {})
+  }
   return result.ok ? `ok: ${result.message}` : `error: ${result.message}`
 }
 
