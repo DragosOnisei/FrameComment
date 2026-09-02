@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
+import { captureReturnUrl } from '@/lib/post-login-redirect'
 import { useRouter, usePathname } from 'next/navigation'
 import { apiFetch, attemptRefresh } from '@/lib/api-client'
 import { clearTokens, getAccessToken } from '@/lib/token-store'
@@ -118,7 +119,12 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
 
   useEffect(() => {
     if (requireAuth && !loading && !user) {
-      router.push(`/login?returnUrl=${encodeURIComponent(pathname || '/')}`)
+      // 7.5.0: full location (path + query + hash), same as login() below —
+      // the ?video=… of a deep link is the part worth coming back to.
+      {
+        const returnUrl = captureReturnUrl()
+        router.push(returnUrl ? `/login?returnUrl=${encodeURIComponent(returnUrl)}` : '/login')
+      }
     }
   }, [requireAuth, loading, user, pathname, router])
 
@@ -176,7 +182,10 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
   }
 
   function login() {
-    router.push(`/login?returnUrl=${encodeURIComponent(pathname || '/')}`)
+    // 7.5.0: capture the FULL location (path + query + hash), not just the
+    // pathname — a deep link's ?video=… is the part worth coming back to.
+    const returnUrl = captureReturnUrl()
+    router.push(returnUrl ? `/login?returnUrl=${encodeURIComponent(returnUrl)}` : '/login')
   }
 
   // SECURITY: Show loading state while checking auth OR when unauthenticated (before redirect)

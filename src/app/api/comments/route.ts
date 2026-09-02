@@ -198,12 +198,27 @@ export async function POST(request: NextRequest) {
   const commentsMessages = messages?.comments || {}
   const shareMessages = messages?.share || {}
 
-  // Rate limiting to prevent comment spam
+  // Rate limiting to prevent comment spam.
+  //
+  // 7.5.0: keyed PER SESSION for authenticated callers, with a budget a paste
+  // can actually live inside. The old shape — 10/min keyed on IP+UA for
+  // everyone — was written to stop a reviewer spamming, and it did; it also
+  // throttled one admin against himself (2026-09-02: pasting three comments
+  // onto v4 after normal activity on v2/v3 got one 200 and then 429s — the
+  // paste sat in a lockout wait, the page got reloaded mid-wait, two notes
+  // were lost) and made a whole office behind one IP share ten per minute
+  // (the CHANGELOG "Known" item this replaces). The bearer is used only as a
+  // BUCKET KEY (hashed by the limiter) — authorization still happens below;
+  // a made-up token buys a bucket whose every request 401s. Share-side
+  // commenters (no bearer) keep an IP+UA bucket at double the old budget:
+  // room for several reviewers on one office IP, still spam-hostile.
+  const authorizationHeader = request.headers.get('authorization') || ''
+  const hasBearer = /^bearer\s+\S+/i.test(authorizationHeader)
   const rateLimitResult = await rateLimit(request, {
     windowMs: 60 * 1000,
-    maxRequests: 10,
+    maxRequests: hasBearer ? 60 : 20,
     message: commentsMessages.tooManyComments || 'Too many comments. Please slow down.'
-  }, 'comments-create')
+  }, 'comments-create', hasBearer ? authorizationHeader : undefined)
 
   if (rateLimitResult) {
     return rateLimitResult

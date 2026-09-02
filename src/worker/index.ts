@@ -10,6 +10,7 @@ import {
   AssetProcessingJob,
   ProjectUploadProcessingJob,
   ExternalNotificationJob,
+  ApplySpeedJob,
 } from '../lib/queue'
 import { initStorage, refreshLocalStorageRoot } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
@@ -28,6 +29,7 @@ import { processRegenerateThumbnail } from './regenerate-thumbnail-processor'
 import { processCreateTranscript } from './create-transcript-processor'
 import { processAsset } from './asset-processor'
 import { processProjectUpload } from './project-upload-processor'
+import { processApplySpeed } from './apply-speed-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
 import { processExternalNotificationJob } from './external-notifications/processExternalNotificationJob'
@@ -119,6 +121,10 @@ async function main() {
         // 2.2.4+: maintenance job — priority 700 (post-FINALIZE) so
         // a bulk sweep never delays an in-flight tier encode.
         return processRegenerateThumbnail(job as Job<RegenerateThumbnailJob>)
+      case 'apply-speed':
+        // 7.5.0: permanent speed rewrite — transforms the master, swaps it
+        // in with the comment/marker rescale, then re-enters prepare.
+        return processApplySpeed(job as Job<ApplySpeedJob>)
       case 'create-transcript':
         // 3.9.x: lowest-priority (900) — audio extract + OpenAI whisper
         // + PDF render. Never delays encode/thumbnail work.

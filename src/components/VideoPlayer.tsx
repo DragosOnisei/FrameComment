@@ -4,9 +4,14 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useTranslations } from 'next-intl'
 import { Video, ProjectStatus, Comment } from '@prisma/client'
 import { Button } from './ui/button'
-import { CheckCircle2, GitCompareArrows } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, GitCompareArrows, Loader2 } from 'lucide-react'
 import CustomVideoControls from './CustomVideoControls'
 import { PLAYBACK_SPEEDS, nearestSpeedIndex } from './PlaybackSpeedMenu'
+import {
+  formatSpeedFactor,
+  isSaveableSpeedFactor,
+  SPEED_REWRITE_STORAGE_KEY,
+} from '@/lib/video-speed'
 import VideoComparison from './VideoComparison'
 import ProjectInfo from './ProjectInfo'
 import AnnotationOverlay from './AnnotationOverlay'
@@ -595,6 +600,13 @@ export default function VideoPlayer({
     reloadHlsInPlace(targetH)
   }, [reloadHlsInPlace])
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
+  // 7.5.0: the permanent-rewrite warning dialog behind the Save button next
+  // to the speed pill. Opening it exits fullscreen first — the dialog is
+  // rendered outside the player element, so inside fullscreen it would be
+  // invisible while blocking every click.
+  const [showSaveSpeed, setShowSaveSpeed] = useState(false)
+  const [savingSpeed, setSavingSpeed] = useState(false)
+  const [saveSpeedError, setSaveSpeedError] = useState<string | null>(null)
   const [videoDuration, setVideoDuration] = useState(0)
   const [currentTimeState, setCurrentTimeState] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -2983,6 +2995,25 @@ export default function VideoPlayer({
                         }
                       : undefined
                   }
+                  /** 7.5.0: Save next to the speed pill — admins only, videos
+                   *  only, and only a READY row (mid-encode there are jobs in
+                   *  flight that would race the master swap). The button
+                   *  itself opens the warning dialog below; nothing happens
+                   *  without the explicit confirm. */
+                  onSaveSpeed={
+                    isAdmin &&
+                    isSaveableSpeedFactor(playbackSpeed) &&
+                    (selectedVideo as any)?.mediaType !== 'IMAGE' &&
+                    (selectedVideo as any)?.status === 'READY'
+                      ? () => {
+                          if (document.fullscreenElement) {
+                            document.exitFullscreen().catch(() => {})
+                          }
+                          setSaveSpeedError(null)
+                          setShowSaveSpeed(true)
+                        }
+                      : undefined
+                  }
                   storyboardUrl={(selectedVideo as any)?.storyboardUrl || null}
                   storyboardCols={(selectedVideo as any)?.storyboardCols ?? null}
                   storyboardRows={(selectedVideo as any)?.storyboardRows ?? null}
@@ -3051,6 +3082,98 @@ export default function VideoPlayer({
           timestampDisplayMode={timestampDisplayMode}
           onClose={() => setShowComparison(false)}
         />
+      )}
+
+      {/* 7.5.0: the permanent speed-rewrite warning. The Save button only
+          opens this; the destructive request fires exclusively from the
+          confirm below. On success the page reloads — the video has flipped
+          to PROCESSING server-side and every surface must show that truth,
+          and a full reload is the one path that cannot desync the player's
+          transport from a master that is about to change identity. */}
+      {showSaveSpeed && selectedVideo && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !savingSpeed) setShowSaveSpeed(false)
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl p-5 text-white ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.8)]"
+            style={{
+              backgroundColor: 'rgba(18, 30, 44, 0.97)',
+              backgroundImage:
+                'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.16) 0%, transparent 70%)',
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/15 ring-1 ring-amber-400/30 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-4 h-4 text-amber-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold">
+                  Save {formatSpeedFactor(playbackSpeed)} speed into the video
+                </h3>
+                {/* 7.5.0 live feedback: short and blunt beats complete —
+                    the first cut listed every consequence and nobody reads a
+                    paragraph inside a danger dialog. */}
+                <p className="mt-1.5 text-xs leading-relaxed text-white/70">
+                  This video will be re-encoded {formatSpeedFactor(playbackSpeed)}{' '}
+                  faster and will replace the original.
+                </p>
+                <p className="mt-1.5 text-xs font-medium text-amber-300">
+                  This cannot be undone.
+                </p>
+              </div>
+            </div>
+            {saveSpeedError && (
+              <p className="mt-3 text-xs text-red-400">{saveSpeedError}</p>
+            )}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={savingSpeed}
+                onClick={() => setShowSaveSpeed(false)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.06] hover:bg-white/[0.12] ring-1 ring-white/15 text-white transition-colors disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingSpeed}
+                onClick={async () => {
+                  setSavingSpeed(true)
+                  setSaveSpeedError(null)
+                  try {
+                    await apiPost(`/api/videos/${selectedVideo.id}/speed`, {
+                      factor: playbackSpeed,
+                    })
+                    // Mark WHICH version is being rewritten before reloading:
+                    // the admin page holds the processing card for it instead
+                    // of falling back to an older version of the stack.
+                    try {
+                      sessionStorage.setItem(SPEED_REWRITE_STORAGE_KEY, selectedVideo.id)
+                    } catch {
+                      /* private mode — the page falls back to old behavior */
+                    }
+                    window.location.reload()
+                  } catch (err) {
+                    setSaveSpeedError(
+                      err instanceof Error ? err.message : 'Failed to start the rewrite.',
+                    )
+                    setSavingSpeed(false)
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 ring-1 ring-amber-400/40 text-amber-200 transition-colors disabled:opacity-60"
+              >
+                {savingSpeed ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  `Rewrite at ${formatSpeedFactor(playbackSpeed)}`
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/*

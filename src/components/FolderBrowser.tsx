@@ -33,6 +33,7 @@ import { logError } from '@/lib/logging'
 import {
   getClippedComments,
   CLIPBOARD_CHANGED_EVENT,
+  copyableComments,
   setClippedComments,
   toClipped,
 } from '@/lib/comments-clipboard'
@@ -307,6 +308,9 @@ interface VideoRow {
   createdAt?: string | Date
   /** Total number of comments on this specific version. */
   commentCount?: number
+  /** 7.5.0: how many a bulk copy would carry — roots that are not
+   *  themselves copies. Drives the context menu's "Copy N comments". */
+  copyableCommentCount?: number
   /** Admin who uploaded the video (1.0.6+); null for legacy rows. */
   createdBy?: {
     id: string
@@ -351,6 +355,8 @@ interface VideoGroup {
   storyboardRows?: number | null
   /** Sum of comments across every version in the group. */
   commentCount: number
+  /** 7.5.0: the latest version's copy-carry count (roots, not copies). */
+  copyableCommentCount?: number
   /** "uploader" = createdBy of the latest version. */
   uploaderName?: string | null
   /** ISO timestamp of the latest version's upload. */
@@ -1212,6 +1218,7 @@ function FolderBrowserInner(
         processingProgress: (latest as any).processingProgress ?? null,
         allIds: sorted.map((v) => v.id),
         commentCount: latestComments,
+        copyableCommentCount: (latest as any).copyableCommentCount ?? undefined,
         uploaderName,
         createdAt: latest.createdAt,
         mediaType: latest.mediaType,
@@ -1873,8 +1880,11 @@ function FolderBrowserInner(
       const res = await apiFetch(`/api/comments?projectId=${projectId}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const all = await res.json()
-      const mine = (Array.isArray(all) ? all : []).filter(
-        (c: any) => !c.parentId && c.videoId === videoId,
+      // 7.5.0: roots that are not themselves copies — a note pasted from
+      // another version does not travel again (copyableComments has the
+      // full why). Same rule the sidebar's Copy all applies.
+      const mine = copyableComments(Array.isArray(all) ? all : []).filter(
+        (c: any) => c.videoId === videoId,
       )
       if (mine.length === 0) return
       setClippedComments(projectId, toClipped(mine))
@@ -4314,7 +4324,13 @@ function FolderBrowserInner(
          */
         copyCommentsCount={
           downloadVideoId
-            ? (videoGroups.find((g) => g.id === downloadVideoId)?.commentCount ?? 0)
+            ? (() => {
+                const g = videoGroups.find((x) => x.id === downloadVideoId)
+                // 7.5.0: the label counts what the copy would CARRY (roots
+                // that are not copies), not raw activity. Fall back to the
+                // total only for a payload that predates the field.
+                return g ? (g.copyableCommentCount ?? g.commentCount ?? 0) : 0
+              })()
             : 0
         }
         onCopyComments={() => {

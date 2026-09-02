@@ -108,6 +108,31 @@ export interface CreateTranscriptJob {
   originalStoragePath: string
 }
 
+// 7.5.0: permanent speed rewrite ("Save" next to the player's speed pill).
+// Re-encodes the ORIGINAL at `factor` (setpts + pitch-preserving atempo),
+// swaps it in as the video's new master, repositions every comment/marker
+// to the same frame on the compressed timeline, then re-enters the normal
+// prepare → encode-tier → finalize pipeline so every quality, HLS rung,
+// thumbnail and storyboard is rebuilt from the new master. `factor` is
+// validated against SAVEABLE_SPEED_FACTORS at the API boundary.
+export interface ApplySpeedJob {
+  videoId: string
+  projectId: string
+  // The master path AT ENQUEUE TIME. The processor compares it against the
+  // row's current path to stay idempotent across stalled-job redeliveries:
+  // a rerun after a crash mid-job sees the paths differ and knows the swap
+  // (and the one-shot comment rescale) already happened.
+  originalStoragePath: string
+  factor: number
+  // 7.5.0: the derived files as they were when the rewrite was requested.
+  // The API nulls the row's playable fields IMMEDIATELY (so nothing
+  // old-speed can play while the rewrite runs — live feedback 2026-09-02),
+  // which means the worker can no longer read these paths off the row when
+  // the time comes to delete the files. They ride in the job instead.
+  oldPreviewPaths?: string[]
+  oldHlsBasePath?: string | null
+}
+
 export type VideoQueueJobData =
   | VideoProcessingJob
   | PrepareVideoJob
@@ -115,6 +140,7 @@ export type VideoQueueJobData =
   | FinalizeVideoJob
   | RegenerateThumbnailJob
   | CreateTranscriptJob
+  | ApplySpeedJob
 
 // 2.2.0+: priorities are hard-coded constants instead of magic
 // numbers scattered around enqueue sites. BullMQ priority is
@@ -126,6 +152,10 @@ export type VideoQueueJobData =
 // in-flight tier encoding for a freshly-uploaded video.
 export const VIDEO_JOB_PRIORITY = {
   PREPARE: 1,
+  // 7.5.0: user-blocking like prepare (the admin is watching the video flip
+  // to "processing"), but slotted just after so a bulk-upload's prepare
+  // blast still lands its thumbnails first.
+  APPLY_SPEED: 2,
   ENCODE_480P: 10,
   ENCODE_720P: 50,
   ENCODE_1080P: 100,
@@ -178,6 +208,7 @@ export async function cancelPendingVideoJobs(videoId: string): Promise<void> {
   const queue = getVideoQueue()
   // Direct jobId removals for the deterministic IDs.
   const knownIds = [
+    `apply-speed-${videoId}`,
     `prepare-${videoId}`,
     `encode-${videoId}-480p`,
     `encode-${videoId}-720p`,

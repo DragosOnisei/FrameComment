@@ -1,5 +1,6 @@
 import { clearTokens, getAccessToken, setTokens } from './token-store'
 import { logError } from './logging'
+import { loginUrlForExpiredSession } from './post-login-redirect'
 
 let isRedirecting = false
 let refreshInFlight: Promise<boolean> | null = null
@@ -227,6 +228,11 @@ function handleSessionExpired() {
   }
 
   if (typeof window !== 'undefined') {
-    window.location.href = '/login?sessionExpired=true'
+    // 7.5.0: carry the interrupted location so signing back in returns the
+    // user to the link they were opening — query string and all — instead
+    // of the default projects page. Built AFTER the storage wipe above on
+    // purpose: the location lives in the URL, not in a storage that just
+    // got cleared.
+    window.location.href = loginUrlForExpiredSession()
   }
 }

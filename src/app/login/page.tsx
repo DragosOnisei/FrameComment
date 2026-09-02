@@ -2,6 +2,7 @@
 
 import { useState, Suspense, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { isSafeReturnPath } from '@/lib/post-login-redirect'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,14 +23,18 @@ function LoginForm() {
   const tc = useTranslations('common')
   const router = useRouter()
   const searchParams = useSearchParams()
-  const rawReturnUrl = searchParams?.get('returnUrl') || '/admin/projects'
-  // SECURITY: Only allow relative paths — prevents javascript: and open redirect attacks
-  const returnUrl = rawReturnUrl.startsWith('/') && !rawReturnUrl.startsWith('//') ? rawReturnUrl : '/admin/projects'
+  const rawReturnUrl = searchParams?.get('returnUrl')
+  // SECURITY: one shared validator (post-login-redirect.ts) for every hop of
+  // this round-trip. 7.5.0: it also rejects `/\evil.com` — browsers fold
+  // backslashes into slashes when parsing URLs, so the old
+  // startsWith('/') && !startsWith('//') check let that one leave the site.
+  const returnUrl = isSafeReturnPath(rawReturnUrl) ? rawReturnUrl : '/admin/projects'
   // 6.2.0: the founder's account belongs to the PLATFORM organization and has
   // no projects of its own — send it straight to the Founder area unless an
   // explicit returnUrl asked for somewhere specific (e.g. an expired session
-  // bouncing back to the page you were on).
-  const hadExplicitReturnUrl = !!searchParams?.get('returnUrl')
+  // bouncing back to the page you were on). 7.5.0: an INVALID returnUrl
+  // counts as absent — it must not pin a founder to the projects fallback.
+  const hadExplicitReturnUrl = isSafeReturnPath(rawReturnUrl)
   const landingFor = useCallback(
     (user: { isPlatformAdmin?: boolean } | null | undefined) =>
       !hadExplicitReturnUrl && user?.isPlatformAdmin ? '/founder' : returnUrl,

@@ -5,7 +5,10 @@ import { rateLimit } from '@/lib/rate-limit'
 import { createFolderSchema, safeParseBody } from '@/lib/validation'
 import { generateUniqueFolderSlug } from '@/lib/folder-helpers'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
-import { enrichVideosForAdmin } from '@/lib/folder-video-enrichment'
+import {
+  copyableCommentCountsByVideo,
+  enrichVideosForAdmin,
+} from '@/lib/folder-video-enrichment'
 import { jsonSafe } from '@/lib/json-safe'
 import { computeFolderSizesByProject } from '@/lib/folder-sizes'
 import { logError } from '@/lib/logging'
@@ -202,10 +205,19 @@ export async function GET(request: NextRequest) {
         sessionId,
         'GET /api/folders root videos',
       )
+      // 7.5.0: same copy-carry count the folder route attaches — the root
+      // grid's context menu makes the same "Copy N comments" promise.
+      const copyableByVideo = await copyableCommentCountsByVideo(
+        rootVideos.map((v: any) => v.id),
+      )
+      const videosWithCopyable = enrichedVideos.map((v: any) => ({
+        ...v,
+        copyableCommentCount: copyableByVideo.get(v.id) ?? 0,
+      }))
       // 6.14.0: belt and braces — the preview helper reads video rows too.
       return NextResponse.json(jsonSafe({
         folders: enriched,
-        videos: enrichedVideos,
+        videos: videosWithCopyable,
       }))
     }
 

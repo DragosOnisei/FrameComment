@@ -14,6 +14,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.0] - 2026-09-03
+
+### Added
+
+- **Save a playback speed INTO the video.** The player's speed menu is now
+  1x · 1.1x · 1.15x · 1.2x · 1.25x · 1.5x · 2x · 4x (no slowdowns, 4x tops),
+  and picking anything but 1x reveals a Save button between the speed pill
+  and the volume. Save opens a short, blunt warning — the video is re-encoded
+  that much faster and replaces the original, irreversibly — and on confirm a
+  worker job re-encodes the master (`setpts` for the picture, a
+  pitch-preserving `atempo` chain for the sound; 4x is two chained doublings),
+  swaps it in, and re-enters the normal prepare → encode → finalize pipeline,
+  so every quality, HLS rung, thumbnail and storyboard is rebuilt from the new
+  master. Share links and every download play the new speed from then on.
+  - Every existing comment and marker is repositioned to `time ÷ factor` in
+    the SAME transaction as the master swap — a note left on a frame stays on
+    that frame — and the transaction is guarded so a stalled-job redelivery
+    can never rescale twice.
+  - A duration sanity gate (new ≈ old ÷ factor, ±2%) refuses to swap a master
+    the filter graph mangled; on any failure the old tiers are rebuilt from
+    the untouched old master, so a failed rewrite leaves the video exactly as
+    it was instead of unplayable.
+  - From the moment of confirm the old qualities are unhooked, so nothing
+    old-speed can play mid-rewrite; the page holds the processing card on the
+    version being rewritten (instead of silently falling back to an older
+    version of the stack) and re-fetches the comments when it lands.
+  - The rewrite invalidates the video's cached access tokens, forcing fresh
+    streaming URLs everywhere — without that, the browser's HTTP cache
+    happily replayed the old-speed bytes at the old URLs (previews are cached
+    an hour, HLS segments a year) while the page showed the new duration:
+    "plays at normal speed and stops at the end".
+  - Admin only, videos only, READY only; a stray press costs nothing — the
+    button only opens the dialog.
+- **Copying comments carries only a version's OWN notes.** A comment that was
+  itself pasted from another version (`isCopied`) no longer travels again: v2
+  holding ten notes pasted from v1 plus two of its own offers v3 exactly the
+  two. Applies to the sidebar kebab, the player's top menu, the folder
+  right-click copy, and the "Paste N comments from vX" button — whose source
+  now falls through to the version the notes actually came from when the
+  newer one holds only copies. Every menu count says what the copy would
+  actually carry (the folder routes ship a dedicated copyable count), and
+  explicitly copying ONE comment still works on a copied note — pointing at
+  it wins.
+- **Timeline beads group only on the exact same frame.** Grouping used to
+  cluster anything within 1.5–3% of the duration — over a second on a short
+  clip — merging notes on visibly different moments into one bead. Notes on
+  different frames now each get their own bead; near-neighbours fan out like
+  cards, 5px apart, pulled back inside the track at the edges (pure layout in
+  `marker-layout.ts`, display-only — seeks and drags use the stored time).
+  Clicking a note in the sidebar lifts its bead in front of the fan, opens a
+  stacked bead's popover on it, and a click-and-drag on the stack pulls out
+  exactly the selected note. Sorting also fixed same-frame notes written far
+  apart in time never stacking (the walk only compared list neighbours).
+- **Signing back in returns you to the link you were opening.** A forced
+  bounce to /login — expired token, or the everyone-logged-out a deploy can
+  cause — now carries the interrupted location (path, query and hash) in
+  `returnUrl`, and the login page goes back there instead of the default
+  projects page. One shared validator guards every hop of the round trip.
+
+### Fixed
+
+- **One admin can no longer rate-limit himself out of a paste.** Comment
+  creation was capped at 10/minute keyed on IP + User-Agent — the "Known"
+  item recorded in 7.3.5 — so pasting onto v4 after normal activity on
+  v2/v3 got one comment through and a lockout. Authenticated sessions now
+  get their own 60/minute bucket (the bearer is only a bucket key — a forged
+  one buys a bucket where every request 401s); share-side commenters keep an
+  IP+UA bucket at 20/minute, doubling the old office-IP headroom. The
+  paste's lockout countdown also ticks visibly every second now — the old
+  static "Waiting 55s…" read as a hang and invited the page reload that
+  killed the batch — and a still-refused retry waits again within the
+  3-wait budget instead of dropping the note.
+- The login page's returnUrl check also rejects `/\host` — browsers fold
+  backslashes into slashes when parsing URLs, so that shape slipped past the
+  old `startsWith('/') && !startsWith('//')` guard as an open redirect. An
+  invalid returnUrl now also counts as absent, so it no longer pins a
+  founder to the projects fallback instead of /founder.
+
 ## [7.4.4] - 2026-09-02
 
 ### Changed

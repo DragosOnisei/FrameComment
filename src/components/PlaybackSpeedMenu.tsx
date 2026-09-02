@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { PLAYBACK_SPEED_LADDER } from '@/lib/video-speed'
 
 /**
  * Frame.io-style playback speed selector.
@@ -12,12 +13,15 @@ import { createPortal } from 'react-dom'
  * pressing Escape closes the popup.
  *
  * The HTMLVideoElement.playbackRate ceiling depends on the codec/decoder
- * — Chrome and Safari typically clamp at ~16x — but 8x is a sensible
- * upper bound that matches what Frame.io exposes for review playback.
+ * — Chrome and Safari typically clamp at ~16x — 4x is the top of the
+ * ladder since 7.5.0.
  */
-/** The one ladder. The J/L keyboard shortcuts walk this same list, so the menu
- *  and the keyboard can never disagree about which speeds exist. */
-export const PLAYBACK_SPEEDS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0] as const
+/** The one ladder — 7.5.0: Dragos's spec, 1x plus the seven factors that can
+ *  also be SAVED into the file (no slowdowns any more). Lives in
+ *  lib/video-speed so the API validates against the very list the menu
+ *  renders. The J/L keyboard shortcuts walk this same list, so the menu and
+ *  the keyboard can never disagree about which speeds exist. */
+export const PLAYBACK_SPEEDS = PLAYBACK_SPEED_LADDER
 
 /** Index of the ladder entry closest to `speed` — so a rate set from anywhere
  *  else (an old session, the comparison view) still steps sensibly. */

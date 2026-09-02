@@ -13,6 +13,7 @@ import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { legacyBackend } from '@/lib/storage-backends'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
+import { copyableCommentCountsByVideo } from '@/lib/folder-video-enrichment'
 import { computeFolderSizesByProject } from '@/lib/folder-sizes'
 
 export const runtime = 'nodejs'
@@ -68,6 +69,12 @@ export async function GET(
     if (!folder) {
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
     }
+
+    // 7.5.0: one grouped count across the folder's videos — root comments
+    // that are not themselves copies, i.e. what "Copy comments" would carry.
+    const copyableByVideo = await copyableCommentCountsByVideo(
+      ((folder as any).videos ?? []).map((v: any) => v.id),
+    )
     // If the folder itself is in Trash, treat it as a 404 — admins
     // only reach it from the Trash page, which uses a different
     // endpoint.
@@ -201,6 +208,9 @@ export async function GET(
           storyboardCols: (v as any).storyboardCols ?? null,
           storyboardRows: (v as any).storyboardRows ?? null,
           commentCount: v._count?.comments ?? 0,
+          // 7.5.0: what a bulk copy would carry (roots, not copies) — the
+          // context menu's "Copy N comments" must not promise 12 and paste 2.
+          copyableCommentCount: copyableByVideo.get(v.id) ?? 0,
           // Attach uploader info from the side query when available.
           createdBy: uploadersByVideoId.get(v.id) ?? null,
         }

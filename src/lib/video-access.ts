@@ -124,6 +124,46 @@ export async function generateVideoAccessToken(
 }
 
 /**
+ * 7.5.0: forget every cached token mint for one video, across ALL sessions.
+ *
+ * Minted tokens are cached per (session, video, quality) and REUSED — good
+ * for request volume, fatal after a speed rewrite: the page re-tokenizes
+ * when the video lands READY, gets the SAME token string back, and the
+ * browser serves the old-speed bytes from HTTP cache because the URL never
+ * changed (previews are `max-age=3600`, HLS segments a year+immutable, and
+ * the rewrite reuses the same storage paths). Live symptom: a 4x video that
+ * "plays at normal speed and stops when the playhead hits the end" — new
+ * duration from the DB, old bytes from the cache.
+ *
+ * Dropping the mint-cache keys forces the next tokenize to mint a FRESH
+ * random token → every derived-content URL changes → no cache anywhere
+ * (browser or CDN) has ever seen it. The underlying `video_access:<token>`
+ * entries are left alone on purpose: a viewer mid-play keeps a working
+ * token instead of hitting 401s; they get the new bytes on their next
+ * reload.
+ */
+export async function invalidateVideoAccessTokenCache(videoId: string): Promise<number> {
+  const redis = getRedis()
+  let cursor = '0'
+  let removed = 0
+  do {
+    const [next, keys] = await redis.scan(
+      cursor,
+      'MATCH',
+      `video_token_cache:*:${videoId}:*`,
+      'COUNT',
+      200,
+    )
+    cursor = next
+    if (keys.length > 0) {
+      removed += keys.length
+      await redis.del(...keys)
+    }
+  } while (cursor !== '0')
+  return removed
+}
+
+/**
  * Verify video access token and validate session binding
  * Checks token existence, session match, and IP address consistency
  *

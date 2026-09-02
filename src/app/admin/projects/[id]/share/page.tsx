@@ -12,6 +12,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { apiFetch } from '@/lib/api-client'
+import { SPEED_REWRITE_STORAGE_KEY } from '@/lib/video-speed'
+import { copyableComments } from '@/lib/comments-clipboard'
 import ThemeToggle from '@/components/ThemeToggle'
 import PlayerTopMenu from '@/components/PlayerTopMenu'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
@@ -641,6 +643,57 @@ function AdminSharePageInner() {
     }, 3500)
     return () => clearInterval(interval)
   }, [activeVideosRaw, loadProject])
+
+  // 7.5.0: the version sent to the speed rewrite (Save next to the speed
+  // pill). The player stamps sessionStorage right before its post-confirm
+  // reload; while that exact version is still processing, the page hides
+  // the whole stack from the player so the PROCESSING card shows instead
+  // of silently falling back to an older version — which looked like "the
+  // save did nothing" in live testing. Cleared the moment the version
+  // lands READY (or ERROR, where hiding forever would be worse than
+  // showing what exists).
+  const [speedRewriteVideoId, setSpeedRewriteVideoId] = useState<string | null>(null)
+  useEffect(() => {
+    try {
+      setSpeedRewriteVideoId(sessionStorage.getItem(SPEED_REWRITE_STORAGE_KEY))
+    } catch {
+      /* private mode — behave as before the feature */
+    }
+  }, [])
+  useEffect(() => {
+    if (!speedRewriteVideoId) return
+    const row = (activeVideosRaw || []).find((v: any) => v?.id === speedRewriteVideoId)
+    if (!row) return
+    if (row.status === 'READY' || row.status === 'ERROR') {
+      try {
+        sessionStorage.removeItem(SPEED_REWRITE_STORAGE_KEY)
+      } catch {}
+      setSpeedRewriteVideoId(null)
+    }
+  }, [activeVideosRaw, speedRewriteVideoId])
+
+  // 7.5.0: when a video that was processing lands READY, re-fetch the
+  // comments too. The 3.5s poll above refreshes only the VIDEO data, and
+  // the speed rewrite (Save next to the speed pill) repositions every
+  // comment server-side while the video is away — live testing showed the
+  // sidebar keeping the pre-rewrite timecodes (a note at 00:15 on a video
+  // that is now 8s long) until a manual refresh. One extra comments GET per
+  // finished encode is the whole cost.
+  const wasProcessingIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const nowProcessing = new Set<string>()
+    let justFinished = false
+    for (const v of (activeVideosRaw || []) as any[]) {
+      if (!v?.id) continue
+      if (v.status === 'PROCESSING' || v.status === 'UPLOADING') {
+        nowProcessing.add(v.id)
+      } else if (v.status === 'READY' && wasProcessingIdsRef.current.has(v.id)) {
+        justFinished = true
+      }
+    }
+    wasProcessingIdsRef.current = nowProcessing
+    if (justFinished) fetchComments()
+  }, [activeVideosRaw, fetchComments])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -1289,7 +1342,21 @@ function AdminSharePageInner() {
   }
 
   // Filter to READY videos
-  const readyVideos = activeVideos.filter((v: any) => v.status === 'READY')
+  const readyVideosActual = activeVideos.filter((v: any) => v.status === 'READY')
+  // 7.5.0: while the active stack's version is away being rewritten at a
+  // new speed, pretend nothing is ready — the processing card (which reads
+  // activeVideosRaw and shows the live percentage) takes the stage instead
+  // of an older version. When the rewrite lands, the effect above clears
+  // the marker and the player mounts fresh with the rewritten version as
+  // the default selection.
+  const speedRewriteInFlight =
+    !!speedRewriteVideoId &&
+    activeVideos.some(
+      (v: any) =>
+        v?.id === speedRewriteVideoId &&
+        (v.status === 'PROCESSING' || v.status === 'UPLOADING'),
+    )
+  const readyVideos = speedRewriteInFlight ? [] : readyVideosActual
 
   // 6.11.0: no approval filter — every ready version is listed.
 
@@ -1432,7 +1499,10 @@ function AdminSharePageInner() {
             // FolderBrowser). Used by `handleShare` to scope the
             // signed share URL to a single video.
             currentFolderId={backFolderId}
-            commentCount={commentsForActiveVideo.length}
+            /* 7.5.0: the menu's "Copy comments (N)" counts what a copy
+               would CARRY — roots that are not themselves copies — so it
+               matches what the copy handler actually writes. */
+            commentCount={copyableComments(commentsForActiveVideo).length}
             onVideoDeleted={() => {
               // Whole version is gone — bounce back to the project page so
               // the admin doesn't sit on a dead player. If they want to

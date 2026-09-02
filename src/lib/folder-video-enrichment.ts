@@ -50,6 +50,31 @@ type VideoLike = {
  * `tag` is used in error messages so each call site can be identified
  * in the logs.
  */
+/**
+ * 7.5.0: per-video count of comments a bulk COPY would actually carry —
+ * roots that are not themselves copies (see copyableComments in
+ * comments-clipboard.ts, the client-side twin of this rule). The folder
+ * context menu's "Copy N comments" reads this; the speech-bubble badge
+ * keeps using the total `commentCount`, because activity and carryability
+ * are different questions.
+ */
+export async function copyableCommentCountsByVideo(
+  videoIds: string[],
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>()
+  if (videoIds.length === 0) return map
+  const rows: Array<{ videoId: string | null; _count: { _all: number } }> =
+    await (prisma as any).comment.groupBy({
+      by: ['videoId'],
+      where: { videoId: { in: videoIds }, parentId: null, isCopied: false },
+      _count: { _all: true },
+    })
+  for (const r of rows) {
+    if (r.videoId) map.set(r.videoId, r._count._all)
+  }
+  return map
+}
+
 export async function enrichVideosForAdmin<T extends VideoLike>(
   videos: T[],
   request: NextRequest,

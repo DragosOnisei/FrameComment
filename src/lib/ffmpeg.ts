@@ -1495,3 +1495,238 @@ export async function rewriteHlsMaster(
     }
   }
 }
+
+/**
+ * 7.5.0: does the file carry at least one audio stream? The speed rewrite
+ * needs to know up front — atempo in the filter chain with no audio stream
+ * to feed it makes ffmpeg abort, and mapping `0:a` on a silent clip does
+ * the same. One tiny ffprobe call, same spawn idiom as the other probes.
+ */
+export function hasAudioStream(inputPath: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-v', 'error',
+      '-select_streams', 'a',
+      '-show_entries', 'stream=index',
+      '-of', 'csv=p=0',
+      inputPath,
+    ]
+    const proc = spawn(ffprobePath, args)
+    let out = ''
+    proc.stdout.on('data', (d) => { out += d.toString() })
+    proc.on('error', (err) =>
+      reject(new Error(`Failed to spawn ffprobe for audio detection: ${err.message}`)),
+    )
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        // A probe failure on a file that already passed magic-byte
+        // validation + the main metadata probe is unusual — treat it as
+        // "no audio" rather than failing the whole rewrite.
+        resolve(false)
+        return
+      }
+      resolve(out.trim().length > 0)
+    })
+  })
+}
+
+/**
+ * 7.5.0: master-grade encoder args for the speed rewrite. Deliberately NOT
+ * buildVideoEncoderArgs: that helper targets streaming-preview bitrates
+ * (6 Mbps for 1080p, CRF 23) because its outputs are transient proxies.
+ * The output HERE becomes the video's new ORIGINAL — the file every future
+ * encode, share and download derives from — so it gets quality-first rate
+ * control (CRF/CQ ~17-19) and no level cap (4K masters need level 5.x;
+ * the encoder picks). VAAPI is skipped on purpose: it needs an hwupload
+ * filter graph this pipeline doesn't build, so it falls back to libx264.
+ */
+function buildMasterEncoderArgs(encoder: VideoEncoder, threads: number): string[] {
+  switch (encoder) {
+    case 'h264_nvenc':
+      return [
+        '-c:v', 'h264_nvenc',
+        '-preset', 'p5',
+        '-tune', 'hq',
+        '-rc', 'vbr',
+        '-cq', '19',
+        '-b:v', '0',
+        '-profile:v', 'high',
+      ]
+    case 'h264_qsv':
+      return [
+        '-c:v', 'h264_qsv',
+        '-preset', 'medium',
+        '-global_quality', '19',
+        '-profile:v', 'high',
+      ]
+    case 'h264_videotoolbox':
+      return [
+        '-c:v', 'h264_videotoolbox',
+        '-q:v', '70',
+        '-profile:v', 'high',
+        '-allow_sw', '1',
+      ]
+    case 'h264_vaapi':
+    case 'libx264':
+    default:
+      return [
+        '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-crf', '17',
+        '-threads', threads.toString(),
+        '-profile:v', 'high',
+      ]
+  }
+}
+
+export interface ApplySpeedOptions {
+  inputPath: string
+  outputPath: string
+  /** > 1 — the video gets FASTER by this factor. Validated by the caller
+   *  against SAVEABLE_SPEED_FACTORS. */
+  factor: number
+  /** Source frame rate; when known the output is pinned to it so the frame
+   *  language (timecodes) survives the rewrite. */
+  fps?: number | null
+  /** Chained atempo instances for the audio, from atempoChainForFactor. */
+  atempoChain: string[]
+  onProgress?: (progress: number) => void | Promise<void>
+  signal?: AbortSignal
+}
+
+/**
+ * 7.5.0: re-encode a video at a faster speed — the "Save" next to the speed
+ * pill. setpts compresses the video timeline, atempo compresses the audio
+ * WITHOUT shifting pitch, and the result is a normal 1x file that simply
+ * plays the same content sooner. Decoding and filtering run in software on
+ * purpose (this is a rare, one-off operation; the fancy full-GPU path in
+ * runTranscodeOnce exists for the bulk tier encodes); the ENCODER still uses
+ * the detected hardware with the same runtime libx264 fallback the tier
+ * pipeline earned in 2.1.9.
+ */
+export async function applySpeedToVideo(options: ApplySpeedOptions): Promise<void> {
+  const initialEncoder = VIDEO_ENCODER === 'h264_vaapi' ? 'libx264' : VIDEO_ENCODER
+  try {
+    await runApplySpeedOnce(options, initialEncoder)
+  } catch (err) {
+    const isAbort = err instanceof Error && err.message === 'TranscodeAborted'
+    if (isAbort || initialEncoder === 'libx264' || !isHardwareEncoderError(err)) {
+      throw err
+    }
+    const message = err instanceof Error ? err.message.split('\n')[0] : String(err)
+    logMessage(
+      `[FFMPEG] Hardware encoder ${initialEncoder} failed during speed rewrite: ${message.slice(0, 200)} — retrying with libx264.`,
+    )
+    await runApplySpeedOnce(options, 'libx264')
+  }
+}
+
+async function runApplySpeedOnce(
+  options: ApplySpeedOptions,
+  encoder: VideoEncoder,
+): Promise<void> {
+  const { inputPath, outputPath, factor, fps, atempoChain, onProgress, signal } = options
+
+  if (signal?.aborted) throw new Error('TranscodeAborted')
+
+  const threads = getCpuAllocation().threadsPerJob
+  const metadata = await getVideoMetadata(inputPath)
+  // Progress is measured against the OUTPUT's duration — the whole point is
+  // that it is `factor` times shorter than the input's.
+  const outputDuration = metadata.duration > 0 ? metadata.duration / factor : 0
+  const withAudio = atempoChain.length > 0 && (await hasAudioStream(inputPath))
+
+  const args: string[] = [
+    '-i', inputPath,
+    // First video stream, first audio stream (when present), nothing else —
+    // an explicit map drops data/subtitle tracks whose timestamps we are
+    // not rescaling and which players don't need from a review master.
+    '-map', '0:v:0',
+    ...(withAudio ? ['-map', '0:a:0'] : []),
+    '-vf', `setpts=PTS/${factor}`,
+    ...(withAudio ? ['-af', atempoChain.join(',')] : []),
+    ...buildMasterEncoderArgs(encoder, threads),
+    '-pix_fmt', 'yuv420p',
+    // Pin the source frame rate: setpts squeezes the timestamps together and
+    // ffmpeg drops the surplus frames to hold this rate. Without the pin a
+    // VFR source would come out VFR-faster, and the stored timecodes' frame
+    // arithmetic (comment repositioning) would stop being exact.
+    ...(fps && fps > 0 ? ['-r', String(fps)] : []),
+    ...(withAudio ? ['-c:a', 'aac', '-b:a', '320k', '-ar', '48000'] : ['-an']),
+    '-movflags', '+faststart',
+    '-max_muxing_queue_size', '1024',
+    // Same rotation hygiene as the tier pipeline: the re-encode bakes any
+    // rotation into the pixels, so the legacy tag must not survive to make
+    // browsers rotate a second time.
+    '-metadata:s:v:0', 'rotate=0',
+    '-progress', 'pipe:2',
+    '-y',
+    outputPath,
+  ]
+
+  if (DEBUG) {
+    logMessage('[FFMPEG DEBUG] applySpeedToVideo:', 'nice -n 10', ffmpegPath, args.join(' '))
+  }
+
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn('nice', ['-n', '10', ffmpegPath, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stderr = ''
+    let abortedByCaller = false
+
+    let abortListener: (() => void) | null = null
+    if (signal) {
+      abortListener = () => {
+        abortedByCaller = true
+        try {
+          ffmpeg.kill('SIGTERM')
+          setTimeout(() => {
+            try {
+              if (!ffmpeg.killed) ffmpeg.kill('SIGKILL')
+            } catch {}
+          }, 2000).unref()
+        } catch {}
+      }
+      signal.addEventListener('abort', abortListener, { once: true })
+    }
+
+    ffmpeg.stderr.on('data', (data) => {
+      const text = data.toString()
+      stderr += text
+      if (stderr.length > 64_000) stderr = stderr.slice(-32_000)
+      if (onProgress && outputDuration > 0) {
+        const timeMatch = text.match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/)
+        if (timeMatch) {
+          const done =
+            parseInt(timeMatch[1]) * 3600 +
+            parseInt(timeMatch[2]) * 60 +
+            parseFloat(timeMatch[3])
+          void onProgress(Math.min(1, done / outputDuration))
+        }
+      }
+    })
+
+    ffmpeg.on('error', (err) => {
+      if (abortListener && signal) signal.removeEventListener('abort', abortListener)
+      reject(new Error(`Failed to spawn ffmpeg for speed rewrite: ${err.message}`))
+    })
+
+    ffmpeg.on('close', (code) => {
+      if (abortListener && signal) signal.removeEventListener('abort', abortListener)
+      if (abortedByCaller || signal?.aborted) {
+        reject(new Error('TranscodeAborted'))
+        return
+      }
+      if (code !== 0) {
+        reject(
+          new Error(
+            `ffmpeg speed rewrite exited with code ${code}: ${stderr.slice(-1500)}`,
+          ),
+        )
+        return
+      }
+      resolve()
+    })
+  })
+}

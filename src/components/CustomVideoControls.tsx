@@ -13,6 +13,7 @@ import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 import { useAvatarUrl } from '@/components/UserAvatar'
 import { storyboardCellStyle, storyboardFraction, storyboardGridOf } from '@/lib/storyboard-grid'
 import PlaybackSpeedMenu from './PlaybackSpeedMenu'
+import { computeMarkerNudges } from '@/lib/marker-layout'
 import PlayerSettingsMenu, { type QualityChoice } from './PlayerSettingsMenu'
 import { AttachmentPreviewStrip, AudioAttachment } from './CommentAttachments'
 import type { SafeZonePreset } from './SafeZoneOverlay'
@@ -79,6 +80,11 @@ interface CustomVideoControlsProps {
   playbackSpeed?: number
   /** Setter for playback speed; when omitted, the speed button is hidden. */
   onPlaybackSpeedChange?: (speed: number) => void
+  /** 7.5.0: pressed = the admin wants the CURRENT speed baked into the file
+   *  permanently — the parent opens the rewrite warning dialog. Absent
+   *  (share view, comparison, images, non-admins) = no Save button ever,
+   *  same convention as onCommentTimecodeChange. */
+  onSaveSpeed?: () => void
   /** Resolved quality for the current stream — used as a small read-only
    *  badge on the right-hand side of the bar (e.g. HD/4K). */
   resolvedPlaybackQuality?: '720p' | '1080p' | '2160p' | '480p'
@@ -415,6 +421,7 @@ export default function CustomVideoControls({
   onMarkerClick,
   playbackSpeed = 1,
   onPlaybackSpeedChange,
+  onSaveSpeed,
   resolvedPlaybackQuality,
   availableQualities,
   pendingQualities,
@@ -636,6 +643,25 @@ export default function CustomVideoControls({
   // stack-index 0 with no slide.
   const [hoveredTime, setHoveredTime] = useState<number | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
+  /**
+   * 7.5.0: the track's live pixel width, for the marker anti-overlap sweep
+   * (markerPixelOffsets). Percent positions can say "these two beads are
+   * 0.1% apart" but only pixels can say whether that overlaps; a
+   * ResizeObserver keeps the number honest through window resizes, the
+   * sidebar opening, and fullscreen.
+   */
+  const [timelineWidthPx, setTimelineWidthPx] = useState(0)
+  useEffect(() => {
+    const el = timelineRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = () => setTimelineWidthPx(el.getBoundingClientRect().width)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+    // Re-bind when the player becomes ready — the bar can mount after us.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoDuration > 0])
   const volumeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const touchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -993,11 +1019,21 @@ export default function CustomVideoControls({
     if (markers.length === 0) return []
 
     const groups: MarkerData[][] = []
-    // Dynamic threshold based on video duration
-    // For short videos (<60s): 3% threshold
-    // For medium videos (60s-600s): 2% threshold  
-    // For long videos (>600s): 1.5% threshold
-    const threshold = videoDuration < 60 ? 3 : videoDuration < 600 ? 2 : 1.5
+    /**
+     * 7.5.0: a stack means SAME FRAME, nothing looser.
+     *
+     * Grouping used to cluster anything within 1.5–3% of the duration — on a
+     * 47s clip that is well over a second, so notes on visibly different
+     * moments merged into one bead with a count, and the only way to reach
+     * the second note was paging the popover. Two notes one frame apart are
+     * two different statements about two different pictures; they get two
+     * beads. `timestamp` is already frame-quantized (see the markers memo),
+     * so frame equality is exact integer equality — and beads that would
+     * overlap visually are separated by a few px at render time (see
+     * markerPixelOffsets), which is a display nudge, never a data change.
+     */
+    const fps = videoFps && videoFps > 0 ? videoFps : 24
+    const frameOf = (m: MarkerData) => Math.round(m.timestamp * fps)
 
     /**
      * 7.4.0: a note being dragged is its own group, at its live position.
@@ -1016,10 +1052,16 @@ export default function CustomVideoControls({
     const heldId = draggingMarker?.commentId ?? pendingMarkerPos?.commentId ?? null
     const heldPct = draggingMarker?.pct ?? pendingMarkerPos?.pct ?? null
 
-    markers.forEach((marker) => {
+    // Sorted by time first: the adjacency-based walk below can only stack
+    // neighbours, and the comments array arrives in creation order — two
+    // notes on the same frame written an hour apart were non-adjacent and
+    // silently never stacked. Sorting also puts the GROUPS in timeline
+    // order, which is what the popover's next/prev paging walks.
+    const inTimelineOrder = [...markers].sort((a, b) => a.timestamp - b.timestamp)
+    inTimelineOrder.forEach((marker) => {
       if (marker.id === heldId) return
       const lastGroup = groups[groups.length - 1]
-      if (lastGroup && Math.abs(marker.position - lastGroup[0].position) < threshold) {
+      if (lastGroup && frameOf(marker) === frameOf(lastGroup[0])) {
         lastGroup.push(marker)
       } else {
         groups.push([marker])
@@ -1032,7 +1074,47 @@ export default function CustomVideoControls({
     }
 
     return groups
-  }, [markers, videoDuration, draggingMarker, pendingMarkerPos])
+  }, [markers, videoFps, draggingMarker, pendingMarkerPos])
+
+  /**
+   * 7.5.0: horizontal px nudges that keep un-stacked beads legible.
+   *
+   * Only identical frames stack now, so two notes a frame or two apart are
+   * two beads whose true positions are a fraction of a pixel apart. Each
+   * bead is ~18px wide; drawing both at their true spot paints one over the
+   * other and the loser is unhoverable. This sweep walks the groups in
+   * screen order and pushes an overlapping bead just far enough RIGHT to
+   * leave a 4px gap, then a backward pass pulls any overflow back inside
+   * the track. The nudge is display-only — click/seek/drag all use the
+   * note's stored time — and the bead being dragged is exempt, because it
+   * must track the finger exactly.
+   */
+  const markerPixelOffsets = useMemo(() => {
+    if (!timelineWidthPx || timelineWidthPx <= 0 || groupedMarkers.length < 2) {
+      return new Map<number, number>()
+    }
+    // 7.5.0 (a doua rundă, live feedback): the beads OVERLAP on purpose,
+    // fanned like cards — 5px centre-to-centre, so the bead behind peeks
+    // out ~5px from under its neighbour. The first cut separated them
+    // fully (22px) and two notes a frame apart read as two distant events;
+    // the fan says "two notes, same breath" while keeping a hoverable
+    // sliver of each.
+    const SPACING = 5
+    const heldId = draggingMarker?.commentId ?? pendingMarkerPos?.commentId ?? null
+    return computeMarkerNudges(
+      groupedMarkers
+        .map((group, index) => ({
+          index,
+          x: ((group[0].position ?? 0) / 100) * timelineWidthPx,
+          held: group[0].id === heldId,
+        }))
+        // The dragged bead tracks the finger exactly — it neither dodges
+        // nor makes the others dodge.
+        .filter((e) => !e.held),
+      timelineWidthPx,
+      SPACING,
+    )
+  }, [groupedMarkers, timelineWidthPx, draggingMarker, pendingMarkerPos])
 
   // 1.3.2+: suppress the synthetic click that touch devices dispatch
   // after a touchend. On phones the playhead was jumping forward or
@@ -1779,6 +1861,26 @@ export default function CustomVideoControls({
   // the close for 220 ms gives the cursor time to land on the
   // popover and re-trigger `mouseenter`, which cancels the timer.
   const hoverCloseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  /**
+   * 7.5.0: where a press on a STACKED bead should land, when the sidebar has
+   * a say. Clicking a note in the comment list sets activeCommentId; if the
+   * pressed stack contains that note, the popover opens ON it and the
+   * press/drag targets it — so "select in the list, then drag the bead"
+   * pulls out exactly the note you selected, not whichever sits first in
+   * the stack. Paging the popover afterwards still wins: it writes
+   * stackIndex, which is what the hovered press path reads.
+   */
+  const stackPressPreference = useCallback(
+    (markerId: string): { index: number; id: string } => {
+      if (!activeCommentId) return { index: 0, id: markerId }
+      const group = groupedMarkers.find((g) => g.some((m) => m.id === markerId))
+      if (!group || group.length < 2) return { index: 0, id: markerId }
+      const idx = group.findIndex((m) => m.id === activeCommentId)
+      return idx >= 0 ? { index: idx, id: group[idx].id } : { index: 0, id: markerId }
+    },
+    [groupedMarkers, activeCommentId],
+  )
+
   const handleMarkerMouseEnter = useCallback((markerId: string) => {
     // 7.x: passing over other beads mid-drag must not summon their popovers
     // either — the pointer is travelling, not browsing.
@@ -1789,11 +1891,12 @@ export default function CustomVideoControls({
     }
     // Fresh hover ⇒ reset stack pagination + slide direction so the
     // first card the user sees fades in normally instead of inheriting
-    // a stale slide from a previous swipe gesture.
-    setStackIndex(0)
+    // a stale slide from a previous swipe gesture. 7.5.0: "reset" now
+    // means "open on the sidebar-selected note when it lives here".
+    setStackIndex(stackPressPreference(markerId).index)
     setStackSlideDir(null)
     setHoveredMarkerId(markerId)
-  }, [])
+  }, [stackPressPreference])
 
   const handleMarkerMouseLeave = useCallback(() => {
     if (hoverCloseTimeoutRef.current) {
@@ -1814,12 +1917,15 @@ export default function CustomVideoControls({
       clearTimeout(touchTimeoutRef.current)
     }
     // Fresh tap ⇒ same reset as the desktop mouse-enter path so the
-    // first card the user sees fades in cleanly.
-    setStackIndex(0)
+    // first card the user sees fades in cleanly. 7.5.0: the tap claims the
+    // sidebar-selected note when it lives in this stack — same rule as the
+    // desktop press target.
+    const pref = stackPressPreference(markerId)
+    setStackIndex(pref.index)
     setStackSlideDir(null)
     setHoveredMarkerId(markerId)
-    claimMarker(markerId)
-  }, [claimMarker])
+    claimMarker(pref.id)
+  }, [claimMarker, stackPressPreference])
 
   // 1.3.1+: dismiss the timeline-comment popover when the user taps
   // outside it (or any marker that owns one). Without this the
@@ -2652,10 +2758,17 @@ export default function CustomVideoControls({
              * `group[0]`: changing the key mid-hover would remount the bead and
              * take the popover down with it.
              */
+            /* 7.5.0: outside a hover (touch, or a press that outruns the
+                hover re-render) the sidebar-selected member of the stack is
+                still the one a press should act on. */
+            const activeStackMember =
+              group.length > 1 && activeCommentId != null
+                ? group.find((m) => m.id === activeCommentId)
+                : undefined
             const pressTarget =
               isHovered && group.length > 1
                 ? group[Math.min(stackIndex, group.length - 1)] ?? primaryMarker
-                : primaryMarker
+                : activeStackMember ?? primaryMarker
             /**
              * 7.3.3: the live position — dragged, pending, or stored — hoisted
              * out of the style prop because two things need it now: where the
@@ -2711,13 +2824,28 @@ export default function CustomVideoControls({
                 // timeline would visually clip into the popover's
                 // top-left avatar.
                 className={`absolute top-0 pointer-events-auto ${
-                  draggingMarker?.commentId === primaryMarker.id ? 'z-[60]' : 'z-50'
+                  draggingMarker?.commentId === primaryMarker.id
+                    ? 'z-[60]'
+                    : /* 7.5.0: the bead of the comment SELECTED in the sidebar
+                         steps in front of its fanned neighbours (beads overlap
+                         5px apart since the same-frame-only grouping), so
+                         clicking a note in the list shows you which face on
+                         the timeline it is. z-[55] sits between resting beads
+                         (50) and a bead being dragged (60); clicking the same
+                         note again deselects and it falls back in line. */
+                      activeCommentId != null && group.some((m) => m.id === activeCommentId)
+                      ? 'z-[55]'
+                      : 'z-50'
                 }`}
                 style={{
                   // 7.x: while this bead is being dragged its position comes from
                   // the pointer, not from the stored timecode — so it stays under
                   // the finger instead of springing back until the save lands.
-                  left: `${markerPct}%`,
+                  // 7.5.0: plus the anti-overlap nudge — beads on nearby (but
+                  // not identical) frames are shifted a few px apart so each
+                  // stays visible and hoverable. Display only; the note's time
+                  // is untouched.
+                  left: `calc(${markerPct}% + ${markerPixelOffsets.get(groupIndex) ?? 0}px)`,
                   transform: 'translateX(-50%)',
                 }}
                 data-comment-popover
@@ -3206,6 +3334,27 @@ export default function CustomVideoControls({
               className="ml-0.5 sm:ml-1"
             />
           )}
+
+          {/* 7.5.0: Save appears the moment the speed leaves 1x, between the
+              speed pill and the volume (per spec). It does NOT rewrite
+              anything itself — it opens the parent's warning dialog for the
+              permanent re-encode, so a stray click costs nothing. */}
+          {onPlaybackSpeedChange &&
+            onSaveSpeed &&
+            Math.abs((playbackSpeed ?? 1) - 1) > 0.001 && (
+              <button
+                type="button"
+                onClick={onSaveSpeed}
+                title={`Rewrite the video at ${playbackSpeed}x — permanent`}
+                className="ml-0.5 sm:ml-1 inline-flex items-center h-7 px-2.5 rounded-md text-xs font-medium text-white transition-[filter] hover:brightness-125"
+                style={{
+                  backgroundColor: 'hsl(var(--spotlight-tint) / 0.30)',
+                  boxShadow: 'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.45)',
+                }}
+              >
+                Save
+              </button>
+            )}
 
           {/* Volume: button always; slider expands on hover (or stays open
               while interacted with via keyboard). On mobile the slider is

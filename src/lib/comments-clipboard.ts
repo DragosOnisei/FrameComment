@@ -204,6 +204,21 @@ function carryableAnnotations(raw: any) {
  * reference to the source comment, which the server resolves (the browser must
  * not pick which files it may copy).
  */
+/**
+ * 7.5.0: what a BULK copy carries — root comments that are not themselves
+ * copies. A comment pasted from another version (isCopied) does not travel
+ * again: copying v2 (10 pasted from v1 + 2 of its own) onto v3 must bring
+ * exactly the 2 — the 10 already have a home and an origin, and re-copying
+ * them would chain provenance ("from v2") onto notes that are really v1's.
+ * Explicit single-comment copy deliberately does NOT go through this: a
+ * user pointing at one specific copied note and saying "copy" wins.
+ */
+export function copyableComments(list: any[]): any[] {
+  return (Array.isArray(list) ? list : []).filter(
+    (c: any) => c && !c.parentId && !c.isCopied,
+  )
+}
+
 export function toClipped(list: any[]): ClippedComment[] {
   return list.map((c: any) => ({
     content: c.content,

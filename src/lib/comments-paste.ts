@@ -149,8 +149,15 @@ export async function pasteClippedThreads({
     waitsUsed += 1
     const header = Number(res.headers.get('Retry-After'))
     const seconds = Number.isFinite(header) && header > 0 ? Math.min(header, 65) : 61
-    onProgress?.({ kind: 'waiting', seconds })
-    await new Promise((r) => setTimeout(r, seconds * 1000))
+    // 7.5.0: tick the countdown every second instead of announcing the wait
+    // once. A static "Waiting 55s…" is indistinguishable from a hang, and a
+    // hang gets the page reloaded — which kills the batch mid-loop and loses
+    // the unpasted notes (exactly the 2026-09-02 incident). A number that
+    // visibly counts down is a promise being kept.
+    for (let remaining = seconds; remaining > 0; remaining -= 1) {
+      onProgress?.({ kind: 'waiting', seconds: remaining })
+      await new Promise((r) => setTimeout(r, 1000))
+    }
     return true
   }
 
@@ -182,8 +189,14 @@ export async function pasteClippedThreads({
     // with its own testing, not a side effect of moving code.
 
     let res = await post(body)
-    if (!res.ok && (await waitForLimit(res))) {
-      // The lockout has expired; the same post is worth exactly one more try.
+    // 7.5.0: keep retrying the SAME note for as long as the wait budget
+    // lasts, instead of retrying once and dropping it. The single-retry
+    // shape lost a note whenever the post-wait attempt was still refused —
+    // seen when another tab spent the freshly reset window first. The
+    // budget (MAX_WAITS, shared by the whole batch) is what bounds this;
+    // waitForLimit returns false once it is spent or the refusal is not a
+    // rate limit, and the loop exits to the honest failed count.
+    while (!res.ok && (await waitForLimit(res))) {
       res = await post(body)
     }
     if (!res.ok) {
@@ -239,7 +252,7 @@ export async function pasteClippedThreads({
         replyBody.sourceVersionLabel = source.versionLabel
       }
       let replyRes = await post(replyBody)
-      if (!replyRes.ok && (await waitForLimit(replyRes))) {
+      while (!replyRes.ok && (await waitForLimit(replyRes))) {
         replyRes = await post(replyBody)
       }
       if (replyRes.ok) {

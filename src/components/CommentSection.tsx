@@ -20,6 +20,7 @@ import { formatCommentTimestamp, secondsToTimecode, timecodeToSeconds, timecodeT
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   getClippedComments,
+  copyableComments,
   toClipped,
   hasClippedComments,
   setClippedComments,
@@ -1793,8 +1794,10 @@ export default function CommentSection({
 
   const handleCopyComments = useCallback(() => {
     // Snapshot what's currently visible in the sidebar (already filtered to
-    // the active video by `displayComments`).
-    const clipped = toClipped(displayComments as any[])
+    // the active video by `displayComments`). 7.5.0: minus the notes that
+    // are themselves copies — a comment pasted from another version does
+    // not travel again (see copyableComments for the why).
+    const clipped = toClipped(copyableComments(displayComments as any[]))
     setClippedComments(projectId, clipped)
     setHasClipboardForProject(clipped.length > 0)
     // The count is what the user is told was copied, so it counts what they
@@ -1977,6 +1980,11 @@ export default function CommentSection({
       // Roots only. Replies travel with their parent, and counting them here
       // would promise "7 comments" and then paste 3 threads.
       if (c.parentId) continue
+      // 7.5.0: notes that are themselves copies stay put. v2 holding 10
+      // pasted from v1 plus 2 of its own offers v3 exactly the 2 — the 10
+      // are v1's, and if v2 has ONLY copies, the source naturally falls
+      // through to the version the notes actually came from.
+      if (c.isCopied) continue
       if (!c.videoId || c.videoId === selectedVideoId) continue
       const bucket = byVideo.get(c.videoId) ?? []
       bucket.push(c)
@@ -2271,7 +2279,7 @@ export default function CommentSection({
                 below (see next block) — inline here it collided with a
                 long filter title like "Completed comments". */}
             <CommentsKebabMenu
-              commentCount={displayComments.length}
+              commentCount={copyableComments(displayComments as any[]).length}
               hasClipboard={hasClipboardForProject}
               onCopy={handleCopyComments}
               onPaste={handlePasteComments}
@@ -2531,7 +2539,7 @@ export default function CommentSection({
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <CommentsKebabMenu
-                commentCount={displayComments.length}
+                commentCount={copyableComments(displayComments as any[]).length}
                 hasClipboard={hasClipboardForProject}
                 onCopy={handleCopyComments}
                 onPaste={handlePasteComments}
