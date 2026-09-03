@@ -14,6 +14,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.1] - 2026-09-03
+
+### Fixed
+
+- **A chosen playback speed stays chosen.** Two separate causes, both real:
+  - Space (and K) reset the speed to 1x on pause. That was deliberate in
+    6.9.0 — "stopping means back to normal" — and wrong in two directions:
+    the mouse play/pause button never did it, so the same action behaved
+    differently depending on how you triggered it, and since 7.5.0 a speed
+    is a decision about the clip (you can save it into the file) rather
+    than a scrubbing accident. Pausing at 2x to write a note now resumes
+    at 2x.
+  - The speed silently fell back to 1x whenever the player reloaded its
+    source — a quality switch, an HLS master re-attach, a version swap —
+    while the pill kept claiming the chosen speed. Verified in a browser
+    rather than reasoned about: setting `playbackRate = 2` and then calling
+    `load()` (or swapping `src`) leaves the element at 1x, because the HTML
+    media load algorithm restores the rate from `defaultPlaybackRate`.
+    Both properties are now written, and the rate is re-applied on
+    `loadedmetadata` / `canplay` / `ratechange` — the last one because
+    hls.js and Safari's native HLS touch the rate themselves in some
+    recovery paths, and this is the only place that knows what the user
+    actually picked. Seeking and pausing never reset it on their own, so
+    the arrow keys were only ever a symptom of this.
+- `Ctrl+,` / `Ctrl+.` walk the speed ladder instead of stepping by 0.25.
+  Their old arithmetic could land on speeds that stopped existing in 7.5.0
+  — 0.75x (slowdowns are gone) or 1.75x (never on the ladder) — which the
+  menu cannot show as active and the Save button cannot write into a file.
+- The "Press Enter to send & Shift+Enter for new line" hint under the
+  comment box is no longer selectable. It is a keyboard hint, not content,
+  and it sits directly under the textarea — a drag that starts a hair too
+  low highlighted the instructions instead of the words being selected.
+
 ## [7.5.0] - 2026-09-03
 
 ### Added

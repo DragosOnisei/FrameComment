@@ -1200,7 +1200,11 @@ export default function CommentInput({
             // 1.0.9+: Shortcuts button removed — only the keyboard
             // hint remains, and only on wide (2xl) sidebars.
             <div className="mt-2 hidden 2xl:block min-w-0">
-              <p className="text-xs text-muted-foreground truncate">
+              {/* 7.5.1: not selectable. It is a hint about the keyboard, not
+                  content — and it sits directly under a textarea, so a drag
+                  that starts a hair too low highlights the instructions
+                  instead of the words you were trying to select. */}
+              <p className="text-xs text-muted-foreground truncate select-none">
                 {t('enterToSend')}
               </p>
             </div>

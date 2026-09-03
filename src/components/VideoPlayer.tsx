@@ -1762,12 +1762,48 @@ export default function VideoPlayer({
     }
   }, [])
 
-  // Apply playback speed to video element
+  /**
+   * Apply playback speed to the video element — and make it STICK.
+   *
+   * 7.5.1: `defaultPlaybackRate` is written alongside `playbackRate`, and
+   * the rate is re-applied whenever the element loads media. Proven in a
+   * browser, not assumed: setting `playbackRate = 2` and then calling
+   * `load()` (or swapping `src`) leaves the element at 1×, because the HTML
+   * media load algorithm resets the rate to `defaultPlaybackRate`. Setting
+   * BOTH survives it. That mattered here because this player swaps `src`
+   * behind the user's back — a quality switch, an HLS master re-attach, a
+   * version change — and the effect above only ran when the React state
+   * changed. So the pill kept saying 2× while the picture had quietly
+   * dropped to 1×, with nothing in the UI admitting it.
+   *
+   * `ratechange` is watched too: hls.js and Safari's native HLS both touch
+   * the rate on their own in some recovery paths, and this is the only
+   * place that knows what the user actually chose. The guard on `!== ` is
+   * what keeps that from being an infinite loop.
+   */
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = playbackSpeed
+    const video = videoRef.current
+    if (!video) return
+    const apply = () => {
+      // defaultPlaybackRate first: it is what a reload restores FROM.
+      if (video.defaultPlaybackRate !== playbackSpeed) {
+        video.defaultPlaybackRate = playbackSpeed
+      }
+      if (video.playbackRate !== playbackSpeed) {
+        video.playbackRate = playbackSpeed
+      }
     }
-  }, [playbackSpeed])
+    apply()
+    video.addEventListener('loadedmetadata', apply)
+    video.addEventListener('canplay', apply)
+    video.addEventListener('ratechange', apply)
+    return () => {
+      video.removeEventListener('loadedmetadata', apply)
+      video.removeEventListener('canplay', apply)
+      video.removeEventListener('ratechange', apply)
+    }
+    // videoUrl: a new source means a fresh element load to re-arm against.
+  }, [playbackSpeed, videoUrl])
 
 
   // Keyboard shortcuts: Ctrl+Space (play/pause), Ctrl+,/. (speed), Ctrl+/ (reset speed), Ctrl+J/L (frame step)
@@ -1798,19 +1834,30 @@ export default function VideoPlayer({
         return
       }
 
-      // Ctrl+, or Ctrl+<: Decrease speed by 0.25x
+      // Ctrl+, / Ctrl+. : one step down / up the speed ladder.
+      //
+      // 7.5.1: these used to add or subtract 0.25 with their own 0.25–2.0
+      // bounds, which since 7.5.0 could land on speeds that no longer
+      // exist — 0.75× (slowdowns are gone) or 1.75× (never on the ladder),
+      // neither of which the menu can display as active or the Save button
+      // can write into the file. They now walk the same list as J/L and the
+      // menu, so every surface agrees on which speeds exist.
       if (e.ctrlKey && !e.metaKey && (e.code === 'Comma' || e.key === '<')) {
         e.preventDefault()
         e.stopPropagation()
-        setPlaybackSpeed(prev => Math.max(0.25, prev - 0.25))
+        setPlaybackSpeed((prev) => PLAYBACK_SPEEDS[Math.max(0, nearestSpeedIndex(prev) - 1)])
         return
       }
 
-      // Ctrl+. or Ctrl+>: Increase speed by 0.25x
       if (e.ctrlKey && !e.metaKey && (e.code === 'Period' || e.key === '>')) {
         e.preventDefault()
         e.stopPropagation()
-        setPlaybackSpeed(prev => Math.min(2.0, prev + 0.25))
+        setPlaybackSpeed(
+          (prev) =>
+            PLAYBACK_SPEEDS[
+              Math.min(PLAYBACK_SPEEDS.length - 1, nearestSpeedIndex(prev) + 1)
+            ],
+        )
         return
       }
 
@@ -2179,9 +2226,13 @@ export default function VideoPlayer({
 
       // K or Space → play / pause.
       //
-      // 6.9.0: pausing also returns to 1×. Scrubbing at 8× and hitting K used
-      // to leave the rate parked, so the next press resumed at 8× — you had to
-      // press twice and wonder why. Stopping means "back to normal".
+      // 7.5.1: pausing KEEPS the chosen speed. 6.9.0 reset it to 1× here on
+      // the theory that "stopping means back to normal", which was wrong in
+      // both directions: the mouse play/pause button never did it, so the
+      // same action had two behaviours depending on how you triggered it,
+      // and a speed is now a decision about the clip (you can even save it
+      // into the file) rather than a scrubbing accident. Someone reviewing
+      // at 2× pauses to write a note and expects 2× when they resume.
       if (e.code === 'Space' || e.key === ' ' || e.code === 'KeyK') {
         e.preventDefault()
         if (video.paused) {
@@ -2190,7 +2241,6 @@ export default function VideoPlayer({
         } else {
           video.pause()
           setIsPlaying(false)
-          setPlaybackSpeed(1)
         }
         return
       }
