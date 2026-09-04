@@ -1854,14 +1854,23 @@ export default function VideoPlayer({
   }, [])
 
   /**
-   * The shuttle itself. Frame-quantized on purpose: seeking is what costs
-   * here (an HLS seek can fetch a segment), so the loop steps whole frames
-   * at the clip's frame rate — 1x reverse on a 25fps clip is 25 seeks a
-   * second, never 60 — and carries the fractional remainder so wall-clock
-   * speed stays exact even when a seek runs late. Stops at 0 and leaves
-   * reverse mode there: there is nothing left to reverse into, and the next
-   * play should go forwards. Every step also announces itself the way the
-   * arrow keys do, so the comment box's timecode chip follows.
+   * The shuttle itself, paced by seek COMPLETION.
+   *
+   * The first cut stepped currentTime back on every tick that owed a frame
+   * and never waited for the seek to finish. A backward seek on H.264 decodes
+   * from the previous keyframe up to the target — up to a whole GOP — so 25
+   * of them a second saturated the decoder: the attribute moved (and the
+   * timeline with it) while no frame was ever presented. The picture froze
+   * on the frame where reverse began.
+   *
+   * Now exactly one seek is in flight; the next is issued only after
+   * `seeked` (with a watchdog for the rare seek that never reports back).
+   * Elapsed time keeps accruing meanwhile, so the next step skips however
+   * many frames the clock says — real-time speed on average, every visible
+   * frame a rendered one. Smoothness is whatever the decoder can sustain:
+   * choppier on long-GOP HLS, but MOVING, which is the whole point. Stops
+   * at 0 and leaves reverse mode there. Every step announces itself the way
+   * the arrow keys do, so the comment box's timecode chip follows.
    */
   useEffect(() => {
     if (!reverse || !reverseRunning) return
@@ -1869,9 +1878,16 @@ export default function VideoPlayer({
     if (!video) return
     const fps = selectedVideo?.fps && selectedVideo.fps > 0 ? selectedVideo.fps : 24
     const frame = 1 / fps
+    const SEEK_WATCHDOG_MS = 600
     let last = performance.now()
-    let carry = 0
+    let debt = 0
+    let inFlight = false
+    let inFlightSince = 0
     let raf = 0
+    const onSeeked = () => {
+      inFlight = false
+    }
+    video.addEventListener('seeked', onSeeked)
     const announce = (time: number) => {
       currentTimeRef.current = time
       window.dispatchEvent(
@@ -1884,10 +1900,9 @@ export default function VideoPlayer({
       // Something (an autoplay-on-seek path) may have started forward
       // motion under us — reverse owns the transport while it runs.
       if (!video.paused) video.pause()
-      // The arithmetic (frame quantization, remainder carry, hidden-tab
-      // clamp) lives in advanceShuttle so the simulation runs the same code.
-      const step = advanceShuttle(carry, (now - last) / 1000, playbackSpeed, fps)
-      carry = step.carry
+      if (inFlight && now - inFlightSince > SEEK_WATCHDOG_MS) inFlight = false
+      const step = advanceShuttle(debt, (now - last) / 1000, playbackSpeed, fps, !inFlight)
+      debt = step.debt
       last = now
       if (step.frames > 0) {
         const next = video.currentTime - step.frames * frame
@@ -1898,13 +1913,18 @@ export default function VideoPlayer({
           setReverse(false)
           return
         }
+        inFlight = true
+        inFlightSince = now
         video.currentTime = next
         announce(next)
       }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf)
+      video.removeEventListener('seeked', onSeeked)
+    }
   }, [reverse, reverseRunning, playbackSpeed, selectedVideo?.fps])
 
   // Keyboard shortcuts: Ctrl+Space (play/pause), Ctrl+,/. (speed), Ctrl+/ (reset speed), Ctrl+J/L (frame step)
@@ -2315,7 +2335,8 @@ export default function VideoPlayer({
   // the player and stealing Space mid-sentence would be terrible.
   //
   // 4.7.x: plain K / J / L shortcuts (same guards):
-  //   K (or Space) — play / pause
+  //   Space        — play / pause
+  //   K            — back to 1x forwards + play/pause toggle (7.6.1)
   //   J            — slower (playback rate −0.25×, floor 0.25×)
   //   L            — faster (playback rate +0.25×, ceil 2×)
   // Uses `e.code` so it's layout- and case-independent (Shift/CapsLock
@@ -2350,7 +2371,32 @@ export default function VideoPlayer({
       // and a speed is now a decision about the clip (you can even save it
       // into the file) rather than a scrubbing accident. Someone reviewing
       // at 2× pauses to write a note and expects 2× when they resume.
-      if (e.code === 'Space' || e.key === ' ' || e.code === 'KeyK') {
+      // 7.6.1: K and Space part ways. K is "back to 1x, forwards" — whatever
+      // the speed, in or out of reverse — AND a play/pause toggle on top: if
+      // anything was moving (forwards at 2x, or the reverse shuttle) K stops
+      // it at 1x; if the clip was paused, K starts it forwards at 1x. Space is
+      // play/pause and nothing else (7.5.1 already stopped it from touching
+      // the speed). One key that normalises and stops, one key that only
+      // stops: neither ever surprises the other.
+      if (e.code === 'KeyK') {
+        e.preventDefault()
+        const wasMoving = reverseRef.current ? reverseRunningRef.current : !video.paused
+        if (reverseRef.current) {
+          // Leave reverse at 1x without auto-resume; the toggle below decides.
+          exitReverse(1, false)
+        } else {
+          setPlaybackSpeed(1)
+        }
+        if (wasMoving) {
+          video.pause()
+          setIsPlaying(false)
+        } else {
+          void video.play().catch(() => {})
+          setIsPlaying(true)
+        }
+        return
+      }
+      if (e.code === 'Space' || e.key === ' ') {
         e.preventDefault()
         // 7.6.0: in reverse mode Space pauses/resumes the shuttle.
         if (reverseRef.current) {

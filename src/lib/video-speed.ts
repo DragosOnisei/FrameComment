@@ -91,26 +91,39 @@ export function rescaleTimecodeForSpeed(
  * 7.6.0: one tick of the reverse shuttle, as arithmetic.
  *
  * The loop in VideoPlayer runs on requestAnimationFrame and asks this how
- * many whole FRAMES to step back this tick. Frame-quantized because seeking
- * is what costs (an HLS seek may fetch a segment): 1x reverse on a 25fps clip
- * is 25 seeks a second, never 60. The fractional remainder is carried so the
- * wall-clock speed stays exact even when a seek runs late. The step is clamped
- * because rAF stops entirely in a hidden tab — the first tick after coming
- * back would otherwise carry minutes of "elapsed" time and teleport the
- * playhead to 0. Pure, so the simulation exercises the same code.
+ * many whole FRAMES to step back this tick. The first cut issued a seek on
+ * every tick that owed a frame and never waited for one to finish — and a
+ * backward seek on H.264 means decoding from the previous keyframe up to the
+ * target, up to a whole GOP per step, so the decoder was saturated: the
+ * `currentTime` attribute (which the timeline follows) kept moving while no
+ * frame was ever PRESENTED. The picture froze on the frame where reverse
+ * began. Live-reported the same day it shipped.
+ *
+ * So the shuttle is paced by seek COMPLETION: `canSeek` is false while a seek
+ * is in flight, and the elapsed time keeps accruing as debt so the next step
+ * skips however many frames the wall clock says — real-time speed on
+ * average, decoder-limited smoothness, and every frame the user sees is one
+ * that actually rendered. Two clamps: the per-tick step (rAF stops in a
+ * hidden tab — the first tick back would carry minutes and teleport to 0),
+ * and the total debt (a decoder that cannot keep up makes reverse run SLOWER
+ * rather than lurch half a second at a time). Pure, so the simulation
+ * exercises the same code the loop runs.
  */
 export const SHUTTLE_MAX_STEP_SECONDS = 0.25
+export const SHUTTLE_MAX_DEBT_SECONDS = 0.5
 
 export function advanceShuttle(
-  carrySeconds: number,
+  debtSeconds: number,
   elapsedSeconds: number,
   speed: number,
   fps: number,
-): { frames: number; carry: number } {
+  canSeek: boolean,
+): { frames: number; debt: number } {
   const frame = 1 / (fps > 0 ? fps : 24)
   const step = Math.min(Math.max(0, elapsedSeconds), SHUTTLE_MAX_STEP_SECONDS) * speed
-  let carry = carrySeconds + step
-  const frames = Math.floor(carry / frame)
-  carry -= frames * frame
-  return { frames, carry }
+  let debt = Math.min(debtSeconds + step, SHUTTLE_MAX_DEBT_SECONDS)
+  if (!canSeek) return { frames: 0, debt }
+  const frames = Math.floor(debt / frame)
+  debt -= frames * frame
+  return { frames, debt }
 }

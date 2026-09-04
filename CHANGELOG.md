@@ -14,6 +14,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.1] - 2026-09-03
+
+### Fixed
+
+- **Reverse actually moves the picture.** 7.6.0's shuttle issued a seek on
+  every tick that owed a frame and never waited for one to finish. A
+  backward seek on H.264 decodes from the previous keyframe up to the target
+  — up to a whole GOP per step — so 25 of them a second saturated the
+  decoder: the `currentTime` attribute kept moving (and the timeline with
+  it) while no frame was ever presented, and the picture froze on the frame
+  where reverse began. The shuttle is now paced by seek COMPLETION: exactly
+  one seek in flight, the next only after `seeked` (with a watchdog for the
+  rare seek that never reports back). Elapsed time keeps accruing meanwhile
+  as debt, so the next step skips however many frames the clock says —
+  real-time speed on average, every visible frame a rendered one. The debt
+  is capped at half a second, so a decoder that cannot keep up makes
+  reverse run slower rather than lurch. Smoothness is whatever the decoder
+  sustains (choppier on long-GOP HLS), but moving. Simulated against fast,
+  slow and hopeless decoders; the conservation law `distance travelled +
+  debt in flight = speed × time` holds to the frame.
+
+### Changed
+
+- **K and Space part ways.** K is now "back to 1x, forwards, and toggle":
+  whatever the speed, in or out of reverse, K returns to 1x — stopping
+  anything that was moving (2x forwards or the reverse shuttle), or starting
+  a paused clip forwards. Space is play/pause and nothing else (it already
+  stopped touching the speed in 7.5.1). One key that normalises and stops,
+  one key that only stops.
+
 ## [7.6.0] - 2026-09-03
 
 ### Added
