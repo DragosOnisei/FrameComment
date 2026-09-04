@@ -8,6 +8,7 @@ import { AlertTriangle, CheckCircle2, GitCompareArrows, Loader2 } from 'lucide-r
 import CustomVideoControls from './CustomVideoControls'
 import { PLAYBACK_SPEEDS, nearestSpeedIndex } from './PlaybackSpeedMenu'
 import {
+  advanceShuttle,
   formatSpeedFactor,
   isSaveableSpeedFactor,
   SPEED_REWRITE_STORAGE_KEY,
@@ -600,6 +601,21 @@ export default function VideoPlayer({
     reloadHlsInPlace(targetH)
   }, [reloadHlsInPlace])
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
+  /**
+   * 7.6.0: reverse playback ("shuttle"). Browsers ignore a negative
+   * playbackRate on <video>, so reverse is done the way Frame.io and Resolve
+   * do it: the element stays paused and a frame-stepping loop walks
+   * currentTime backwards at the chosen speed, silently. Two pieces of
+   * state: `reverse` is the MODE (the button is lit, J/L behave as a
+   * shuttle), `reverseRunning` is the MOTION (Space / the play button
+   * pause and resume it without leaving the mode). Refs mirror them for the
+   * document-level keyboard handlers, which are bound once.
+   */
+  const [reverse, setReverse] = useState(false)
+  const [reverseRunning, setReverseRunning] = useState(false)
+  const reverseRef = useRef(false)
+  const reverseRunningRef = useRef(false)
+  const playbackSpeedRef = useRef(1)
   // 7.5.0: the permanent-rewrite warning dialog behind the Save button next
   // to the speed pill. Opening it exits fullscreen first — the dialog is
   // rendered outside the player element, so inside fullscreen it would be
@@ -1106,6 +1122,8 @@ export default function VideoPlayer({
   // video meant the arrows appeared to fast-forward the whole folder.
   useEffect(() => {
     setPlaybackSpeed(1)
+    setReverse(false)
+    setReverseRunning(false)
   }, [selectedVideo?.id])
 
   useEffect(() => {
@@ -1806,6 +1824,89 @@ export default function VideoPlayer({
   }, [playbackSpeed, videoUrl])
 
 
+  useEffect(() => {
+    reverseRef.current = reverse
+    reverseRunningRef.current = reverseRunning
+    playbackSpeedRef.current = playbackSpeed
+  }, [reverse, reverseRunning, playbackSpeed])
+
+  /** Enter reverse: native forward motion stops, the shuttle takes over at
+   *  1x backwards. Speed is reset to 1 on the way in — reverse is its own
+   *  gear, not "0.5x but backwards". */
+  const enterReverse = useCallback(() => {
+    const video = videoRef.current
+    if (video && !video.paused) video.pause()
+    setPlaybackSpeed(1)
+    setReverse(true)
+    setReverseRunning(true)
+  }, [])
+
+  /** Leave reverse at `speed`, resuming forward playback when the shuttle
+   *  was in motion — so L out of a running reverse keeps playing, forwards. */
+  const exitReverse = useCallback((speed: number, resume: boolean) => {
+    setReverse(false)
+    setReverseRunning(false)
+    setPlaybackSpeed(speed)
+    if (resume) {
+      void videoRef.current?.play().catch(() => {})
+      setIsPlaying(true)
+    }
+  }, [])
+
+  /**
+   * The shuttle itself. Frame-quantized on purpose: seeking is what costs
+   * here (an HLS seek can fetch a segment), so the loop steps whole frames
+   * at the clip's frame rate — 1x reverse on a 25fps clip is 25 seeks a
+   * second, never 60 — and carries the fractional remainder so wall-clock
+   * speed stays exact even when a seek runs late. Stops at 0 and leaves
+   * reverse mode there: there is nothing left to reverse into, and the next
+   * play should go forwards. Every step also announces itself the way the
+   * arrow keys do, so the comment box's timecode chip follows.
+   */
+  useEffect(() => {
+    if (!reverse || !reverseRunning) return
+    const video = videoRef.current
+    if (!video) return
+    const fps = selectedVideo?.fps && selectedVideo.fps > 0 ? selectedVideo.fps : 24
+    const frame = 1 / fps
+    let last = performance.now()
+    let carry = 0
+    let raf = 0
+    const announce = (time: number) => {
+      currentTimeRef.current = time
+      window.dispatchEvent(
+        new CustomEvent('videoTimeUpdated', {
+          detail: { time, videoId: selectedVideoIdRef.current },
+        }),
+      )
+    }
+    const tick = (now: number) => {
+      // Something (an autoplay-on-seek path) may have started forward
+      // motion under us — reverse owns the transport while it runs.
+      if (!video.paused) video.pause()
+      // The arithmetic (frame quantization, remainder carry, hidden-tab
+      // clamp) lives in advanceShuttle so the simulation runs the same code.
+      const step = advanceShuttle(carry, (now - last) / 1000, playbackSpeed, fps)
+      carry = step.carry
+      last = now
+      if (step.frames > 0) {
+        const next = video.currentTime - step.frames * frame
+        if (next <= 0) {
+          video.currentTime = 0
+          announce(0)
+          setReverseRunning(false)
+          setReverse(false)
+          return
+        }
+        video.currentTime = next
+        announce(next)
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [reverse, reverseRunning, playbackSpeed, selectedVideo?.fps])
+
   // Keyboard shortcuts: Ctrl+Space (play/pause), Ctrl+,/. (speed), Ctrl+/ (reset speed), Ctrl+J/L (frame step)
   useEffect(() => {
     const handleKeyboard = (e: KeyboardEvent) => {
@@ -1861,10 +1962,20 @@ export default function VideoPlayer({
         return
       }
 
-      // Ctrl+/: Reset speed to 1.0x
+      // Ctrl+/: Reset speed to 1.0x — forwards. 7.6.0: leaving reverse too,
+      // resuming forward playback if the shuttle was in motion.
       if (e.ctrlKey && !e.metaKey && (e.code === 'Slash' || e.key === '/' || e.key === '?')) {
         e.preventDefault()
         e.stopPropagation()
+        if (reverseRef.current) {
+          const wasRunning = reverseRunningRef.current
+          setReverse(false)
+          setReverseRunning(false)
+          if (wasRunning) {
+            void video.play().catch(() => {})
+            setIsPlaying(true)
+          }
+        }
         setPlaybackSpeed(1.0)
         return
       }
@@ -2144,6 +2255,12 @@ export default function VideoPlayer({
   }
 
   const handlePlayPause = () => {
+    // 7.6.0: in reverse mode the play button pauses/resumes the shuttle, not
+    // the element (which is deliberately paused the whole time).
+    if (reverse) {
+      setReverseRunning((running) => !running)
+      return
+    }
     if (videoRef.current) {
       if (videoRef.current.paused) {
         videoRef.current.play()
@@ -2235,6 +2352,11 @@ export default function VideoPlayer({
       // at 2× pauses to write a note and expects 2× when they resume.
       if (e.code === 'Space' || e.key === ' ' || e.code === 'KeyK') {
         e.preventDefault()
+        // 7.6.0: in reverse mode Space pauses/resumes the shuttle.
+        if (reverseRef.current) {
+          setReverseRunning((running) => !running)
+          return
+        }
         if (video.paused) {
           void video.play()
           setIsPlaying(true)
@@ -2249,20 +2371,34 @@ export default function VideoPlayer({
       // the speed menu shows. 6.9.0: L used to add 0.25 and stop dead at 2×,
       // so 4× and 8× existed in the menu but were unreachable by keyboard.
       // Now both walk the real list and stop at its ends.
-      if (e.code === 'KeyJ' || e.code === 'KeyL') {
+      //
+      // 7.6.0: the ladder continues below its bottom rung into REVERSE, the
+      // way a shuttle control does: at 1x, J goes to 0.5x; J again goes into
+      // reverse (1x backwards); L out of reverse returns to 0.5x forwards
+      // and keeps playing if the shuttle was running. Further J presses in
+      // reverse do nothing — there is one reverse gear.
+      if (e.code === 'KeyJ') {
         e.preventDefault()
-        const dir = e.code === 'KeyL' ? 1 : -1
-        setPlaybackSpeed((prev) => {
-          const i = nearestSpeedIndex(prev)
-          const next = Math.max(0, Math.min(PLAYBACK_SPEEDS.length - 1, i + dir))
-          return PLAYBACK_SPEEDS[next]
-        })
+        if (reverseRef.current) return
+        const i = nearestSpeedIndex(playbackSpeedRef.current)
+        if (i === 0) enterReverse()
+        else setPlaybackSpeed(PLAYBACK_SPEEDS[i - 1])
+        return
+      }
+      if (e.code === 'KeyL') {
+        e.preventDefault()
+        if (reverseRef.current) {
+          exitReverse(PLAYBACK_SPEEDS[0], reverseRunningRef.current)
+          return
+        }
+        const i = nearestSpeedIndex(playbackSpeedRef.current)
+        setPlaybackSpeed(PLAYBACK_SPEEDS[Math.min(PLAYBACK_SPEEDS.length - 1, i + 1)])
         return
       }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [enterReverse, exitReverse])
 
   const handleVolumeChange = (newVolume: number) => {
     if (videoRef.current) {
@@ -3001,12 +3137,22 @@ export default function VideoPlayer({
                   videoRef={videoRef as React.RefObject<HTMLVideoElement>}
                   videoDuration={videoDuration}
                   currentTime={currentTimeState}
-                  isPlaying={isPlaying}
+                  isPlaying={isPlaying || (reverse && reverseRunning)}
                   volume={volume}
                   isMuted={isMuted}
                   isFullscreen={isFullscreen}
                   onPlayPause={handlePlayPause}
-                  onSeek={handleTimelineSeek}
+                  reverseActive={reverse}
+                  onToggleReverse={() =>
+                    reverse ? exitReverse(1, reverseRunning) : enterReverse()
+                  }
+                  onSeek={(time) => {
+                    // 7.6.0: a hand on the timeline pauses the shuttle — a drag
+                    // would otherwise fight the loop for currentTime. Mode
+                    // stays; play resumes reverse from the new spot.
+                    if (reverse) setReverseRunning(false)
+                    handleTimelineSeek(time)
+                  }}
                   onVolumeChange={handleVolumeChange}
                   onToggleMute={handleToggleMute}
                   onToggleFullscreen={handleToggleFullscreen}
@@ -3075,7 +3221,9 @@ export default function VideoPlayer({
                   onFlagMarkerDelete={deleteMarker}
                   onFlagMarkerUpdate={updateMarker}
                   playbackSpeed={playbackSpeed}
-                  onPlaybackSpeedChange={setPlaybackSpeed}
+                  onPlaybackSpeedChange={(speed) =>
+                    reverse ? exitReverse(speed, reverseRunning) : setPlaybackSpeed(speed)
+                  }
                   resolvedPlaybackQuality={resolvedPlaybackQuality as any}
                   availableQualities={availableQualities as any}
                   pendingQualities={pendingQualities}

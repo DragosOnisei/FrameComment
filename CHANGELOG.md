@@ -14,6 +14,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.0] - 2026-09-03
+
+### Added
+
+- **Reverse playback.** A rewind button sits to the left of Play, and the
+  speed ladder now continues below its bottom rung into reverse, the way a
+  shuttle control does: at 1x, J goes to 0.5x; J again goes into reverse (1x
+  backwards); L out of reverse returns to 0.5x forwards and keeps playing if
+  the shuttle was running. Space and the play button pause and resume the
+  backward motion without leaving reverse; the reverse button, the speed
+  menu and Ctrl+/ leave it; reaching 0 leaves it too. A hand on the timeline
+  pauses the shuttle so a drag never fights it for the playhead. While in
+  reverse the speed pill reads "⏪ 1x".
+  - Browsers ignore a negative `playbackRate` on `<video>`, so reverse is
+    done the way Frame.io and Resolve do it: the element stays paused and a
+    frame-stepping loop walks `currentTime` backwards at the clip's frame
+    rate — 25 seeks a second on a 25fps clip, never 60 — carrying the
+    fractional remainder so wall-clock speed stays exact when a seek runs
+    late. Silent by nature. The step is clamped to a quarter second per tick
+    because `requestAnimationFrame` stops in a hidden tab; without the clamp
+    the first frame after switching back would have carried minutes of
+    "elapsed" time and teleported the playhead to 0. The arithmetic lives in
+    `advanceShuttle` (lib/video-speed) so the simulation runs the same code.
+- **0.5x is back on the speed ladder** (0.5 · 1 · 1.1 · 1.15 · 1.2 · 1.25 ·
+  1.5 · 2 · 4). It is a viewing speed only: the Save button does not offer
+  0.5x, because the rewrite pins the source frame rate and a 0.5x master
+  would be slow motion by frame duplication — a stuttering deliverable
+  nobody asked for. A real slow-mo export needs interpolation, not a flag.
+
 ## [7.5.1] - 2026-09-03
 
 ### Fixed

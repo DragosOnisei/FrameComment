@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Trash2, MapPin } from 'lucide-react'
+import { Play, Pause, Rewind, Volume2, VolumeX, Maximize, Minimize, Trash2, MapPin } from 'lucide-react'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
@@ -31,6 +31,12 @@ interface CustomVideoControlsProps {
   isMuted: boolean
   isFullscreen: boolean
   onPlayPause: () => void
+  /** 7.6.0: reverse playback (shuttle). Absent = no reverse button (the
+   *  comparison view). `reverseActive` lights the button while the player is
+   *  in reverse mode; `isPlaying` already reflects reverse motion, so the
+   *  play/pause button needs nothing extra. */
+  reverseActive?: boolean
+  onToggleReverse?: () => void
   onSeek: (time: number) => void
   onVolumeChange: (volume: number) => void
   onToggleMute: () => void
@@ -403,6 +409,8 @@ export default function CustomVideoControls({
   isMuted,
   isFullscreen,
   onPlayPause,
+  reverseActive = false,
+  onToggleReverse,
   onSeek,
   onVolumeChange,
   onToggleMute,
@@ -3309,6 +3317,33 @@ export default function CustomVideoControls({
       <div className="flex items-center gap-1 sm:gap-2 px-1">
         {/* LEFT GROUP */}
         <div className="flex items-center gap-0.5 sm:gap-1 flex-1 min-w-0">
+          {/* 7.6.0: Reverse, left of Play. Browsers do not play <video>
+              backwards (a negative playbackRate is ignored), so the player
+              shuttles currentTime back frame by frame instead — the way
+              Frame.io and Resolve do it, without sound. J walks down the speed
+              ladder and, below 0.5x, into reverse; L walks back out. */}
+          {onToggleReverse && (
+            <button
+              type="button"
+              onClick={onToggleReverse}
+              aria-pressed={reverseActive}
+              aria-label={t('reversePlayback')}
+              title={`${t('reversePlayback')} (J)`}
+              className={`p-2 rounded-md transition-colors touch-manipulation ${
+                reverseActive ? 'text-white' : 'text-white/85 hover:text-white hover:bg-white/[0.10] active:bg-white/[0.18]'
+              }`}
+              style={
+                reverseActive
+                  ? {
+                      backgroundColor: 'hsl(var(--spotlight-tint) / 0.30)',
+                      boxShadow: 'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.45)',
+                    }
+                  : undefined
+              }
+            >
+              <Rewind className="w-5 h-5 text-white fill-white" />
+            </button>
+          )}
           <button
             onClick={onPlayPause}
             className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
@@ -3331,6 +3366,7 @@ export default function CustomVideoControls({
             <PlaybackSpeedMenu
               value={playbackSpeed ?? 1}
               onChange={onPlaybackSpeedChange}
+              reverse={reverseActive}
               className="ml-0.5 sm:ml-1"
             />
           )}

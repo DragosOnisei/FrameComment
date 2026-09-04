@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Rewind } from 'lucide-react'
 import { PLAYBACK_SPEED_LADDER } from '@/lib/video-speed'
 
 /**
@@ -39,9 +40,13 @@ interface PlaybackSpeedMenuProps {
   value: number
   onChange: (speed: number) => void
   className?: string
-  /** Override the list of speeds. Defaults to the full 0.5×–8× ladder.
+  /** Override the list of speeds. Defaults to the full ladder.
    *  The comparison view passes a tighter 0.75×–2× set. */
   options?: readonly number[]
+  /** 7.6.0: the player is shuttling BACKWARDS at `value`. The pill shows the
+   *  rewind glyph in front of the speed ("⏪ 1x") so the direction is legible
+   *  at a glance, not only from the lit reverse button. */
+  reverse?: boolean
 }
 
 function formatSpeed(s: number): string {
@@ -55,6 +60,7 @@ export default function PlaybackSpeedMenu({
   onChange,
   className = '',
   options = DEFAULT_SPEED_OPTIONS,
+  reverse = false,
 }: PlaybackSpeedMenuProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -145,9 +151,9 @@ export default function PlaybackSpeedMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Playback speed"
+        title={reverse ? 'Playback speed — reverse' : 'Playback speed'}
         className={`
-          inline-flex items-center justify-center
+          inline-flex items-center justify-center gap-1
           h-7 px-2.5 rounded-md
           text-xs font-mono tabular-nums font-medium
           ring-1 transition-colors
@@ -156,6 +162,7 @@ export default function PlaybackSpeedMenu({
             : 'bg-white/[0.06] ring-white/10 text-white/85 hover:bg-white/[0.12] hover:ring-white/20 hover:text-white'}
         `}
       >
+        {reverse && <Rewind className="w-3.5 h-3.5 -ml-0.5 fill-current" aria-hidden />}
         {formatSpeed(value)}
       </button>
 

@@ -1954,6 +1954,7 @@
     "nextFrame": "Next Frame",
     "pauseVideo": "Pause",
     "playVideo": "Play",
+    "reversePlayback": "Reverse",
     "mute": "Mute",
     "unmute": "Unmute",
     "exitFullscreen": "Exit Fullscreen",

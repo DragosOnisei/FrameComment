@@ -13,13 +13,19 @@ import { timecodeToSeconds, secondsToTimecode } from '@/lib/timecode'
  * on that frame after the frame moved earlier in time.
  */
 
-/** The speed ladder, per Dragos's spec (2026-09-02). 1x plus the seven
- *  saveable factors. The menu renders exactly this; J/L step through it. */
-export const PLAYBACK_SPEED_LADDER = [1, 1.1, 1.15, 1.2, 1.25, 1.5, 2, 4] as const
+/** The speed ladder, per Dragos's spec (2026-09-02, 0.5x added 2026-09-03).
+ *  The menu renders exactly this; J/L step through it, and J below the
+ *  bottom rung enters reverse playback (see VideoPlayer). */
+export const PLAYBACK_SPEED_LADDER = [0.5, 1, 1.1, 1.15, 1.2, 1.25, 1.5, 2, 4] as const
 
-/** Factors that can be BAKED into the file. 1x is not on it — saving a 1x
- *  "change" would re-encode the master for nothing. */
-export const SAVEABLE_SPEED_FACTORS = PLAYBACK_SPEED_LADDER.filter((f) => f !== 1)
+/** Factors that can be BAKED into the file: strictly faster than 1x. 1x is
+ *  not on it — saving a 1x "change" would re-encode the master for nothing.
+ *  0.5x is not on it either, on purpose: the rewrite pins the source frame
+ *  rate, so a 0.5x master would be slow motion by frame DUPLICATION — a
+ *  stuttering deliverable nobody asked for. Half speed is a viewing aid; if
+ *  a real slow-mo export is ever wanted it needs frame interpolation, not a
+ *  flag flip here. */
+export const SAVEABLE_SPEED_FACTORS = PLAYBACK_SPEED_LADDER.filter((f) => f > 1)
 
 /**
  * 7.5.0: sessionStorage key set by the player right before the post-confirm
@@ -79,4 +85,32 @@ export function rescaleTimecodeForSpeed(
   fps: number,
 ): string {
   return secondsToTimecode(timecodeToSeconds(timecode, fps) / factor, fps)
+}
+
+/**
+ * 7.6.0: one tick of the reverse shuttle, as arithmetic.
+ *
+ * The loop in VideoPlayer runs on requestAnimationFrame and asks this how
+ * many whole FRAMES to step back this tick. Frame-quantized because seeking
+ * is what costs (an HLS seek may fetch a segment): 1x reverse on a 25fps clip
+ * is 25 seeks a second, never 60. The fractional remainder is carried so the
+ * wall-clock speed stays exact even when a seek runs late. The step is clamped
+ * because rAF stops entirely in a hidden tab — the first tick after coming
+ * back would otherwise carry minutes of "elapsed" time and teleport the
+ * playhead to 0. Pure, so the simulation exercises the same code.
+ */
+export const SHUTTLE_MAX_STEP_SECONDS = 0.25
+
+export function advanceShuttle(
+  carrySeconds: number,
+  elapsedSeconds: number,
+  speed: number,
+  fps: number,
+): { frames: number; carry: number } {
+  const frame = 1 / (fps > 0 ? fps : 24)
+  const step = Math.min(Math.max(0, elapsedSeconds), SHUTTLE_MAX_STEP_SECONDS) * speed
+  let carry = carrySeconds + step
+  const frames = Math.floor(carry / frame)
+  carry -= frames * frame
+  return { frames, carry }
 }
