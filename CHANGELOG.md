@@ -14,6 +14,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.8.0] - 2026-09-09
+
+### Added
+
+- **Export markers for Premiere.** The three-dot menu next to Copy / Paste
+  comments has a third entry: it downloads a Final Cut Pro 7 XML file that
+  Premiere Pro imports (File → Import) as a sequence named after the cut, with
+  one marker per comment at the comment's frame — the author and the first
+  line as the marker name, the full text and the replies as the marker
+  comment, ranged comments as markers with a duration. The same markers sit on
+  the clip inside the sequence so they can be copied onto the real timeline.
+  The referenced media is offline on purpose (we cannot know the editor's
+  local path); relinking is one click and the markers do not depend on it.
+  Frame numbers go through the player's own timecode arithmetic, drop-frame
+  included. Admin view only; images have no timeline and get no entry.
+- **Lists in comments.** Type "1. " and press Shift+Enter: the next line
+  starts with "2. ", and any numbered lines that follow are renumbered;
+  Shift+Enter on an empty item ends the list. "- " bullets do the same. The
+  composer is a plain text box, so the indent shows where it can: the posted
+  comment renders those lines as a real numbered or bulleted list, with the
+  hanging indent. The text is stored exactly as typed — copy, paste, e-mail
+  and the Premiere export keep seeing "1. …".
+
+### Fixed
+
+- **Clicking a notification lands on the comment again, highlight included.**
+  Three things had broken the promise made in 6.14.0, and they hid behind each
+  other:
+  - Inside the review page, a bell click is a client-side navigation: the
+    query string changes, the page does not remount — and every URL-derived
+    value was read once, at mount. The focused comment stayed the first one
+    ever targeted, the active video stayed the one already open; the click
+    looked like nothing happened, sometimes not even the right video. The
+    same link from the Projects page worked, because that mounts fresh. The
+    page now follows the URL while mounted: the comment, the video group and
+    the exact version inside a stack (a note on v2 of three cuts was never in
+    the visible list before — the player opened the group at its first cut).
+    Clicking the same notification twice tells the comments panel directly,
+    since the URL does not change at all.
+  - A notification opened from a push loads the page from scratch, and the
+    comments arrive after the project and the video have resolved — routinely
+    later than the 1.3 s the scroll-to-comment used to wait. Worse, the id was
+    latched before the first attempt, so when the comments finally landed the
+    retry was skipped. It now latches only once the card is found and keeps
+    trying as comments arrive.
+  - A reply had no anchor at all, so "X replied to your comment" could never
+    scroll to X's reply. Replies are anchored like cards and get the same
+    selection and pulse.
+- **A notification opened from a push is marked read.** The bell marked a row
+  read when clicked, but a push opens the page straight from the operating
+  system and never passes through the bell — the row stayed unread and the
+  badge kept counting it. The link now carries the notification id and the
+  review page marks it read on arrival (idempotent, so the bell path doing it
+  twice costs nothing).
+- **Re-registering a push device kept its name and switches** (7.7.1 shipped
+  the fix; noted here because the same batch of testing found it).
+- **An emoji on the composer's second line no longer sits under the timecode
+  chip.** The chip is 20.5 px tall and reaches 22.5 px down; with 19 px lines
+  the second line began underneath it, and an emoji — taller than a letter —
+  was drawn half under the chip. Lines are 24 px now.
+
+### Internal
+
+- New: `src/lib/premiere-markers.ts` (pure XML builder, `fpsToRate`,
+  `timecodeToFrame`, `commentPlainText`), `src/lib/comment-lists.ts`
+  (`continueListOnNewline`, `plainTextListsToHtml`). `notificationDeepLink`
+  takes an optional `notificationId`; the review page follows
+  `urlTargetVideoName` and `urlVideoId` while mounted and fires the existing
+  `selectVideoVersion` / `selectVideoForComments` events for the version;
+  `handleVideoSelect` drops a deep link's `videoId`, `comment` and
+  `notification` params when the reviewer picks another video, so a stale id
+  no longer wins over the chosen name on reload. CommentSection's focus
+  routine is one function reached by the prop and by the `comment:focus`
+  window event.
+- Verified: tsc 0 errors, eslint clean on new files (the composer's 12
+  rules-of-hooks errors predate this release and are untouched); 40 cases
+  against the pure functions; the generated XML parsed by a standard XML
+  parser (sequence and clip markers, sorted, ranges, escaping); in a browser
+  on the public share page — a full page load with a deep link to a reply
+  selected and pulsed the reply, a client-side query change (no reload)
+  moved the selection to the new comment, the `comment:focus` event lit the
+  same card twice in a row, list text rendered as `<ol>`/`<ul>`, Shift+Enter
+  continued and ended a list, the composer's line height measured 24 px. Not
+  verifiable from the sandbox: the import in Premiere Pro itself, and the
+  admin-only video-group / version follow (no sign-in from the sandbox).
+
 ## [7.7.1] - 2026-09-09
 
 ### Fixed

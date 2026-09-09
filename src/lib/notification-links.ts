@@ -20,7 +20,19 @@ export interface NotificationLinkTarget {
   commentId?: string | null
 }
 
-export function notificationDeepLink(n: NotificationLinkTarget): string | null {
+export interface NotificationLinkOptions {
+  /**
+   * 7.8.0: the bell row this link came from. The review page marks it read on
+   * arrival, so a notification opened from a push (which never passes through
+   * the bell's click handler) does not stay unread forever.
+   */
+  notificationId?: string | null
+}
+
+export function notificationDeepLink(
+  n: NotificationLinkTarget,
+  opts: NotificationLinkOptions = {},
+): string | null {
   // 5.14: EARLY_ACCESS rows (landing-page requests) have no video to open;
   // 7.3.1 FEEDBACK_UPDATE rows neither. Clicking those just marks them read.
   if (!n.projectId || !n.videoName) return null
@@ -33,5 +45,6 @@ export function notificationDeepLink(n: NotificationLinkTarget): string | null {
   // 6.14.0: land ON the comment. The review page already knows how to read
   // `?comment=` — it scrolls the thread to that card and lifts it.
   if (n.commentId) params.set('comment', n.commentId)
+  if (opts.notificationId) params.set('notification', opts.notificationId)
   return `/admin/projects/${n.projectId}/share?${params.toString()}`
 }

@@ -485,7 +485,7 @@ export function formatBellPush(n: BellPushSource, s: BellPushStrings = {}): Push
       bellType: n.type,
       notificationId: n.id,
       // Same destination as clicking the bell row (video, folder, comment).
-      url: notificationDeepLink(n) ?? '/admin',
+      url: notificationDeepLink(n, { notificationId: n.id }) ?? '/admin',
       ...(n.projectId ? { projectId: n.projectId } : {}),
     },
   }

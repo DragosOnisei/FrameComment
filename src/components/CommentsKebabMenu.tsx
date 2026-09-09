@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { MoreVertical, ClipboardCopy, ClipboardPaste } from 'lucide-react'
+import { MoreVertical, ClipboardCopy, ClipboardPaste, FileDown } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 /**
  * Three-dot menu that lives in the top-right of the comments sidebar
@@ -36,6 +37,13 @@ export interface CommentsKebabMenuProps {
    *  so the phone header stays compact. Interactive content is fine — clicks
    *  inside the popover don't close it. */
   nameSection?: ReactNode
+  /**
+   * 7.8.0: "Export markers for Premiere". Present only where the host can
+   * build the file (admin view, a video with a frame rate); absent = no item.
+   */
+  onExport?: () => Promise<void> | void
+  /** Comments the export would contain — shown next to the item; 0 disables it. */
+  exportCount?: number
 }
 
 export default function CommentsKebabMenu({
@@ -44,7 +52,10 @@ export default function CommentsKebabMenu({
   onPaste,
   hasClipboard,
   nameSection,
+  onExport,
+  exportCount = 0,
 }: CommentsKebabMenuProps) {
+  const t = useTranslations('comments')
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -132,8 +143,18 @@ export default function CommentsKebabMenu({
     }
   }
 
+  const runExport = async () => {
+    setOpen(false)
+    try {
+      await onExport?.()
+    } catch {
+      /* no inline toast */
+    }
+  }
+
   const canCopy = commentCount > 0
   const canPaste = hasClipboard
+  const canExport = exportCount > 0
 
   return (
     <div ref={wrapperRef} className="relative shrink-0">
@@ -218,6 +239,26 @@ export default function CommentsKebabMenu({
             <ClipboardPaste className="w-4 h-4 shrink-0" />
             <span className="flex-1">Paste comments</span>
           </button>
+          {onExport && (
+            <button
+              role="menuitem"
+              type="button"
+              onClick={runExport}
+              disabled={!canExport}
+              title={t('exportPremiereMarkersHint')}
+              className={`
+                w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
+                transition-colors text-left
+                ${canExport ? 'hover:bg-white/[0.08]' : 'opacity-40 cursor-not-allowed'}
+              `}
+            >
+              <FileDown className="w-4 h-4 shrink-0" />
+              <span className="flex-1">{t('exportPremiereMarkers')}</span>
+              {exportCount > 0 && (
+                <span className="text-xs text-white/55 tabular-nums">{exportCount}</span>
+              )}
+            </button>
+          )}
         </div>,
         document.body
       )}

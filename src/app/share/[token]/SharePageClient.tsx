@@ -67,6 +67,11 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   const isSingleVideoShare = !!(searchParams?.get('sig'))
 
   const [focusCommentId, setFocusCommentId] = useState<string | null>(urlFocusCommentId)
+  // 7.8.0: follow `?comment=` while mounted, not only at mount — same fix as
+  // the admin review page (a client-side navigation does not remount this).
+  useEffect(() => {
+    if (urlFocusCommentId) setFocusCommentId(urlFocusCommentId)
+  }, [urlFocusCommentId])
   const [isPasswordProtected, setIsPasswordProtected] = useState<boolean | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isGuest, setIsGuest] = useState(false)

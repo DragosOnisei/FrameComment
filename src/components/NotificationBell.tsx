@@ -136,10 +136,20 @@ export default function NotificationBell() {
   const onRowClick = (n: InAppNotification) => {
     // Opening the video marks it read but keeps it in the list.
     if (!n.isRead) void markRead(n.id)
-    const link = notificationDeepLink(n)
+    const link = notificationDeepLink(n, { notificationId: n.id })
     if (link) {
       setOpen(false)
       router.push(link)
+      // 7.8.0: when the review page is already open on this video the URL may
+      // not change at all (the same notification clicked twice), and a changed
+      // query does not remount the page — so tell the comments panel directly.
+      // Harmless when the page is not there yet: nobody is listening, and the
+      // URL carries the same request for when it mounts.
+      if (n.commentId) {
+        window.dispatchEvent(
+          new CustomEvent('comment:focus', { detail: { commentId: n.commentId } }),
+        )
+      }
     }
   }
 

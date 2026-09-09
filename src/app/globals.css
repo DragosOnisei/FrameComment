@@ -538,6 +538,24 @@
     }
   }
 
+  /* 7.8.0: a reply can be the target of a deep link too — "X replied to your
+     comment" lands on the reply, not on the thread. Replies are not cards, so
+     the two card-only rules get a reply twin: the same pulse, and a lighter
+     selected tint that fits inside the parent card. */
+  .comment-reply.is-focus-pulse {
+    animation: comment-focus-pulse 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    will-change: transform;
+  }
+  .comment-reply.is-selected {
+    background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.14);
+    box-shadow: 0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.35);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .comment-reply.is-focus-pulse {
+      animation: none;
+    }
+  }
+
   /* 7.3.3: after a paste, the notes that just arrived say so.
      
      Pasting a batch onto a cut that already has forty comments used to be

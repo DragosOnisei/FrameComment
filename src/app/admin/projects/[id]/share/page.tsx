@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation'
+import { useNotifications } from '@/contexts/NotificationsContext'
 import Link from 'next/link'
 import VideoPlayer from '@/components/VideoPlayer'
 import CommentSection from '@/components/CommentSection'
@@ -121,6 +122,9 @@ function AdminSharePageInner() {
   const urlVideoId = searchParams?.get('videoId') || null
   const urlVersion = searchParams?.get('version') ? parseInt(searchParams.get('version')!, 10) : null
   const urlFocusCommentId = searchParams?.get('comment') || null
+  // 7.8.0: the bell row that brought us here (`&notification=<id>`, added by
+  // the bell and by the push payload). Marked read on arrival — see below.
+  const urlNotificationId = searchParams?.get('notification') || null
   // 3.9.x: the folder the video was opened from (FolderBrowser appends
   // `&folderId=`). CRITICAL for version scoping: two videos with the
   // SAME name in DIFFERENT folders (e.g. a low-res stack in "IN EDIT"
@@ -130,6 +134,32 @@ function AdminSharePageInner() {
   const urlFolderId = searchParams?.get('folderId') || null
 
   const [focusCommentId, setFocusCommentId] = useState<string | null>(urlFocusCommentId)
+  // 7.8.0: follow the URL while mounted. A bell click from inside this page is
+  // a client-side navigation — the query string changes, the component does
+  // not remount — and the initializer above only ever ran once. Timeline
+  // marker clicks keep writing the same state through `onCommentFocus`.
+  useEffect(() => {
+    if (urlFocusCommentId) setFocusCommentId(urlFocusCommentId)
+  }, [urlFocusCommentId])
+  /**
+   * 7.8.0: arriving here from a notification marks that notification read.
+   *
+   * The bell already marks a row read when it is clicked, but a push
+   * notification opens this URL straight from the operating system and never
+   * passes through the bell — so the row stayed unread, the badge kept
+   * counting it, and the person who had plainly seen the comment was told
+   * they had not. Idempotent on the server, so the bell path doing it twice
+   * costs nothing.
+   */
+  const { markRead: markNotificationRead } = useNotifications()
+  const markedNotificationRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!urlNotificationId || markedNotificationRef.current === urlNotificationId) return
+    markedNotificationRef.current = urlNotificationId
+    void markNotificationRead(urlNotificationId).catch(() => {
+      /* best effort — the badge is not worth a visible error */
+    })
+  }, [urlNotificationId, markNotificationRead])
   const [project, setProject] = useState<any>(null)
   const [comments, setComments] = useState<any[]>([])
   const [_commentsLoading, setCommentsLoading] = useState(false)
@@ -1199,13 +1229,9 @@ function AdminSharePageInner() {
     [activeVideos, activeVideosRaw],
   )
 
-  // Handle video selection
-  const handleVideoSelect = useCallback((videoName: string, fromGrid = false) => {
-    // 6.3.1: only a click in the in-page grid counts as "entered via grid".
-    // The version reel's prev/next arrows also call this, and marking them as
-    // grid entries made "Back" drop the user into the project-wide grid
-    // instead of returning to the folder they came from.
-    if (fromGrid) enteredViaGridRef.current = true
+  // 7.8.0: switching the player to another name-group — shared by the
+  // in-page click (handleVideoSelect) and by the URL-follow effect below.
+  const activateVideoGroup = useCallback((videoName: string) => {
     setActiveVideoName(videoName)
     setActiveVideosRaw(scopeGroupToFolder(project.videosByName[videoName]))
     setViewState('player')
@@ -1216,11 +1242,77 @@ function AdminSharePageInner() {
     // would briefly show the wrong clip in the player). Reset so
     // the next successful tokenization seeds a fresh baseline.
     lastGoodActiveVideosRef.current = []
+  }, [project?.videosByName, scopeGroupToFolder])
+
+  // Handle video selection
+  const handleVideoSelect = useCallback((videoName: string, fromGrid = false) => {
+    // 6.3.1: only a click in the in-page grid counts as "entered via grid".
+    // The version reel's prev/next arrows also call this, and marking them as
+    // grid entries made "Back" drop the user into the project-wide grid
+    // instead of returning to the folder they came from.
+    if (fromGrid) enteredViaGridRef.current = true
+    activateVideoGroup(videoName)
 
     const params = new URLSearchParams(searchParams?.toString() || '')
     params.set('video', videoName)
+    // 7.8.0: a deep link's stable id, comment and notification describe the
+    // video the link opened, not the one being chosen now. Left in place, the
+    // id would win over the name on the next reload (see urlTargetVideoName)
+    // and put the reviewer back on the notification's video.
+    params.delete('videoId')
+    params.delete('comment')
+    params.delete('notification')
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-  }, [project?.videosByName, searchParams, pathname, router, scopeGroupToFolder])
+  }, [activateVideoGroup, searchParams, pathname, router])
+
+  /**
+   * 7.8.0: follow the URL while the page stays mounted.
+   *
+   * Clicking a bell notification from inside the review page is a client-side
+   * navigation: `router.push` swaps the query string and this component
+   * re-renders with new search params — it does not remount. Until now every
+   * URL-derived value was read once, into state, at mount: `activeVideoName`
+   * kept the video you were on, `focusCommentId` kept the first comment ever
+   * targeted, and the click appeared to do nothing — no highlight, sometimes
+   * not even the right video. The same link opened from the projects page
+   * worked, because that mounts fresh; which is why it passed the first test
+   * and failed in real use.
+   *
+   * The name-group follows here, the exact version in the next effect, and
+   * `focusCommentId` in the effect beside its state; CommentSection then
+   * retries until the comment is on screen. Guarded by the last URL target
+   * applied, so a video the reviewer picks by hand afterwards is not undone
+   * on the next re-render.
+   */
+  const appliedUrlTargetRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!urlTargetVideoName) return
+    if (appliedUrlTargetRef.current === urlTargetVideoName) return
+    appliedUrlTargetRef.current = urlTargetVideoName
+    if (urlTargetVideoName === activeVideoName) return
+    if (!project?.videosByName?.[urlTargetVideoName]) return
+    activateVideoGroup(urlTargetVideoName)
+  }, [urlTargetVideoName, activeVideoName, project?.videosByName, activateVideoGroup])
+
+  /**
+   * 7.8.0: land on the VERSION the link names, not on the group's first cut.
+   *
+   * A bell row carries the id of the exact cut the comment is on. The player
+   * opens every group at index 0 and the comments panel follows the player, so
+   * a note on v2 of a three-cut stack was never in the visible list and could
+   * not be highlighted. Both the player and the panel already accept a version
+   * by id over window events (the version dropdown uses the same two); they are
+   * fired once per URL id, as soon as that video is in the active group — which
+   * is also after the player's own "new group → index 0" reset has run.
+   */
+  const appliedUrlVideoIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!urlVideoId || appliedUrlVideoIdRef.current === urlVideoId) return
+    if (!activeVideos.some((v: any) => v?.id === urlVideoId)) return
+    appliedUrlVideoIdRef.current = urlVideoId
+    window.dispatchEvent(new CustomEvent('selectVideoVersion', { detail: { videoId: urlVideoId } }))
+    window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: urlVideoId } }))
+  }, [urlVideoId, activeVideos])
 
   // 3.9.x: folder-scoped view of `videosByName` for the player's version
   // reel (ThumbnailReel). Each name-group is narrowed to the current

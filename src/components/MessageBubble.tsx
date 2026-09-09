@@ -1,5 +1,7 @@
 'use client'
 
+import { plainTextListsToHtml } from '@/lib/comment-lists'
+
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
@@ -790,9 +792,12 @@ export default function MessageBubble({
                     )}
                   </>
                 )}
+                {/* 7.8.0: "1. …" / "- …" lines render as real lists — see
+                    src/lib/comment-lists.ts. Display-only; the text is stored
+                    as typed. */}
                 <span
-                  className="[&>p]:m-0 [&>p]:inline"
-                  dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
+                  className="[&>p]:m-0 [&>p]:inline [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:pl-5 [&_ul]:pl-5 [&_ol]:my-0.5 [&_ul]:my-0.5 [&_li]:pl-0.5"
+                  dangerouslySetInnerHTML={{ __html: plainTextListsToHtml(sanitizeContent(comment.content)) }}
                 />
               </div>
             )}
@@ -1087,7 +1092,13 @@ export default function MessageBubble({
                     isInternal={reply.isInternal ?? false}
                   />
                 </div>
-                <div className="min-w-0">
+                {/* 7.8.0: anchored like a card so a deep link (bell row, push
+                    notification) can land ON the reply; `.comment-reply`
+                    takes the same highlight classes a card does. */}
+                <div
+                  id={`comment-${reply.id}`}
+                  className="min-w-0 comment-reply rounded-md transition-colors"
+                >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-semibold text-foreground truncate">
                       {replyEffectiveName || t('anonymous')}
@@ -1172,8 +1183,8 @@ export default function MessageBubble({
                   ) : (
                     <>
                       <div
-                        className="mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words leading-snug [&>p]:m-0"
-                        dangerouslySetInnerHTML={{ __html: sanitizeContent(reply.content) }}
+                        className="mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words leading-snug [&>p]:m-0 [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:pl-5 [&_ul]:pl-5 [&_ol]:my-0.5 [&_ul]:my-0.5 [&_li]:pl-0.5"
+                        dangerouslySetInnerHTML={{ __html: plainTextListsToHtml(sanitizeContent(reply.content)) }}
                       />
                       {(reply as any).assets && (reply as any).assets.length > 0 && (
                         <div className="mt-1.5">

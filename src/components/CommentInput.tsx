@@ -11,6 +11,7 @@ import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Send, X, Paperclip, Pencil, PenTool, Flag } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
+import { continueListOnNewline } from '@/lib/comment-lists'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachmentButton, { type CommentAttachmentButtonHandle } from './CommentAttachmentButton'
 import VoiceRecorderButton from './VoiceRecorderButton'
@@ -600,6 +601,34 @@ export default function CommentInput({
       }
     }
 
+    // 7.8.0: Shift+Enter inside a list item continues the list ("1. " →
+    // "2. ", "- " → "- ") and renumbers what follows; on an empty item it
+    // ends the list instead. Any other line: the browser's own newline.
+    if (e.key === 'Enter' && e.shiftKey) {
+      const el = e.currentTarget
+      const next = continueListOnNewline(
+        el.value,
+        el.selectionStart ?? el.value.length,
+        el.selectionEnd ?? el.value.length,
+      )
+      if (next) {
+        e.preventDefault()
+        // Written to the DOM as well as to React state for the reason the
+        // emoticon handler below documents: the native `input` sync listener
+        // must never find stale text in the element.
+        el.value = next.value
+        onCommentChange(next.value)
+        requestAnimationFrame(() => {
+          try {
+            el.setSelectionRange(next.caret, next.caret)
+          } catch {
+            /* best effort */
+          }
+        })
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       // Prevent multiple submissions while loading
@@ -945,14 +974,22 @@ export default function CommentInput({
                   onPaste={handlePaste}
                   onFocus={onInputFocus}
                   maxLength={MAX_COMMENT_LENGTH}
-                  className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-snug"
+                  /**
+                   * 7.8.0: `leading-6`, was `leading-snug`. The timecode chip is
+                   * 20.5 px tall and sits 2 px down, so it reaches 22.5 px; with
+                   * 19 px lines the second line started underneath it, and an
+                   * emoji — taller than a letter — was drawn half under the chip.
+                   * 24 px lines start the second line below the chip with room
+                   * to spare. The placeholder overlay below matches.
+                   */
+                  className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-6"
                   style={{ textIndent: firstLineIndent }}
                   rows={1}
                 />
                 {!newComment && (
                   <span
                     aria-hidden="true"
-                    className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm leading-snug"
+                    className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm leading-6"
                     style={{ textIndent: firstLineIndent }}
                   >
                     {markerMode ? 'Note (optional)' : t('typeMessage')}

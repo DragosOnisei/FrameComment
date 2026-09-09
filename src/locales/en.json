@@ -751,6 +751,8 @@
   },
   "comments": {
     "feedbackAndDiscussion": "All comments",
+    "exportPremiereMarkers": "Export markers for Premiere",
+    "exportPremiereMarkersHint": "Downloads a Final Cut Pro 7 XML file. In Premiere Pro, File \u2192 Import creates a sequence with one marker per comment.",
     "hideFeedback": "Hide Feedback Section",
     "showFeedback": "Show Feedback",
     "currentlyViewing": "Currently viewing:",

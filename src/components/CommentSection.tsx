@@ -28,6 +28,7 @@ import {
   type ClippedComment,
 } from '@/lib/comments-clipboard'
 import { pasteClippedThreads } from '@/lib/comments-paste'
+import { buildPremiereMarkersXml, premiereMarkersFileName } from '@/lib/premiere-markers'
 import { emoticonOnChange } from '@/lib/emoticons'
 
 type CommentWithReplies = Comment & {
@@ -981,14 +982,30 @@ export default function CommentSection({
   }, [initialComments])
 
   const lastFocusedCommentRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!focusCommentId) return
-    if (lastFocusedCommentRef.current === focusCommentId) return
 
-    lastFocusedCommentRef.current = focusCommentId
-
+  /**
+   * Scroll to a comment (or a reply) and light it up; returns a cancel.
+   *
+   * Retries while the card is not in the DOM yet. 7.8.0: was 6 × 200 ms with
+   * the id latched BEFORE the first attempt. A notification opened from a push
+   * loads this page from scratch and the comments arrive after the project and
+   * the video have resolved — routinely later than 1.3 s on production — so
+   * the retries ran out, and when the comments finally landed the re-run on
+   * `localComments.length` returned early because the id was already latched:
+   * no scroll, no highlight, "it takes me to the video but not to the
+   * comment". The id is latched only once the card was found.
+   *
+   * Reachable two ways: the `focusCommentId` prop (URL / timeline marker) and
+   * the `comment:focus` window event. The event exists because a bell click
+   * from inside the review page can target the comment that is ALREADY the
+   * URL's — the prop does not change, the effect cannot see the click, and
+   * the person sees nothing happen. Same reasoning as 7.3.7's
+   * `comment:selectFromTimeline`.
+   */
+  const focusCommentInList = useCallback((targetId: string): (() => void) => {
     let attempts = 0
-    const maxAttempts = 6
+    const maxAttempts = 15
+    let timer: ReturnType<typeof setTimeout> | null = null
 
     // 1.3.1+: on phones the comment list sits below the video, so
     // scrolling to a comment shoves the video off-screen. Skip the
@@ -1002,8 +1019,9 @@ export default function CommentSection({
 
     const tryScroll = () => {
       attempts += 1
-      const element = document.getElementById(`comment-${focusCommentId}`)
+      const element = document.getElementById(`comment-${targetId}`)
       if (element) {
+        lastFocusedCommentRef.current = targetId
         if (!isMobile) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' })
         }
@@ -1016,9 +1034,14 @@ export default function CommentSection({
         // class with transition-colors, so the bg + border fade
         // smoothly in/out.
         document
-          .querySelectorAll('.comment-card.is-selected')
+          .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
           .forEach((el) => el.classList.remove('is-selected'))
-        const card = element.querySelector<HTMLElement>('.comment-card')
+        // 7.8.0: a reply is a target too ("X replied to your comment" lands
+        // on the reply). Replies are not cards — the anchor element itself
+        // carries `.comment-reply` and takes the same two classes.
+        const card =
+          element.querySelector<HTMLElement>('.comment-card') ??
+          (element.classList.contains('comment-reply') ? element : null)
         if (card) {
           card.classList.add('is-selected')
           // 6.14.0: a one-shot scale beat so the eye lands on the right card
@@ -1036,12 +1059,36 @@ export default function CommentSection({
       }
 
       if (attempts < maxAttempts) {
-        setTimeout(tryScroll, 200)
+        timer = setTimeout(tryScroll, 200)
       }
     }
 
-    setTimeout(tryScroll, 100)
-  }, [focusCommentId, localComments.length])
+    timer = setTimeout(tryScroll, 100)
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!focusCommentId) return
+    if (lastFocusedCommentRef.current === focusCommentId) return
+    return focusCommentInList(focusCommentId)
+  }, [focusCommentId, localComments.length, focusCommentInList])
+
+  useEffect(() => {
+    let cancel: (() => void) | null = null
+    const onFocus = (e: Event) => {
+      const id = (e as CustomEvent).detail?.commentId
+      if (typeof id !== 'string' || !id) return
+      cancel?.()
+      cancel = focusCommentInList(id)
+    }
+    window.addEventListener('comment:focus', onFocus as EventListener)
+    return () => {
+      window.removeEventListener('comment:focus', onFocus as EventListener)
+      cancel?.()
+    }
+  }, [focusCommentInList])
 
   // 1.9.1+: persistent selection management for comment cards.
   // - Click on any .comment-card → marks THAT card as selected,
@@ -1098,7 +1145,7 @@ export default function CommentSection({
           // class churn → reflowed transitions).
           if (!card.classList.contains('is-selected')) {
             document
-              .querySelectorAll('.comment-card.is-selected')
+              .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
               .forEach((el) => el.classList.remove('is-selected'))
             card.classList.add('is-selected')
           }
@@ -1107,7 +1154,7 @@ export default function CommentSection({
         // Normal card click → make THIS one the selected one.
         if (!card.classList.contains('is-selected')) {
           document
-            .querySelectorAll('.comment-card.is-selected')
+            .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
             .forEach((el) => el.classList.remove('is-selected'))
           card.classList.add('is-selected')
         }
@@ -1115,7 +1162,7 @@ export default function CommentSection({
       }
       // Click landed OUTSIDE every comment card → clear selection.
       document
-        .querySelectorAll('.comment-card.is-selected')
+        .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
         .forEach((el) => el.classList.remove('is-selected'))
       /**
        * 7.3.3: and drop the real selection with it — the ticked circles, which
@@ -1805,6 +1852,58 @@ export default function CommentSection({
     return { count: clipped.length }
   }, [displayComments, projectId])
 
+  /**
+   * 7.8.0: the notes as Premiere Pro markers.
+   *
+   * Every top-level comment on the active cut — carried-over ones included,
+   * since a marker is about the cut, not about where the note was first
+   * written — becomes one marker in a Final Cut Pro 7 XML file that Premiere
+   * imports (File → Import). Built in the browser from what the sidebar
+   * already holds and handed over as a download; nothing is stored. Admin
+   * only, and only for a video with a frame rate (an image has no timeline).
+   * See src/lib/premiere-markers.ts for the format.
+   */
+  const exportableComments = useMemo(
+    () => (displayComments as any[]).filter((c) => !c.parentId),
+    [displayComments],
+  )
+  const canExportMarkers =
+    isAdminView && !!currentVideo && typeof currentVideo.fps === 'number' && currentVideo.fps > 0
+  const handleExportMarkers = useCallback(() => {
+    if (!currentVideo || !currentVideo.fps) return
+    const xml = buildPremiereMarkersXml(
+      {
+        name: currentVideo.name,
+        versionLabel: currentVideo.versionLabel,
+        fps: currentVideo.fps,
+        duration: currentVideo.duration,
+        width: currentVideo.width,
+        height: currentVideo.height,
+      },
+      exportableComments.map((c: any) => ({
+        timecode: c.timecode,
+        timecodeEnd: c.timecodeEnd ?? null,
+        authorName: c.authorName || c.user?.name || c.user?.email || null,
+        content: c.content ?? '',
+        replies: Array.isArray(c.replies)
+          ? c.replies.map((r: any) => ({
+              authorName: r.authorName || r.user?.name || r.user?.email || null,
+              content: r.content ?? '',
+            }))
+          : [],
+      })),
+    )
+    const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = premiereMarkersFileName(currentVideo)
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }, [currentVideo, exportableComments])
+
   /** One POST, admin or share flavour. */
   const postComment = useCallback(
     async (body: Record<string, unknown>) => {
@@ -2283,6 +2382,8 @@ export default function CommentSection({
               hasClipboard={hasClipboardForProject}
               onCopy={handleCopyComments}
               onPaste={handlePasteComments}
+              onExport={canExportMarkers ? handleExportMarkers : undefined}
+              exportCount={exportableComments.length}
             />
             {showToggleButton && onToggleVisibility && (
               <Button
@@ -2543,6 +2644,8 @@ export default function CommentSection({
                 hasClipboard={hasClipboardForProject}
                 onCopy={handleCopyComments}
                 onPaste={handlePasteComments}
+                onExport={canExportMarkers ? handleExportMarkers : undefined}
+                exportCount={exportableComments.length}
                 /* 4.x: on mobile the guest "Name" editor lives INSIDE this
                    kebab menu instead of taking its own row under the header. */
                 nameSection={
