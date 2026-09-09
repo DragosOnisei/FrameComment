@@ -14,6 +14,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.7.1] - 2026-09-09
+
+### Fixed
+
+- **Enabling notifications failed on production with "Could not enable
+  notifications on this device."** The browser prompt appeared and "Allow"
+  was pressed; the failure came one step later, when the page asked the
+  server for the VAPID public key and `/api/push/vapid-public-key` answered
+  500. The route was public ("anyone can request the public key"), so it ran
+  with no session and therefore no organisation context; the RLS-armed client
+  then ran the Settings lookup unarmed, row-level security hid the company's
+  row, `getOrCreateVapidKeys` concluded there were no keys, tried to insert a
+  fresh pair, and the insert was refused. Locally the database is a
+  superuser, RLS filters nothing, and the same code returns the key — the
+  asymmetry CLAUDE.md warns about. This has been the state of push enabling
+  since the RLS flip: the Settings → Browser → Enable button failed the same
+  way; the 7.7.0 entry bar merely put the button in front of everyone.
+  - The route now requires a signed-in staff session, which arms the
+    caller's organisation. That is also the correct answer for a
+    multi-company instance: keys are per company, and an unauthenticated
+    route could only ever have handed out org-1's key.
+  - The bar appends the server's own message to its error line, so the next
+    failure names itself instead of hiding behind the generic text.
+  - Reproduced before the fix and verified after it against the local
+    database as the restricted `framecomment_app` role: unarmed, the lookup
+    fails exactly like production; inside the organisation context it
+    returns the stored key. CLAUDE.md documents how to run that check, and
+    the `runWithOrgContext` trap it surfaced (a lazy PrismaPromise returned
+    from the callback executes outside the context; the callback must await
+    its queries).
+
 ## [7.7.0] - 2026-09-09
 
 ### Added

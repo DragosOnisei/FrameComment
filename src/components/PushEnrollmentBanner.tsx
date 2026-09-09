@@ -180,7 +180,12 @@ export default function PushEnrollmentBanner() {
       window.setTimeout(() => setMode('hidden'), 5000)
     } catch (err) {
       logError('[push] enrolment failed:', err)
-      setError(t('failed'))
+      // 7.7.1: say WHY. The generic line alone hid a server 500 for a whole
+      // release; the API's own message ("Failed to get VAPID public key",
+      // "already registered by another admin", …) is what makes the report
+      // actionable.
+      const detail = err instanceof Error && err.message ? ` (${err.message})` : ''
+      setError(`${t('failed')}${detail}`)
       setMode('prompt')
     }
   }, [t])

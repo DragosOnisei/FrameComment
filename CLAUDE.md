@@ -52,6 +52,17 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma
   --script` prints what Prisma would generate, which is what the additive
   `IF NOT EXISTS` version has to match column for column.
+- **RLS can be exercised locally.** The dev database is a superuser, so RLS
+  filters nothing there — but the restricted `framecomment_app` role exists
+  in the dev database too (the RLS migration creates it NOLOGIN) and since
+  2026-09-09 it has LOGIN with password `localtest`. Run a tsx script (or a
+  route) with
+  `DATABASE_URL=postgresql://framecomment_app:localtest@127.0.0.1:5432/framecomment?schema=public`
+  and `DATABASE_URL_PRIVILEGED` unset, and every unarmed query fails the
+  way it fails on production. This is how the 7.7.1 VAPID 500 was
+  reproduced before it was fixed; any code that touches the database
+  outside an authenticated request (public routes, worker, boot) should be
+  tried this way before release.
 - Typecheck: `NODE_OPTIONS=--max-old-space-size=2560 npx tsc --noEmit
   --incremental` (one bash call; it is slow). Then eslint on touched files only.
   Two pre-existing warnings in CommentSection/VideoPlayer are known noise.
@@ -125,7 +136,11 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   org context (today: the founder answering feedback) must pass
   `{ organizationId }`; without it RLS matches zero devices, silently. VAPID
   details are per call, never `setVapidDetails` (module-global, races across
-  companies). Devices enrolled by the entry bar start with NO broadcast
+  companies). `runWithOrgContext(org, fn)` only covers what `fn` AWAITS
+  inside it: a bare `prisma.x.find…()` returned from `fn` is a lazy
+  PrismaPromise that executes at the outer `await`, outside the context, and
+  under RLS that reads as "no rows" — make `fn` an async function that awaits
+  its queries. Devices enrolled by the entry bar start with NO broadcast
   events (`initialEvents: []`); Disable in Settings sets `fc:push-opted-out`
   so the bar never re-enrols that browser.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
