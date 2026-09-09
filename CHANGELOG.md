@@ -14,6 +14,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.2] - 2026-09-09
+
+### Fixed
+
+- **AirPlay from an iPhone sends the picture, not just the sound.** Casting a
+  video to a TV played audio only. The player assumed iPhones had no Media
+  Source Extensions and would fall back to native `<video src=master.m3u8>`
+  — true until iOS 17.1 (October 2023), when Safari shipped
+  ManagedMediaSource and hls.js 1.5+ started using it, so `Hls.isSupported()`
+  became true on the phone and hls.js quietly took over the very element
+  whose native `src` was already set. An MSE stream is a blob assembled
+  inside the browser with no URL a television can fetch, so AirPlay handed
+  the TV nothing but decoded sound. iPhone and iPad Safari now play HLS
+  natively — hls.js's own README recommends exactly that for modern Safari —
+  and the TV fetches the tokenized playlist itself (the HLS route already
+  accepts it: admin tokens skip the session check, share tokens carry their
+  session in the token, and there is no referer check). The fingerprint is
+  UA-free and deliberately narrow: iOS exposes only ManagedMediaSource,
+  iPadOS exposes both but reports touch points; macOS Safari, Chrome and
+  Android are untouched, so the studio's pinned-quality menu stays where it
+  is. (`src/lib/native-hls.ts`)
+
+### Added
+
+- **"Play on TV" in the player bar**, left of Fullscreen — the AirPlay picker
+  on Safari, the Cast prompt on Chrome/Android — rendered only while a
+  device is actually available, so a desk with no TV never sees a dead
+  button. No screen mirroring needed: the TV plays the stream itself, at its
+  own quality, and the phone stays free.
+
 ## [7.6.1] - 2026-09-03
 
 ### Fixed

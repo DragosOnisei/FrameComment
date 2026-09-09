@@ -1959,6 +1959,7 @@
     "unmute": "Unmute",
     "exitFullscreen": "Exit Fullscreen",
     "fullscreen": "Fullscreen",
+    "castToTv": "Play on TV",
     "moreComments": "+{count} more",
     "showDrawingTools": "Show Drawing Tools",
     "strokeThickness": "Stroke Thickness",

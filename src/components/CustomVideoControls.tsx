@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
-import { Play, Pause, Rewind, Volume2, VolumeX, Maximize, Minimize, Trash2, MapPin } from 'lucide-react'
+import { Play, Pause, Rewind, Volume2, VolumeX, Maximize, Minimize, Trash2, MapPin, Airplay, Cast } from 'lucide-react'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
@@ -449,6 +449,73 @@ export default function CustomVideoControls({
   const tComments = useTranslations('comments')
   const [isDragging, setIsDragging] = useState(false)
   const [showVolume, setShowVolume] = useState(false)
+  /**
+   * 7.6.2: "Play on TV". Which remote-playback door this browser offers for
+   * the current <video>, or null when there is no device to send to (the
+   * button only renders when there is one — a dead cast button on a desk
+   * with no TV is noise). Safari exposes AirPlay through its webkit picker
+   * and announces availability with `webkitplaybacktargetavailabilitychanged`
+   * (fired once on subscribe, then on every change). Chrome, Edge and
+   * Android use the Remote Playback API (`video.remote`), which reports
+   * availability through `watchAvailability`. Re-subscribed per video: the
+   * element remounts with the clip.
+   */
+  const [castTarget, setCastTarget] = useState<'airplay' | 'remote' | null>(null)
+  useEffect(() => {
+    const video = _videoRef?.current
+    if (!video || typeof window === 'undefined') return
+    if ('WebKitPlaybackTargetAvailabilityEvent' in window) {
+      const onAvailability = (e: Event) => {
+        const availability = (e as Event & { availability?: string }).availability
+        setCastTarget(availability === 'available' ? 'airplay' : null)
+      }
+      video.addEventListener('webkitplaybacktargetavailabilitychanged', onAvailability)
+      return () => {
+        video.removeEventListener('webkitplaybacktargetavailabilitychanged', onAvailability)
+      }
+    }
+    const remote = (video as HTMLVideoElement & {
+      remote?: {
+        watchAvailability: (cb: (available: boolean) => void) => Promise<number>
+        cancelWatchAvailability: (id?: number) => Promise<void>
+        prompt: () => Promise<void>
+      }
+    }).remote
+    if (remote?.watchAvailability) {
+      let watchId: number | null = null
+      let cancelled = false
+      remote
+        .watchAvailability((available) => {
+          if (!cancelled) setCastTarget(available ? 'remote' : null)
+        })
+        .then((id) => {
+          watchId = id
+        })
+        .catch(() => setCastTarget(null))
+      return () => {
+        cancelled = true
+        if (watchId != null) remote.cancelWatchAvailability(watchId).catch(() => {})
+      }
+    }
+    setCastTarget(null)
+  }, [_videoRef, videoId])
+
+  const handleCast = useCallback(() => {
+    const video = _videoRef?.current as
+      | (HTMLVideoElement & {
+          webkitShowPlaybackTargetPicker?: () => void
+          remote?: { prompt: () => Promise<void> }
+        })
+      | null
+    if (!video) return
+    if (castTarget === 'airplay' && video.webkitShowPlaybackTargetPicker) {
+      video.webkitShowPlaybackTargetPicker()
+      return
+    }
+    if (castTarget === 'remote' && video.remote?.prompt) {
+      void video.remote.prompt().catch(() => {})
+    }
+  }, [_videoRef, castTarget])
   // 1.9.1+: custom volume slider state. Native <input type=range>
   // doesn't let us transition the thumb position, so we replace it
   // with a div-based slider that mirrors the timeline pattern.
@@ -3534,6 +3601,27 @@ export default function CustomVideoControls({
                  resolvedPlaybackQuality === '1080p' ? 'HD' : 'SD'}
               </span>
             )
+          )}
+
+          {/* 7.6.2: Play on TV — AirPlay picker on Safari, Cast prompt
+              elsewhere. Only rendered while a device is actually available.
+              Works because iPhone/iPad play HLS natively now (native-hls.ts):
+              the TV fetches the playlist itself, so it gets the picture, not
+              just the sound. */}
+          {castTarget && (
+            <button
+              type="button"
+              onClick={handleCast}
+              className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
+              aria-label={t('castToTv')}
+              title={t('castToTv')}
+            >
+              {castTarget === 'airplay' ? (
+                <Airplay className="w-4 h-4 text-white" />
+              ) : (
+                <Cast className="w-4 h-4 text-white" />
+              )}
+            </button>
           )}
 
           <button

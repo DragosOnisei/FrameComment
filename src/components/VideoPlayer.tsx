@@ -7,6 +7,7 @@ import { Button } from './ui/button'
 import { AlertTriangle, CheckCircle2, GitCompareArrows, Loader2 } from 'lucide-react'
 import CustomVideoControls from './CustomVideoControls'
 import { PLAYBACK_SPEEDS, nearestSpeedIndex } from './PlaybackSpeedMenu'
+import { prefersNativeHls } from '@/lib/native-hls'
 import {
   advanceShuttle,
   formatSpeedFactor,
@@ -320,7 +321,8 @@ export default function VideoPlayer({
       try {
         const HlsModule = await import('hls.js')
         const Hls = HlsModule.default
-        if (!Hls.isSupported()) return
+        // 7.6.2: same native-HLS gate as the attach effect (AirPlay).
+        if (!Hls.isSupported() || prefersNativeHls(video)) return
 
         const newHls = new Hls({
           manifestLoadingMaxRetry: Infinity,
@@ -1457,7 +1459,11 @@ export default function VideoPlayer({
         const HlsModule = await import('hls.js')
         const Hls = HlsModule.default
         if (cancelled) return
-        if (!Hls.isSupported()) {
+        // 7.6.2: on iPhone/iPad Safari, hls.js would win this element over
+        // the native `src` already set below — and an MSE stream cannot be
+        // AirPlayed (the TV got audio only). Native HLS is the transport
+        // there; see prefersNativeHls for the platform fingerprint.
+        if (!Hls.isSupported() || prefersNativeHls(video)) {
           return
         }
         const hls = new Hls({
@@ -3029,9 +3035,15 @@ export default function VideoPlayer({
                       // routes Chrome through hls.js where we can
                       // pin the level. Only iOS Safari (no MSE)
                       // falls back to the native src.
+                      // 7.6.2: unless this is iPhone/iPad Safari, where
+                      // the element plays HLS natively so AirPlay can hand
+                      // the URL to a TV (prefersNativeHls) — an iPad has
+                      // MediaSource too, so that check alone would leave
+                      // its `src` empty with no hls.js coming to fill it.
                       videoUrl && videoUrl.includes('.m3u8') &&
                       typeof window !== 'undefined' &&
-                      typeof (window as any).MediaSource !== 'undefined'
+                      typeof (window as any).MediaSource !== 'undefined' &&
+                      !prefersNativeHls()
                         ? undefined
                         : videoUrl
                     }
