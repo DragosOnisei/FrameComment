@@ -14,6 +14,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.3] - 2026-09-09
+
+### Security
+
+- **Next.js 16.2.11 → 16.3.4, and every other compatible dependency fix.**
+  The 7.6.2 image never built: the Dockerfile's audit gate
+  (`npm audit --audit-level=critical`) failed the build on a CRITICAL
+  advisory against Next.js — unauthenticated RCE in the Image Optimization
+  API via AVIF (GHSA-2xp9-vwfh-vxw4), plus a Windows-only one — which is
+  exactly the job that gate exists to do. `npm audit fix` without `--force`
+  resolved it and nine more: nodemailer 9.1.1 (four HIGHs, including
+  recipient-domain validation bypasses — real ones for an app that sends
+  mail), sharp 0.35.4, postcss, undici, js-yaml, nanoid, dompurify,
+  @simplewebauthn/server. All within the version ranges `package.json`
+  already declared; `package.json` itself is unchanged. The one advisory
+  left is `deepmerge-ts` under `@prisma/config`, whose only fix is a
+  breaking downgrade to prisma 6.12 — HIGH, not critical, so the gate
+  passes; the Dockerfile comment records why the gate cannot yet be
+  re-tightened to `high`.
+  - Verified before tagging: the gate run exactly as the Dockerfile runs it
+    exits 0; `npm ci --dry-run` confirms the lockfile is in sync; the
+    lockfile carries the linux/amd64 binaries for next and sharp at the
+    new versions; tsc 0 errors; and a full `next build --webpack` with the
+    Dockerfile's environment succeeds (31/31 pages) in an isolated
+    worktree.
+  - This release carries 7.6.2's changes into a published image: native HLS
+    on iPhone/iPad Safari so AirPlay sends the picture, and the Play-on-TV
+    button.
+
 ## [7.6.2] - 2026-09-09
 
 ### Fixed

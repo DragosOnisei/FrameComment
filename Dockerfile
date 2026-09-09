@@ -54,6 +54,15 @@ RUN cp -R node_modules /tmp/prod_node_modules
 #
 # We still hard-fail on CRITICAL (the worst class). Re-tighten to `high` once
 # Next.js ships a stable patched release and bump `next` to it.
+#
+# 7.6.3 (2026-09-09): the gate did its job — a CRITICAL landed on Next.js
+# (Image Optimization RCE via AVIF, GHSA-2xp9-vwfh-vxw4) and this line failed
+# the 7.6.2 image build. Fixed by `npm audit fix` (no --force): next 16.3.4,
+# nodemailer 9.1.1, sharp 0.35.4 and the rest of the compatible fixes. The
+# Next.js HIGHs above are now resolved on the stable line, but re-tightening
+# to `high` still is not possible: the one remaining HIGH is `deepmerge-ts`
+# under `@prisma/config`, whose only fix is a breaking downgrade to prisma
+# 6.12. Re-tighten when Prisma ships a config that drops it.
 RUN npm audit --audit-level=critical || \
     (echo "SECURITY: Critical vulnerabilities found!" && exit 1)
 
