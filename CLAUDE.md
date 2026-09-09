@@ -117,6 +117,17 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   PROJECT_MANAGER minus the actor; dedupe per (recipient, video, type). Every
   silent exit must log which rule fired — silent exits hid a dead PM lookup for
   months.
+- **Bell → web push** (7.7.0): every bell row published through
+  `publishNotification` is also pushed to the recipient's enrolled devices
+  (src/lib/push-notifications.ts `sendBellPush`), unconditionally — the
+  per-device event switches only govern the company-wide broadcasts. The
+  lookup runs through the ARMED client, so a caller outside the recipient's
+  org context (today: the founder answering feedback) must pass
+  `{ organizationId }`; without it RLS matches zero devices, silently. VAPID
+  details are per call, never `setVapidDetails` (module-global, races across
+  companies). Devices enrolled by the entry bar start with NO broadcast
+  events (`initialEvents: []`); Disable in Settings sets `fc:push-opted-out`
+  so the bar never re-enrols that browser.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

@@ -22,6 +22,7 @@ import {
   useNotifications,
   type InAppNotification,
 } from '@/contexts/NotificationsContext'
+import { notificationDeepLink } from '@/lib/notification-links'
 
 /**
  * 6.9.0: "All" became "Today".
@@ -74,24 +75,6 @@ function dateGroupLabel(iso: string): string {
     day: 'numeric',
     year: 'numeric',
   })
-}
-
-function deepLink(n: InAppNotification): string | null {
-  // 5.14: EARLY_ACCESS rows (landing-page requests) have no video to
-  // open — clicking just marks them read.
-  if (!n.projectId || !n.videoName) return null
-  // Include the STABLE video id so the review page can resolve the video even
-  // if its display name changed (rename / version-stack) since the notification
-  // was created — `video` (name) stays as a fallback for older links.
-  const params = new URLSearchParams({ video: n.videoName })
-  if (n.videoId) params.set('videoId', n.videoId)
-  if (n.folderId) params.set('folderId', n.folderId)
-  // 6.14.0: land ON the comment. The review page already knows how to read
-  // `?comment=` — it scrolls the thread to that card and lifts it — but the
-  // bell never told it which one, so a reply notification dropped you at the
-  // top of the thread to go hunting.
-  if (n.commentId) params.set('comment', n.commentId)
-  return `/admin/projects/${n.projectId}/share?${params.toString()}`
 }
 
 export default function NotificationBell() {
@@ -153,7 +136,7 @@ export default function NotificationBell() {
   const onRowClick = (n: InAppNotification) => {
     // Opening the video marks it read but keeps it in the list.
     if (!n.isRead) void markRead(n.id)
-    const link = deepLink(n)
+    const link = notificationDeepLink(n)
     if (link) {
       setOpen(false)
       router.push(link)

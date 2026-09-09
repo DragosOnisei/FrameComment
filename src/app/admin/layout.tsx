@@ -14,6 +14,7 @@ import { StorageTransferBanner } from '@/components/StorageTransferBanner'
 import { GlobalDropOverlay } from '@/components/GlobalDropOverlay'
 import BillingWall from '@/components/BillingWall'
 import OrgDeletionBanner from '@/components/OrgDeletionBanner'
+import PushEnrollmentBanner from '@/components/PushEnrollmentBanner'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 
@@ -172,6 +173,9 @@ export default function AdminLayout({
             <div className="spotlight-bg flex flex-1 min-h-0 overflow-x-hidden select-none">
               <AdminSidebar />
               <div className="flex-1 min-w-0 flex flex-col">
+                {/* 7.7.0: "Enable notifications" bar — chromed pages only, so
+                    it never sits over a video in the player preview. */}
+                <PushEnrollmentBanner />
                 <AdminTopBar />
                 <main className="flex-1 min-h-0 flex flex-col">
                   {children}

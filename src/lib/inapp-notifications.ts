@@ -23,6 +23,8 @@
 import { prisma } from '@/lib/db'
 import { getRedis } from '@/lib/redis'
 import { logError, logMessage } from '@/lib/logging'
+import { runWithOrgContext } from '@/lib/org-context'
+import { sendBellPush } from '@/lib/push-notifications'
 
 // Narrow accessor for the new delegate. Confined to this file.
 const notificationDelegate = () => (prisma as any).notification
@@ -174,10 +176,24 @@ export async function createOrBumpNotification(params: {
  * SSE stream delivers it live. Best-effort: a Redis hiccup must not
  * fail the originating request (the row is already persisted and the
  * polling fallback will pick it up).
+ *
+ * 7.7.0: the same row also goes out as a web push to every device the
+ * recipient enrolled (see PushEnrollmentBanner / sendBellPush). Fire-and-
+ * forget: a slow push service never delays the comment that caused it, and
+ * a failure is logged, never thrown. People without devices cost one query.
+ *
+ * `organizationId` is for callers outside the recipient's request context —
+ * today only the founder answering feedback, whose request runs as the
+ * platform organisation while the recipient belongs to a company. The push
+ * lookup (the person's devices, the company's VAPID keys) goes through the
+ * RLS-armed client, so it has to run AS the recipient's company; under the
+ * founder's context it would match zero rows, silently, the way RLS always
+ * fails (CLAUDE.md).
  */
 export async function publishNotification(
   recipientId: string,
   notification: InAppNotification,
+  opts?: { organizationId?: string | null },
 ): Promise<void> {
   try {
     await getRedis().publish(
@@ -187,6 +203,11 @@ export async function publishNotification(
   } catch (err) {
     logError('[inapp-notifications] publish failed:', err)
   }
+
+  const push = () => sendBellPush(recipientId, notification)
+  void (opts?.organizationId ? runWithOrgContext(opts.organizationId, push) : push()).catch(
+    (err) => logError('[inapp-notifications] web push failed (non-fatal):', err),
+  )
 }
 
 /**

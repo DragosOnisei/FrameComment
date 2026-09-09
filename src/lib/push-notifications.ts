@@ -4,6 +4,7 @@ import { encrypt, decrypt } from '@/lib/encryption'
 import type { NotificationEventType } from '@/lib/external-notifications/constants'
 import { loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
+import { notificationDeepLink } from '@/lib/notification-links'
 
 async function getPushLocaleText() {
   const settings = await prisma.settings.findUnique({
@@ -17,6 +18,8 @@ async function getPushLocaleText() {
   return {
     auth: messages?.auth || {},
     webPush: messages?.push?.webPush || {},
+    // 7.7.0: texts for the bell mirror (`formatBellPush`).
+    bell: messages?.push?.bell || {},
     notificationsText: messages?.notificationsText || {},
   }
 }
@@ -115,12 +118,20 @@ export async function getVapidPublicKey(): Promise<string> {
 }
 
 /**
- * Configure web-push with VAPID keys
+ * VAPID details for ONE send, passed per call.
+ *
+ * 7.7.0: this used to call `webpush.setVapidDetails(...)`, which sets module-
+ * wide state. Keys are per company (one Settings row each), and since the
+ * bell mirror a request can push on behalf of a company other than the one
+ * it is browsing as (the founder answering feedback runs as the recipient's
+ * company). Two sends racing through a global setter could sign one
+ * company's push with another company's key and fail with a signature
+ * error. Per-call details cannot race.
  */
-async function configureWebPush(): Promise<void> {
+async function getVapidDetails(): Promise<{ subject: string; publicKey: string; privateKey: string }> {
   const keys = await getOrCreateVapidKeys()
   const subject = await getVapidSubject()
-  webpush.setVapidDetails(subject, keys.publicKey, keys.privateKey)
+  return { subject, publicKey: keys.publicKey, privateKey: keys.privateKey }
 }
 
 export interface PushNotificationPayload {
@@ -147,7 +158,7 @@ async function sendToSubscription(
   payload: PushNotificationPayload
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await configureWebPush()
+    const vapidDetails = await getVapidDetails()
 
     const pushSubscription = {
       endpoint: subscription.endpoint,
@@ -159,7 +170,9 @@ async function sendToSubscription(
 
     // web-push returns a response object with statusCode
     // 201 = Created (success), 200 = OK (success)
-    const response = await webpush.sendNotification(pushSubscription, JSON.stringify(payload))
+    const response = await webpush.sendNotification(pushSubscription, JSON.stringify(payload), {
+      vapidDetails,
+    })
 
     // Check if response indicates success (2xx status codes)
     if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
@@ -380,5 +393,152 @@ export async function createNotificationPayload(
         title: webPush.defaultNotificationTitle || 'FrameComment Notification',
         body: webPush.defaultNotificationBody || 'You have a new notification',
       }
+  }
+}
+
+// ─── 7.7.0: the bell, mirrored to the recipient's devices ───────────────────
+//
+// `sendPushNotifications` above is a broadcast: an event goes to every device
+// in the company that opted into that event. The bell (`Notification` rows,
+// src/lib/inapp-notifications.ts) is the opposite — addressed to one person:
+// the editor whose cut got feedback, the Project Managers, the author who was
+// replied to. Until 7.7.0 those rows lived only in the bell, so the phone in
+// someone's pocket learned nothing until they opened the app. Every bell row
+// now also goes to every device that person enrolled, unconditionally: a
+// device on the list means "tell me about my things". The company-wide event
+// switches in Settings are unrelated and untouched.
+
+/** The fields of a bell row the push needs (a subset of InAppNotification). */
+export interface BellPushSource {
+  id: string
+  type: string
+  projectId: string | null
+  videoId: string | null
+  videoName: string | null
+  folderId: string | null
+  actorName: string | null
+  message: string | null
+  commentId?: string | null
+}
+
+export type BellPushStrings = Record<string, string | undefined>
+
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_match, key: string) => vars[key] ?? '')
+}
+
+/**
+ * Bell row → push payload. Pure, so it can be checked without a browser or a
+ * push service. Wording mirrors the bell rows in NotificationBell.tsx: the
+ * push and the row should read as the same event.
+ */
+export function formatBellPush(n: BellPushSource, s: BellPushStrings = {}): PushNotificationPayload {
+  const actor = (n.actorName || '').trim()
+  const video = (n.videoName || '').trim()
+  const message = (n.message || '').trim()
+  const clip = (text: string) => (text.length > 180 ? `${text.slice(0, 177)}...` : text)
+
+  let title: string
+  let body: string
+  switch (n.type) {
+    case 'COMMENT_REPLY':
+      title = actor
+        ? fillTemplate(s.replyTitle || '{actor} replied to your comment', { actor })
+        : s.replyTitleAnonymous || 'Someone replied to your comment'
+      body = video
+      break
+    case 'FEEDBACK_UPDATE':
+      title = s.feedbackTitle || 'Your feedback has a reply'
+      body =
+        clip(message) ||
+        (actor ? fillTemplate(s.feedbackBody || '{actor} answered your report', { actor }) : '')
+      break
+    case 'EARLY_ACCESS':
+      title = s.earlyAccessTitle || 'New early-access request'
+      body = clip(message)
+      break
+    default:
+      // NEW_COMMENTS — the first fresh comment of a round, and the manual
+      // "Send to editor". Any future type that carries a video reads the same.
+      if (video) {
+        title = fillTemplate(s.newCommentsTitle || 'New comments on {video}', { video })
+        body = actor
+          ? fillTemplate(s.newCommentsBody || '{actor} left feedback', { actor })
+          : s.newCommentsBodyAnonymous || 'Someone left feedback'
+      } else {
+        title = s.defaultTitle || 'FrameComment'
+        body = clip(message) || s.defaultBody || 'You have a new notification'
+      }
+  }
+
+  return {
+    title,
+    body,
+    icon: '/brand/icon-192.svg',
+    badge: '/brand/icon-192.svg',
+    // One tag per (type, video): a reviewer pressing "Send to editor" five
+    // times replaces the notification on the editor's phone instead of
+    // stacking five. The service worker sets `renotify`, so it still alerts.
+    tag: `bell:${n.type}:${n.videoId ?? n.id}`,
+    data: {
+      type: 'IN_APP',
+      bellType: n.type,
+      notificationId: n.id,
+      // Same destination as clicking the bell row (video, folder, comment).
+      url: notificationDeepLink(n) ?? '/admin',
+      ...(n.projectId ? { projectId: n.projectId } : {}),
+    },
+  }
+}
+
+/**
+ * Deliver one bell row to every device its recipient enrolled. Never throws;
+ * returns counts for the log. Runs through the RLS-armed client, so the caller
+ * must be in the RECIPIENT's organisation context (see `publishNotification`).
+ * Cheap for people without devices: one indexed query, then done — the
+ * payload (locale texts) is only built when there is somewhere to send it.
+ */
+export async function sendBellPush(
+  userId: string,
+  source: BellPushSource,
+): Promise<{ sent: number; failed: number }> {
+  try {
+    const subscriptions = await prisma.pushSubscription.findMany({
+      where: { userId },
+      select: { id: true, endpoint: true, p256dh: true, auth: true },
+    })
+    if (subscriptions.length === 0) return { sent: 0, failed: 0 }
+
+    const { bell } = await getPushLocaleText()
+    const payload = formatBellPush(source, bell)
+
+    const results = await Promise.allSettled(
+      subscriptions.map(async (sub) => {
+        const result = await sendToSubscription(
+          { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+          payload
+        )
+        if (result.success) {
+          await prisma.pushSubscription
+            .update({ where: { id: sub.id }, data: { lastUsedAt: new Date() } })
+            .catch(() => {
+              // Ignore update errors
+            })
+        }
+        return result
+      })
+    )
+
+    let sent = 0
+    let failed = 0
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value.success) sent++
+      else failed++
+    }
+    logMessage(`[WEB-PUSH] bell ${source.type} for user ${userId}: sent=${sent}, failed=${failed}`)
+    return { sent, failed }
+  } catch (error) {
+    logError('[WEB-PUSH] bell push failed:', error)
+    return { sent: 0, failed: 0 }
   }
 }

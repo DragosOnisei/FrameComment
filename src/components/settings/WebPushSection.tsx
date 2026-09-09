@@ -10,6 +10,13 @@ import { NOTIFICATION_EVENT_TYPES, type NotificationEventType } from '@/lib/exte
 import { Bell, BellOff, Send, Trash2, Smartphone, Monitor, Pencil, Check, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
+import {
+  PUSH_OPT_OUT_KEY,
+  PUSH_SUBSCRIPTION_ID_KEY,
+  isPushSupported as detectPushSupport,
+  subscribeThisDevice,
+  writeFlag,
+} from '@/lib/push-client'
 
 interface PushSubscription {
   id: string
@@ -44,12 +51,8 @@ export function WebPushSection({ active }: { active: boolean }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
 
-  // Check browser support
-  const isPushSupported =
-    typeof window !== 'undefined' &&
-    'serviceWorker' in navigator &&
-    'PushManager' in window &&
-    'Notification' in window
+  // Check browser support (shared with the enrolment bar since 7.7.0)
+  const isPushSupported = detectPushSupport()
 
   // Load subscriptions
   const loadSubscriptions = useCallback(async () => {
@@ -64,7 +67,7 @@ export function WebPushSection({ active }: { active: boolean }) {
       setSubscriptions(data.subscriptions || [])
 
       // Check if current device is subscribed using localStorage ID
-      const storedId = localStorage.getItem('framecomment_push_subscription_id')
+      const storedId = localStorage.getItem(PUSH_SUBSCRIPTION_ID_KEY)
       if (storedId) {
         const found = data.subscriptions?.find(
           (s: PushSubscription) => s.id === storedId
@@ -74,7 +77,7 @@ export function WebPushSection({ active }: { active: boolean }) {
           setCurrentSubscriptionId(storedId)
         } else {
           // Stored ID no longer exists on server (subscription was removed)
-          localStorage.removeItem('framecomment_push_subscription_id')
+          localStorage.removeItem(PUSH_SUBSCRIPTION_ID_KEY)
           setCurrentDeviceSubscribed(false)
           setCurrentSubscriptionId(null)
         }
@@ -145,37 +148,12 @@ export function WebPushSection({ active }: { active: boolean }) {
         return
       }
 
-      // Get VAPID public key
-      const vapidResponse = await apiFetch('/api/push/vapid-public-key')
-      if (!vapidResponse.ok) {
-        throw new Error(t('failedVapid'))
-      }
-      const { publicKey } = await vapidResponse.json()
-
-      // Subscribe to push manager
-      const registration = await navigator.serviceWorker.ready
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
-      })
-
-      // Send subscription to server
-      const keys = subscription.toJSON().keys
-      // apiPost returns parsed JSON directly, throws on error
-      const data = await apiPost('/api/push/subscribe', {
-        endpoint: subscription.endpoint,
-        keys: {
-          p256dh: keys?.p256dh,
-          auth: keys?.auth,
-        },
-      })
-
-      const subId = data.subscriptionId || null
-      if (subId) {
-        localStorage.setItem('framecomment_push_subscription_id', subId)
-      }
+      // 7.7.0: shared with the enrolment bar. No `initialEvents` here: a
+      // device enabled from Settings keeps getting every company-wide event
+      // by default, exactly as before — the switches are right below.
+      const { subscriptionId } = await subscribeThisDevice()
       setCurrentDeviceSubscribed(true)
-      setCurrentSubscriptionId(subId)
+      setCurrentSubscriptionId(subscriptionId)
       setSuccess(t('enabledSuccess'))
       await loadSubscriptions()
     } catch (err) {
@@ -204,7 +182,11 @@ export function WebPushSection({ active }: { active: boolean }) {
         })
       }
 
-      localStorage.removeItem('framecomment_push_subscription_id')
+      localStorage.removeItem(PUSH_SUBSCRIPTION_ID_KEY)
+      // 7.7.0: Disable is a decision. Without this flag the enrolment bar
+      // would see "permission granted, device not registered" on the next
+      // page load and quietly subscribe the device again.
+      writeFlag(PUSH_OPT_OUT_KEY, true)
       setCurrentDeviceSubscribed(false)
       setCurrentSubscriptionId(null)
       setSuccess(t('disabledSuccess'))
@@ -221,7 +203,8 @@ export function WebPushSection({ active }: { active: boolean }) {
       // apiPost returns parsed JSON directly, throws on error
       await apiPost('/api/push/unsubscribe', { subscriptionId })
       if (subscriptionId === currentSubscriptionId) {
-        localStorage.removeItem('framecomment_push_subscription_id')
+        localStorage.removeItem(PUSH_SUBSCRIPTION_ID_KEY)
+        writeFlag(PUSH_OPT_OUT_KEY, true)
         setCurrentDeviceSubscribed(false)
         setCurrentSubscriptionId(null)
       }
@@ -439,6 +422,9 @@ export function WebPushSection({ active }: { active: boolean }) {
                 {/* Event toggles */}
                 <div className="space-y-3 border-2 border-border p-4 rounded-lg bg-accent/5">
                   <h4 className="font-semibold text-sm">{te('sendFor')}</h4>
+                  {/* 7.7.0: the bell mirror is not a switch — a device on
+                      this list always gets the owner's own notifications. */}
+                  <p className="text-xs text-muted-foreground">{t('bellAlwaysOn')}</p>
                   <div className="space-y-3">
                     {NOTIFICATION_EVENT_TYPES.map((eventType) => (
                       <div key={eventType} className="flex items-center justify-between">
@@ -478,16 +464,4 @@ export function WebPushSection({ active }: { active: boolean }) {
       )}
     </div>
   )
-}
-
-// Helper to convert VAPID public key
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const rawData = atob(base64)
-  const outputArray = new Uint8Array(rawData.length)
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i)
-  }
-  return outputArray
 }

@@ -1507,7 +1507,8 @@
       "failedToGetVapidKey": "Failed to get VAPID public key",
       "lastUsed": "Last used:",
       "sendTestTitle": "Send test notification",
-      "removeTitle": "Remove subscription"
+      "removeTitle": "Remove subscription",
+      "bellAlwaysOn": "Your own notifications (new feedback on your cuts, replies to your comments, cuts sent to you) always reach every device listed here. The switches below add company-wide events on top."
     },
     "schedule": {
       "title": "Notification Schedule",
@@ -2104,6 +2105,33 @@
     "ignoreNotice": "If you didn't request this code, please ignore this email.",
     "textIntro": "Your verification code for {projectTitle} is:",
     "textIgnoreNotice": "If you didn't request this code, you can safely ignore this email."
+  },
+  "pushPrompt": {
+    "title": "Get notified when something needs you",
+    "body": "New feedback on your cuts, replies to your comments and cuts sent to you reach this device even when FrameComment is closed.",
+    "enable": "Enable notifications",
+    "notNow": "Not now",
+    "enabling": "Waiting for your browser…",
+    "done": "Notifications are on for this device. Manage them in Settings → Notifications → Browser.",
+    "failed": "Could not enable notifications on this device. You can try again from Settings → Notifications → Browser.",
+    "iosHintTitle": "Notifications on iPhone and iPad",
+    "iosHintBody": "Add FrameComment to your Home Screen (Share → Add to Home Screen) and open it from there to receive notifications.",
+    "gotIt": "Got it",
+    "dismiss": "Dismiss"
+  },
+  "push": {
+    "bell": {
+      "newCommentsTitle": "New comments on {video}",
+      "newCommentsBody": "{actor} left feedback",
+      "newCommentsBodyAnonymous": "Someone left feedback",
+      "replyTitle": "{actor} replied to your comment",
+      "replyTitleAnonymous": "Someone replied to your comment",
+      "feedbackTitle": "Your feedback has a reply",
+      "feedbackBody": "{actor} answered your report",
+      "earlyAccessTitle": "New early-access request",
+      "defaultTitle": "FrameComment",
+      "defaultBody": "You have a new notification"
+    }
   },
   "privacy": {
     "title": "Privacy Notice",

@@ -14,6 +14,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.7.0] - 2026-09-09
+
+### Added
+
+- **The app now offers to notify you the moment you enter it.** Every team
+  member arriving in the admin sees a bar at the top — "Get notified when
+  something needs you" — and one click on **Enable notifications** opens the
+  browser's own permission prompt; on "Allow" the device subscribes itself.
+  No more Settings → Notifications → Browser → Enable: web push has existed
+  since 3.x, and that path is the reason almost nobody was on the list.
+  "Not now" keeps the bar away for a week. A browser where permission is
+  already granted but the device is not registered (fresh login, cleared site
+  data) is subscribed quietly, with no bar at all. Blocked notifications, or
+  Disable pressed in Settings, keep the bar away for good — Settings already
+  explains how to change either.
+  - Why a bar and not the browser prompt on page load: Safari and Firefox
+    ignore `Notification.requestPermission()` outside a user gesture, and
+    Chrome demotes sites that ask on load to a "quiet" prompt most people
+    never notice. One click is the only way the native prompt reliably
+    appears everywhere.
+  - iPhone and iPad: Safari delivers web push only to sites added to the
+    Home Screen. In a plain Safari tab the bar names exactly that step
+    instead of staying silent.
+- **What lands in the bell now lands on your phone.** Every bell notification
+  — new feedback on a cut you uploaded, someone replying to your comment, a
+  cut sent to you, the founder answering your feedback — is also delivered
+  as a push to every device you enrolled, and clicking it opens the same
+  page the bell row opens, comment included (through /login and back when
+  the browser is signed out, per 7.5.0). Until now those rows lived only in
+  the bell, so a phone in a pocket learned nothing until the app was opened.
+  Devices enrolled by the bar get these and nothing else; the company-wide
+  events (share link opened, admin login, client comments on every project,
+  uploads, security alerts, deadlines) stay opt-in per device in Settings,
+  exactly as before — a team of thirty enrolled into every event would turn
+  notifications off within a day. Settings says so next to the switches.
+
+### Fixed
+
+- **Re-subscribing a device no longer resets it.** Registering a device the
+  server already knew (the same browser enabling again) overwrote the
+  company-wide event switches with "everything on" and replaced the name the
+  owner typed with the user-agent guess. Both now survive; the switches
+  change only when the request says so.
+- **VAPID signing details are passed per send** instead of through
+  web-push's module-global `setVapidDetails`. Keys are per company, and with
+  the bell mirror a request can push on behalf of a company other than the
+  one it is browsing as (the founder answering feedback). Two sends racing
+  through a global setter could sign one company's push with another's key
+  and fail with a signature error; per-call details cannot race.
+
+### Internal
+
+- New: `src/lib/push-enrollment.ts` (the pure ask / subscribe quietly / stay
+  silent decision), `src/lib/push-client.ts` (browser plumbing shared by the
+  bar and Settings), `src/lib/notification-links.ts` (the bell's deep link,
+  now shared with the server so push and row cannot drift), and
+  `src/components/PushEnrollmentBanner.tsx`. `publishNotification` mirrors
+  every bell row via `sendBellPush`; a caller outside the recipient's org
+  context passes `{ organizationId }`, because the RLS-armed lookup would
+  otherwise match zero devices, silently — the founder's feedback reply is
+  that caller. CLAUDE.md records the rule. No schema change, no migration.
+- Verified: tsc 0 errors and eslint clean on every touched file; 30 cases
+  against the real decision, iOS-hint, deep-link and payload functions; and
+  the real `sendBellPush` against the local database with a fake Mozilla
+  endpoint — the push service answered with the expiry code and the row was
+  removed, both directly and inside the founder's org-context wrapper. Left
+  for the manual test: the bar and a real push in a browser (the sandbox
+  cannot sign in, and its browser blocks service workers).
+
 ## [7.6.3] - 2026-09-09
 
 ### Security

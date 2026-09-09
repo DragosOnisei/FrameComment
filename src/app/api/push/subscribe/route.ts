@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { endpoint, keys, deviceName, subscribedEvents } = body
+    const { endpoint, keys, deviceName, subscribedEvents, initialEvents } = body
 
     // Validate required fields
     if (!endpoint || !keys?.p256dh || !keys?.auth) {
@@ -100,11 +100,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate subscribedEvents if provided
-    const events = subscribedEvents || [...NOTIFICATION_EVENT_TYPES]
-    const validEvents = events.filter((e: string) =>
-      NOTIFICATION_EVENT_TYPES.includes(e as typeof NOTIFICATION_EVENT_TYPES[number])
-    )
+    // 7.7.0: two ways to describe which COMPANY-WIDE events a device wants.
+    // `subscribedEvents` sets the list outright, on a new or an existing
+    // device. `initialEvents` applies only to a device the server has never
+    // seen: the enrolment bar sends `[]`, so a device enrolled on entry starts
+    // with the person's own bell notifications and nothing else, while a
+    // device re-registering (fresh login, cleared site data) keeps the
+    // switches its owner already chose. Neither given: a new device gets
+    // everything, as it always has (the Settings path). Before 7.7.0 every
+    // re-registration reset the list to everything.
+    const explicitEvents = sanitizeEvents(subscribedEvents)
+    const eventsForNewDevice =
+      explicitEvents ?? sanitizeEvents(initialEvents) ?? [...NOTIFICATION_EVENT_TYPES]
 
     // Get user agent for device identification
     const userAgent = request.headers.get('user-agent') || undefined
@@ -133,15 +140,17 @@ export async function POST(request: NextRequest) {
         auth: keys.auth,
         userAgent,
         deviceName: deviceName || getDeviceNameFromUserAgent(userAgent),
-        subscribedEvents: validEvents,
+        subscribedEvents: eventsForNewDevice,
       },
       update: {
         p256dh: keys.p256dh,
         auth: keys.auth,
         userAgent,
-        deviceName: deviceName || getDeviceNameFromUserAgent(userAgent),
-        subscribedEvents: validEvents,
         lastUsedAt: new Date(),
+        // A name the owner typed in Settings survives a re-registration;
+        // before 7.7.0 it was overwritten with the user-agent guess.
+        ...(deviceName ? { deviceName } : {}),
+        ...(explicitEvents ? { subscribedEvents: explicitEvents } : {}),
       },
     })
 
@@ -242,6 +251,15 @@ export async function PATCH(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+/** Keep only known event names; null when the field was not an array. */
+function sanitizeEvents(list: unknown): string[] | null {
+  if (!Array.isArray(list)) return null
+  return list.filter(
+    (e): e is string =>
+      typeof e === 'string' && (NOTIFICATION_EVENT_TYPES as readonly string[]).includes(e),
+  )
 }
 
 /**

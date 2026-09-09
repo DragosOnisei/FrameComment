@@ -117,7 +117,11 @@ async function notifyReporter(params: {
         message: note,
       },
     })
-    await publishNotification(recipientId, serializeNotification(row))
+    // 7.7.0: the bell row is mirrored to the person's devices; that lookup
+    // must run as THEIR company, not as the platform organisation.
+    await publishNotification(recipientId, serializeNotification(row), {
+      organizationId: recipient.organizationId,
+    })
     return true
   } catch (error) {
     logError('[feedback] could not notify the sender:', error, recipientId)
