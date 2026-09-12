@@ -143,6 +143,10 @@ export interface PushNotificationPayload {
   tag?: string
   data?: Record<string, unknown>
   actions?: Array<{ action: string; title: string; icon?: string }>
+  /** 7.8.4: stays on screen until read. Default true (set at send time). */
+  requireInteraction?: boolean
+  /** 7.8.4: when it happened, in ms since epoch. Default: the send time. */
+  timestamp?: number
 }
 
 interface PushSubscriptionData {
@@ -169,10 +173,24 @@ async function sendToSubscription(
       },
     }
 
+    // 7.8.4: every notification is persistent and stamped unless the caller
+    // says otherwise, and the push service is asked for HIGH urgency (RFC
+    // 8030): deliver now, even to a phone that is saving power, rather than
+    // batching it with the next low-priority wake-up. That is the closest
+    // web push gets to "time sensitive" — the interruption level that
+    // pierces Focus is an iOS/macOS app-only feature and is not exposed to
+    // web notifications on any platform.
+    const wirePayload: PushNotificationPayload = {
+      ...payload,
+      requireInteraction: payload.requireInteraction ?? true,
+      timestamp: payload.timestamp ?? Date.now(),
+    }
+
     // web-push returns a response object with statusCode
     // 201 = Created (success), 200 = OK (success)
-    const response = await webpush.sendNotification(pushSubscription, JSON.stringify(payload), {
+    const response = await webpush.sendNotification(pushSubscription, JSON.stringify(wirePayload), {
       vapidDetails,
+      urgency: 'high',
     })
 
     // Check if response indicates success (2xx status codes)

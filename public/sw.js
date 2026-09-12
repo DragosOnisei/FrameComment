@@ -42,10 +42,18 @@ self.addEventListener('push', (event) => {
     tag: payload.tag || 'default',
     data: payload.data || {},
     vibrate: [100, 50, 100],
-    requireInteraction: false,
+    // 7.8.4: persistent. A banner that slides away after five seconds is
+    // missed by anyone not looking at the screen at that moment; a review
+    // note deserves to wait until it is read. Chrome on macOS delivers a
+    // requireInteraction notification through its "alerts" helper, which
+    // stays until clicked or dismissed regardless of the Banners/Alerts
+    // style chosen for Chrome. The payload can opt out per notification.
+    requireInteraction: payload.requireInteraction !== false,
     silent: false,
     renotify: true,
     actions: payload.actions || [],
+    // Shown by Chrome as the notification's time; the server stamps it.
+    timestamp: typeof payload.timestamp === 'number' ? payload.timestamp : Date.now(),
   }
   if (payload.badge) options.badge = payload.badge
 

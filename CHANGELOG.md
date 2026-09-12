@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.8.4] - 2026-09-12
+
+### Changed
+
+- **Push notifications stay on screen until read, and arrive at once.**
+  Every notification now carries `requireInteraction: true`, so it waits to
+  be clicked or dismissed instead of sliding away after a few seconds — on
+  macOS Chrome delivers such notifications through its "alerts" helper,
+  which keeps them visible whatever Banners/Alerts style Chrome itself is
+  set to. Each one is stamped with the time it happened. Every push is sent
+  with `urgency: high` (RFC 8030): the push service delivers it immediately,
+  including to a phone that is saving power, rather than batching it with
+  the next low-priority wake-up.
+  - Stated plainly: a "Time Sensitive" interruption level that pierces
+    Focus mode exists only for native iPhone/Mac apps; no platform exposes it
+    to web notifications. Persistent + immediate + sound is the ceiling for
+    web push, and it is what this release sets.
+
+### Internal
+
+- The service worker honours `requireInteraction` and `timestamp` from the
+  payload (defaults: persistent, now); `sendToSubscription` stamps both and
+  passes `urgency: 'high'` per call. CLAUDE.md records the rule. Verified:
+  service worker syntax, tsc 0 errors, eslint clean, push formatting cases,
+  and a real test push with the new options accepted by the push service
+  with HTTP 201.
+
 ## [7.8.3] - 2026-09-12
 
 ### Changed

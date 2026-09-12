@@ -142,7 +142,10 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   the same, and the Settings section for it is hidden — reachable at
   `/admin/settings?section=notifications` as a debugging door. All pushes
   about one video's comments share the tag `comments:<videoId>` so a person
-  gets one notification per video, not one per sender path.
+  gets one notification per video, not one per sender path. Pushes are
+  persistent (`requireInteraction` defaults to true in the service worker)
+  and sent with `urgency: 'high'`; a true "Time Sensitive" interruption
+  level does not exist for web push on any platform (7.8.4).
   `runWithOrgContext(org, fn)` only covers what `fn` AWAITS
   inside it: a bare `prisma.x.find…()` returned from `fn` is a lazy
   PrismaPromise that executes at the outer `await`, outside the context, and
