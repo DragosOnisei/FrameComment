@@ -238,6 +238,11 @@ export async function maybeNotifyEditorForComment(params: {
   videoId: string
   actorUserId: string | null
   actorName: string | null
+  /**
+   * 7.8.1: the comment that opened the round. Stored on the row (6.14.0's
+   * `commentId`), so the bell lands on it and the push can quote a line of it.
+   */
+  commentId?: string | null
 }): Promise<void> {
   try {
     const video = (await prisma.video.findUnique({
@@ -328,6 +333,7 @@ export async function maybeNotifyEditorForComment(params: {
         videoName: video.name,
         folderId: video.folderId,
         actorName: params.actorName,
+        commentId: params.commentId ?? null,
         organizationId: (video as any).organizationId ?? null,
       })
       await publishNotification(recipientId, notification)

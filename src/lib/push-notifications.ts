@@ -5,6 +5,7 @@ import type { NotificationEventType } from '@/lib/external-notifications/constan
 import { loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
 import { notificationDeepLink } from '@/lib/notification-links'
+import { commentPlainText } from '@/lib/premiere-markers'
 
 async function getPushLocaleText() {
   const settings = await prisma.settings.findUnique({
@@ -156,7 +157,7 @@ interface PushSubscriptionData {
 async function sendToSubscription(
   subscription: PushSubscriptionData,
   payload: PushNotificationPayload
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; statusCode?: number }> {
   try {
     const vapidDetails = await getVapidDetails()
 
@@ -176,18 +177,18 @@ async function sendToSubscription(
 
     // Check if response indicates success (2xx status codes)
     if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
-      return { success: true }
+      return { success: true, statusCode: response.statusCode }
     }
 
     // If we get here without throwing, the notification was accepted
-    return { success: true }
+    return { success: true, statusCode: response.statusCode }
   } catch (error) {
     // Check if this is a WebPushError with a success status code
     // Some push services return 201 which web-push might handle oddly
     if (error instanceof webpush.WebPushError) {
       // 201 Created is actually success
       if (error.statusCode === 201 || error.statusCode === 200) {
-        return { success: true }
+        return { success: true, statusCode: error.statusCode }
       }
 
       // 410 Gone or 404 Not Found = subscription expired
@@ -199,11 +200,13 @@ async function sendToSubscription(
           // Ignore if already deleted
         })
         logMessage('[WEB-PUSH] Removed expired subscription:', subscription.endpoint.slice(0, 50))
-        return { success: false, error: 'Subscription expired' }
+        return { success: false, error: 'Subscription expired', statusCode: error.statusCode }
       }
 
-      logError('[WEB-PUSH] Push error:', error.statusCode, error.message)
-      return { success: false, error: `Push service error: ${error.statusCode}` }
+      // 7.8.1: the service's own body names the reason (bad VAPID key, wrong
+      // audience, payload too large…) — the number alone never did.
+      logError('[WEB-PUSH] Push error:', error.statusCode, error.message, String(error.body || '').slice(0, 300))
+      return { success: false, error: `Push service error: ${error.statusCode}`, statusCode: error.statusCode }
     }
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -220,12 +223,13 @@ export async function sendPushNotifications(
   payload: PushNotificationPayload
 ): Promise<{ sent: number; failed: number }> {
   try {
-    const defaultIcon = '/brand/icon-192.svg'
-    const defaultBadge = '/brand/icon-192.svg'
+    // 7.8.1: PNG — an SVG icon makes macOS drop the whole notification (see
+    // src/app/brand/icon-192.png). No default badge (Android renders it as a
+    // white silhouette; a coloured logomark there is a blob).
+    const defaultIcon = '/brand/icon-192.png'
     const normalizedPayload = {
       ...payload,
       icon: payload.icon || defaultIcon,
-      badge: payload.badge || defaultBadge,
     }
 
     // Get all subscriptions that include this event type
@@ -293,7 +297,7 @@ export async function sendPushNotifications(
  */
 export async function sendTestNotification(
   subscriptionId: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; statusCode?: number }> {
   const { webPush } = await getPushLocaleText()
 
   const subscription = await prisma.pushSubscription.findUnique({
@@ -309,10 +313,11 @@ export async function sendTestNotification(
     title: webPush.testTitle || 'FrameComment Test',
     body: (webPush.testBodyForDevice || 'Test notification for {device}')
       .replace('{device}', subscription.deviceName || webPush.thisDevice || 'this device'),
-    icon: '/brand/icon-192.svg',
-    badge: '/brand/icon-192.svg',
+    icon: '/brand/icon-192.png',
     tag: 'test',
-    data: { type: 'TEST' },
+    // 7.8.1: the send time travels with the payload so the notification can be
+    // matched to the click that caused it.
+    data: { type: 'TEST', sentAt: Date.now() },
   }
 
   return sendToSubscription(subscription, payload)
@@ -338,8 +343,7 @@ export async function createNotificationPayload(
   const { auth, webPush, notificationsText } = await getPushLocaleText()
 
   const basePayload = {
-    icon: '/brand/icon-192.svg',
-    badge: '/brand/icon-192.svg',
+    icon: '/brand/icon-192.png',
     tag: eventType,
     data: { type: eventType, ...data },
   }
@@ -432,11 +436,28 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
  * push service. Wording mirrors the bell rows in NotificationBell.tsx: the
  * push and the row should read as the same event.
  */
-export function formatBellPush(n: BellPushSource, s: BellPushStrings = {}): PushNotificationPayload {
+export interface BellPushExtras {
+  /**
+   * 7.8.1: the text of the comment the row points at, already reduced to plain
+   * text. The bell row itself carries none (it is a signal, by design); the
+   * push shows a line of it, the way a Slack banner shows the message.
+   */
+  commentText?: string | null
+}
+
+export function formatBellPush(
+  n: BellPushSource,
+  s: BellPushStrings = {},
+  extras: BellPushExtras = {},
+): PushNotificationPayload {
   const actor = (n.actorName || '').trim()
   const video = (n.videoName || '').trim()
   const message = (n.message || '').trim()
   const clip = (text: string) => (text.length > 180 ? `${text.slice(0, 177)}...` : text)
+  // One line for a banner: newlines become spaces, and it is cut shorter than
+  // the message clip above because the video name shares the line.
+  const snippet = (extras.commentText || '').replace(/\s+/g, ' ').trim()
+  const shortSnippet = snippet.length > 120 ? `${snippet.slice(0, 117)}...` : snippet
 
   let title: string
   let body: string
@@ -445,7 +466,11 @@ export function formatBellPush(n: BellPushSource, s: BellPushStrings = {}): Push
       title = actor
         ? fillTemplate(s.replyTitle || '{actor} replied to your comment', { actor })
         : s.replyTitleAnonymous || 'Someone replied to your comment'
-      body = video
+      body = shortSnippet
+        ? video
+          ? fillTemplate(s.replyBodyWithText || '{video}: {text}', { video, text: shortSnippet })
+          : shortSnippet
+        : video
       break
     case 'FEEDBACK_UPDATE':
       title = s.feedbackTitle || 'Your feedback has a reply'
@@ -462,9 +487,14 @@ export function formatBellPush(n: BellPushSource, s: BellPushStrings = {}): Push
       // "Send to editor". Any future type that carries a video reads the same.
       if (video) {
         title = fillTemplate(s.newCommentsTitle || 'New comments on {video}', { video })
-        body = actor
-          ? fillTemplate(s.newCommentsBody || '{actor} left feedback', { actor })
-          : s.newCommentsBodyAnonymous || 'Someone left feedback'
+        body = shortSnippet
+          ? fillTemplate(s.newCommentsBodyWithText || '{actor}: {text}', {
+              actor: actor || s.someone || 'Someone',
+              text: shortSnippet,
+            })
+          : actor
+            ? fillTemplate(s.newCommentsBody || '{actor} left feedback', { actor })
+            : s.newCommentsBodyAnonymous || 'Someone left feedback'
       } else {
         title = s.defaultTitle || 'FrameComment'
         body = clip(message) || s.defaultBody || 'You have a new notification'
@@ -474,8 +504,7 @@ export function formatBellPush(n: BellPushSource, s: BellPushStrings = {}): Push
   return {
     title,
     body,
-    icon: '/brand/icon-192.svg',
-    badge: '/brand/icon-192.svg',
+    icon: '/brand/icon-192.png',
     // One tag per (type, video): a reviewer pressing "Send to editor" five
     // times replaces the notification on the editor's phone instead of
     // stacking five. The service worker sets `renotify`, so it still alerts.
@@ -510,7 +539,25 @@ export async function sendBellPush(
     if (subscriptions.length === 0) return { sent: 0, failed: 0 }
 
     const { bell } = await getPushLocaleText()
-    const payload = formatBellPush(source, bell)
+
+    // 7.8.1: a line of the comment itself. The row names the comment it is
+    // about (the newest one, per createOrBumpNotification); read it through
+    // the armed client — same company as the recipient — and never let a
+    // failure here cost the notification.
+    let commentText: string | null = null
+    if (source.commentId) {
+      try {
+        const comment = await prisma.comment.findUnique({
+          where: { id: source.commentId },
+          select: { content: true },
+        })
+        if (comment?.content) commentText = commentPlainText(comment.content)
+      } catch (err) {
+        logError('[WEB-PUSH] comment text lookup failed (non-fatal):', err)
+      }
+    }
+
+    const payload = formatBellPush(source, bell, { commentText })
 
     const results = await Promise.allSettled(
       subscriptions.map(async (sub) => {

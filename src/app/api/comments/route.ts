@@ -609,6 +609,7 @@ export async function POST(request: NextRequest) {
     if (videoId) {
       await maybeNotifyEditorForComment({
         videoId,
+        commentId: comment.id,
         actorUserId: authContext.user?.id ?? null,
         actorName:
           contentValidation.sanitizedAuthorName ?? authContext.user?.name ?? null,

@@ -14,6 +14,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.8.1] - 2026-09-12
+
+### Fixed
+
+- **Push notifications appear on macOS.** Since 7.7.0 every push reported
+  "delivered" by the push service and nothing ever showed on a Mac — no
+  banner, no entry in Notification Center, no error anywhere, with Chrome's
+  site permission and the system's permission for Chrome both on. The cause
+  was the icon: every payload pointed at `/brand/icon-192.svg`, and Chrome on
+  macOS hands notifications to the system, which accepts only raster images
+  as attachments and drops the whole notification for an SVG. Dragos's own
+  A/B on another site was the tell — "service worker, no icon" showed, the
+  variant with an SVG icon did not. A new `/brand/icon-192.png` route renders
+  the logomark with sharp from the same SVG the favicon uses (accent colour
+  included), every payload and the service worker's default use it, and the
+  default badge is gone (Android paints a badge as a white silhouette; a
+  coloured logomark there is a blob). The first push with the PNG icon, sent
+  through the local server at 14:00, was the first one to show on Dragos's
+  Mac.
+- **Push text mirrors the bell and quotes the comment.** "New comments on
+  {video}" with "{author}: {a line of the comment}", and "{author} replied to
+  your comment" with "{video}: {a line of the reply}". For this the row that
+  opens a review round now stores the id of the comment that opened it
+  (6.14.0's `commentId`, previously set only for replies), so the bell also
+  lands on that comment when clicked. One notification per video and round,
+  exactly the bell's rule: the push fires when the bell row is created or
+  bumped, and a newer one for the same video replaces the older on the
+  device instead of stacking.
+
+### Added
+
+- **Test notification button** in Settings → Notifications → Browser → This
+  device, reporting the three steps of a test as they happen: accepted by the
+  push service (with the HTTP code, or the service's refusal), received by
+  this browser (the service worker now posts `fc:push-received` to open pages
+  the moment a push arrives), and shown — with the precise place to look when
+  a step fails: `chrome://gcm-internals` and its Connection State when the
+  browser never receives what the service accepted (managed Macs, VPNs, a
+  second copy of Chrome holding the subscription), System Settings →
+  Notifications → Google Chrome and Focus when the browser received it and
+  nothing was drawn. Temporary by agreement: once push is confirmed working
+  it can be hidden without removing the plumbing, the way Retry payment was.
+
+### Internal
+
+- `/api/push/test` returns the push service's `statusCode` (502 when the
+  service refuses); `sendToSubscription` returns it too and logs the
+  service's response body — the number alone never said why. The service
+  worker falls back to a plain notification if the full option set is
+  refused, so a silent failure cannot hide there again. CLAUDE.md records
+  the PNG rule.
+- Verified: tsc 0 errors, eslint clean, service worker syntax checked, 30
+  cases on the push formatting (snippets, one-line collapse, 120-char cut,
+  PNG icon, no badge); the PNG route renders and serves a 192×192 logomark;
+  under the restricted `framecomment_app` role the subscribe upsert and the
+  bell send both work in the request's organisation context; three real
+  pushes to Dragos's Chrome were accepted by the push service with HTTP 201.
+  Not verifiable from the sandbox: the receipt indicator in Settings (its
+  browser blocks service workers).
+
 ## [7.8.0] - 2026-09-09
 
 ### Added

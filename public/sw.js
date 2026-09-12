@@ -32,10 +32,13 @@ self.addEventListener('push', (event) => {
     }
   }
 
+  // 7.8.1: PNG, never SVG — macOS accepts only raster attachments and drops
+  // the whole notification otherwise (see src/app/brand/icon-192.png). No
+  // default badge: Android draws the badge as a white silhouette, and a
+  // coloured logomark there is a blob.
   const options = {
     body: payload.body || 'You have a new notification',
-    icon: payload.icon || '/brand/icon-192.svg',
-    badge: payload.badge || '/brand/icon-192.svg',
+    icon: payload.icon || '/brand/icon-192.png',
     tag: payload.tag || 'default',
     data: payload.data || {},
     vibrate: [100, 50, 100],
@@ -44,10 +47,36 @@ self.addEventListener('push', (event) => {
     renotify: true,
     actions: payload.actions || [],
   }
+  if (payload.badge) options.badge = payload.badge
 
-  event.waitUntil(
-    self.registration.showNotification(payload.title || 'FrameComment', options)
-  )
+  // 7.8.1: tell every open page of this origin that a push ARRIVED, before
+  // anything is drawn. Settings → Notifications → Browser listens for this, so
+  // its test button can say where the chain breaks: accepted by the push
+  // service but never received here (the browser's push channel is blocked),
+  // or received here but never shown (the operating system hides it). Without
+  // this the two failures look identical: nothing happens.
+  const title = payload.title || 'FrameComment'
+  const announce = self.clients
+    .matchAll({ type: 'window', includeUncontrolled: true })
+    .then((clientList) => {
+      for (const client of clientList) {
+        client.postMessage({
+          type: 'fc:push-received',
+          title,
+          tag: options.tag,
+          receivedAt: Date.now(),
+        })
+      }
+    })
+    .catch(() => {})
+
+  // If the full option set is ever refused, still show a plain notification —
+  // a silent failure here is exactly what makes push "not work" undiagnosably.
+  const show = self.registration
+    .showNotification(title, options)
+    .catch(() => self.registration.showNotification(title, { body: options.body, tag: options.tag }))
+
+  event.waitUntil(Promise.all([announce, show]))
 })
 
 self.addEventListener('notificationclick', (event) => {

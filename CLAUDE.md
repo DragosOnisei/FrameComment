@@ -142,7 +142,10 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   under RLS that reads as "no rows" — make `fn` an async function that awaits
   its queries. Devices enrolled by the entry bar start with NO broadcast
   events (`initialEvents: []`); Disable in Settings sets `fc:push-opted-out`
-  so the bar never re-enrols that browser.
+  so the bar never re-enrols that browser. **Notification icons are PNG**
+  (`/brand/icon-192.png`, rendered by sharp from the brand SVG): macOS accepts
+  only raster attachments and silently drops the WHOLE notification for an
+  SVG icon while the push service reports it delivered (7.8.1).
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

@@ -1,13 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { apiFetch, apiPost, apiPatch } from '@/lib/api-client'
 import { NOTIFICATION_EVENT_TYPES, type NotificationEventType } from '@/lib/external-notifications/constants'
-import { Bell, BellOff, Send, Trash2, Smartphone, Monitor, Pencil, Check, X } from 'lucide-react'
+import { Bell, BellOff, Send, Trash2, Smartphone, Monitor, Pencil, Check, X, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { logError } from '@/lib/logging'
 import {
@@ -50,6 +50,47 @@ export function WebPushSection({ active }: { active: boolean }) {
   const [permissionState, setPermissionState] = useState<NotificationPermission | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
+
+  /**
+   * 7.8.1: the three-step test for THIS device.
+   *
+   * "Nothing arrives" has three different causes that look identical from
+   * the outside: the server could not hand the message to the push service;
+   * the push service accepted it but this browser never received it (its
+   * push channel is blocked — managed Macs, VPNs, or two copies of Chrome
+   * where the other one holds the subscription); or the browser received it
+   * and the operating system hid the banner. The service worker now posts
+   * `fc:push-received` to open pages the moment a push arrives, so this
+   * component can tell the second case from the third instead of guessing.
+   */
+  type TestPhase = 'idle' | 'sending' | 'sent' | 'received' | 'not-received' | 'failed'
+  const [testPhase, setTestPhase] = useState<TestPhase>('idle')
+  const [testSentAt, setTestSentAt] = useState<number | null>(null)
+  const [testStatusCode, setTestStatusCode] = useState<number | null>(null)
+  const [testError, setTestError] = useState<string | null>(null)
+  const [lastReceived, setLastReceived] = useState<{ at: number; title: string } | null>(null)
+  const testTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data
+      if (!data || data.type !== 'fc:push-received') return
+      const at = typeof data.receivedAt === 'number' ? data.receivedAt : Date.now()
+      const title = typeof data.title === 'string' ? data.title : 'FrameComment'
+      setLastReceived({ at, title })
+      setTestPhase((phase) => (phase === 'sending' || phase === 'sent' ? 'received' : phase))
+      if (testTimerRef.current) {
+        clearTimeout(testTimerRef.current)
+        testTimerRef.current = null
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', onMessage)
+      if (testTimerRef.current) clearTimeout(testTimerRef.current)
+    }
+  }, [])
 
   // Check browser support (shared with the enrolment bar since 7.7.0)
   const isPushSupported = detectPushSupport()
@@ -214,8 +255,38 @@ export function WebPushSection({ active }: { active: boolean }) {
     }
   }
 
-  // Send test notification
+  // 7.8.1: test THIS device and report each step (see TestPhase above).
+  const handleTestThisDevice = async () => {
+    if (!currentSubscriptionId) return
+    setError(null)
+    setSuccess(null)
+    setTestError(null)
+    setTestStatusCode(null)
+    setTestPhase('sending')
+    if (testTimerRef.current) clearTimeout(testTimerRef.current)
+    try {
+      const data = await apiPost('/api/push/test', { subscriptionId: currentSubscriptionId })
+      setTestSentAt(Date.now())
+      setTestStatusCode(typeof data?.statusCode === 'number' ? data.statusCode : null)
+      setTestPhase((phase) => (phase === 'received' ? phase : 'sent'))
+      // The push service usually delivers within a second or two; fifteen is
+      // generous enough that "not received" means blocked, not slow.
+      testTimerRef.current = setTimeout(() => {
+        setTestPhase((phase) => (phase === 'sent' ? 'not-received' : phase))
+      }, 15000)
+    } catch (err) {
+      setTestError(err instanceof Error ? err.message : t('failedToTest'))
+      setTestPhase('failed')
+    }
+  }
+
+  // Send test notification to another listed device (no receipt to observe
+  // from here — it lands on that device, not this one).
   const handleTestNotification = async (subscriptionId: string) => {
+    if (subscriptionId === currentSubscriptionId) {
+      await handleTestThisDevice()
+      return
+    }
     setError(null)
     setSuccess(null)
     try {
@@ -226,6 +297,8 @@ export function WebPushSection({ active }: { active: boolean }) {
       setError(err instanceof Error ? err.message : t('failedToTest'))
     }
   }
+
+  const clock = (ms: number) => new Date(ms).toLocaleTimeString()
 
   // Update subscription events
   const handleToggleEvent = async (subscriptionId: string, eventType: string, enabled: boolean) => {
@@ -313,18 +386,73 @@ export function WebPushSection({ active }: { active: boolean }) {
               </p>
             </div>
           </div>
-          <Button
-            onClick={currentDeviceSubscribed ? handleUnsubscribe : handleSubscribe}
-            variant={currentDeviceSubscribed ? 'outline' : 'default'}
-            disabled={permissionState === 'denied' && !currentDeviceSubscribed}
-          >
-            {currentDeviceSubscribed ? tc('disable') : tc('enable')}
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            {currentDeviceSubscribed && currentSubscriptionId && (
+              <Button
+                onClick={handleTestThisDevice}
+                variant="secondary"
+                disabled={testPhase === 'sending'}
+                title={t('sendTestTitle')}
+              >
+                {testPhase === 'sending' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                <span className="ml-2">{t('testThisDevice')}</span>
+              </Button>
+            )}
+            <Button
+              onClick={currentDeviceSubscribed ? handleUnsubscribe : handleSubscribe}
+              variant={currentDeviceSubscribed ? 'outline' : 'default'}
+              disabled={permissionState === 'denied' && !currentDeviceSubscribed}
+            >
+              {currentDeviceSubscribed ? tc('disable') : tc('enable')}
+            </Button>
+          </div>
         </div>
 
         {permissionState === 'denied' && !currentDeviceSubscribed && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
             {t('enableInstructions')}
+          </p>
+        )}
+
+        {/* 7.8.1: the three steps of a test, each named as it happens. */}
+        {testPhase !== 'idle' && (
+          <div className="rounded-md border border-border/60 bg-accent/5 p-3 text-xs space-y-1.5">
+            {testPhase === 'sending' && <p>{t('testSending')}</p>}
+            {testPhase === 'failed' && (
+              <p className="text-red-500">{t('testStepServiceFailed', { error: testError ?? '' })}</p>
+            )}
+            {(testPhase === 'sent' || testPhase === 'received' || testPhase === 'not-received') && (
+              <p className="text-green-600 dark:text-green-400">
+                {t('testStepService', {
+                  time: testSentAt ? clock(testSentAt) : '',
+                  status: testStatusCode ?? '?',
+                })}
+              </p>
+            )}
+            {testPhase === 'sent' && <p className="text-muted-foreground">{t('testStepWaiting')}</p>}
+            {testPhase === 'received' && lastReceived && (
+              <>
+                <p className="text-green-600 dark:text-green-400">
+                  {t('testStepReceived', { time: clock(lastReceived.at), title: lastReceived.title })}
+                </p>
+                <p className="text-muted-foreground">{t('testHintReceived')}</p>
+              </>
+            )}
+            {testPhase === 'not-received' && (
+              <>
+                <p className="text-amber-600 dark:text-amber-400">{t('testStepNotReceived')}</p>
+                <p className="text-muted-foreground">{t('testHintNotReceived')}</p>
+              </>
+            )}
+          </div>
+        )}
+        {testPhase === 'idle' && lastReceived && (
+          <p className="text-xs text-muted-foreground">
+            {t('lastPushReceived', { time: clock(lastReceived.at), title: lastReceived.title })}
           </p>
         )}
       </div>

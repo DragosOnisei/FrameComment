@@ -46,11 +46,16 @@ export async function POST(request: NextRequest) {
     const result = await sendTestNotification(subscriptionId)
 
     if (result.success) {
-      return NextResponse.json({ success: true })
+      // 7.8.1: the push service's status code, so Settings can show "accepted
+      // (HTTP 201)" as the first of three steps and place a failure precisely.
+      return NextResponse.json({ success: true, statusCode: result.statusCode ?? null })
     } else {
       return NextResponse.json(
-        { error: result.error || webPushMessages.failedToSendTestNotification || 'Failed to send test notification' },
-        { status: 500 }
+        {
+          error: result.error || webPushMessages.failedToSendTestNotification || 'Failed to send test notification',
+          statusCode: result.statusCode ?? null,
+        },
+        { status: 502 }
       )
     }
   } catch (error) {
