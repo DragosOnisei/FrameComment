@@ -14,6 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.8.2] - 2026-09-12
+
+### Fixed
+
+- **Settings → Notifications is back, for browser push.** The 7.8.1 test
+  button was unreachable: the Notifications entry had been removed from the
+  Settings sidebar in 3.0.0 ("no managed delivery infrastructure yet") and
+  `?section=notifications` was not accepted either, so the whole section —
+  and with it the only place to see one's push devices, rename them, pick
+  company-wide events and run the test — could not be opened from anywhere.
+  Browser push needs no infrastructure of ours (the VAPID keys are the
+  company's own, delivery is the browser vendor's), so the entry returns for
+  the Browser tab alone; the Email and External tabs stay hidden exactly as
+  before, and the section shows no tab strip when it has one tab.
+  `?section=notifications` deep-links to it. Owners and Admins only, like
+  every Settings page; other roles enrol from the entry bar.
+
 ## [7.8.1] - 2026-09-12
 
 ### Fixed

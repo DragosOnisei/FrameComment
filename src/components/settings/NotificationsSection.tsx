@@ -7,14 +7,34 @@ import { WebPushSection } from '@/components/settings/WebPushSection'
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
+export type NotificationsTab = 'email' | 'external' | 'browser'
+const ALL_TABS: ReadonlyArray<NotificationsTab> = ['email', 'external', 'browser']
+
 interface NotificationsSectionProps extends EmailSettingsContentProps {
   show: boolean
   setShow: (value: boolean) => void
   collapsible?: boolean
+  /**
+   * 7.8.2: which tabs exist. The whole section had been off the Settings
+   * sidebar since 3.0.0 ("no managed delivery infrastructure yet"), which
+   * also hid the Browser tab — the only place a person can see their push
+   * devices, rename them, pick company-wide events, and (7.8.1) run the
+   * three-step test. Browser push needs none of that infrastructure (VAPID
+   * keys are the company's own; delivery is the browser vendor's), so the
+   * page now mounts this section with `['browser']` and the email/external
+   * tabs stay hidden exactly as before. One tab: no tab strip.
+   */
+  tabs?: ReadonlyArray<NotificationsTab>
 }
 
-export function NotificationsSection({ show, setShow, collapsible, ...emailProps }: NotificationsSectionProps) {
-  const [activeTab, setActiveTab] = useState<'email' | 'external' | 'browser'>('email')
+export function NotificationsSection({
+  show,
+  setShow,
+  collapsible,
+  tabs = ALL_TABS,
+  ...emailProps
+}: NotificationsSectionProps) {
+  const [activeTab, setActiveTab] = useState<NotificationsTab>(tabs[0] ?? 'browser')
   const t = useTranslations('settings')
 
   return (
@@ -30,11 +50,13 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
       contentClassName="space-y-6 border-t border-white/10 pt-6"
       collapsible={collapsible}
     >
+          {tabs.length > 1 && (
           <div
             role="tablist"
             aria-label={t('notifications.title')}
             className="inline-flex w-full gap-2"
           >
+            {tabs.includes('email') && (
             <button
               type="button"
               role="tab"
@@ -50,6 +72,8 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
             >
               {t('notifications.emailTab')}
             </button>
+            )}
+            {tabs.includes('external') && (
             <button
               type="button"
               role="tab"
@@ -65,6 +89,8 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
             >
               {t('notifications.pushTab')}
             </button>
+            )}
+            {tabs.includes('browser') && (
             <button
               type="button"
               role="tab"
@@ -80,9 +106,11 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
             >
               {t('notifications.browserPushTab')}
             </button>
+            )}
           </div>
+          )}
 
-          {activeTab === 'email' && (
+          {tabs.includes('email') && activeTab === 'email' && (
             <div id="notifications-tabpanel-email" role="tabpanel" className="space-y-4">
               <div className="text-xs text-white/55">
                 {t('notifications.emailDescription')}
@@ -90,7 +118,7 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
               <EmailSettingsContent {...emailProps} />
             </div>
           )}
-          {activeTab === 'external' && (
+          {tabs.includes('external') && activeTab === 'external' && (
             <div id="notifications-tabpanel-external" role="tabpanel" className="space-y-4">
               <div className="text-xs text-white/55">
                 {t('notifications.pushDescription')}
@@ -98,7 +126,7 @@ export function NotificationsSection({ show, setShow, collapsible, ...emailProps
               <ExternalNotificationsContent active={show && activeTab === 'external'} showIntro={false} />
             </div>
           )}
-          {activeTab === 'browser' && (
+          {tabs.includes('browser') && activeTab === 'browser' && (
             <div id="notifications-tabpanel-browser" role="tabpanel" className="space-y-4">
               <div className="text-xs text-white/55">
                 {t('notifications.browserPushDescription')}

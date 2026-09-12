@@ -251,7 +251,7 @@ export default function GlobalSettingsPage() {
     if (typeof window === 'undefined') return
     const section = new URLSearchParams(window.location.search).get('section')
     const valid = [
-      'appearance', 'branding', 'privacy', 'video-processing',
+      'appearance', 'branding', 'privacy', 'notifications', 'video-processing',
       'security', 'blocklist', 'storage', 'billing',
     ]
     if (!section || !valid.includes(section)) return
@@ -265,6 +265,7 @@ export default function GlobalSettingsPage() {
       blocklist: setShowBlocklist,
       storage: setShowStorage,
       billing: setShowBilling,
+      notifications: setShowNotifications,
     }
     openers[section]?.(true)
   }, [])
@@ -844,11 +845,13 @@ export default function GlobalSettingsPage() {
     { id: 'appearance', label: t('appearance.title'), icon: Palette },
     { id: 'branding', label: t('branding.title'), icon: Building2 },
     { id: 'privacy', label: t('privacy.title'), icon: ShieldCheck },
-    // 2.5.0+: Email & Push Notifications hidden from the sidebar
-    // — we don't ship managed delivery infrastructure for it yet.
-    // Props + state + JSX stay defined below so re-enabling is a
-    // single-line restore.
-    // { id: 'notifications', label: t('notifications.title'), icon: Mail },
+    // 2.5.0+: Email & Push Notifications were hidden from the sidebar — no
+    // managed delivery infrastructure for them yet. 7.8.2: the entry is back
+    // for the BROWSER tab only (see `tabs={['browser']}` where the section
+    // mounts): browser push needs no infrastructure of ours, and hiding the
+    // whole section had also hidden the one place a person can see their push
+    // devices and run the test. Email and external destinations stay hidden.
+    { id: 'notifications', label: t('notifications.title'), icon: Mail },
     { id: 'video-processing', label: t('videoProcessing.title'), icon: Video },
     { id: 'security', label: t('security.title'), icon: Shield },
     { id: 'blocklist', label: t('blocklist.title'), icon: Ban },
@@ -1060,7 +1063,7 @@ export default function GlobalSettingsPage() {
           {isPlatformOrg && (
             <PrivacySection {...privacyProps} show={showPrivacy} setShow={setShowPrivacy} />
           )}
-          <NotificationsSection {...notificationsProps} show={showNotifications} setShow={setShowNotifications} />
+          <NotificationsSection {...notificationsProps} tabs={['browser']} show={showNotifications} setShow={setShowNotifications} />
           <VideoProcessingSettingsSection {...videoProcessingProps} show={showVideoProcessing} setShow={setShowVideoProcessing} />
           {/* 1.5.8: <ProjectDefaultsSection> removed from the mobile
               collapsible stack alongside the sidebar entry. Props +
@@ -1132,7 +1135,7 @@ export default function GlobalSettingsPage() {
               <PrivacySection {...privacyProps} show={true} setShow={() => {}} collapsible={false} />
             )}
             {activeSection === 'notifications' && (
-              <NotificationsSection {...notificationsProps} show={true} setShow={() => {}} collapsible={false} />
+              <NotificationsSection {...notificationsProps} tabs={['browser']} show={true} setShow={() => {}} collapsible={false} />
             )}
             {activeSection === 'video-processing' && (
               <VideoProcessingSettingsSection {...videoProcessingProps} show={true} setShow={() => {}} collapsible={false} />
