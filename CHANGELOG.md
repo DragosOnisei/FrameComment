@@ -14,6 +14,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.8.3] - 2026-09-12
+
+### Changed
+
+- **Push notifications are about comments, and nothing else.** Every
+  enrolled device now receives every client comment — the video in the
+  title, the author and a line of the comment in the body — plus the person's
+  own bell notifications (feedback on their cuts, replies to them, cuts sent
+  to them). The other company-wide events (share opened, admin login,
+  uploads, security alerts, deadlines) are not pushed to anyone. Devices
+  enrolled from the entry bar start this way, and the migration
+  `push_comments_only` sets every existing device to exactly that and
+  changes the column default — no device ever had its list chosen by a
+  person, because the screen for it had been hidden since 3.0.0.
+  - One notification per video: every push about a video's comments — the
+    bell's "new comments" and "replied to you", and the company-wide client
+    comment — shares the tag `comments:<videoId>`, so a person who is both
+    the uploader and on the company-wide list gets one banner, the later
+    replacing the earlier, instead of two for the same comment.
+- **Settings → Notifications is hidden again**, the 7.8.1 test button with
+  it: with every device receiving the same thing there is nothing left to
+  configure. `/admin/settings?section=notifications` still opens the section
+  as a debugging door (devices, rename, the three-step test).
+
+### Internal
+
+- Entry-bar copy updated (client comments, replies, cuts sent to you; no
+  pointer to a hidden Settings page). CLAUDE.md records the comments-only
+  rule and the shared tag.
+- Verified: tsc 0 errors, eslint clean; the push formatting cases updated
+  for the shared tag; the migration applied to the local database (the one
+  device row → `{CLIENT_COMMENT}`, column default changed) and
+  `prisma migrate diff` from that database to the schema shows no line for
+  the column — only the long-standing staged-migration noise.
+
 ## [7.8.2] - 2026-09-12
 
 ### Fixed

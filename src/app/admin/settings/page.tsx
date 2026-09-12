@@ -24,6 +24,13 @@ import { TopbarLeftSlot, TopbarRightSlot } from '@/components/TopbarSlots'
 import { useAuth } from '@/components/AuthProvider'
 import { canManageSettings } from '@/lib/permissions'
 
+/**
+ * 7.8.3: the Notifications section is off the sidebar and the mobile stack.
+ * Flip to true to restore both (the desktop `?section=notifications` door
+ * works regardless).
+ */
+const SHOW_NOTIFICATIONS_SETTINGS = false
+
 interface Settings {
   id: string
   language: string | null
@@ -845,13 +852,16 @@ export default function GlobalSettingsPage() {
     { id: 'appearance', label: t('appearance.title'), icon: Palette },
     { id: 'branding', label: t('branding.title'), icon: Building2 },
     { id: 'privacy', label: t('privacy.title'), icon: ShieldCheck },
-    // 2.5.0+: Email & Push Notifications were hidden from the sidebar — no
-    // managed delivery infrastructure for them yet. 7.8.2: the entry is back
-    // for the BROWSER tab only (see `tabs={['browser']}` where the section
-    // mounts): browser push needs no infrastructure of ours, and hiding the
-    // whole section had also hidden the one place a person can see their push
-    // devices and run the test. Email and external destinations stay hidden.
-    { id: 'notifications', label: t('notifications.title'), icon: Mail },
+    // 2.5.0+: Email & Push Notifications hidden from the sidebar — no
+    // managed delivery infrastructure for them yet. 7.8.2 briefly showed the
+    // entry for the Browser tab; 7.8.3 hides it again by product decision:
+    // push is about comments and nothing else, every device gets the same
+    // thing, so there is nothing for a person to configure. The section still
+    // mounts for `?section=notifications` (see the allow-list above) as a
+    // hidden door to the push devices and the three-step test.
+    ...(SHOW_NOTIFICATIONS_SETTINGS
+      ? [{ id: 'notifications', label: t('notifications.title'), icon: Mail }]
+      : []),
     { id: 'video-processing', label: t('videoProcessing.title'), icon: Video },
     { id: 'security', label: t('security.title'), icon: Shield },
     { id: 'blocklist', label: t('blocklist.title'), icon: Ban },
@@ -1063,7 +1073,9 @@ export default function GlobalSettingsPage() {
           {isPlatformOrg && (
             <PrivacySection {...privacyProps} show={showPrivacy} setShow={setShowPrivacy} />
           )}
-          <NotificationsSection {...notificationsProps} tabs={['browser']} show={showNotifications} setShow={setShowNotifications} />
+          {SHOW_NOTIFICATIONS_SETTINGS && (
+            <NotificationsSection {...notificationsProps} tabs={['browser']} show={showNotifications} setShow={setShowNotifications} />
+          )}
           <VideoProcessingSettingsSection {...videoProcessingProps} show={showVideoProcessing} setShow={setShowVideoProcessing} />
           {/* 1.5.8: <ProjectDefaultsSection> removed from the mobile
               collapsible stack alongside the sidebar entry. Props +

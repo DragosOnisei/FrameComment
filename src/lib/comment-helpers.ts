@@ -264,6 +264,7 @@ export async function handleCommentNotifications(params: {
         pushData: {
           projectTitle: project.title,
           projectId: project.id,
+          videoId: videoId || undefined,
           videoName: video?.name || undefined,
           authorName,
           content: rawContent,

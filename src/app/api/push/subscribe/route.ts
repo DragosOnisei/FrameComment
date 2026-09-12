@@ -110,8 +110,10 @@ export async function POST(request: NextRequest) {
     // everything, as it always has (the Settings path). Before 7.7.0 every
     // re-registration reset the list to everything.
     const explicitEvents = sanitizeEvents(subscribedEvents)
+    // 7.8.3: a device nobody configured gets client comments — push is about
+    // comments and nothing else (see the migration of the same name).
     const eventsForNewDevice =
-      explicitEvents ?? sanitizeEvents(initialEvents) ?? [...NOTIFICATION_EVENT_TYPES]
+      explicitEvents ?? sanitizeEvents(initialEvents) ?? ['CLIENT_COMMENT']
 
     // Get user agent for device identification
     const userAgent = request.headers.get('user-agent') || undefined

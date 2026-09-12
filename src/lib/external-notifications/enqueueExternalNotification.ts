@@ -14,6 +14,8 @@ interface ExtendedNotificationJob extends ExternalNotificationJob {
     ip?: string
     email?: string
     projectId?: string
+    /** 7.8.3: lets a client-comment push share its tag with the bell's push for the same video. */
+    videoId?: string
     url?: string
     title?: string
     body?: string
@@ -61,6 +63,12 @@ export async function enqueueExternalNotification(job: ExtendedNotificationJob):
         title: pushData.title,
         body: pushData.body,
       })
+
+      // 7.8.3: one notification per video about its comments, whoever sent it
+      // (see formatBellPush for the other half of this tag).
+      if (eventType === 'CLIENT_COMMENT' && pushData.videoId) {
+        payload.tag = `comments:${pushData.videoId}`
+      }
 
       // Add project ID and URL to payload data for click handling
       if (pushData.projectId || pushData.url) {

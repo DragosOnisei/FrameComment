@@ -1404,8 +1404,10 @@ model PushSubscription {
   userAgent  String?
   deviceName String?
 
-  // Event subscriptions (default: all events)
-  subscribedEvents String[] @default(["SHARE_ACCESS", "ADMIN_ACCESS", "CLIENT_COMMENT", "VIDEO_APPROVAL", "CLIENT_UPLOAD", "SECURITY_ALERT"])
+  // Company-wide events this device receives. 7.8.3: comments only — push is
+  // about comments and nothing else (the per-device event screen is hidden);
+  // the person's own bell notifications are delivered regardless of this list.
+  subscribedEvents String[] @default(["CLIENT_COMMENT"])
 
   createdAt  DateTime @default(now())
   lastUsedAt DateTime @default(now())

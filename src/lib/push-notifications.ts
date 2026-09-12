@@ -363,12 +363,22 @@ export async function createNotificationPayload(
         body: data.body || `${data.email || notificationsText.someone || auth.someoneLabel || 'Someone'} ${(notificationsText.openedProjectShort || 'opened {projectTitle}').replace('{projectTitle}', data.projectTitle || notificationsText.aProject || 'a project')}`,
       }
 
-    case 'CLIENT_COMMENT':
+    case 'CLIENT_COMMENT': {
+      // 7.8.3: reads like the bell's own push — the video in the title, the
+      // author and a line of the comment in the body.
+      const who = data.authorName || notificationsText.someone || auth.someoneLabel || 'Someone'
+      const where = data.videoName || data.projectTitle || webPush.aVideo || 'a video'
+      const line = (data.content || '').replace(/\s+/g, ' ').trim()
       return {
         ...basePayload,
-        title: webPush.newCommentTitle || 'New Comment',
-        body: `${data.authorName || notificationsText.someone || auth.someoneLabel || 'Someone'} ${webPush.onLabel || 'on'} ${data.videoName || data.projectTitle || webPush.aVideo || 'a video'}${data.content ? `: "${data.content.slice(0, 50)}${data.content.length > 50 ? '...' : ''}"` : ''}`,
+        title: data.videoName
+          ? `${webPush.newCommentOn || 'New comment on'} ${data.videoName}`
+          : webPush.newCommentTitle || 'New Comment',
+        body: line
+          ? `${who}: ${line.length > 120 ? `${line.slice(0, 117)}...` : line}`
+          : `${who} ${webPush.onLabel || 'on'} ${where}`,
       }
+    }
 
     case 'SECURITY_ALERT':
       return {
@@ -505,10 +515,14 @@ export function formatBellPush(
     title,
     body,
     icon: '/brand/icon-192.png',
-    // One tag per (type, video): a reviewer pressing "Send to editor" five
-    // times replaces the notification on the editor's phone instead of
-    // stacking five. The service worker sets `renotify`, so it still alerts.
-    tag: `bell:${n.type}:${n.videoId ?? n.id}`,
+    // One tag per video for everything about its comments — the bell's "new
+    // comments" and "replied to you", and the company-wide client-comment push
+    // (enqueueExternalNotification uses the same `comments:<videoId>`). A
+    // person who is both the uploader and on the company-wide list gets ONE
+    // notification per video, the later replacing the earlier, instead of two
+    // for the same comment; "Send to editor" pressed five times replaces
+    // itself. The service worker sets `renotify`, so it still alerts.
+    tag: n.videoId ? `comments:${n.videoId}` : `bell:${n.type}:${n.id}`,
     data: {
       type: 'IN_APP',
       bellType: n.type,

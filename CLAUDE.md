@@ -136,12 +136,19 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   org context (today: the founder answering feedback) must pass
   `{ organizationId }`; without it RLS matches zero devices, silently. VAPID
   details are per call, never `setVapidDetails` (module-global, races across
-  companies). `runWithOrgContext(org, fn)` only covers what `fn` AWAITS
+  companies). Push is about COMMENTS only (7.8.3): every device carries
+  `subscribedEvents = ['CLIENT_COMMENT']` (migration `push_comments_only`
+  set the existing rows and the column default), the entry bar enrols with
+  the same, and the Settings section for it is hidden — reachable at
+  `/admin/settings?section=notifications` as a debugging door. All pushes
+  about one video's comments share the tag `comments:<videoId>` so a person
+  gets one notification per video, not one per sender path.
+  `runWithOrgContext(org, fn)` only covers what `fn` AWAITS
   inside it: a bare `prisma.x.find…()` returned from `fn` is a lazy
   PrismaPromise that executes at the outer `await`, outside the context, and
   under RLS that reads as "no rows" — make `fn` an async function that awaits
   its queries. Devices enrolled by the entry bar start with NO broadcast
-  events (`initialEvents: []`); Disable in Settings sets `fc:push-opted-out`
+  events (`initialEvents: ['CLIENT_COMMENT']` since 7.8.3); Disable in Settings sets `fc:push-opted-out`
   so the bar never re-enrols that browser. **Notification icons are PNG**
   (`/brand/icon-192.png`, rendered by sharp from the brand SVG): macOS accepts
   only raster attachments and silently drops the WHOLE notification for an

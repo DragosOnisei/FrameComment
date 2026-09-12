@@ -23,11 +23,10 @@
  *   - permission denied, or Disable pressed in Settings → nothing; Settings
  *     already explains how to change either.
  *
- * Devices enrolled here start with the person's OWN notifications only
- * (`initialEvents: []`); the company-wide events (share opened, admin login,
- * client comments on every project, …) stay opt-in per device in Settings,
- * exactly as before. A team of thirty enrolled into every event would turn
- * notifications off within a day.
+ * Devices enrolled here receive the person's OWN bell notifications and every
+ * client comment (`initialEvents: ['CLIENT_COMMENT']`, 7.8.3) — push is about
+ * comments and nothing else; the other company-wide events (share opened,
+ * admin login, uploads, security alerts, deadlines) are not pushed to anyone.
  *
  * iPhone/iPad: Safari delivers web push only to sites added to the Home
  * Screen, and in a plain tab `PushManager` does not exist. In that one case
@@ -129,7 +128,7 @@ export default function PushEnrollmentBanner() {
 
       if (decision === 'subscribe-silently') {
         try {
-          await subscribeThisDevice({ registration, initialEvents: [] })
+          await subscribeThisDevice({ registration, initialEvents: ['CLIENT_COMMENT'] })
         } catch (err) {
           // A device another admin registered on this browser answers 409;
           // remember the failure so this does not run on every page load.
@@ -174,7 +173,7 @@ export default function PushEnrollmentBanner() {
       await subscribeThisDevice({
         registration: registrationRef.current,
         vapidPublicKey: vapidKeyRef.current ?? undefined,
-        initialEvents: [],
+        initialEvents: ['CLIENT_COMMENT'],
       })
       setMode('done')
       window.setTimeout(() => setMode('hidden'), 5000)
