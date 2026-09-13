@@ -14,6 +14,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.9.0] - 2026-09-13
+
+### Added
+
+- **Loop.** A Loop button sits to the right of Play, the same size as Play
+  and Reverse, off by default and lit with the accent colour when on. It
+  flips the video element's own `loop` flag, so the clip wraps without a
+  seam.
+- **Compare picks up where you were, and keeps playing.** Opening Compare
+  used to put two paused players at 0:00 on top of a main clip that kept
+  playing underneath — the reviewer lost their place and heard two
+  soundtracks. Now the main player pauses, both sides start at the same
+  time and speed, playing if it was playing, and closing Compare (Escape or
+  the X) returns the main player to the exact moment compare left off, in
+  the same state.
+
+### Fixed
+
+- **The encoding banner counts right from the first second.** Four HD+
+  uploads read "2 / 8", then "4 / 12", then "25 / 27". Two things were wrong:
+  - The total grew as the worker reached each file, because a video's tier
+    ladder was decided only by `prepare-video` and counted as zero until
+    then. The browser now reads the file's pixel dimensions before uploading,
+    `/api/videos` stores them, and the status API predicts the ladder with the
+    very function the worker uses — extracted into `src/lib/tier-ladder.ts`,
+    so what the banner announces is what the worker will do. A file the
+    browser cannot decode falls back to the project's cap; the worker corrects
+    that one case when it probes.
+  - The jump to 25 / 27 was double counting. After its first tier a video was
+    listed only while one of its jobs was ACTIVE; between two tiers, waiting
+    for a free slot, it vanished for a poll, the banner folded its whole
+    ladder into "done", then counted it again when it came back — every
+    transition added phantom tiers. The status API now keeps READY rows whose
+    ladder is unfinished, and the tally holds a vanished video for two polls
+    with its last numbers: a flicker resumes without double counting, a real
+    finish folds once, and the header never moves backwards.
+
+### Internal
+
+- New: `src/lib/tier-ladder.ts` (`planTierSlugs`, `predictTierSlugs`),
+  `src/lib/tier-tally.ts` (`tallyStep`, `tallyLive`),
+  `src/lib/video-dimensions.ts` (`probeVideoDimensions`). The processing
+  status response carries `plannedTiersPredicted`; the banner reads the real
+  ladder when present and the prediction otherwise. `VideoComparison` takes
+  `initialTime`, `autoPlay`, `initialPlaybackSpeed` and reports
+  `{ time, playing }` on close; `CustomVideoControls` takes
+  `loopActive` / `onToggleLoop`. CLAUDE.md records the one-function ladder
+  rule and the grace-based tally.
+- Verified: 228 ladder cases identical between the worker's decision and the
+  pure function (three aspect ratios × nineteen short sides × four caps);
+  prediction and tally cases including the flicker, the finish and a stopped
+  video; tsc 0 errors; eslint with no new warnings (the five reported predate
+  this release); the new status query run against the local database; in a
+  browser, the Loop button sits right of Play at the same 36 px, toggles the
+  element's `loop`, and Compare opened both sides at exactly the main
+  player's second and handed the same second back on Escape. Not verifiable
+  from the sandbox: the "keeps playing" half of the handoff (media does not
+  start in its hidden browser) — it uses the same play calls Compare's own
+  Play button does.
+
 ## [7.8.4] - 2026-09-12
 
 ### Changed

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { Comment } from '@prisma/client'
-import { Play, Pause, Rewind, Volume2, VolumeX, Maximize, Minimize, Trash2, MapPin, Airplay, Cast } from 'lucide-react'
+import { Play, Pause, Rewind, Repeat, Volume2, VolumeX, Maximize, Minimize, Trash2, MapPin, Airplay, Cast } from 'lucide-react'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { getUserColor } from '@/lib/utils'
 import { timecodeToSeconds, timecodeToSeekSeconds, secondsToTimecode, formatCommentTimestamp } from '@/lib/timecode'
@@ -37,6 +37,10 @@ interface CustomVideoControlsProps {
    *  play/pause button needs nothing extra. */
   reverseActive?: boolean
   onToggleReverse?: () => void
+  /** 7.9.0: loop the clip. Absent = no button (the comparison view). Off by
+   *  default; the parent flips the element's own `loop` flag. */
+  loopActive?: boolean
+  onToggleLoop?: () => void
   onSeek: (time: number) => void
   onVolumeChange: (volume: number) => void
   onToggleMute: () => void
@@ -411,6 +415,8 @@ export default function CustomVideoControls({
   onPlayPause,
   reverseActive = false,
   onToggleReverse,
+  loopActive = false,
+  onToggleLoop,
   onSeek,
   onVolumeChange,
   onToggleMute,
@@ -3423,6 +3429,31 @@ export default function CustomVideoControls({
               <Play className="w-5 h-5 text-white fill-white" />
             )}
           </button>
+          {/* 7.9.0: Loop, right of Play, the same footprint as Reverse. Off by
+              default and lit with the accent when on. The <video> element's
+              own `loop` flag does the wrap, so there is no seam at the end. */}
+          {onToggleLoop && (
+            <button
+              type="button"
+              onClick={onToggleLoop}
+              aria-pressed={loopActive}
+              aria-label={t('loopPlayback')}
+              title={t('loopPlayback')}
+              className={`p-2 rounded-md transition-colors touch-manipulation ${
+                loopActive ? 'text-white' : 'text-white/85 hover:text-white hover:bg-white/[0.10] active:bg-white/[0.18]'
+              }`}
+              style={
+                loopActive
+                  ? {
+                      backgroundColor: 'hsl(var(--spotlight-tint) / 0.30)',
+                      boxShadow: 'inset 0 0 0 1px hsl(var(--spotlight-tint) / 0.45)',
+                    }
+                  : undefined
+              }
+            >
+              <Repeat className="w-5 h-5 text-white" />
+            </button>
+          )}
 
           {/* 4.1.0+: frame back/forward buttons removed — frame stepping
               stays available via the ←/→ keyboard shortcuts. */}

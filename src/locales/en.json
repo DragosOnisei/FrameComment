@@ -1968,6 +1968,7 @@
     "pauseVideo": "Pause",
     "playVideo": "Play",
     "reversePlayback": "Reverse",
+    "loopPlayback": "Loop",
     "mute": "Mute",
     "unmute": "Unmute",
     "exitFullscreen": "Exit Fullscreen",

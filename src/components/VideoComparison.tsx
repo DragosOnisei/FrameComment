@@ -16,7 +16,13 @@ interface VideoComparisonProps {
   defaultVersionA?: number
   defaultVersionB?: number
   timestampDisplayMode?: 'TIMECODE' | 'AUTO'
-  onClose: () => void
+  /** 7.9.0: where the main player was when Compare opened, and whether it was
+   *  playing — both sides start there, playing if it was. */
+  initialTime?: number
+  autoPlay?: boolean
+  initialPlaybackSpeed?: number
+  /** 7.9.0: reports where compare left off so the main player can resume there. */
+  onClose: (state?: { time: number; playing: boolean }) => void
 }
 
 /**
@@ -65,6 +71,9 @@ export default function VideoComparison({
   defaultVersionA,
   defaultVersionB,
   timestampDisplayMode = 'TIMECODE',
+  initialTime = 0,
+  autoPlay = false,
+  initialPlaybackSpeed = 1,
   onClose,
 }: VideoComparisonProps) {
   const t = useTranslations('videos')
@@ -85,9 +94,9 @@ export default function VideoComparison({
   const [versionBIndex, setVersionBIndex] = useState(Math.max(0, initialB))
   const [mode, setMode] = useState<'side-by-side' | 'slider'>('side-by-side')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
+  const [currentTime, setCurrentTime] = useState(initialTime)
   const [videoDuration, setVideoDuration] = useState(0)
-  const [playbackSpeed, setPlaybackSpeed] = useState(1)
+  const [playbackSpeed, setPlaybackSpeed] = useState(initialPlaybackSpeed)
   const [showSelectorA, setShowSelectorA] = useState(false)
   const [showSelectorB, setShowSelectorB] = useState(false)
   // 3.8.x: which side is the AUDIO source. Both clips play in sync, but
@@ -117,7 +126,19 @@ export default function VideoComparison({
   const videoRefA = useRef<HTMLVideoElement | null>(null)
   const videoRefB = useRef<HTMLVideoElement | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const currentTimeRef = useRef(0)
+  const currentTimeRef = useRef(initialTime)
+  // 7.9.0: mirrors `isPlaying` for the close handler, which lives in an
+  // effect and would otherwise see a stale value.
+  const isPlayingRef = useRef(false)
+  useEffect(() => {
+    isPlayingRef.current = isPlaying
+  }, [isPlaying])
+  // 7.9.0: the handoff from the main player is applied once, when both sides
+  // have their metadata (see handleLoadedMetadata).
+  const handoffAppliedRef = useRef(false)
+  const closeWithState = useCallback(() => {
+    onClose({ time: currentTimeRef.current, playing: isPlayingRef.current })
+  }, [onClose])
   const videoFpsRef = useRef(24)
   const videoDurationRef = useRef(0)
   const stepFrameRef = useRef<(direction: 'forward' | 'backward') => void>((direction) => {
@@ -282,7 +303,32 @@ export default function VideoComparison({
     }
     if (a) { a.playbackRate = playbackSpeed; a.muted = mutedFor('A'); a.volume = volume }
     if (b) { b.playbackRate = playbackSpeed; b.muted = mutedFor('B'); b.volume = volume }
-  }, [playbackSpeed, mutedFor, volume])
+
+    // 7.9.0: the handoff — once, when BOTH sides know their duration: land on
+    // the frame the main player was on, and keep playing if it was playing.
+    // Seeking one side before the other has metadata would be overwritten by
+    // its own load, so this waits for the pair.
+    if (!handoffAppliedRef.current && a && b && a.readyState >= 1 && b.readyState >= 1) {
+      handoffAppliedRef.current = true
+      const limit = Math.min(a.duration || Infinity, b.duration || Infinity)
+      const t0 = Math.max(0, Math.min(initialTime, Number.isFinite(limit) ? limit - 0.05 : initialTime))
+      if (t0 > 0) {
+        a.currentTime = t0
+        b.currentTime = t0
+        currentTimeRef.current = t0
+        setCurrentTime(t0)
+      }
+      if (autoPlay) {
+        a.play().catch((err) => {
+          console.warn('[compare] version A did not resume:', err?.name, err?.message)
+        })
+        b.play().catch((err) => {
+          console.warn('[compare] version B did not resume:', err?.name, err?.message)
+        })
+        setIsPlaying(true)
+      }
+    }
+  }, [playbackSpeed, mutedFor, volume, initialTime, autoPlay])
 
   // Apply audio focus: mute the non-active side, and both when muted. Re-applied
   // whenever the active side, mute or volume changes, or either version reloads
@@ -369,7 +415,7 @@ export default function VideoComparison({
     const handleKeyboard = (e: KeyboardEvent) => {
       // Escape: close comparison (no Ctrl needed)
       if (e.key === 'Escape') {
-        onClose()
+        closeWithState()
         return
       }
 
@@ -460,7 +506,7 @@ export default function VideoComparison({
     // Use capture phase like the main player
     window.addEventListener('keydown', handleKeyboard, { capture: true })
     return () => window.removeEventListener('keydown', handleKeyboard, { capture: true })
-  }, [onClose, togglePlayPause])
+  }, [closeWithState, togglePlayPause])
 
   // Pause on unmount
   useEffect(() => {
@@ -684,7 +730,7 @@ export default function VideoComparison({
 
         <button
           type="button"
-          onClick={onClose}
+          onClick={closeWithState}
           aria-label="Close"
           className="h-8 w-8 rounded-full bg-white/[0.08] ring-1 ring-white/15 text-white flex items-center justify-center hover:bg-white/[0.16] hover:ring-white/25 active:scale-95 transition-colors shrink-0"
         >

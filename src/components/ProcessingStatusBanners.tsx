@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { tallyStep, tallyLive, type TallySnapshot } from '@/lib/tier-tally'
 import { Upload, Cog, ChevronDown, ChevronUp, CheckCircle2, FolderOpen, Trash2, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { useProcessingStatus, type ProcessingVideo } from '@/contexts/ProcessingStatusContext'
@@ -161,6 +162,21 @@ type BannerKind = 'upload' | 'processing'
 //
 // For UPLOADING rows: TUS-driven `uploadProgress / 100`. Falls
 // back to 0 when the row hasn't started receiving bytes yet.
+/**
+ * 7.9.0: the ladder to count against — the worker's real one once it exists,
+ * the API's prediction until then. Null only for legacy rows with neither.
+ */
+function effectivePlannedTiers(v: ProcessingVideo): string[] | null {
+  const real = Array.isArray(v.plannedTiers)
+    ? v.plannedTiers.filter((t): t is string => typeof t === 'string')
+    : []
+  if (real.length > 0) return real
+  const predicted = Array.isArray(v.plannedTiersPredicted)
+    ? v.plannedTiersPredicted.filter((t): t is string => typeof t === 'string')
+    : []
+  return predicted.length > 0 ? predicted : null
+}
+
 function computeSmoothProgressForVideo(
   v: ProcessingVideo,
   kind: BannerKind,
@@ -184,9 +200,7 @@ function computeSmoothProgressForVideo(
   // "fraction of plannedTiers that completedTiers covers, plus
   // the smooth tick from the in-flight tier" — same shape for
   // PROCESSING and READY-but-encoding rows.
-  const planned = Array.isArray(v.plannedTiers)
-    ? v.plannedTiers.filter((t): t is string => typeof t === 'string')
-    : null
+  const planned = effectivePlannedTiers(v)
   if (!planned || planned.length === 0) {
     // Legacy row with no per-tier ladder — fall back to whatever
     // overall progress the worker reports. If the row is READY
@@ -263,10 +277,13 @@ function computeSmoothProgressForVideo(
  * backwards. The base resets once the queue drains.
  */
 function useTierTally(videos: ProcessingVideo[], isDone: boolean) {
-  // Base = tiers belonging to videos that have already left the list. Held in
-  // state (not a ref) so reading it during render is legitimate.
+  // Base = tiers belonging to videos that have already left the list
+  // FINISHED. Held in state (not a ref) so reading it during render is
+  // legitimate. 7.9.0: the fold happens in `tallyStep` (src/lib/tier-tally.ts),
+  // which counts a vanished video as finished only if its last snapshot had
+  // every tier done — see there for the "25 / 27" this replaces.
   const [base, setBase] = useState<{ done: number; total: number }>({ done: 0, total: 0 })
-  const [seen, setSeen] = useState<Record<string, number>>({})
+  const [seen, setSeen] = useState<Record<string, TallySnapshot>>({})
 
   useEffect(() => {
     if (isDone) {
@@ -274,33 +291,31 @@ function useTierTally(videos: ProcessingVideo[], isDone: boolean) {
       setSeen({})
       return
     }
-    const live = new Set(videos.map((v) => v.id))
     setSeen((prevSeen) => {
-      let finishedTiers = 0
-      const next: Record<string, number> = {}
-      for (const [id, planned] of Object.entries(prevSeen)) {
-        if (live.has(id)) continue
-        // Gone from the list = finished. Its whole ladder counts as done.
-        finishedTiers += planned
+      const step = tallyStep(
+        prevSeen,
+        videos.map((v) => ({
+          id: v.id,
+          planned: effectivePlannedTiers(v)?.length ?? 0,
+          done: v.completedTiers?.length ?? 0,
+        })),
+      )
+      if (step.finished > 0) {
+        setBase((b) => ({ done: b.done + step.finished, total: b.total + step.finished }))
       }
-      for (const v of videos) next[v.id] = v.plannedTiers?.length ?? 0
-      if (finishedTiers > 0) {
-        setBase((b) => ({ done: b.done + finishedTiers, total: b.total + finishedTiers }))
-      }
-      const sameKeys =
-        Object.keys(next).length === Object.keys(prevSeen).length &&
-        Object.keys(next).every((k) => prevSeen[k] === next[k])
-      return sameKeys ? prevSeen : next
+      return step.changed ? step.next : prevSeen
     })
   }, [videos, isDone])
 
-  let done = base.done
-  let total = base.total
-  for (const v of videos) {
-    done += v.completedTiers?.length ?? 0
-    total += v.plannedTiers?.length ?? 0
-  }
-  return { done, total }
+  const live = tallyLive(
+    seen,
+    videos.map((v) => ({
+      id: v.id,
+      planned: effectivePlannedTiers(v)?.length ?? 0,
+      done: v.completedTiers?.length ?? 0,
+    })),
+  )
+  return { done: base.done + live.done, total: base.total + live.total }
 }
 
 function StatusBanner({
@@ -807,9 +822,7 @@ function getInProgressTier(video: ProcessingVideo): string | null {
   // The pip falls back to the legacy pulsing dot for those.
   if (video.status === 'UPLOADING') return null
 
-  const planned = Array.isArray(video.plannedTiers)
-    ? video.plannedTiers.filter((t): t is string => typeof t === 'string')
-    : null
+  const planned = effectivePlannedTiers(video)
   const completed = Array.isArray(video.completedTiers)
     ? new Set(video.completedTiers.filter((t): t is string => typeof t === 'string'))
     : new Set<string>()

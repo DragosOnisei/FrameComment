@@ -72,6 +72,12 @@ export type ProcessingVideo = {
    * migration; the pip falls back to a generic pulse for those.
    */
   plannedTiers: string[] | null
+  /**
+   * 7.9.0: the ladder the worker will decide, for rows it has not reached
+   * yet (null once `plannedTiers` is real). From the dimensions the browser
+   * probed at upload when it could, else from the project cap.
+   */
+  plannedTiersPredicted: string[] | null
   completedTiers: string[] | null
   /**
    * 2.2.6+: per-tier ffmpeg progress, eg `{ "720p": 50 }`.

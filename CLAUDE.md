@@ -156,6 +156,17 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   (`/brand/icon-192.png`, rendered by sharp from the brand SVG): macOS accepts
   only raster attachments and silently drops the WHOLE notification for an
   SVG icon while the push service reports it delivered (7.8.1).
+- **Tier ladder** (7.9.0): which tiers a source gets is decided in ONE pure
+  function, `planTierSlugs` (src/lib/tier-ladder.ts). The worker's
+  `computeProgressiveTiers` maps it to dimensions; the status API predicts
+  with it (`plannedTiersPredicted`) from the dimensions the browser probes at
+  upload (`/api/videos` accepts `width`/`height`), or from the project cap.
+  Change the ladder in one place or the banner and the worker disagree. The
+  processing list keeps READY rows whose ladder is unfinished (JSON columns,
+  filtered in JS after a 6h-bounded query), and the banner's tally
+  (src/lib/tier-tally.ts) holds a vanished video for two polls before folding
+  it as finished — the pre-7.9.0 "fold on first disappearance" produced
+  "25 / 27" for four uploads.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

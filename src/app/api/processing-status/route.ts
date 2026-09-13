@@ -6,6 +6,8 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 import { isS3Mode } from '@/lib/storage'
 import { logError, logMessage } from '@/lib/logging'
 import { filterStoppedVideoIds } from '@/lib/encode-cancel'
+import { predictTierSlugs } from '@/lib/tier-ladder'
+import type { Prisma } from '@prisma/client'
 
 // 4.2.3+: reap ABANDONED uploads so the bottom-right "Uploading videos"
 // banner (and the per-card spinner) can't be pinned forever by an upload
@@ -34,6 +36,8 @@ import { filterStoppedVideoIds } from '@/lib/encode-cancel'
 // PROCESSING rows are left completely alone, because a big 4K encode
 // legitimately runs for a long time and must not be interrupted.
 const STALE_UPLOAD_TUS_MS = 30 * 60 * 1000 // 30 minutes
+// 7.9.0: how far back to look for READY rows that are still encoding higher tiers.
+const RECENT_READY_WINDOW_MS = 6 * 60 * 60 * 1000 // 6 hours
 const STALE_UPLOAD_S3_MS = 24 * 60 * 60 * 1000 // 24 hours
 // Don't run the sweep on every 3 s poll — once a minute is plenty and the
 // query is idempotent (it only matches genuinely-stale rows).
@@ -185,9 +189,9 @@ export async function GET(request: NextRequest) {
 
     const [
       uploadingCount,
-      processingCount,
+      processingCountBase,
       uploadingVideos,
-      processingVideos,
+      processingCandidates,
     ] = await Promise.all([
       prisma.video.count({ where: { status: 'UPLOADING' } }),
       // Count both "officially still PROCESSING" rows and the
@@ -240,7 +244,7 @@ export async function GET(request: NextRequest) {
           // count-only `done/total` that previously sat at 0
           // until the row flipped to READY and jumped to 100.
           transcodeProgressByTier: true,
-          project: { select: { id: true, title: true } },
+          project: { select: { id: true, title: true, previewResolution: true } },
         },
         orderBy: { createdAt: 'desc' },
         take: 50,
@@ -257,21 +261,26 @@ export async function GET(request: NextRequest) {
         // active marker would jump to the next queued row even
         // though the worker is nowhere near done with the
         // original one.
-        where:
-          activeVideoIds.size > 0
-            ? {
-                OR: [
-                  { status: 'PROCESSING' },
-                  // The READY-but-BullMQ-active case. Guard
-                  // against UPLOADING in case a stale active job
-                  // ever leaks across the upload boundary.
-                  {
-                    id: { in: [...activeVideoIds] },
-                    status: { not: 'UPLOADING' },
-                  },
-                ],
-              }
-            : { status: 'PROCESSING' },
+        where: {
+          OR: [
+            { status: 'PROCESSING' },
+            // The READY-but-BullMQ-active case. Guard against UPLOADING in
+            // case a stale active job ever leaks across the upload boundary.
+            ...(activeVideoIds.size > 0
+              ? [{ id: { in: [...activeVideoIds] }, status: { not: 'UPLOADING' } } as Prisma.VideoWhereInput]
+              : []),
+            // 7.9.0: READY rows whose ladder is not finished. After 480p lands
+            // a video is READY, and until now it stayed listed only while one
+            // of its jobs was ACTIVE — so between two tiers, waiting for a free
+            // slot, it vanished for a poll and the banner folded its whole
+            // ladder into "done", then counted it again when it came back
+            // ("25 / 27" for four uploads). The database knows the truth
+            // regardless of the queue: keep it listed while
+            // completedTiers < plannedTiers (filtered below; JSON columns
+            // cannot be compared in the query). Bounded to recent rows.
+            { status: 'READY', updatedAt: { gte: new Date(Date.now() - RECENT_READY_WINDOW_MS) } },
+          ],
+        },
         select: {
           id: true,
           name: true,
@@ -290,12 +299,28 @@ export async function GET(request: NextRequest) {
           plannedTiers: true,
           completedTiers: true,
           transcodeProgressByTier: true,
-          project: { select: { id: true, title: true } },
+          project: { select: { id: true, title: true, previewResolution: true } },
         },
         orderBy: { createdAt: 'desc' },
-        take: 50,
+        take: 120,
       }),
     ])
+
+    // 7.9.0: keep a READY row only while its ladder is unfinished (or BullMQ
+    // says it is active); PROCESSING rows always stay. See the query comment.
+    const ladderUnfinished = (v: { plannedTiers: unknown; completedTiers: unknown }) => {
+      const planned = Array.isArray(v.plannedTiers) ? v.plannedTiers.length : 0
+      const completed = Array.isArray(v.completedTiers) ? v.completedTiers.length : 0
+      return planned > 0 && completed < planned
+    }
+    const processingVideos = processingCandidates
+      .filter((v) => v.status !== 'READY' || activeVideoIds.has(v.id) || ladderUnfinished(v))
+      .slice(0, 50)
+    // The DB count above covers PROCESSING and BullMQ-active rows; add the
+    // READY-but-unfinished ones the query alone could not count.
+    const processingCount =
+      processingCountBase +
+      processingVideos.filter((v) => v.status === 'READY' && !activeVideoIds.has(v.id)).length
 
     // Build the "effective active set" — what we actually return
     // as `isActive` on each row. Two sources, in priority order:
@@ -400,6 +425,14 @@ export async function GET(request: NextRequest) {
         plannedTiers: Array.isArray((v as any).plannedTiers)
           ? ((v as any).plannedTiers as unknown[]).filter((x) => typeof x === 'string') as string[]
           : null,
+        // 7.9.0: the ladder the worker WILL decide, for rows it has not
+        // reached yet — from the dimensions the browser probed at upload, or
+        // from the project cap. Lets the banner's total be right from the
+        // first second instead of growing as prepare-video reaches each file.
+        plannedTiersPredicted:
+          Array.isArray((v as any).plannedTiers) && ((v as any).plannedTiers as unknown[]).length > 0
+            ? null
+            : predictTierSlugs(v.width, v.height, (v as any).project?.previewResolution ?? 'auto'),
         completedTiers: Array.isArray((v as any).completedTiers)
           ? ((v as any).completedTiers as unknown[]).filter((x) => typeof x === 'string') as string[]
           : null,

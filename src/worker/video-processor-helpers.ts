@@ -9,6 +9,7 @@ import { pipeline } from 'stream/promises'
 import { TEMP_DIR } from './cleanup'
 import { logError, logMessage } from '../lib/logging'
 import { planStoryboardGrid } from '../lib/storyboard-grid'
+import { planTierSlugs, type QualityTier as LadderTier } from '../lib/tier-ladder'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -800,7 +801,7 @@ export async function handleProcessingError(
 // and bumps processingProgress; the player picks the highest
 // available column at watch time.
 
-export type QualityTier = '480p' | '720p' | '1080p' | '2160p'
+export type QualityTier = LadderTier
 
 export interface ProgressivePass {
   tier: QualityTier
@@ -828,66 +829,16 @@ export function computeProgressiveTiers(
   metadata: VideoMetadata,
   maxResolution: string,
 ): ProgressivePass[] {
+  // 7.9.0: the tier decision itself lives in src/lib/tier-ladder.ts so the
+  // processing-status API can predict the ladder before this worker has
+  // probed the file (the banner's total was zero until then). Same rules,
+  // tier for tier — the 90% tolerance, "auto" climbing to the source, 480p
+  // always first; only the output dimensions are computed here.
   const shortSide = Math.min(metadata.width, metadata.height)
-  const passes: ProgressivePass[] = []
-
-  // 1.9.4+ Phase A: cinematic / cropped sources (e.g. 1920×1008
-  // letterboxed, 1920×800 ultrawide) shouldn't be downgraded
-  // just because their short side missed the tier threshold by
-  // a few pixels. Anything within 90% of a tier's nominal height
-  // counts as "that quality" — close enough that the user
-  // expects the tier in the Quality menu.
-  const meetsTier = (tierHeight: number) => shortSide >= tierHeight * 0.9
-
-  // 1.9.4+ Phase A: "auto" means "climb to whatever the input
-  // actually is". With the 90% tolerance a 1920×1008 cinematic
-  // master gets the full 1080p ladder slot instead of being
-  // capped at 720p.
-  let effectiveMax = maxResolution
-  if (effectiveMax === 'auto') {
-    if (meetsTier(2160)) effectiveMax = '2160p'
-    else if (meetsTier(1080)) effectiveMax = '1080p'
-    else if (meetsTier(720)) effectiveMax = '720p'
-    else effectiveMax = '720p' // floor — still allow a 720p tier above 480p for sub-720p sources
-  }
-
-  // Always start with 480p — fastest path to status=READY.
-  passes.push({
-    tier: '480p',
-    dimensions: calculateOutputDimensions(metadata, '480p'),
-  })
-
-  // 720p tier — include if project allows AND input is essentially >= 720p.
-  const wants720 = effectiveMax === '720p' || effectiveMax === '1080p' || effectiveMax === '2160p'
-  if (wants720 && meetsTier(720)) {
-    passes.push({
-      tier: '720p',
-      dimensions: calculateOutputDimensions(metadata, '720p'),
-    })
-  }
-
-  // 1080p tier — include if project allows AT LEAST 1080p AND
-  // input is essentially >= 1080p (90% rule handles 1920×1008
-  // cinematic crops, ultrawides, etc.).
-  const wants1080 = effectiveMax === '1080p' || effectiveMax === '2160p'
-  if (wants1080 && meetsTier(1080)) {
-    passes.push({
-      tier: '1080p',
-      dimensions: calculateOutputDimensions(metadata, '1080p'),
-    })
-  }
-
-  // 2160p tier — include if project allows it AND input is
-  // essentially >= 2160p.
-  const wants2160 = effectiveMax === '2160p'
-  if (wants2160 && meetsTier(2160)) {
-    passes.push({
-      tier: '2160p',
-      dimensions: calculateOutputDimensions(metadata, '2160p'),
-    })
-  }
-
-  return passes
+  return planTierSlugs(shortSide, maxResolution).map((tier) => ({
+    tier,
+    dimensions: calculateOutputDimensions(metadata, tier),
+  }))
 }
 
 /**

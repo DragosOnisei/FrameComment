@@ -1128,6 +1128,15 @@ export default function VideoPlayer({
     setReverseRunning(false)
   }, [selectedVideo?.id])
 
+  // 7.9.0: loop. Off by default; the element's own `loop` flag does the wrap
+  // without a seam, so 'ended' never fires while it is on. Re-asserted per
+  // clip because a remounted element starts with the flag off.
+  const [loopEnabled, setLoopEnabled] = useState(false)
+  useEffect(() => {
+    const video = videoRef.current
+    if (video) video.loop = loopEnabled
+  }, [loopEnabled, selectedVideo?.id])
+
   useEffect(() => {
     if (!activeVideoName) return
     if (previousVideoNameRef.current && previousVideoNameRef.current !== activeVideoName) {
@@ -1163,9 +1172,25 @@ export default function VideoPlayer({
   // pattern as selectVideoVersion above. The overlay + button are gated to
   // ≥2 versions (and the button to large screens), so a stray event on a
   // single-version clip is a harmless no-op.
+  // 7.9.0: hand the moment over. Compare used to open on two paused players
+  // at 0:00 while the main clip kept playing underneath — the reviewer lost
+  // their place and heard two soundtracks. Now the main player pauses, compare
+  // starts both sides at the same time, playing if it was playing, at the
+  // same speed, and on close the main player picks up where compare left off.
+  const compareHandoffRef = useRef<{ time: number; playing: boolean; rate: number } | null>(null)
   useEffect(() => {
     const handleOpenComparison = () => {
-      if (displayVideos.length >= 2) setShowComparison(true)
+      if (displayVideos.length < 2) return
+      const video = videoRef.current
+      compareHandoffRef.current = {
+        time: video?.currentTime ?? 0,
+        // In reverse (a paused element shuttled by seeks) this reads false,
+        // which is right: compare has no reverse.
+        playing: !!video && !video.paused && !video.ended,
+        rate: video?.playbackRate ?? 1,
+      }
+      video?.pause()
+      setShowComparison(true)
     }
     window.addEventListener('openVersionComparison', handleOpenComparison as EventListener)
     return () => {
@@ -3204,6 +3229,8 @@ export default function VideoPlayer({
                   onToggleReverse={() =>
                     reverse ? exitReverse(1, reverseRunning) : enterReverse()
                   }
+                  loopActive={loopEnabled}
+                  onToggleLoop={() => setLoopEnabled((on) => !on)}
                   onSeek={(time) => {
                     // 7.6.0: a hand on the timeline pauses the shuttle — a drag
                     // would otherwise fight the loop for currentTime. Mode
@@ -3336,7 +3363,21 @@ export default function VideoPlayer({
           videoVersions={displayVideos}
           defaultQuality={defaultQuality as any}
           timestampDisplayMode={timestampDisplayMode}
-          onClose={() => setShowComparison(false)}
+          initialTime={compareHandoffRef.current?.time ?? 0}
+          autoPlay={compareHandoffRef.current?.playing ?? false}
+          initialPlaybackSpeed={compareHandoffRef.current?.rate ?? 1}
+          onClose={(state) => {
+            setShowComparison(false)
+            // 7.9.0: resume where compare left off — same frame, same state.
+            const video = videoRef.current
+            if (!video || !state) return
+            try {
+              video.currentTime = state.time
+            } catch {
+              /* not seekable yet — keep the old position */
+            }
+            if (state.playing) void video.play().catch(() => {})
+          }}
         />
       )}
 

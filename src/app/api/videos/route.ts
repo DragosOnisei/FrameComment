@@ -51,6 +51,14 @@ export async function POST(request: NextRequest) {
       typeof body?.stackOntoVideoId === 'string' && body.stackOntoVideoId.trim()
         ? body.stackOntoVideoId.trim()
         : null
+    // 7.9.0: the browser reads the file's pixel dimensions before uploading
+    // (src/lib/video-dimensions.ts) so the processing banner can name the
+    // whole tier ladder from the first second. Optional and bounded; the
+    // worker's ffprobe overwrites them with the truth later.
+    const probedDimension = (raw: unknown): number =>
+      typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 16384 ? raw : 0
+    const probedWidth = probedDimension(body?.width)
+    const probedHeight = probedDimension(body?.height)
 
     // Validate required fields
     if (!name || !name.trim()) {
@@ -156,8 +164,8 @@ export async function POST(request: NextRequest) {
       originalStoragePath: `projects/${projectId}/videos/original-${Date.now()}-${originalFileName}`,
       status: 'UPLOADING' as const,
       duration: 0,
-      width: 0,
-      height: 0,
+      width: probedWidth,
+      height: probedHeight,
       mediaType: isImage ? 'IMAGE' : 'VIDEO',
       // 5.4: explicit org — belt to the current_setting(...) column default.
       // The uploader's org is DB-fresh on the AuthUser; never trust the client.

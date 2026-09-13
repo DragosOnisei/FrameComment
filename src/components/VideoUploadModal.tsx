@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { probeVideoDimensions } from '@/lib/video-dimensions'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { Upload, Video, X, Pause, Play, CheckCircle2, Loader2 } from 'lucide-react'
@@ -892,8 +893,14 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
           targetName: trimmedVideoName,
         })
       } else {
+        // 7.9.0: dimensions first, so the row is born knowing its ladder (the
+        // processing banner's total). Best effort — null for anything the
+        // browser cannot decode, and the server falls back to the project cap.
+        const probed = await probeVideoDimensions(file)
         const response = await apiPost('/api/videos', {
           projectId,
+          width: probed?.width,
+          height: probed?.height,
           // 1.0.6+: route the upload into the active folder so the
           // new video shows up in the FolderBrowser grid you're
           // looking at, not at the project root.
