@@ -158,7 +158,11 @@ export interface VideoCardProps {
   /** Visual flag: another video is being dragged AND this card is
    *  a valid drop target (not the source itself). */
   isPotentialStackTarget?: boolean
-  onOpen: (name: string) => void
+  /** 7.9.1: `videoId` is the latest version's id. The player page resolves
+   *  the stack by id first, so two different assets that share a name (a 4:5
+   *  and a 9:16 cut uploaded with identical filenames) open the one that was
+   *  double-clicked, not whichever stack owns the plain name. */
+  onOpen: (name: string, videoId?: string) => void
   onRename?: (id: string, currentName: string) => void
   onDelete?: (id: string, currentName: string) => void
   /** Move the whole version group one level up in the folder tree
@@ -655,10 +659,10 @@ export default function VideoCard({
           // selects only this card.
           onToggleSelect(id, e.metaKey || e.ctrlKey, e.shiftKey)
         } else {
-          onOpen(name)
+          onOpen(name, id)
         }
       }}
-      onDoubleClick={() => onOpen(name)}
+      onDoubleClick={() => onOpen(name, id)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -667,7 +671,7 @@ export default function VideoCard({
         // FolderBrowser-level Quick Preview overlay.
         if (e.key === 'Enter') {
           e.preventDefault()
-          onOpen(name)
+          onOpen(name, id)
         }
       }}
       // Drag SOURCE. 1.0.9+: drag is now always armed (was disabled

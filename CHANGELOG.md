@@ -14,6 +14,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.9.1] - 2026-09-14
+
+### Fixed
+
+- **Two videos with the same name open the right one.** An editor uploaded a
+  4:5 and a 9:16 cut with identical filenames. Since 6.1.0 they are two
+  separate stacks and two cards — hover, the aspect tag and the Space preview
+  all belonged to the card — but a double-click navigated by NAME, and the
+  player page keys its groups by display name, calling the second stack
+  "<name> (2)": the plain name resolved to whichever stack owned it, and the
+  9:16 opened from the 4:5 card. The grid and the table now send the stable
+  id of the card's latest version, the player page resolves the group by id
+  first and no longer settles on the name before it has looked, and the
+  public share page understands `?videoId=` the same way. E-mail and push
+  deep links carry the id too (the queue always had it; it never reached the
+  link), and the project's share dialog groups versions by stack instead of
+  by name, so it no longer merges two same-named assets into one list.
+- **The hover preview on the timeline shows up on long clips.** The sprite
+  with the frames was fetched only on the first hover, being a CSS
+  background; on a long clip it is a 20×20 grid at 3840×2160 and the box sat
+  black until it landed — or showed nothing if the cursor had already moved
+  on. It is fetched the moment the controls know its URL, so the first hover
+  shows a frame. If it cannot load (a signed URL past its lifetime after a
+  long session is the likely cause) the preview falls back to the timecode
+  badge and says so in the console, instead of an empty black frame.
+- **The yellow range handles step aside during playback.** The composer's
+  ball rode along with the playhead while the clip played, reading as a
+  second, yellow playhead. Both handles (the composer's and the one on a
+  selected comment's range) are hidden while playing and reappear the
+  instant playback pauses, with no fade; dragging and range-edit keep them.
+- **Nothing sits under the timecode chip in the composer any more.** The
+  second line of a comment started at the left edge, directly under the chip,
+  and an emoji opening that line sat wedged beneath the timecode. The chip
+  now owns a narrow gutter and the text is a block beside it on every line.
+
+### Internal
+
+- `VideoCard.onOpen` / `FolderBrowserTable.onOpenVideo` pass `(name,
+  videoId)`; `buildTimecodeDeepLink` / `buildAdminTimecodeDeepLink` accept
+  `videoId`; the e-mail item type carries it; `ProjectActions` uses
+  `groupByStack`. CLAUDE.md records the "every player link carries the id"
+  rule. Verified: tsc 0 errors; eslint with no new problems (the composer's
+  twelve rules-of-hooks errors predate this release); in a browser, a public
+  share link with a wrong name and a valid id opened the right video, the
+  composer measured a 53 px gutter with no first-line indent, and the sprite
+  request left at page load before any hover.
+
 ## [7.9.0] - 2026-09-13
 
 ### Added

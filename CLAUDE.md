@@ -195,7 +195,13 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `revokeToken`.
 - **Version stacks**: membership is `stackId`, `name` is display-only,
   `version` is position 1..N renumbered by one canonical helper. Do not infer
-  membership from names — that was the 6.0.x bug family.
+  membership from names — that was the 6.0.x bug family. The player pages
+  key their groups by display name and call a second stack with the same
+  name "<name> (2)", so every link into a player must carry the STABLE id
+  (`?videoId=`) as well as the name (7.9.1): the grid, the table, e-mail and
+  push deep links all do, and both player pages resolve the group by id
+  first. Two identical filenames (a 4:5 and a 9:16 cut) opened the wrong one
+  without it.
 - Menus are OPAQUE (`brand-menu-surface` + inline color-mix + translateZ(0)
   isolation for iOS); `glass-panel` is for page panels, never menus. The
   canonical player timeline/volume styling lives in CustomVideoControls —

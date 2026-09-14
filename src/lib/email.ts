@@ -378,11 +378,13 @@ export function renderUnsubscribeSection(unsubscribeUrl: string, brand = EMAIL_B
 /**
  * Build a deep-link URL to a specific comment/timecode on the share page
  */
-export function buildTimecodeDeepLink(shareUrl: string, opts: { videoName?: string; commentId?: string; timecode?: string | null; fps?: number | null }): string | null {
+export function buildTimecodeDeepLink(shareUrl: string, opts: { videoName?: string; videoId?: string | null; commentId?: string; timecode?: string | null; fps?: number | null }): string | null {
   if (!opts.timecode) return null
   try {
     const url = new URL(shareUrl)
     if (opts.videoName) url.searchParams.set('video', opts.videoName)
+    // 7.9.1: the stable id, so a same-named stack cannot hijack the link.
+    if (opts.videoId) url.searchParams.set('videoId', opts.videoId)
     if (opts.commentId) url.searchParams.set('comment', opts.commentId)
     const fps = typeof opts.fps === 'number' && isFinite(opts.fps) && opts.fps > 0 ? opts.fps : 24
     const seconds = parseFloat(timecodeToSeekSeconds(opts.timecode, fps).toFixed(2))
@@ -397,12 +399,13 @@ export function buildTimecodeDeepLink(shareUrl: string, opts: { videoName?: stri
  * Build a deep-link URL for admin to the admin share page
  * Wraps through /login?returnUrl= for auth redirect
  */
-export function buildAdminTimecodeDeepLink(appDomain: string, projectId: string, opts: { videoName?: string; commentId?: string; timecode?: string | null; fps?: number | null }): string | null {
+export function buildAdminTimecodeDeepLink(appDomain: string, projectId: string, opts: { videoName?: string; videoId?: string | null; commentId?: string; timecode?: string | null; fps?: number | null }): string | null {
   if (!opts.timecode || !appDomain) return null
   try {
     let path = `/admin/projects/${projectId}/share`
     const params = new URLSearchParams()
     if (opts.videoName) params.set('video', opts.videoName)
+    if (opts.videoId) params.set('videoId', opts.videoId)
     if (opts.commentId) params.set('comment', opts.commentId)
     const fps = typeof opts.fps === 'number' && isFinite(opts.fps) && opts.fps > 0 ? opts.fps : 24
     const seconds = parseFloat(timecodeToSeekSeconds(opts.timecode, fps).toFixed(2))

@@ -568,6 +568,42 @@ export default function CustomVideoControls({
   const pendingScrubRef = useRef<number | null>(null)
   const scrubTrailingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  /**
+   * 7.9.1: the hover preview's sprite, fetched the moment the controls know
+   * its URL rather than on the first hover.
+   *
+   * The preview is a CSS background, so nothing asked for the sprite until
+   * the cursor first touched the timeline — and then the box sat black for as
+   * long as the download took. On a long clip the sprite is a 20×20 grid at
+   * 3840×2160 (several hundred KB), so that black box lasted long enough to
+   * read as "the preview does not work", and moving the cursor away before it
+   * landed meant seeing nothing at all. Fetching it up front, the first hover
+   * shows a frame. If the fetch FAILS (a signed URL past its lifetime is the
+   * likely reason after a long session) the preview honestly falls back to the
+   * timecode badge instead of an empty black frame, and says so in the console.
+   */
+  const [spriteState, setSpriteState] = useState<'loading' | 'ready' | 'failed'>('loading')
+  useEffect(() => {
+    if (!storyboardUrl) return
+    let cancelled = false
+    setSpriteState('loading')
+    const img = new Image()
+    img.onload = () => {
+      if (!cancelled) setSpriteState('ready')
+    }
+    img.onerror = () => {
+      if (cancelled) return
+      setSpriteState('failed')
+      console.warn('[timeline] storyboard sprite failed to load; hover preview falls back to timecode only')
+    }
+    img.src = storyboardUrl
+    return () => {
+      cancelled = true
+      img.onload = null
+      img.onerror = null
+    }
+  }, [storyboardUrl])
+
   const scrubSeek = useCallback(
     (time: number) => {
       pendingScrubRef.current = time
@@ -2597,6 +2633,7 @@ export default function CustomVideoControls({
                     hover:scale-110 active:scale-100
                     touch-none
                     ${isDraggingOutHandle ? 'scale-125 shadow-lg' : ''}
+                    ${isPlaying && !isDraggingOutHandle && !rangeEditing ? 'opacity-0 pointer-events-none' : 'opacity-100'}
                   `}
                   // 1.9.1+: same 200ms linear `left` transition as
                   // the white playhead so the yellow handle glides
@@ -2617,6 +2654,13 @@ export default function CustomVideoControls({
                     // transition for the hover/drag scale pop.
                     transition: 'transform 150ms ease',
                   }}
+                  /* 7.9.1: hidden while the clip plays. The ball rides the
+                     playhead during playback, which reads as a second, yellow
+                     playhead chasing the white one; it is only meaningful when
+                     the picture is still. It comes back the instant playback
+                     pauses — no transition on opacity, so pause and ball land
+                     together. Dragging and range-edit keep it visible. Same
+                     rule for the saved-range handle below. */
                   title="Drag right to mark the comment's end point"
                   aria-label="Drag to set comment out point"
                   data-tutorial="tour-range"
@@ -2688,6 +2732,7 @@ export default function CustomVideoControls({
                 hover:scale-110 active:scale-100
                 touch-none
                 ${rangeOutDrag ? 'scale-125 shadow-lg' : ''}
+                ${isPlaying && !rangeOutDrag && !rangeEditing ? 'opacity-0 pointer-events-none' : 'opacity-100'}
               `}
               style={{
                 left: `${activeOutPct}%`,
@@ -2774,13 +2819,13 @@ export default function CustomVideoControls({
               <div
                 className="hidden sm:block absolute bottom-full mb-3 pointer-events-none z-30"
                 style={{
-                  left: storyboardUrl
+                  left: storyboardUrl && spriteState !== 'failed'
                     ? `clamp(84px, ${leftPct}%, calc(100% - 84px))`
                     : `${leftPct}%`,
                   transform: 'translateX(-50%)',
                 }}
               >
-                {storyboardUrl ? (
+                {storyboardUrl && spriteState !== 'failed' ? (
                   <div className="rounded-lg overflow-hidden ring-1 ring-white/20 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.85)] bg-black">
                     <div
                       className="w-[160px] aspect-video bg-black"

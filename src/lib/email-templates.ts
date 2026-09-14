@@ -11,6 +11,8 @@ import { loadEmailMessages } from './email-template-system'
 interface NotificationData {
   type: 'CLIENT_COMMENT' | 'ADMIN_REPLY'
   videoName: string
+  /** 7.9.1: stable id for the deep link (optional — older queue rows lack it). */
+  videoId?: string | null
   videoLabel?: string
   authorName: string
   authorEmail?: string
@@ -81,7 +83,7 @@ export async function generateNotificationSummaryEmail(data: NotificationSummary
 
   const itemsHtmlContent = data.notifications.map((n) => {
     const isReply = n.isReply && n.parentComment
-    const tcLink = buildTimecodeDeepLink(data.shareUrl, { videoName: n.videoName, commentId: n.commentId, timecode: n.timecode, fps: n.fps })
+    const tcLink = buildTimecodeDeepLink(data.shareUrl, { videoName: n.videoName, videoId: n.videoId, commentId: n.commentId, timecode: n.timecode, fps: n.fps })
     const tcPill = renderTimecodePill(n.timecode, tcLink, brand)
     return `
       <div style="padding:10px 0;">
@@ -153,8 +155,8 @@ export async function generateAdminSummaryEmail(data: AdminSummaryData): Promise
   const projectsHtml = data.projects.map((project) => {
     const items = project.notifications.map((n, index) => {
       const tcLink = data.appDomain && project.projectId
-        ? buildAdminTimecodeDeepLink(data.appDomain, project.projectId, { videoName: n.videoName, commentId: n.commentId, timecode: n.timecode, fps: n.fps })
-        : buildTimecodeDeepLink(project.shareUrl, { videoName: n.videoName, commentId: n.commentId, timecode: n.timecode, fps: n.fps })
+        ? buildAdminTimecodeDeepLink(data.appDomain, project.projectId, { videoName: n.videoName, videoId: n.videoId, commentId: n.commentId, timecode: n.timecode, fps: n.fps })
+        : buildTimecodeDeepLink(project.shareUrl, { videoName: n.videoName, videoId: n.videoId, commentId: n.commentId, timecode: n.timecode, fps: n.fps })
       const tcPill = renderTimecodePill(n.timecode, tcLink, brand)
       return `
       <div style="padding:10px 0;${index > 0 ? ` border-top:1px solid ${brand.border}; margin-top:8px;` : ''}">

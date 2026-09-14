@@ -1346,18 +1346,26 @@ function FolderBrowserInner(
   }, [pendingDropPlaceholders.length])
 
   const handleOpenVideo = useCallback(
-    (videoName: string) => {
+    (videoName: string, videoId?: string) => {
       // FolderBrowser only renders on admin pages (1.0.7+), so we
       // navigate into the admin video player rather than the public
       // share URL. This keeps admin privileges (rename / delete
       // comments, admin badges, no "Client N" labelling) instead of
       // re-entering as an anonymous reviewer. Pass folderId so the
       // player's title flyout stays scoped to the current folder.
-      const base = `/admin/projects/${projectId}/share?video=${encodeURIComponent(videoName)}`
-      const url = currentFolderId
-        ? `${base}&folderId=${encodeURIComponent(currentFolderId)}`
-        : base
-      router.push(url)
+      //
+      // 7.9.1: and the STABLE id. The player page keys its version groups by
+      // display name and disambiguates a second stack with the same name as
+      // "<name> (2)" — but this card only knows the plain name. An editor
+      // uploaded a 4:5 and a 9:16 cut with identical filenames: the card
+      // showed the 4:5 (hover, tag, Space preview all read the card's own
+      // video), while `?video=<name>` resolved to whichever stack owned the
+      // plain key — the 9:16. With the id in the URL the page finds the stack
+      // that contains it (the 4.x `urlVideoId` lookup) and opens that one.
+      const params = new URLSearchParams({ video: videoName })
+      if (videoId) params.set('videoId', videoId)
+      if (currentFolderId) params.set('folderId', currentFolderId)
+      router.push(`/admin/projects/${projectId}/share?${params.toString()}`)
     },
     [router, projectId, currentFolderId],
   )

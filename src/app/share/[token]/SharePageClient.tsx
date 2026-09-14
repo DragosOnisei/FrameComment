@@ -52,6 +52,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   // Parse URL parameters for video seeking
   const urlTimestamp = searchParams?.get('t') ? parseFloat(searchParams.get('t')!) : null
   const urlVideoName = searchParams?.get('video') || null
+  // 7.9.1: the stable video id. Two different assets can share a display
+  // name (keyed "<name>" and "<name> (2)" by the share API); a link that
+  // carries the id opens the stack that contains it, whatever the name says.
+  const urlVideoId = searchParams?.get('videoId') || null
   const urlVersion = searchParams?.get('version') ? parseInt(searchParams.get('version')!, 10) : null
   const urlFocusCommentId = searchParams?.get('comment') || null
   // Folder share context (1.0.6+). When the client opens a video from
@@ -686,8 +690,18 @@ function SharePageClientInner({ token }: SharePageClientProps) {
       if (!activeVideoName) {
         let videoNameToUse: string | null = null
 
+        // 7.9.1 — Priority 0: the stable id names ONE stack even when two
+        // share a display name.
+        if (urlVideoId) {
+          for (const [name, group] of Object.entries(effectiveVideosByName)) {
+            if (Array.isArray(group) && (group as any[]).some((v) => v?.id === urlVideoId)) {
+              videoNameToUse = name
+              break
+            }
+          }
+        }
         // Priority 1: URL parameter for video name
-        if (urlVideoName && effectiveVideosByName[urlVideoName]) {
+        if (!videoNameToUse && urlVideoName && effectiveVideosByName[urlVideoName]) {
           videoNameToUse = urlVideoName
         }
         // Priority 2: First video
@@ -733,7 +747,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
         }
       }
     }
-  }, [effectiveVideosByName, activeVideoName, urlVideoName, urlVersion, urlTimestamp, fingerprintRawVideos])
+  }, [effectiveVideosByName, activeVideoName, urlVideoName, urlVideoId, urlVersion, urlTimestamp, fingerprintRawVideos])
 
   const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
@@ -1135,15 +1149,20 @@ function SharePageClientInner({ token }: SharePageClientProps) {
   useEffect(() => {
     if (!project?.videosByName) return
 
-    // If URL specifies a video, go to player
-    if (urlVideoName && project.videosByName[urlVideoName]) {
+    // If URL specifies a video, go to player (7.9.1: by id as well)
+    const idResolves =
+      !!urlVideoId &&
+      Object.values(project.videosByName as Record<string, any[]>).some(
+        (group) => Array.isArray(group) && group.some((v: any) => v?.id === urlVideoId),
+      )
+    if ((urlVideoName && project.videosByName[urlVideoName]) || idResolves) {
       setViewState('player')
       return
     }
 
     // Default: show grid (same behavior for single and multiple videos)
     setViewState('grid')
-  }, [project?.videosByName, urlVideoName])
+  }, [project?.videosByName, urlVideoName, urlVideoId])
 
   // Handle video selection - update URL so refresh preserves state
   const handleVideoSelect = useCallback((videoName: string) => {

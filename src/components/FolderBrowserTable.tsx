@@ -55,7 +55,7 @@ interface FolderBrowserTableProps {
   onToggleFolder: (id: string, additive: boolean, range: boolean) => void
   onToggleVideo: (id: string, additive: boolean, range: boolean) => void
   onOpenFolder: (id: string) => void
-  onOpenVideo: (name: string) => void
+  onOpenVideo: (name: string, videoId?: string) => void
   // 3.5.x drag-and-drop parity with the grid (all bulk-aware in the
   // parent: dragging a selected row carries the whole selection).
   onStackVideo: (sourceId: string, targetId: string) => void
@@ -281,11 +281,11 @@ export default function FolderBrowserTable({
               onClick={(e) =>
                 onToggleVideo(v.id, e.metaKey || e.ctrlKey, e.shiftKey)
               }
-              onDoubleClick={() => onOpenVideo(v.name)}
+              onDoubleClick={() => onOpenVideo(v.name, v.id)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
-                  onOpenVideo(v.name)
+                  onOpenVideo(v.name, v.id)
                 }
               }}
               onDragStart={(e) => {

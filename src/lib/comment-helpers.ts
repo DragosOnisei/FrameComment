@@ -219,6 +219,8 @@ export async function handleCommentNotifications(params: {
 
         const params = new URLSearchParams()
         if (video?.name) params.set('video', video.name)
+        // 7.9.1: the stable id, so a same-named stack cannot hijack the link.
+        if (videoId) params.set('videoId', videoId)
         const version = comment?.videoVersion ?? video?.version
         if (typeof version === 'number') params.set('version', String(version))
 

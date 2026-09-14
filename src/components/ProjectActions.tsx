@@ -5,6 +5,7 @@ import { useTranslations, useLocale } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { copyToClipboard } from '@/lib/clipboard'
+import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Trash2, ExternalLink, Archive, ArchiveRestore, RotateCcw, Send, Loader2, CheckCircle, BarChart3, FolderKanban, Copy, Check, Calendar, MoreVertical, Settings as SettingsIcon } from 'lucide-react'
@@ -99,14 +100,22 @@ export default function ProjectActions({ project, videos, onRefresh, shareUrl = 
   // Filter only ready videos
   const readyVideos = videos.filter(v => v.status === 'READY')
 
-  // Group videos by name
-  const videosByName = readyVideos.reduce((acc, video) => {
-    if (!acc[video.name]) {
-      acc[video.name] = []
+  // 7.9.1: group by the explicit STACK, like every other surface since 6.1.0,
+  // and disambiguate a second stack that shares a display name as
+  // "<name> (2)". Grouping by name merged two different assets into one
+  // version list here.
+  const videosByName: Record<string, Video[]> = {}
+  for (const rows of groupByStack(readyVideos as any[]).values()) {
+    const sorted = sortVersionsDesc(rows as any[]) as Video[]
+    const name = sorted[0].name
+    if (!videosByName[name]) {
+      videosByName[name] = sorted
+    } else {
+      let n = 2
+      while (videosByName[`${name} (${n})`]) n++
+      videosByName[`${name} (${n})`] = sorted
     }
-    acc[video.name].push(video)
-    return acc
-  }, {} as Record<string, Video[]>)
+  }
 
   const videoNames = Object.keys(videosByName)
   const versionsForSelectedVideo = selectedVideoName ? videosByName[selectedVideoName] : []

@@ -496,7 +496,12 @@ export default function CommentInput({
   }, [])
   // 8px of breathing room, matching the old flex gap. Zero when the chip is
   // gone (restricted video) so the text starts at the edge.
-  const firstLineIndent = chipWidth > 0 ? `${Math.round(chipWidth) + 8}px` : undefined
+  //
+  // 7.9.1: applied as padding on EVERY line, not as a first-line indent. With
+  // the indent, line two started at the left edge — directly under the chip —
+  // and an emoji opening that line sat wedged beneath the timecode. The chip
+  // now owns a narrow gutter and the text is a clean block beside it.
+  const chipGutter = chipWidth > 0 ? `${Math.round(chipWidth) + 8}px` : undefined
 
   const chipSeconds = hasCapturedTimestamp ? selectedTimestamp! : livePlayheadSeconds
   const timestampLabel = formatCommentTimestamp({
@@ -983,14 +988,14 @@ export default function CommentInput({
                    * to spare. The placeholder overlay below matches.
                    */
                   className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-6"
-                  style={{ textIndent: firstLineIndent }}
+                  style={{ paddingLeft: chipGutter }}
                   rows={1}
                 />
                 {!newComment && (
                   <span
                     aria-hidden="true"
                     className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm leading-6"
-                    style={{ textIndent: firstLineIndent }}
+                    style={{ paddingLeft: chipGutter }}
                   >
                     {markerMode ? 'Note (optional)' : t('typeMessage')}
                   </span>

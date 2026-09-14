@@ -173,7 +173,13 @@ function AdminSharePageInner() {
   // effect fired — a visible "client / 01_VDA / Select a video"
   // flash every time the user double-clicked a video in the dashboard
   // to navigate here. Honouring the URL up-front skips that flash.
-  const [activeVideoName, setActiveVideoName] = useState<string>(urlVideoName || '')
+  // 7.9.1: when the URL carries a stable id, do NOT seed from the name. Two
+  // stacks with the same display name are keyed "<name>" and "<name> (2)";
+  // seeding "<name>" made the group-resolution effect below skip its id
+  // lookup (the seeded key existed), so a double-click on the second stack
+  // opened the first. With an empty seed that effect resolves by id — the
+  // loading slate covers the gap, so nothing flashes.
+  const [activeVideoName, setActiveVideoName] = useState<string>(urlVideoId ? '' : (urlVideoName || ''))
   // Currently-playing video id (specific version), surfaced from
   // VideoPlayer via onVideoStateChange. Used by ThumbnailReel to
   // highlight the active row in the version dropdown.
