@@ -2871,6 +2871,10 @@ export default function CommentSection({
                         setReplyMention(mentionName ?? null)
                         handleReply(comment.id, comment.videoId)
                       }}
+                      // 7.11.0: the 👍 button posts straight through the same
+                      // path the inline reply form uses, so it is a real reply
+                      // with the same author, timecode and notifications.
+                      onQuickReply={(text) => submitInlineReply(comment.id, comment.videoId, text)}
                       // 1.0.9+: no seek handler for image comments —
                       // clicking the bubble must do nothing (images
                       // have no timeline).

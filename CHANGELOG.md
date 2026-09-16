@@ -14,6 +14,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.11.0] - 2026-09-16
+
+### Changed
+
+- **The comment thread's controls are icons, in one row, on every level.**
+  A comment's row used to read "Edit  Reply" in small text at the bottom
+  right, a reply kept its Reply / pencil / bin up in its header next to the
+  author's name, and the corner of each comment showed its number ("#3")
+  until it was resolved. Now: every comment and every reply carries the
+  same four icons under its text, bottom right — 👍, Reply, Edit, Delete —
+  each a 28 px target a thumb can hit. Edit and Delete appear for admins and
+  for the author, as before, and Delete still asks first.
+- **👍 is a one-tap reply.** Tapping it posts a reply that says "👍" (or
+  "@Name 👍" when tapped under someone's reply) straight into the thread —
+  no composer, no Send. It is a real reply, so whoever wrote the note gets
+  the same bell and push as for any other answer.
+- **The corner of a comment is the Done tick.** Hollow while the comment is
+  open, green once done, and a tap flips it either way — marking a note done
+  no longer requires knowing about the right-click menu. The sequence number
+  is no longer printed; the order itself is unchanged (sorting, exports and
+  the batch menu are as they were) and still shows in the tick's tooltip.
+
 ## [7.10.1] - 2026-09-16
 
 ### Fixed

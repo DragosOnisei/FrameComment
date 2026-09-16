@@ -14,6 +14,8 @@ import {
   Copy,
   X,
   MoreHorizontal,
+  Reply as ReplyIcon,
+  ThumbsUp,
 } from 'lucide-react'
 import DOMPurify from 'isomorphic-dompurify'
 import { cn } from '@/lib/utils'
@@ -35,6 +37,15 @@ type ReactionGroup = {
   reactors: { id: string; authorName: string | null; createdAt: string | Date }[]
 }
 
+/**
+ * 7.11.0: one look for every action icon in a thread — root row and reply
+ * rows alike. 28 px square, so it is a real target on a phone; muted until
+ * hovered; a soft tint behind it on hover so the eye finds the button that
+ * is about to act.
+ */
+const ACTION_ICON_BUTTON =
+  'inline-flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground/80 hover:text-foreground hover:bg-white/[0.08] transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+
 interface MessageBubbleProps {
   comment: CommentWithReplies
   isReply: boolean
@@ -45,6 +56,15 @@ interface MessageBubbleProps {
    * the same root comment and simply opens with "@Name " already typed.
    */
   onReply?: (mentionName?: string | null) => void
+  /**
+   * 7.11.0: one-tap "👍" reply. Posts a reply to THIS thread straight away —
+   * no composer, no Send — with the text the bubble decides ("👍", or
+   * "@Name 👍" when the tap was on one of the replies). It is a reply, not a
+   * reaction, on purpose: a reply is a message in the thread, so the person
+   * who wrote the note gets the same bell and push as for any other answer,
+   * which "seen, agreed" is meant to deliver.
+   */
+  onQuickReply?: (text: string) => Promise<void> | void
   onSeekToTimecode?: (
     timecode: string,
     videoId: string,
@@ -145,6 +165,7 @@ export default function MessageBubble({
   comment,
   isReply,
   onReply,
+  onQuickReply,
   onSeekToTimecode,
   onDelete,
   onCopyForPaste,
@@ -497,6 +518,25 @@ export default function MessageBubble({
     }
   }
 
+  // 7.11.0: see `onQuickReply`. Guarded like the resolve toggle so a double
+  // tap cannot post twice, and surfaced the same way when the server refuses.
+  const [quickReplying, setQuickReplying] = useState(false)
+  const handleQuickReply = async (mentionName?: string | null) => {
+    if (!onQuickReply || quickReplying) return
+    try {
+      setQuickReplying(true)
+      await onQuickReply(mentionName ? `@${mentionName} 👍` : '👍')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to send reply'
+      if (typeof window !== 'undefined') {
+        window.alert(message)
+      }
+      console.error('[MessageBubble] quick reply failed:', err)
+    } finally {
+      setQuickReplying(false)
+    }
+  }
+
   const handleReactSelect = (emoji: string) => {
     if (!onReact) return
     void onReact(comment.id, emoji)
@@ -597,6 +637,10 @@ export default function MessageBubble({
         // else (project cards, folder cards, profile sections).
         // Hover lifts the tint; focused / annotation-targeted
         // state uses the brand-blue accent ring.
+        // 7.11.0: the order is still here for anyone who needs it (exports,
+        // the right-click batch, a future "jump to #N"); it is just no longer
+        // printed in the corner — that spot is the Done tick now.
+        data-sequence={typeof sequenceNumber === 'number' ? sequenceNumber : undefined}
         className={`group relative cursor-pointer transition-colors py-3 px-3 ${
           isReply
             ? 'rounded-md hover:bg-white/[0.04]'
@@ -691,39 +735,47 @@ export default function MessageBubble({
                     Copied
                   </span>
                 ) : null}
-                {isResolved ? (
-                  /* 7.3.0: the green tick undoes itself.
-                     It was a <span> — a label saying "done" with no way to say
-                     otherwise, now that the resolve button has left the hover
-                     row. Marking a comment complete by mistake had no undo
-                     except the right-click menu. As a <button> it is also
-                     excluded from the bubble's own click handler, which skips
-                     buttons, so undoing does not also seek the player. */
+                {/* 7.11.0: the corner is the Done tick, in both states.
+                    It used to print "#N" until the comment was resolved and
+                    only then turn into the green tick (7.3.0), so marking a
+                    note done meant knowing about the right-click menu. Now
+                    the hollow tick is there from the start — tap it and it
+                    fills green, tap again and it empties. The sequence
+                    number survives in the tooltip and in `data-sequence` on
+                    the card; the ordering itself never changed. A <button>,
+                    so the bubble's own click handler skips it and toggling
+                    does not also seek the player. */}
+                {onResolveToggle && (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation()
                       void handleResolveToggle()
                     }}
-                    disabled={resolving || !onResolveToggle}
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-white shadow-sm transition-colors hover:bg-emerald-400 disabled:opacity-60"
-                    title={
-                      (comment as any).resolvedBy
-                        ? `${t('markUnresolved') || 'Mark as not done'} · ${(comment as any).resolvedBy}`
-                        : t('markUnresolved') || 'Mark as not done'
+                    disabled={resolving}
+                    className={`inline-flex items-center justify-center w-5 h-5 rounded-full transition-colors disabled:opacity-60 ${
+                      isResolved
+                        ? 'bg-emerald-500 text-white shadow-sm hover:bg-emerald-400'
+                        : 'ring-1 ring-white/20 text-white/40 hover:ring-emerald-400/60 hover:text-emerald-300 hover:bg-emerald-500/10'
+                    }`}
+                    title={[
+                      isResolved
+                        ? t('markUnresolved') || 'Mark as not done'
+                        : t('markResolved') || 'Mark as done',
+                      isResolved && (comment as any).resolvedBy ? (comment as any).resolvedBy : null,
+                      typeof sequenceNumber === 'number' && sequenceNumber > 0 ? `#${sequenceNumber}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                    aria-label={
+                      isResolved
+                        ? t('markUnresolved') || 'Mark as not done'
+                        : t('markResolved') || 'Mark as done'
                     }
-                    aria-label={t('markUnresolved') || 'Mark as not done'}
-                    aria-pressed
+                    aria-pressed={isResolved}
                   >
                     <Check className="w-3 h-3" strokeWidth={3} />
                   </button>
-                ) : (
-                  typeof sequenceNumber === 'number' &&
-                  sequenceNumber > 0 && (
-                    <span className="text-[11px] text-muted-foreground/70 tabular-nums">
-                      #{sequenceNumber}
-                    </span>
-                  )
                 )}
               </div>
             </div>
@@ -860,32 +912,80 @@ export default function MessageBubble({
                     thing anyone does to a comment they just wrote, and it was
                     behind a gesture with no visible hint that it existed. It
                     stays on right-click too; this is a shortcut, not a move. */}
+                {/* 7.11.0: icons, not words, and a 👍 in front of them. The
+                    row read "Edit  Reply" in 11 px text; it is now four
+                    28 px targets — 👍 (one-tap reply), Reply, Edit, Delete —
+                    which is what a thumb can hit and exactly what a reply row
+                    underneath shows, so the whole thread speaks one language. */}
                 {!isReply && (
-                  <div className="ml-auto flex items-center gap-3">
+                  <div className="ml-auto flex items-center gap-0.5">
+                    {!commentsDisabled && onQuickReply && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void handleQuickReply(null)
+                        }}
+                        disabled={quickReplying}
+                        className={ACTION_ICON_BUTTON}
+                        title={t('quickThumbsUp') || 'Reply with 👍'}
+                        aria-label={t('quickThumbsUp') || 'Reply with 👍'}
+                      >
+                        <ThumbsUp className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {!commentsDisabled && onReply && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onReply(null)
+                        }}
+                        className={ACTION_ICON_BUTTON}
+                        title={t('reply')}
+                        aria-label={t('reply')}
+                      >
+                        <ReplyIcon className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     {/* Same gate the right-click menu and the reply kebab use.
                         A pasted note is not editable — that rule predates all
                         of this — and without `onEdit` there is nowhere to save
                         to, so offering the button would be a dead end. */}
                     {canEdit && onEdit && !isCarriedOver && (
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation()
                           handleStartEdit()
                         }}
-                        className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
+                        className={ACTION_ICON_BUTTON}
+                        title={t('editComment')}
+                        aria-label={t('editComment')}
                       >
-                        {t('editComment')}
+                        <Pencil className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    {!commentsDisabled && onReply && (
+                    {/* 7.11.0: Delete is back on the row too, so the root
+                        comment carries the same four controls its replies do.
+                        7.3.0 had moved it to right-click alone; a control that
+                        exists only behind a gesture is invisible on a phone,
+                        where there is no right-click. Same gate as the menu —
+                        the host passes `onDelete` only to admins and to the
+                        author — and the same confirmation dialog behind it, so
+                        a stray tap still costs nothing. */}
+                    {onDelete && (
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation()
-                          onReply(null)
+                          onDelete()
                         }}
-                        className="hover:text-foreground transition-colors font-medium whitespace-nowrap"
+                        className={`${ACTION_ICON_BUTTON} hover:!text-red-400`}
+                        title={t('deleteComment')}
+                        aria-label={t('deleteComment')}
                       >
-                        {t('reply')}
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
@@ -1106,50 +1206,6 @@ export default function MessageBubble({
                     <span className="text-[11px] text-muted-foreground flex-shrink-0">
                       {formatMessageTime(reply.createdAt)}
                     </span>
-                    <div className="ml-auto flex items-center gap-2 text-muted-foreground/80">
-                      {/*
-                        6.15.2: you can answer a reply. Before, only the root
-                        comment carried a Reply button, so the moment a thread
-                        had one answer the conversation had nowhere to go —
-                        you had to start a second top-level comment and lose
-                        the context.
-
-                        It attaches to the same root comment rather than
-                        nesting deeper: the data model allows arbitrary depth,
-                        but a review thread that indents forever stops being
-                        readable next to a video. Addressing the person by
-                        name keeps it clear who is being answered.
-                      */}
-                      {!commentsDisabled && onReply && editingReplyId !== reply.id && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onReply(replyEffectiveName || null)
-                          }}
-                          className="hover:text-foreground transition-colors font-medium whitespace-nowrap text-[11px]"
-                        >
-                          {t('reply')}
-                        </button>
-                      )}
-                      {canEditReply && canEditReply(reply) && onEditReply && editingReplyId !== reply.id && (
-                        <button
-                          onClick={() => handleStartEditReply(reply)}
-                          className="hover:text-foreground transition-colors"
-                          title={t('editComment')}
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {onDeleteReply && editingReplyId !== reply.id && (
-                        <button
-                          onClick={() => onDeleteReply(reply.id)}
-                          className="hover:text-destructive transition-colors"
-                          title={t('deleteReply')}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
                   </div>
                   {editingReplyId === reply.id ? (
                     <div className="mt-1 flex flex-col gap-2">
@@ -1195,6 +1251,77 @@ export default function MessageBubble({
                           />
                         </div>
                       )}
+                      {/* 7.11.0: the reply's controls sit UNDER its text, bottom
+                          right, as icons — 👍, Reply, Edit, Delete — the same
+                          row the root comment has. They used to sit in the
+                          header next to the time, where on a phone they
+                          crowded the name and read as part of the byline.
+
+                          6.15.2: you can answer a reply. It attaches to the same
+                          root comment rather than nesting deeper: the data model
+                          allows arbitrary depth, but a review thread that indents
+                          forever stops being readable next to a video.
+                          Addressing the person by name keeps it clear who is
+                          being answered — the 👍 does the same ("@Name 👍"). */}
+                      <div className="mt-1 flex items-center justify-end gap-0.5 text-muted-foreground/80">
+                        {!commentsDisabled && onQuickReply && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleQuickReply(replyEffectiveName || null)
+                            }}
+                            disabled={quickReplying}
+                            className={ACTION_ICON_BUTTON}
+                            title={t('quickThumbsUp') || 'Reply with 👍'}
+                            aria-label={t('quickThumbsUp') || 'Reply with 👍'}
+                          >
+                            <ThumbsUp className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {!commentsDisabled && onReply && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onReply(replyEffectiveName || null)
+                            }}
+                            className={ACTION_ICON_BUTTON}
+                            title={t('reply')}
+                            aria-label={t('reply')}
+                          >
+                            <ReplyIcon className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {canEditReply && canEditReply(reply) && onEditReply && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleStartEditReply(reply)
+                            }}
+                            className={ACTION_ICON_BUTTON}
+                            title={t('editComment')}
+                            aria-label={t('editComment')}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {onDeleteReply && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onDeleteReply(reply.id)
+                            }}
+                            className={`${ACTION_ICON_BUTTON} hover:!text-red-400`}
+                            title={t('deleteReply')}
+                            aria-label={t('deleteReply')}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
