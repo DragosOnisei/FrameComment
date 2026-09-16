@@ -3431,10 +3431,29 @@ export default function CustomVideoControls({
            CENTER: current/total time.
            RIGHT : quality badge, fullscreen.
           The whole bar lives BELOW the video (not as an overlay) and
-          stays permanently visible. */}
+          stays permanently visible.
+
+          7.10.1: the bar has a width BUDGET on a phone. With Loop (7.9.0)
+          the left group grew to five controls, and on a 390 px iPhone the
+          left group (which is `flex-1 min-w-0`, so it may shrink but its
+          buttons may not) ran under the time display: the 1x pill sat on
+          "00:04", the speaker on the slash. Below `sm` the icon buttons
+          drop to p-1.5 (28/32 px instead of 32/36), Reverse is hidden —
+          it is driven by J/L on a keyboard and shuttles frames, neither
+          of which a phone has a use for — and a long time label (the
+          TIMECODE mode's HH:MM:SS:FF, or an hour-long clip) shows only
+          the current time, the duration returning from `sm` up. Measured at
+          375 px in AUTO mode: 134 px of controls, 94 px of time, 58 px of
+          menu + fullscreen (86 with AirPlay) inside a 343 px bar. */}
       <div className="flex items-center gap-1 sm:gap-2 px-1">
-        {/* LEFT GROUP */}
-        <div className="flex items-center gap-0.5 sm:gap-1 flex-1 min-w-0">
+        {/* LEFT GROUP. 7.10.1: `flex-auto` below sm — `flex-1` gives both
+            groups a ZERO basis and equal shares of the bar, so on a phone the
+            left group (five controls) was handed the same width as the right
+            group (two) and its last button ran under the time display even
+            with the smaller buttons. With an auto basis each group is sized
+            by its content first and only the leftover is split. From sm up
+            `flex-1` stays, so the time keeps sitting dead centre on desktop. */}
+        <div className="flex items-center gap-0.5 sm:gap-1 flex-auto sm:flex-1 min-w-0">
           {/* 7.6.0: Reverse, left of Play. Browsers do not play <video>
               backwards (a negative playbackRate is ignored), so the player
               shuttles currentTime back frame by frame instead — the way
@@ -3447,7 +3466,7 @@ export default function CustomVideoControls({
               aria-pressed={reverseActive}
               aria-label={t('reversePlayback')}
               title={`${t('reversePlayback')} (J)`}
-              className={`p-2 rounded-md transition-colors touch-manipulation ${
+              className={`max-sm:hidden p-1.5 sm:p-2 rounded-md transition-colors touch-manipulation ${
                 reverseActive ? 'text-white' : 'text-white/85 hover:text-white hover:bg-white/[0.10] active:bg-white/[0.18]'
               }`}
               style={
@@ -3464,7 +3483,7 @@ export default function CustomVideoControls({
           )}
           <button
             onClick={onPlayPause}
-            className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
+            className="p-1.5 sm:p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
             aria-label={isPlaying ? t('pauseVideo') : t('playVideo')}
             title={isPlaying ? `${t('pauseVideo')} (Ctrl+Space)` : `${t('playVideo')} (Ctrl+Space)`}
           >
@@ -3484,7 +3503,7 @@ export default function CustomVideoControls({
               aria-pressed={loopActive}
               aria-label={t('loopPlayback')}
               title={t('loopPlayback')}
-              className={`p-2 rounded-md transition-colors touch-manipulation ${
+              className={`p-1.5 sm:p-2 rounded-md transition-colors touch-manipulation ${
                 loopActive ? 'text-white' : 'text-white/85 hover:text-white hover:bg-white/[0.10] active:bg-white/[0.18]'
               }`}
               style={
@@ -3545,7 +3564,7 @@ export default function CustomVideoControls({
           >
             <button
               onClick={onToggleMute}
-              className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
+              className="p-1.5 sm:p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
               aria-label={isMuted ? t('unmute') : t('mute')}
               title={isMuted ? t('unmute') : t('mute')}
             >
@@ -3636,15 +3655,25 @@ export default function CustomVideoControls({
           </div>
         </div>
 
-        {/* CENTER: time */}
-        <div className="text-white/85 text-xs sm:text-sm font-mono tabular-nums whitespace-nowrap shrink-0">
-          {formatTimeWithMode(smoothTime, videoFps, videoDuration, timestampDisplayMode)}
-          <span className="text-white/40"> / </span>
-          {formatTimeWithMode(videoDuration, videoFps, videoDuration, timestampDisplayMode)}
-        </div>
+        {/* CENTER: time. 7.10.1: on a phone the duration half is shown only
+            while the pair is short (m:ss / mm:ss); see the bar comment. */}
+        {(() => {
+          const currentLabel = formatTimeWithMode(smoothTime, videoFps, videoDuration, timestampDisplayMode)
+          const durationLabel = formatTimeWithMode(videoDuration, videoFps, videoDuration, timestampDisplayMode)
+          const longPair = currentLabel.length + durationLabel.length > 11
+          return (
+            <div className="text-white/85 text-xs sm:text-sm font-mono tabular-nums whitespace-nowrap shrink-0">
+              {currentLabel}
+              <span className={longPair ? 'max-sm:hidden' : ''}>
+                <span className="text-white/40"> / </span>
+                {durationLabel}
+              </span>
+            </div>
+          )
+        })()}
 
         {/* RIGHT GROUP */}
-        <div className="flex items-center gap-0.5 sm:gap-1 flex-1 justify-end min-w-0">
+        <div className="flex items-center gap-0.5 sm:gap-1 flex-auto sm:flex-1 justify-end min-w-0">
           {/* 1.3.2+: Settings popup (gear) — replaces the old read-only
               SD/HD/4K quality badge. Now houses Quality switcher, Guides
               (social safe-zones), Rulers (Photoshop-style draggable
@@ -3688,7 +3717,7 @@ export default function CustomVideoControls({
             <button
               type="button"
               onClick={handleCast}
-              className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
+              className="p-1.5 sm:p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
               aria-label={t('castToTv')}
               title={t('castToTv')}
             >
@@ -3702,7 +3731,7 @@ export default function CustomVideoControls({
 
           <button
             onClick={onToggleFullscreen}
-            className="p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
+            className="p-1.5 sm:p-2 hover:bg-white/[0.10] active:bg-white/[0.18] rounded-md transition-colors touch-manipulation text-white/85 hover:text-white"
             aria-label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
             title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
           >

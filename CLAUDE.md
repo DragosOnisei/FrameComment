@@ -191,6 +191,16 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   with `LIST_INDENT` (literal spaces, the only indent a textarea can show),
   Shift+Enter continues, Backspace right after a fresh marker un-lists, and
   a lone empty marker continues instead of ending the list.
+- **A release invalidates every chunk a still-open tab may ask for** (7.10.1):
+  chunk names carry the build hash and the image is replaced whole, so an old
+  page's first lazy import after a deploy fails with "Loading chunk N failed".
+  `src/app/error.tsx` recognises that (src/lib/stale-chunk.ts) and reloads
+  ONCE per minute per tab, via sessionStorage; a second failure shows the card
+  with the reason. `public/sw.js` has NO `fetch` handler on purpose — it is a
+  push-only worker; the old pass-through handler cached nothing and only added
+  a way for loads to fail on iOS. The player sets `navigator.mediaSession
+  .metadata` (title = video, artist = project, artwork = poster) so the iOS
+  lock screen shows the thumbnail instead of the app icon.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

@@ -14,6 +14,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.10.1] - 2026-09-16
+
+### Fixed
+
+- **A tab left open across an update recovers by itself.** Every release
+  replaces the app's JavaScript files, whose names carry the build hash. A
+  page opened before the update — a share link left in a phone's browser,
+  say — still holds the old page, and the first time it lazily needs a file
+  it has not loaded yet it asks for one that no longer exists: "Loading
+  chunk 685 failed", presented as "Something broke on this screen". Nothing
+  was broken; the page was old. The error screen now recognises that case
+  and reloads once, automatically, with "Updating to the latest version…";
+  a second failure inside a minute shows the card with the reason and a
+  Reload button instead, so a genuinely missing file cannot become a reload
+  loop. The service worker no longer intercepts page requests at all — its
+  pass-through `fetch` handler cached nothing and only added a way for a
+  load to fail on iOS — it exists for push notifications.
+- **The player controls fit on a phone.** Since Loop arrived the left group
+  held five controls, and on an iPhone it ran under the time display: the
+  1x pill sat on the minutes, the speaker on the slash. Below the small
+  breakpoint the buttons are tighter, Reverse is hidden (it is a J/L
+  keyboard control that shuttles frames), the two groups are sized by their
+  content instead of being handed equal halves of the bar, and a long time
+  label (HH:MM:SS:FF, or an hour-long clip) shows only the current time
+  there. Desktop is unchanged, with the time still dead centre.
+- **The iPhone lock screen shows the video, not the app icon.** While a video
+  played, the Now Playing card read "FrameComment" over the logomark. The
+  player now tells the system what is playing — the video's name, the
+  project, and its thumbnail as artwork — the way YouTube does.
+
 ## [7.10.0] - 2026-09-16
 
 ### Added

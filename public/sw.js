@@ -139,11 +139,12 @@ self.addEventListener('message', (event) => {
   }
 })
 
-self.addEventListener('fetch', (event) => {
-  if (!event.request.url.startsWith(self.location.origin)) return
-  if (event.request.url.includes('/api/')) return
-
-  event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
-  )
-})
+// 7.10.1: no `fetch` handler. This worker exists for push notifications;
+// the handler that used to sit here routed every same-origin request except
+// /api/ through the worker only to `fetch()` it unchanged, with a fallback to
+// a cache nothing ever wrote to — so on a network failure it answered with
+// `undefined`, which the page sees as a failed request. That is pure overhead
+// on every page, chunk and image, and on iOS Safari, which stops workers
+// aggressively, a request in flight through one is a way for a load to fail
+// that has nothing to do with the server. Requests now go straight to the
+// network as they would with no worker at all.

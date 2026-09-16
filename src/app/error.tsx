@@ -18,8 +18,13 @@
  * their time than a shrug. Stack traces stay in the console.
  */
 
-import { useEffect } from 'react'
-import { AlertTriangle, RotateCw, ArrowLeft } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, RotateCw, ArrowLeft, Loader2 } from 'lucide-react'
+import {
+  isChunkLoadError,
+  shouldReloadForStaleChunk,
+  STALE_CHUNK_RELOAD_KEY,
+} from '@/lib/stale-chunk'
 
 export default function AppError({
   error,
@@ -28,11 +33,48 @@ export default function AppError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  // 7.10.1: a stale-deploy chunk failure is not a bug in the screen, it is an
+  // old page asking for files the last release replaced — see
+  // src/lib/stale-chunk.ts. Reload once, automatically, and say so; if the
+  // chunk is still missing after that, fall through to the card below with
+  // the reason spelled out, so a genuinely broken build is still visible.
+  const staleChunk = isChunkLoadError(error)
+  const [reloading, setReloading] = useState(false)
+
   useEffect(() => {
     // Next already logs this server-side; this puts it in the browser console
     // too, where the person who hit it can copy it.
     console.error('[FrameComment] Unhandled render error:', error)
-  }, [error])
+    if (!staleChunk) return
+    let lastReloadAt: number | null = null
+    try {
+      const raw = window.sessionStorage.getItem(STALE_CHUNK_RELOAD_KEY)
+      lastReloadAt = raw ? Number(raw) : null
+    } catch {
+      /* private mode or blocked storage: decide as if never reloaded */
+    }
+    if (!shouldReloadForStaleChunk(lastReloadAt, Date.now())) return
+    try {
+      window.sessionStorage.setItem(STALE_CHUNK_RELOAD_KEY, String(Date.now()))
+    } catch {
+      /* without storage a loop cannot be ruled out — still reload once; the
+         next failure lands here again with storage still unavailable and the
+         card below is shown because `reloading` never persists */
+    }
+    setReloading(true)
+    window.location.reload()
+  }, [error, staleChunk])
+
+  if (reloading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center px-6 py-16">
+        <div className="inline-flex items-center gap-2.5 rounded-xl ring-1 ring-white/12 bg-black/30 px-4 py-3 text-sm text-white/80">
+          <Loader2 className="w-4 h-4 animate-spin text-primary" aria-hidden />
+          Updating to the latest version…
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-[60vh] flex items-center justify-center px-6 py-16">
@@ -52,8 +94,9 @@ export default function AppError({
 
         <h1 className="mt-4 text-lg font-semibold">Something broke on this screen</h1>
         <p className="mt-1.5 text-sm text-white/55 leading-relaxed">
-          The rest of the app is fine — your files and comments are untouched.
-          Try again, or step back to where you were.
+          {staleChunk
+            ? 'This page is from before the last update and could not fetch a part of the new one. Reloading the page usually fixes it; your files and comments are untouched.'
+            : 'The rest of the app is fine — your files and comments are untouched. Try again, or step back to where you were.'}
         </p>
 
         {(error?.message || error?.digest) && (
@@ -74,11 +117,13 @@ export default function AppError({
         <div className="mt-5 flex items-center gap-2">
           <button
             type="button"
-            onClick={() => reset()}
+            // A stale chunk cannot be fixed by re-rendering the same old page;
+            // only a reload fetches the new files.
+            onClick={() => (staleChunk ? window.location.reload() : reset())}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-xs font-semibold text-primary-foreground hover:brightness-110 transition-[filter]"
           >
             <RotateCw className="w-3.5 h-3.5" />
-            Try again
+            {staleChunk ? 'Reload page' : 'Try again'}
           </button>
           <button
             type="button"

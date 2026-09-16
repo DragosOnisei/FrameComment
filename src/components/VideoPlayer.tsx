@@ -698,6 +698,44 @@ export default function VideoPlayer({
   // path already had several of them stacked back to back.
   const showPlayerSlate = useDelayedFlag(!hasDisplayableSource, 350)
 
+  // 7.10.1: what the lock screen and the media notification show.
+  //
+  // With a <video> playing and no MediaMetadata set, iOS puts the site's app
+  // icon on the Now Playing card and labels it with the page title — so the
+  // lock screen read "FrameComment" over the logomark, where YouTube shows
+  // the video's thumbnail and title. The Media Session API is how a page says
+  // what is actually playing: title = the video, artist = the project, and
+  // the poster as artwork. The URL is made absolute because the OS fetches
+  // the artwork itself; a signed /api/content URL needs no cookies, so that
+  // works. `sizes`/`type` are optional hints and are left out rather than
+  // guessed. Cleared when the player unmounts so a stale card does not
+  // outlive the video it described.
+  const mediaSessionTitle = selectedVideo?.name ?? null
+  const mediaSessionArtwork = ((selectedVideo as any)?.thumbnailUrl as string | undefined) || null
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
+    if (typeof (window as any).MediaMetadata === 'undefined') return
+    if (!mediaSessionTitle) return
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: mediaSessionTitle,
+        artist: projectTitle || 'FrameComment',
+        artwork: mediaSessionArtwork
+          ? [{ src: new URL(mediaSessionArtwork, window.location.origin).href }]
+          : [],
+      })
+    } catch {
+      /* an older engine with a partial implementation: the default card stays */
+    }
+    return () => {
+      try {
+        navigator.mediaSession.metadata = null
+      } catch {
+        /* same */
+      }
+    }
+  }, [mediaSessionTitle, mediaSessionArtwork, projectTitle])
+
   // 3.9.x: comments are per-VERSION. `comments` arrives scoped to the
   // whole active version group (v1…vN), but a comment — and its saved
   // annotation — belongs to ONE specific version's videoId. Without this

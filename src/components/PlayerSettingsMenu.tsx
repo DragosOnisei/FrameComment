@@ -252,7 +252,7 @@ export default function PlayerSettingsMenu({
           setOpen((o) => !o)
           setSubmenu(null)
         }}
-        className="relative p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
+        className="relative p-1.5 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-md transition-colors touch-manipulation"
         aria-label="Player settings"
         title="Player settings"
       >
