@@ -14,6 +14,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.10.0] - 2026-09-16
+
+### Added
+
+- **The upload and encoding banners are yours alone.** The bottom-right
+  "Uploading videos" and "Encoding tiers" banners were company-wide: every
+  person on the team got one — with a Cancel control in it — for whatever a
+  colleague happened to be uploading. They now show only the videos the
+  signed-in person uploaded, with counts computed for that person, and they
+  say "All uploads complete" when YOUR uploads finish, not the company's. The
+  cards in the folder are unchanged: a colleague's upload still shows its
+  progress bar on its card for everyone, because the status list itself is
+  still company-wide — each row now simply says whose it is. A reprocess or
+  a speed change re-encodes an existing video, so that banner goes to the
+  person who originally uploaded it.
+
+### Fixed
+
+- **Comment text wraps under the timecode chip again, and an emoji on the
+  second line no longer collides with it.** The second line of a comment in
+  the composer was meant to start below the chip since 7.8.0, which set 24 px
+  lines; that line height never applied on desktop — the base text box
+  re-declares its own at the small breakpoint and won — so the lines stayed
+  20 px, the second line began under the chip and an emoji opening it sat
+  half beneath the timecode. 7.9.1 mistook the cause and pushed the whole
+  text into a block beside the chip. The line height is now set directly on
+  the element at every width, the text starts beside the chip and wraps
+  underneath it like the posted comment does, and the second line clears
+  the chip with room for an emoji.
+- **Lists in comments behave like lists while you type.** Typing "1." and a
+  space at the start of a line indents the item, Shift+Enter continues with
+  "2." (and renumbers what follows), Shift+Enter on an empty item below
+  another item ends the list, and Backspace straight after a fresh "1. "
+  removes it again. A lone "1. " followed by Shift+Enter used to be read as
+  "end the list" and vanished — which is exactly how the feature was tried,
+  and why it looked like Shift+Enter did nothing; it now continues to "2.".
+  The reply box gets the same keys; it had no list behaviour at all. Posted
+  comments still render as real numbered and bulleted lists.
+
 ## [7.9.1] - 2026-09-14
 
 ### Fixed

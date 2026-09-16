@@ -30,6 +30,7 @@ import {
 import { pasteClippedThreads } from '@/lib/comments-paste'
 import { buildPremiereMarkersXml, premiereMarkersFileName } from '@/lib/premiere-markers'
 import { emoticonOnChange } from '@/lib/emoticons'
+import { handleListKeydown } from '@/lib/comment-list-keys'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -144,6 +145,11 @@ function InlineReplyForm({
         // would read as a bug in whichever one the user tried second.
         onChange={(e) => emoticonOnChange(e.currentTarget, setText)}
         onKeyDown={(e) => {
+          // 7.10.0: the same list keystrokes as the main composer — "1. "
+          // indents, Shift+Enter continues with "2. ", Backspace un-lists.
+          // A reply is a comment; lists working in one box and not the other
+          // would read as a bug in whichever one was tried second.
+          if (handleListKeydown(e, setText)) return
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
             void handleSend()

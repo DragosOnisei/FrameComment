@@ -11,7 +11,7 @@ import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Send, X, Paperclip, Pencil, PenTool, Flag } from 'lucide-react'
 import { formatCommentTimestamp, secondsToTimecode } from '@/lib/timecode'
-import { continueListOnNewline } from '@/lib/comment-lists'
+import { handleListKeydown } from '@/lib/comment-list-keys'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import CommentAttachmentButton, { type CommentAttachmentButtonHandle } from './CommentAttachmentButton'
 import VoiceRecorderButton from './VoiceRecorderButton'
@@ -497,11 +497,29 @@ export default function CommentInput({
   // 8px of breathing room, matching the old flex gap. Zero when the chip is
   // gone (restricted video) so the text starts at the edge.
   //
-  // 7.9.1: applied as padding on EVERY line, not as a first-line indent. With
-  // the indent, line two started at the left edge — directly under the chip —
-  // and an emoji opening that line sat wedged beneath the timecode. The chip
-  // now owns a narrow gutter and the text is a clean block beside it.
+  // 7.10.0: back to a FIRST-LINE indent — the text starts beside the chip and
+  // wraps underneath it, the way a comment reads once it is posted. 7.9.1 had
+  // turned this into padding on every line because an emoji opening line two
+  // sat wedged under the chip; that was a misdiagnosis. The real cause was
+  // the line height: the 24 px lines meant to clear the chip (7.8.0) never
+  // applied on desktop, see `COMPOSER_LINE_HEIGHT` below. With the lines
+  // actually 24 px, line two starts below the chip and the indent is right.
   const chipGutter = chipWidth > 0 ? `${Math.round(chipWidth) + 8}px` : undefined
+  /**
+   * 7.10.0: the composer's line height, as an inline style on purpose.
+   *
+   * The timecode chip is 20.5 px tall and sits 2 px down, so it reaches
+   * 22.5 px into the box. 7.8.0 set `leading-6` (24 px) so the second line
+   * would start below it — but the base <Textarea> carries `sm:text-sm`, and
+   * in Tailwind 3 a responsive `text-sm` re-declares `line-height: 1.25rem`
+   * in a variant rule that is emitted AFTER every plain utility. From the sm
+   * breakpoint up `leading-6` therefore lost, the lines stayed 20 px, line two
+   * began 2.5 px under the chip, and an emoji opening that line was drawn half
+   * beneath the timecode — twice reported, never actually fixed. An inline
+   * style beats every utility at every width. The placeholder overlay uses
+   * the same value so it keeps lining up with the text.
+   */
+  const COMPOSER_LINE_HEIGHT = '1.5rem'
 
   const chipSeconds = hasCapturedTimestamp ? selectedTimestamp! : livePlayheadSeconds
   const timestampLabel = formatCommentTimestamp({
@@ -606,33 +624,12 @@ export default function CommentInput({
       }
     }
 
-    // 7.8.0: Shift+Enter inside a list item continues the list ("1. " →
-    // "2. ", "- " → "- ") and renumbers what follows; on an empty item it
-    // ends the list instead. Any other line: the browser's own newline.
-    if (e.key === 'Enter' && e.shiftKey) {
-      const el = e.currentTarget
-      const next = continueListOnNewline(
-        el.value,
-        el.selectionStart ?? el.value.length,
-        el.selectionEnd ?? el.value.length,
-      )
-      if (next) {
-        e.preventDefault()
-        // Written to the DOM as well as to React state for the reason the
-        // emoticon handler below documents: the native `input` sync listener
-        // must never find stale text in the element.
-        el.value = next.value
-        onCommentChange(next.value)
-        requestAnimationFrame(() => {
-          try {
-            el.setSelectionRange(next.caret, next.caret)
-          } catch {
-            /* best effort */
-          }
-        })
-        return
-      }
-    }
+    // 7.8.0 / 7.10.0: lists. Space after "1." at the start of a line indents
+    // the marker, Shift+Enter continues the list ("2. ", "- ") and renumbers
+    // what follows, Backspace straight after a fresh marker removes it. The
+    // helper consumes only those keystrokes; everything else — including
+    // Shift+Enter on an ordinary line — falls through to the browser.
+    if (handleListKeydown(e, onCommentChange)) return
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -980,22 +977,19 @@ export default function CommentInput({
                   onFocus={onInputFocus}
                   maxLength={MAX_COMMENT_LENGTH}
                   /**
-                   * 7.8.0: `leading-6`, was `leading-snug`. The timecode chip is
-                   * 20.5 px tall and sits 2 px down, so it reaches 22.5 px; with
-                   * 19 px lines the second line started underneath it, and an
-                   * emoji — taller than a letter — was drawn half under the chip.
-                   * 24 px lines start the second line below the chip with room
-                   * to spare. The placeholder overlay below matches.
+                   * 7.10.0: line height and first-line indent are inline styles —
+                   * see `COMPOSER_LINE_HEIGHT` and `chipGutter` for why a utility
+                   * class was not enough for either.
                    */
-                  className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full leading-6"
-                  style={{ paddingLeft: chipGutter }}
+                  className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full"
+                  style={{ textIndent: chipGutter, lineHeight: COMPOSER_LINE_HEIGHT }}
                   rows={1}
                 />
                 {!newComment && (
                   <span
                     aria-hidden="true"
-                    className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm leading-6"
-                    style={{ paddingLeft: chipGutter }}
+                    className="placeholder-shimmer pointer-events-none absolute inset-0 select-none text-sm"
+                    style={{ textIndent: chipGutter, lineHeight: COMPOSER_LINE_HEIGHT }}
                   >
                     {markerMode ? 'Note (optional)' : t('typeMessage')}
                   </span>

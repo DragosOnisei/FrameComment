@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -95,20 +96,46 @@ export type ProcessingVideo = {
    * Derived from `queue.getActive()` on the server.
    */
   isActive: boolean
+  /**
+   * 7.10.0: true when the signed-in person uploaded this row
+   * (`Video.createdById`), decided on the server. The bottom-right banners
+   * show only these rows; the folder cards keep reading the whole list so
+   * everyone still sees a colleague's upload progressing on its card.
+   */
+  isMine: boolean
 }
 
 type StatusResponse = {
-  uploading: { count: number; videos: ProcessingVideo[] }
-  processing: { count: number; videos: ProcessingVideo[] }
+  uploading: { count: number; mineCount?: number; videos: ProcessingVideo[] }
+  processing: { count: number; mineCount?: number; videos: ProcessingVideo[] }
 }
 
-type StatusValue = {
+/**
+ * 7.10.0: the signed-in person's own share of the in-flight work. This is
+ * what the banners render. The counts come from the server (a true total,
+ * not the length of the capped list) and the high-water marks are kept
+ * separately from the company-wide ones, so "All uploads complete" appears
+ * when MY uploads finish, not when the company's do.
+ */
+type MineStatus = {
   uploadingCount: number
   uploadingHwm: number
   uploadingVideos: ProcessingVideo[]
   processingCount: number
   processingHwm: number
   processingVideos: ProcessingVideo[]
+}
+
+type StatusValue = {
+  /** Company-wide. Drives the per-card progress bars and the poll cadence. */
+  uploadingCount: number
+  uploadingHwm: number
+  uploadingVideos: ProcessingVideo[]
+  processingCount: number
+  processingHwm: number
+  processingVideos: ProcessingVideo[]
+  /** 7.10.0: the viewer's own rows and counts — what the banners show. */
+  mine: MineStatus
   /** Force a one-off refetch (e.g. right after the user uploads). */
   refetch: () => void
 }
@@ -140,6 +167,12 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
   const [processingCount, setProcessingCount] = useState(0)
   const [processingHwm, setProcessingHwm] = useState(0)
   const [processingVideos, setProcessingVideos] = useState<ProcessingVideo[]>([])
+  // 7.10.0: the viewer's own counts + high-water marks, kept apart from the
+  // company-wide ones above so the two banners answer to MY work only.
+  const [mineUploadingCount, setMineUploadingCount] = useState(0)
+  const [mineUploadingHwm, setMineUploadingHwm] = useState(0)
+  const [mineProcessingCount, setMineProcessingCount] = useState(0)
+  const [mineProcessingHwm, setMineProcessingHwm] = useState(0)
 
   // Track the most recent fetch sequence so an in-flight poll
   // can't clobber a newer one when the user mashes refetch().
@@ -154,6 +187,9 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
   // clocks lets each banner dismiss independently.
   const uploadingResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const processingResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 7.10.0: and one clock each for the viewer's own banners.
+  const mineUploadingResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mineProcessingResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const aliveRef = useRef(true)
 
   /**
@@ -237,6 +273,27 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
       } else {
         armHwmReset(processingResetTimerRef, setProcessingHwm)
       }
+
+      // 7.10.0: the same bookkeeping for the viewer's own share. A server
+      // from before this field is treated as "nothing of mine" rather than
+      // "everything is mine" — the banner then stays quiet until the image
+      // is updated, which is the honest reading of a missing number.
+      const muc = data.uploading?.mineCount ?? 0
+      const mpc = data.processing?.mineCount ?? 0
+      setMineUploadingCount(muc)
+      setMineProcessingCount(mpc)
+      if (muc > 0) {
+        cancelHwmReset(mineUploadingResetTimerRef)
+        setMineUploadingHwm((prev) => Math.max(prev, muc))
+      } else {
+        armHwmReset(mineUploadingResetTimerRef, setMineUploadingHwm)
+      }
+      if (mpc > 0) {
+        cancelHwmReset(mineProcessingResetTimerRef)
+        setMineProcessingHwm((prev) => Math.max(prev, mpc))
+      } else {
+        armHwmReset(mineProcessingResetTimerRef, setMineProcessingHwm)
+      }
     } catch (err) {
       if (seq !== fetchSeqRef.current || !aliveRef.current) return
       logError('[ProcessingStatus] fetch threw:', err)
@@ -252,6 +309,8 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
       aliveRef.current = false
       cancelHwmReset(uploadingResetTimerRef)
       cancelHwmReset(processingResetTimerRef)
+      cancelHwmReset(mineUploadingResetTimerRef)
+      cancelHwmReset(mineProcessingResetTimerRef)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -269,6 +328,36 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasWork])
 
+  // 7.10.0: the viewer's rows, filtered once per poll. Memoised so the
+  // banner's effects (which key on the array identity) do not re-run on
+  // every unrelated render of the provider.
+  const mineUploadingVideos = useMemo(
+    () => uploadingVideos.filter((v) => v.isMine),
+    [uploadingVideos],
+  )
+  const mineProcessingVideos = useMemo(
+    () => processingVideos.filter((v) => v.isMine),
+    [processingVideos],
+  )
+  const mine = useMemo<MineStatus>(
+    () => ({
+      uploadingCount: mineUploadingCount,
+      uploadingHwm: mineUploadingHwm,
+      uploadingVideos: mineUploadingVideos,
+      processingCount: mineProcessingCount,
+      processingHwm: mineProcessingHwm,
+      processingVideos: mineProcessingVideos,
+    }),
+    [
+      mineUploadingCount,
+      mineUploadingHwm,
+      mineUploadingVideos,
+      mineProcessingCount,
+      mineProcessingHwm,
+      mineProcessingVideos,
+    ],
+  )
+
   return (
     <ProcessingStatusCtx.Provider
       value={{
@@ -278,6 +367,7 @@ export function ProcessingStatusProvider({ children }: { children: ReactNode }) 
         processingCount,
         processingHwm,
         processingVideos,
+        mine,
         refetch: fetchStatus,
       }}
     >
@@ -299,6 +389,14 @@ export function useProcessingStatus(): StatusValue {
       processingCount: 0,
       processingHwm: 0,
       processingVideos: [],
+      mine: {
+        uploadingCount: 0,
+        uploadingHwm: 0,
+        uploadingVideos: [],
+        processingCount: 0,
+        processingHwm: 0,
+        processingVideos: [],
+      },
       refetch: () => {},
     }
   }

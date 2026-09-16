@@ -112,6 +112,11 @@ export async function GET(request: NextRequest) {
   // here are interchangeable with the ones minted there — same
   // namespacing in Redis, same TTL behaviour.
   const sessionId = `admin:${authResult.id}`
+  // 7.10.0: the banners are personal. Every row still goes out (the folder
+  // cards read the same list to paint their progress bar for everyone), but
+  // each row says whether the signed-in person uploaded it, and the counts
+  // that drive the bottom-right banners are computed for that person only.
+  const viewerId = authResult.id
 
   // 4.2.3+: clear zombie UPLOADING rows before we count, so the banner this
   // request produces already reflects the reaped state (throttled internally).
@@ -187,9 +192,27 @@ export async function GET(request: NextRequest) {
       logError('[processing-status] getActive failed:', err)
     }
 
+    // 7.10.0: PROCESSING-or-active is counted twice — once for the company
+    // (the cards) and once for the viewer (their banner). One `where`, so the
+    // two can never disagree about what counts as "processing".
+    const processingWhere: Prisma.VideoWhereInput =
+      activeVideoIds.size > 0
+        ? {
+            OR: [
+              { status: 'PROCESSING' },
+              {
+                id: { in: [...activeVideoIds] },
+                status: { not: 'UPLOADING' },
+              },
+            ],
+          }
+        : { status: 'PROCESSING' }
+
     const [
       uploadingCount,
       processingCountBase,
+      uploadingMineCount,
+      processingMineCountBase,
       uploadingVideos,
       processingCandidates,
     ] = await Promise.all([
@@ -200,19 +223,10 @@ export async function GET(request: NextRequest) {
       // below so the "X / Y done" banner header is consistent
       // with the rows the user can actually see when they
       // expand the panel.
-      activeVideoIds.size > 0
-        ? prisma.video.count({
-            where: {
-              OR: [
-                { status: 'PROCESSING' },
-                {
-                  id: { in: [...activeVideoIds] },
-                  status: { not: 'UPLOADING' },
-                },
-              ],
-            },
-          })
-        : prisma.video.count({ where: { status: 'PROCESSING' } }),
+      prisma.video.count({ where: processingWhere }),
+      // 7.10.0: the viewer's own share of both, for the personal banners.
+      prisma.video.count({ where: { status: 'UPLOADING', createdById: viewerId } }),
+      prisma.video.count({ where: { AND: [processingWhere, { createdById: viewerId }] } }),
       prisma.video.findMany({
         where: { status: 'UPLOADING' },
         select: {
@@ -224,6 +238,8 @@ export async function GET(request: NextRequest) {
           createdAt: true,
           projectId: true,
           folderId: true,
+          // 7.10.0: who uploaded it — the banners show a row only to that person.
+          createdById: true,
           uploadProgress: true,
           processingProgress: true,
           // 6.14.0: the banner turns `uploadProgress` deltas into MB/s, which
@@ -290,6 +306,8 @@ export async function GET(request: NextRequest) {
           createdAt: true,
           projectId: true,
           folderId: true,
+          // 7.10.0: who uploaded it — the banners show a row only to that person.
+          createdById: true,
           uploadProgress: true,
           processingProgress: true,
           originalFileSize: true,
@@ -321,6 +339,11 @@ export async function GET(request: NextRequest) {
     const processingCount =
       processingCountBase +
       processingVideos.filter((v) => v.status === 'READY' && !activeVideoIds.has(v.id)).length
+    const processingMineCount =
+      processingMineCountBase +
+      processingVideos.filter(
+        (v) => v.status === 'READY' && !activeVideoIds.has(v.id) && v.createdById === viewerId,
+      ).length
 
     // Build the "effective active set" — what we actually return
     // as `isActive` on each row. Two sources, in priority order:
@@ -445,6 +468,12 @@ export async function GET(request: NextRequest) {
             ? ((v as any).transcodeProgressByTier as Record<string, unknown>)
             : null,
         isActive: effectiveActiveIds.has(v.id),
+        // 7.10.0: true when the signed-in person uploaded this row. The
+        // bottom-right banners show only these; the folder cards show all.
+        // A row with no uploader on record (very old rows, or a dev database
+        // without the column) is nobody's — it stays on the cards for
+        // everyone and in no one's banner.
+        isMine: v.createdById != null && v.createdById === viewerId,
       }
     }
 
@@ -457,10 +486,15 @@ export async function GET(request: NextRequest) {
       {
         uploading: {
           count: uploadingCount,
+          // 7.10.0: how many of them the viewer uploaded — the true total,
+          // not the length of the capped list, so "3 in progress" is right
+          // even when a colleague's bulk upload fills the 50-row window.
+          mineCount: uploadingMineCount,
           videos: shapedUploading,
         },
         processing: {
           count: processingCount,
+          mineCount: processingMineCount,
           videos: shapedProcessing,
         },
       },

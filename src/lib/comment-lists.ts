@@ -6,11 +6,16 @@
  *
  *   1. `continueListOnNewline` — Shift+Enter at the end of "1. foo" inserts
  *      "\n2. " (and renumbers any numbered items that follow); Shift+Enter
- *      on an empty "3. " removes the marker instead, which is how every
- *      editor ends a list.
+ *      on an empty "3. " below another item removes the marker instead,
+ *      which is how every editor ends a list.
  *   2. `plainTextListsToHtml` — when a comment is displayed, runs of such
  *      lines become real <ol>/<ul> markup, which is what gives them the
  *      hanging indent the plain text cannot have.
+ *   3. (7.10.0) `indentListMarkerOnSpace` / `removeListMarkerOnBackspace` —
+ *      the space after a marker typed at the start of a line indents it
+ *      (`LIST_INDENT`), and Backspace straight after undoes that. The three
+ *      keystrokes are wired by `handleListKeydown` (comment-list-keys.ts) in
+ *      both the composer and the reply box.
  *
  * Both are pure and exercised by a script before release. The stored comment
  * stays plain text: the transform is display-only, so copy, paste, e-mail
@@ -20,10 +25,25 @@
 const NUMBERED = /^(\s*)(\d{1,3})([.)])(\s+)(.*)$/
 const BULLETED = /^(\s*)([-*•])(\s+)(.*)$/
 
+/**
+ * 7.10.0: the indent a marker gets when it is typed at the start of a line.
+ * A <textarea> cannot indent one line by CSS, so the indent is literal spaces
+ * in the text — the display transform strips them again (its regexes allow
+ * leading whitespace), e-mail and export keep them harmlessly.
+ */
+export const LIST_INDENT = '    '
+// A line that is nothing but a marker so far: "1." / "12)" / "-" / "*" / "•".
+const MARKER_ONLY = /^(\d{1,3}[.)]|[-*•])$/
+// "    1. " exactly — an auto-indented marker with nothing typed after it yet.
+const INDENTED_EMPTY_MARKER = new RegExp(`^${LIST_INDENT}(\\d{1,3}[.)]|[-*•]) $`)
+
 export interface ListContinuation {
   value: string
   caret: number
 }
+
+/** 7.10.0: the shape every list keystroke helper returns. */
+export type ListEdit = ListContinuation
 
 /**
  * What Shift+Enter should do at `selectionStart..selectionEnd` in `value`.
@@ -47,10 +67,25 @@ export function continueListOnNewline(
   // An empty item means "I am done with the list": drop the marker and leave
   // the caret on the now-empty line. Only when nothing is selected — a
   // selection means the person is replacing text, not ending a list.
+  //
+  // 7.10.0: …but only when there IS a list to be done with, i.e. the line
+  // above is an item of the same kind. A lone "1. " followed by Shift+Enter
+  // is not someone leaving a list, it is someone starting one and checking
+  // that the numbering follows — Dragos did exactly that, watched "1. "
+  // vanish, and reported that Shift+Enter "does nothing". Ending the list
+  // still works the way every editor does it: Shift+Enter twice.
   if (rest.trim() === '' && selectionStart === selectionEnd) {
-    return {
-      value: value.slice(0, lineStart) + value.slice(selectionStart),
-      caret: lineStart,
+    const prevLine =
+      lineStart > 0
+        ? value.slice(value.lastIndexOf('\n', lineStart - 2) + 1, lineStart - 1)
+        : null
+    const prevIsItem =
+      prevLine !== null && (numbered ? NUMBERED.test(prevLine) : BULLETED.test(prevLine))
+    if (prevIsItem) {
+      return {
+        value: value.slice(0, lineStart) + value.slice(selectionStart),
+        caret: lineStart,
+      }
     }
   }
 
@@ -91,6 +126,52 @@ export function continueListOnNewline(
   return {
     value: value.slice(0, selectionStart) + insert + after,
     caret: selectionStart + insert.length,
+  }
+}
+
+/**
+ * 7.10.0: what typing a space should do. When the line so far is exactly a
+ * marker ("1." / "-"), the line becomes "    1. " — the marker moves in and
+ * reads as a list item from that moment, which is the "auto indent" the
+ * plain textarea can otherwise not show. Null for every ordinary space.
+ */
+export function indentListMarkerOnSpace(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+): ListEdit | null {
+  if (selectionStart !== selectionEnd) return null
+  const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
+  const line = value.slice(lineStart, selectionStart)
+  if (!MARKER_ONLY.test(line)) return null
+  // Only at the end of the line: a space typed into "1.|more" is a space.
+  const lineEnd = value.indexOf('\n', selectionStart)
+  if (value.slice(selectionStart, lineEnd === -1 ? value.length : lineEnd) !== '') return null
+  const replaced = `${LIST_INDENT}${line} `
+  return {
+    value: value.slice(0, lineStart) + replaced + value.slice(selectionStart),
+    caret: lineStart + replaced.length,
+  }
+}
+
+/**
+ * 7.10.0: Backspace right after an auto-indented marker ("    1. |") removes
+ * the whole marker, indent included, instead of one space — the way every
+ * editor un-lists a line — so a person who did not want a list is not left
+ * with four invisible spaces to hunt down. Null for every ordinary Backspace.
+ */
+export function removeListMarkerOnBackspace(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+): ListEdit | null {
+  if (selectionStart !== selectionEnd) return null
+  const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
+  const line = value.slice(lineStart, selectionStart)
+  if (!INDENTED_EMPTY_MARKER.test(line)) return null
+  return {
+    value: value.slice(0, lineStart) + value.slice(selectionStart),
+    caret: lineStart,
   }
 }
 

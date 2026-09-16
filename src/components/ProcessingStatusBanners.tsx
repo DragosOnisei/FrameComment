@@ -91,9 +91,16 @@ const BANNER_STALL_MS = 20_000
  * existing `DownloadBanners` in the admin layout so all three
  * surfaces (downloads, uploads, processing) stack consistently.
  *
- * Counts are global (every project the signed-in admin has
- * access to), so a `bulk-upload.mjs` run on a separate machine
- * also surfaces here. Polling lives in
+ * 7.10.0: the banners are PERSONAL. They show only the videos the
+ * signed-in person uploaded (`Video.createdById`), with counts the
+ * server computed for that person. Until now they were company-wide,
+ * so everyone on the team got an "Uploading videos" banner — with a
+ * Cancel control in it — for work that was not theirs. A
+ * `bulk-upload.mjs` run under your own account on another machine
+ * still surfaces here, because it creates the rows as you. The
+ * folder cards are NOT filtered: they read the company-wide list
+ * from the same context, so a colleague's upload still shows its
+ * progress bar on its card for everyone. Polling lives in
  * `ProcessingStatusContext` — this component is pure render.
  *
  * Click anywhere on a banner row to expand a scrollable list of
@@ -104,12 +111,14 @@ const BANNER_STALL_MS = 20_000
  */
 export function ProcessingStatusBanners() {
   const {
-    uploadingCount,
-    uploadingHwm,
-    uploadingVideos,
-    processingCount,
-    processingHwm,
-    processingVideos,
+    mine: {
+      uploadingCount,
+      uploadingHwm,
+      uploadingVideos,
+      processingCount,
+      processingHwm,
+      processingVideos,
+    },
   } = useProcessingStatus()
 
   const showUpload = uploadingCount > 0 || uploadingHwm > 0

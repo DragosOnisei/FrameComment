@@ -167,6 +167,30 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   (src/lib/tier-tally.ts) holds a vanished video for two polls before folding
   it as finished — the pre-7.9.0 "fold on first disappearance" produced
   "25 / 27" for four uploads.
+- **Upload / encoding banners are personal, the cards are not** (7.10.0):
+  `/api/processing-status` still returns the company-wide in-flight list —
+  `VideoCard` reads it to paint the progress bar on every colleague's card —
+  but each row carries `isMine` (`Video.createdById` = viewer) and the
+  response carries `mineCount` per state; `ProcessingStatusContext` exposes
+  them as `mine`, and only `ProcessingStatusBanners` renders `mine`. Do not
+  filter the API by uploader: that hides the cards' progress for everyone
+  else. A reprocess or speed change re-encodes an EXISTING row, so its banner
+  goes to the original uploader, not to whoever pressed the button; a row
+  with no `createdById` is in nobody's banner.
+- **Comment composer line height is an inline style** (7.10.0): the base
+  `<Textarea>` carries `sm:text-sm`, and in Tailwind 3 a responsive `text-*`
+  re-declares `line-height` in a variant rule emitted after every plain
+  utility, so a `leading-*` class on the composer silently loses from the sm
+  breakpoint up. 7.8.0's `leading-6` never applied on desktop; the timecode
+  chip (20.5 px + 2 px) reached into line two and an emoji there sat under
+  it, reported twice. `COMPOSER_LINE_HEIGHT` in CommentInput is the fix; the
+  text uses a FIRST-LINE indent (`textIndent: chipGutter`) so it wraps under
+  the chip like the posted comment does — do not turn it back into padding.
+  Lists in both boxes go through ONE helper, `handleListKeydown`
+  (src/lib/comment-list-keys.ts): Space after "1." at a line start indents
+  with `LIST_INDENT` (literal spaces, the only indent a textarea can show),
+  Shift+Enter continues, Backspace right after a fresh marker un-lists, and
+  a lone empty marker continues instead of ending the list.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**
