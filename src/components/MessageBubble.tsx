@@ -1,6 +1,7 @@
 'use client'
 
 import { plainTextListsToHtml } from '@/lib/comment-lists'
+import { linkifyHtml } from '@/lib/comment-links'
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -43,6 +44,15 @@ type ReactionGroup = {
  * hovered; a soft tint behind it on hover so the eye finds the button that
  * is about to act.
  */
+/**
+ * 7.12.0: how a link looks inside a comment — the classic hyperlink blue,
+ * underlined, breaking anywhere so a long deep link cannot push the bubble
+ * wider than the panel. Applied from the container because the anchors are
+ * produced as a string (comment-links.ts) and injected as HTML.
+ */
+const COMMENT_LINK_CLASSES =
+  '[&_a]:text-sky-400 [&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-sky-400/60 [&_a:hover]:text-sky-300 [&_a:hover]:decoration-sky-300 [&_a]:break-all'
+
 const ACTION_ICON_BUTTON =
   'inline-flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground/80 hover:text-foreground hover:bg-white/[0.08] transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
 
@@ -537,6 +547,16 @@ export default function MessageBubble({
     }
   }
 
+  // 7.12.0: links in the text. The app's own host is read after mount so the
+  // first render (and any server render) agrees with itself — a link to this
+  // app opens in the same tab, anything else in a new one. See comment-links.ts.
+  const [linkHost, setLinkHost] = useState<string | null>(null)
+  useEffect(() => {
+    setLinkHost(window.location.host)
+  }, [])
+  const renderCommentHtml = (raw: string) =>
+    linkifyHtml(plainTextListsToHtml(sanitizeContent(raw)), { sameHost: linkHost })
+
   const handleReactSelect = (emoji: string) => {
     if (!onReact) return
     void onReact(comment.id, emoji)
@@ -848,8 +868,8 @@ export default function MessageBubble({
                     src/lib/comment-lists.ts. Display-only; the text is stored
                     as typed. */}
                 <span
-                  className="[&>p]:m-0 [&>p]:inline [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:pl-5 [&_ul]:pl-5 [&_ol]:my-0.5 [&_ul]:my-0.5 [&_li]:pl-0.5"
-                  dangerouslySetInnerHTML={{ __html: plainTextListsToHtml(sanitizeContent(comment.content)) }}
+                  className={`[&>p]:m-0 [&>p]:inline [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:pl-5 [&_ul]:pl-5 [&_ol]:my-0.5 [&_ul]:my-0.5 [&_li]:pl-0.5 ${COMMENT_LINK_CLASSES}`}
+                  dangerouslySetInnerHTML={{ __html: renderCommentHtml(comment.content) }}
                 />
               </div>
             )}
@@ -1239,8 +1259,8 @@ export default function MessageBubble({
                   ) : (
                     <>
                       <div
-                        className="mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words leading-snug [&>p]:m-0 [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:pl-5 [&_ul]:pl-5 [&_ol]:my-0.5 [&_ul]:my-0.5 [&_li]:pl-0.5"
-                        dangerouslySetInnerHTML={{ __html: plainTextListsToHtml(sanitizeContent(reply.content)) }}
+                        className={`mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words leading-snug [&>p]:m-0 [&_ol]:list-decimal [&_ul]:list-disc [&_ol]:pl-5 [&_ul]:pl-5 [&_ol]:my-0.5 [&_ul]:my-0.5 [&_li]:pl-0.5 ${COMMENT_LINK_CLASSES}`}
+                        dangerouslySetInnerHTML={{ __html: renderCommentHtml(reply.content) }}
                       />
                       {(reply as any).assets && (reply as any).assets.length > 0 && (
                         <div className="mt-1.5">

@@ -1599,39 +1599,86 @@ function FolderBrowserInner(
           throw new Error(err.error || 'Failed to regenerate thumbnail')
         }
 
+        const posted = (await res.json().catch(() => ({}))) as { alreadyQueued?: boolean }
         task = startTask({
           label,
-          sublabel: 'Regenerating thumbnail…',
+          sublabel: posted.alreadyQueued ? 'Already regenerating…' : 'Regenerating thumbnail…',
           icon: 'refresh',
         })
 
-        // Poll the grid until the row's thumbnailPath flips (covers the
-        // common null → set case; an in-place overwrite that keeps the
-        // same path falls through to the graceful timeout below). Cap
-        // the watch at ~60s so a wedged worker never leaves the banner
-        // spinning forever.
-        const ATTEMPTS = 20
+        // 7.12.0: follow the JOB, not just the grid. The old loop watched
+        // `thumbnailPath` for a minute and then closed with "Thumbnail
+        // updated" no matter what — which is what a failed job looked like
+        // from the outside, every time. Now each tick asks the server for
+        // the job's state: queued/running keeps the spinner for as long as
+        // the worker is genuinely on it (a tier download for a long clip
+        // can take a few minutes), `failed` shows the worker's own reason,
+        // and `completed`/`none` hands the verdict to the grid — if the
+        // path changed or the file was rewritten in place, that is success;
+        // if the row still has no cover, that is said too. Ten minutes is
+        // the ceiling, and reaching it is reported as what it is.
         const INTERVAL_MS = 3000
-        for (let i = 0; i < ATTEMPTS; i++) {
+        const MAX_TICKS = 200
+        const currentPath = () =>
+          videoGroupsRef.current.find(
+            (g) => g.id === videoId || g.allIds.includes(videoId),
+          )?.thumbnailPath ?? null
+        let sawJob = false
+        for (let i = 0; i < MAX_TICKS; i++) {
           await new Promise((r) => setTimeout(r, INTERVAL_MS))
+          let state = 'unknown'
+          let failedReason: string | null = null
+          let serverPath: string | null | undefined
+          try {
+            const st = await apiFetch(`/api/videos/${videoId}/regenerate-thumbnail`, { cache: 'no-store' })
+            if (st.ok) {
+              const body = (await st.json()) as {
+                state?: string
+                failedReason?: string | null
+                thumbnailPath?: string | null
+              }
+              state = body.state ?? 'unknown'
+              failedReason = body.failedReason ?? null
+              serverPath = body.thumbnailPath
+            }
+          } catch {
+            /* a missed poll is not a verdict; try again next tick */
+          }
+          if (state === 'waiting' || state === 'prioritized' || state === 'delayed') {
+            sawJob = true
+            task.update('Waiting for the worker…')
+            continue
+          }
+          if (state === 'active') {
+            sawJob = true
+            task.update('Regenerating thumbnail…')
+            continue
+          }
+          if (state === 'failed') {
+            task.finish('error', failedReason ? `Failed: ${failedReason}` : 'The worker could not regenerate the thumbnail')
+            return
+          }
+          // completed / none / unknown: the grid decides.
           await fetchFolders({ silent: true })
           onMutated?.()
           // Give React a beat to commit the fetch into state + sync the
           // ref before we read it.
           await new Promise((r) => setTimeout(r, 300))
-          const nowPath =
-            videoGroupsRef.current.find(
-              (g) => g.id === videoId || g.allIds.includes(videoId),
-            )?.thumbnailPath ?? null
-          if (nowPath && nowPath !== beforePath) {
+          const nowPath = currentPath() ?? serverPath ?? null
+          if (nowPath && (nowPath !== beforePath || state === 'completed' || sawJob)) {
             task.finish('success', 'Thumbnail updated')
             return
           }
+          if (state === 'completed' || state === 'none') {
+            // The job is over and the row still has no cover: say so.
+            task.finish(
+              'error',
+              'The job finished but the video still has no thumbnail — see the worker log for this video',
+            )
+            return
+          }
         }
-        // Timed out watching for the change — the worker has almost
-        // certainly finished by now (and the grid was refreshed each
-        // tick), so close the banner cleanly rather than as an error.
-        task.finish('success', 'Thumbnail updated')
+        task.finish('error', 'Still not finished after ten minutes — the worker may be stuck; see its log')
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to regenerate thumbnail'
         if (task) task.finish('error', msg)

@@ -201,6 +201,18 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   a way for loads to fail on iOS. The player sets `navigator.mediaSession
   .metadata` (title = video, artist = project, artwork = poster) so the iOS
   lock screen shows the thumbnail instead of the app icon.
+- **Fixed-id jobs must replace a FINISHED job, not be swallowed by it**
+  (7.12.0): BullMQ's `queue.add(..., { jobId })` is a no-op while any job
+  with that id exists — completed ones are kept 1 h, failed ones 24 h — so a
+  "Regenerate thumbnail" click after one failure did nothing for a day while
+  the route said success. Use `addJobReplacingFinished` (src/lib/queue.ts)
+  for every fixed-id job; it removes a completed/failed job first and reports
+  'already-queued' for one still running. The regenerate job reads an encoded
+  TIER (720p first, src/lib/thumbnail-source.ts) whenever the master is not
+  on local disk — the master of a 25-min 4K clip is tens of GB and the
+  worker's /tmp is a memory disk. The folder banner polls the job's state
+  (GET on the same route) and reports `failed` with the worker's reason
+  instead of closing with "Thumbnail updated" after a minute.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

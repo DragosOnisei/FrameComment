@@ -1,4 +1,4 @@
-import { Queue } from 'bullmq'
+import { Queue, type Job, type JobsOptions } from 'bullmq'
 import { getRedisForQueue } from './redis'
 
 // Lazy initialization to prevent connections during build time
@@ -435,3 +435,94 @@ export const assetQueue = new Proxy({} as Queue<AssetProcessingJob>, {
     return getAssetQueue()[prop as keyof Queue<AssetProcessingJob>]
   }
 })
+
+/**
+ * 7.12.0: what to do when a job with a fixed id is asked for again.
+ *
+ * BullMQ treats `queue.add(name, data, { jobId })` as a no-op while ANY job
+ * with that id exists — including one that already finished or failed. The
+ * regenerate-thumbnail routes use `regen-thumb-<videoId>` so a double-click
+ * cannot schedule the work twice, and that is right while the job is queued
+ * or running. But completed jobs are kept for an hour and failed ones for a
+ * day, so after one failure every later "Regenerate thumbnail" click for 24
+ * hours did nothing at all — the route returned success, the banner spun and
+ * then said "Thumbnail updated", and no worker ever touched the video. Pure,
+ * so the table is exercised by a script.
+ */
+export type DedupedEnqueueDecision = 'add' | 'replace' | 'skip'
+
+export function decideDedupedEnqueue(existingState: string | null): DedupedEnqueueDecision {
+  if (existingState === null) return 'add'
+  switch (existingState) {
+    case 'completed':
+    case 'failed':
+    case 'unknown':
+      // Finished (or a ghost BullMQ cannot classify): out of the way, run again.
+      return 'replace'
+    default:
+      // waiting / prioritized / delayed / active / waiting-children / paused:
+      // the same work is already on its way, a second copy would be wasted.
+      return 'skip'
+  }
+}
+
+export type DedupedEnqueueOutcome = 'queued' | 'already-queued'
+
+/**
+ * `queue.add` with a fixed `jobId`, except that a FINISHED job under that id
+ * is removed first so the new one actually runs. A job still queued or
+ * running is left alone and 'already-queued' is returned so the caller can
+ * say so instead of pretending to have started something.
+ */
+/**
+ * The two queue methods the helper needs, as METHOD signatures so any
+ * `Queue<Data>` fits without wrestling BullMQ's conditional generics
+ * (`ExtractNameType` / `ExtractDataType`), which a caller-generic wrapper
+ * cannot satisfy and a bare `Queue` resolves to `unknown`.
+ */
+interface FixedIdQueue {
+  getJob(jobId: string): Promise<Job | undefined>
+  add(name: string, data: unknown, opts?: JobsOptions): Promise<unknown>
+}
+
+export async function addJobReplacingFinished(
+  queue: FixedIdQueue,
+  name: string,
+  data: unknown,
+  opts: JobsOptions & { jobId: string },
+): Promise<DedupedEnqueueOutcome> {
+  const existing = await queue.getJob(opts.jobId)
+  const state = existing ? await existing.getState() : null
+  const decision = decideDedupedEnqueue(state)
+  if (decision === 'skip') return 'already-queued'
+  if (decision === 'replace' && existing) {
+    try {
+      await existing.remove()
+    } catch {
+      // Raced with BullMQ's own age-based cleanup, or the job got locked in
+      // the meantime: either way `add` below decides — it is a no-op only if
+      // the id is still taken.
+    }
+  }
+  await queue.add(name, data, opts)
+  return 'queued'
+}
+
+/** The one place the regenerate-thumbnail job id is spelled. */
+export function regenerateThumbnailJobId(videoId: string): string {
+  return `regen-thumb-${videoId}`
+}
+
+/**
+ * 7.12.0: enqueue a thumbnail refresh for one video. Used by the per-video
+ * button and both batch sweeps, so all three replace a finished job the same
+ * way.
+ */
+export async function enqueueRegenerateThumbnail(
+  job: RegenerateThumbnailJob,
+): Promise<DedupedEnqueueOutcome> {
+  return addJobReplacingFinished(getVideoQueue(), 'regenerate-thumbnail', job, {
+    priority: VIDEO_JOB_PRIORITY.REGENERATE_THUMBNAIL,
+    jobId: regenerateThumbnailJobId(job.videoId),
+  })
+}

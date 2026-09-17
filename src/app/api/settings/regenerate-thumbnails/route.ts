@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiManageSettings } from '@/lib/auth'
-import { getVideoQueue, VIDEO_JOB_PRIORITY, RegenerateThumbnailJob } from '@/lib/queue'
+import { enqueueRegenerateThumbnail, RegenerateThumbnailJob } from '@/lib/queue'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 
@@ -56,7 +56,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, count: 0 })
     }
 
-    const queue = getVideoQueue()
     let enqueued = 0
     for (const video of videos) {
       const job: RegenerateThumbnailJob = {
@@ -64,10 +63,9 @@ export async function POST(request: NextRequest) {
         projectId: video.projectId,
         originalStoragePath: video.originalStoragePath,
       }
-      await queue.add('regenerate-thumbnail', job, {
-        priority: VIDEO_JOB_PRIORITY.REGENERATE_THUMBNAIL,
-        jobId: `regen-thumb-${video.id}`,
-      })
+      // 7.12.0: deduped per video while a job is queued or running; a job
+      // that already finished or failed is replaced so the sweep really runs.
+      await enqueueRegenerateThumbnail(job)
       enqueued++
     }
 

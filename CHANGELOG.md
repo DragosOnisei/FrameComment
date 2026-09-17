@@ -14,6 +14,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.12.0] - 2026-09-17
+
+### Added
+
+- **Links in comments are links.** A URL typed or pasted into a comment or a
+  reply now shows in hyperlink blue, underlined, and opens when clicked — a
+  link to the app itself in the same tab, anything else in a new one. The
+  text is stored exactly as typed; the link is made when the comment is
+  displayed, after sanitising, so only http(s) and www addresses can ever
+  become one, and the comma or full stop after an address stays outside it.
+
+### Fixed
+
+- **"Regenerate thumbnail" works again after it has failed once.** The job
+  is filed under a fixed id per video so a double-click cannot schedule it
+  twice — but the queue treats a job that already finished or failed as
+  "still there", and failed jobs are kept for a day. So after one failure,
+  every click for the next 24 hours did nothing while the app reported
+  success and the banner closed with "Thumbnail updated". A finished or
+  failed job is now replaced; one still running is reported as already in
+  progress.
+- **Regenerating no longer downloads the whole master.** On a company whose
+  storage is the FrameComment Server bucket, the job pulled the entire
+  original into the worker's temporary disk to extract one frame — for a
+  25-minute 4K interview that is tens of gigabytes, more than that disk
+  holds, which is the likely reason such a video kept no cover. The job now
+  reads the encoded 720p tier (or the next best one) and falls back to the
+  original only when no tier exists yet; the log names the source and its
+  size.
+- **The thumbnail banner tells the truth.** It follows the job itself:
+  "Waiting for the worker…", "Regenerating thumbnail…", and on failure the
+  worker's own reason — instead of "Thumbnail updated" after a minute
+  regardless. A card also retries its cover as soon as the row gets a new
+  one, without a reload.
+
 ## [7.11.0] - 2026-09-16
 
 ### Changed

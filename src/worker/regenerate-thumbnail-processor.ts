@@ -5,9 +5,10 @@ import { pipeline } from 'stream/promises'
 import { RegenerateThumbnailJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
-import { downloadFile, getLocalSourcePath } from '../lib/storage'
+import { downloadFile, getLocalSourcePath, getStorageFileSize } from '../lib/storage'
 import { getVideoBackend } from '../lib/storage-backends'
 import { getVideoMetadata } from '../lib/ffmpeg'
+import { pickThumbnailSource } from '../lib/thumbnail-source'
 import { TEMP_DIR } from './cleanup'
 import {
   TempFiles,
@@ -54,7 +55,13 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
     // we silently bail rather than write a phantom path.
     const existing = await prisma.video.findUnique({
       where: { id: videoId },
-      select: { id: true },
+      select: {
+        id: true,
+        preview480Path: true,
+        preview720Path: true,
+        preview1080Path: true,
+        preview2160Path: true,
+      },
     })
     if (!existing) {
       logMessage(`[WORKER] regenerate-thumbnail ${videoId}: row gone, skipping`)
@@ -67,17 +74,61 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
     // 4.2.0+: resolve the video's storage backend for the source read.
     const backend = await getVideoBackend(videoId)
 
-    let sourcePath: string
+    // 7.12.0: when the master is not on local disk, read an encoded TIER
+    // instead of downloading the whole original — see
+    // src/lib/thumbnail-source.ts for why (a 4K master is tens of GB; /tmp
+    // is a memory disk; the job died and the video kept no cover). The
+    // cached original from the encode run is still used when it is there.
     const localSource = getLocalSourcePath(originalStoragePath, backend)
-    if (localSource) {
+    const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
+    const source = pickThumbnailSource({
+      localOriginal: !!localSource || fs.existsSync(cachedOriginal),
+      tiers: {
+        '480p': existing.preview480Path,
+        '720p': existing.preview720Path,
+        '1080p': existing.preview1080Path,
+        '2160p': existing.preview2160Path,
+      },
+    })
+
+    let sourcePath: string
+    if (source.kind === 'original' && localSource) {
       sourcePath = localSource
-    } else {
-      const cachedOriginal = path.join(TEMP_DIR, `${videoId}-original`)
-      if (!fs.existsSync(cachedOriginal)) {
-        logMessage(`[WORKER] regenerate-thumbnail ${videoId}: cached original missing, re-downloading`)
-        const stream = await downloadFile(originalStoragePath, backend)
-        await pipeline(stream, fs.createWriteStream(cachedOriginal))
+      logMessage(`[WORKER] regenerate-thumbnail ${videoId}: reading the original from local disk`)
+    } else if (source.kind === 'original' && fs.existsSync(cachedOriginal)) {
+      sourcePath = cachedOriginal
+      logMessage(`[WORKER] regenerate-thumbnail ${videoId}: reusing the cached original`)
+    } else if (source.kind === 'tier') {
+      const localTier = getLocalSourcePath(source.path, backend)
+      if (localTier) {
+        sourcePath = localTier
+        logMessage(`[WORKER] regenerate-thumbnail ${videoId}: reading the ${source.tier} tier from local disk`)
+      } else {
+        const tierTemp = path.join(TEMP_DIR, `${videoId}-thumbsrc-${source.tier}.mp4`)
+        const size = await getStorageFileSize(source.path, backend).catch(() => null)
+        logMessage(
+          `[WORKER] regenerate-thumbnail ${videoId}: downloading the ${source.tier} tier` +
+            (size !== null ? ` (${(size / 1024 / 1024).toFixed(1)} MB)` : '') +
+            ` instead of the original`,
+        )
+        const stream = await downloadFile(source.path, backend)
+        await pipeline(stream, fs.createWriteStream(tierTemp))
+        // Ours alone — nothing else reads this copy, so it is swept with the
+        // other temp files at the end of the job.
+        tempFiles.input = tierTemp
+        sourcePath = tierTemp
       }
+    } else {
+      // No tier at all (never encoded, or encoding stopped before 480p):
+      // the original is the only picture there is. Say how big it is, so
+      // a log reader knows what the next minutes are being spent on.
+      const size = await getStorageFileSize(originalStoragePath, backend).catch(() => null)
+      logMessage(
+        `[WORKER] regenerate-thumbnail ${videoId}: no encoded tier yet, downloading the original` +
+          (size !== null ? ` (${(size / 1024 / 1024 / 1024).toFixed(2)} GB)` : ''),
+      )
+      const stream = await downloadFile(originalStoragePath, backend)
+      await pipeline(stream, fs.createWriteStream(cachedOriginal))
       // We DON'T set tempFiles.input — the temp sweeper / a later
       // tier job may need the cached original to stick around.
       sourcePath = cachedOriginal

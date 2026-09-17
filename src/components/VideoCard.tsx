@@ -413,6 +413,13 @@ export default function VideoCard({
   const [titleTip, setTitleTip] = useState<{ x: number; y: number } | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [thumbErrored, setThumbErrored] = useState(false)
+  // 7.12.0: a failed image is a fact about THAT url. When the row gets a new
+  // thumbnail (a regenerate landed, a custom cover was set) the url changes
+  // and the card must try again — otherwise the Film icon stayed until a
+  // full reload even though the cover was there.
+  useEffect(() => {
+    setThumbErrored(false)
+  }, [thumbnailUrl])
   const qualityLabel = highestTierLabel(completedTiers)
   const menuRef = useRef<HTMLDivElement>(null)
   // 1.3.1+: kebab popover uses smart fixed-positioning (Frame.io
