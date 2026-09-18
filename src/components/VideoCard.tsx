@@ -18,6 +18,7 @@ import {
   Trash2,
   MessageSquare,
   UploadCloud,
+  Layers,
   FileText,
 } from 'lucide-react'
 import { computePopoverStyle } from '@/lib/popover-position'
@@ -147,6 +148,14 @@ export interface VideoCardProps {
   onStartVideoDrag?: (id: string) => void
   onEndVideoDrag?: () => void
   onStackOnto?: (sourceId: string, targetId: string) => void
+  /**
+   * 7.13.0: this card is under the finger of a touch "hold and drag" (see
+   * src/lib/use-touch-stack-drag.ts). The grid owns that gesture — there is
+   * no dragenter/dragleave to react to — so it tells the card, and the card
+   * shows the same ring it shows for a mouse drag plus a "New version"
+   * label, because on a phone the ring alone is easy to miss under a thumb.
+   */
+  isStackHoverForced?: boolean
   /** 3.9.x: files dragged from the OS onto this card upload as a NEW
    *  VERSION of this video (same targeted-upload logic as dropping
    *  files onto a folder). The parent snapshots the DataTransfer and
@@ -360,6 +369,7 @@ export default function VideoCard({
   onStartVideoDrag,
   onEndVideoDrag,
   onStackOnto,
+  isStackHoverForced,
   onDropOSFiles,
   isBeingDragged,
   isPotentialStackTarget,
@@ -790,7 +800,7 @@ export default function VideoCard({
           ? 'ring-2 ring-primary/70 bg-primary/15'
           : isBeingDragged
           ? 'opacity-40 ring-1 ring-white/10 scale-[0.98]'
-          : isStackHover
+          : isStackHover || isStackHoverForced
             ? 'ring-2 ring-primary/60 bg-primary/10'
             : isSelected
               ? 'ring-2 ring-primary/50'
@@ -801,6 +811,9 @@ export default function VideoCard({
       // FolderBrowser container drop handler bails (the card already
       // routed the files into a new version of this video).
       data-accepts-os-files={onDropOSFiles ? 'true' : undefined}
+      // 7.13.0: a held finger must lift the card, not select its title or
+      // open iOS's save-image sheet for the thumbnail.
+      style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
     >
       {/* Cover — thumbnail (or Film icon fallback) with overlays. The
           card area is a fixed 16:9 box, but we use `object-contain`
@@ -824,6 +837,15 @@ export default function VideoCard({
         {isOSFileDropHover && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-1.5 bg-primary/25 backdrop-blur-[2px] pointer-events-none">
             <UploadCloud className="w-8 h-8 text-white drop-shadow" />
+            <span className="text-xs font-semibold text-white drop-shadow">
+              New version
+            </span>
+          </div>
+        )}
+        {/* 7.13.0: the touch gesture's drop target — see `isStackHoverForced`. */}
+        {isStackHoverForced && !isOSFileDropHover && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-1.5 bg-primary/25 backdrop-blur-[2px] pointer-events-none">
+            <Layers className="w-8 h-8 text-white drop-shadow" />
             <span className="text-xs font-semibold text-white drop-shadow">
               New version
             </span>

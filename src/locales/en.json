@@ -813,6 +813,7 @@
     "markUnresolved": "Mark as not done",
     "resolved": "Done",
     "attachFiles": "Attach Files",
+    "dropToAttach": "Drop to attach",
     "attachFilesTitle": "Attach Files",
     "attachFilesDesc": "Select files to attach to your comment.",
     "maxFilesReached": "Maximum files reached",

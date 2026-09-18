@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { isRangeEditActive, toggleRangeEdit, setRangeEditActive } from '@/lib/comment-range-edit'
 import { emoticonOnChange } from '@/lib/emoticons'
+import { extractImageFiles, isFileDrag } from '@/lib/clipboard-files'
 import { Comment } from '@prisma/client'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
@@ -158,6 +159,41 @@ export default function CommentInput({
   // typed note becomes the marker label; Enter (or Add marker) drops it
   // at the current playhead via a window event the player listens for.
   const [markerMode, setMarkerMode] = useState(false)
+
+  // 7.13.0: a paste that lands NOWHERE still means "put this in my comment".
+  //
+  // ⌘V only reaches the textarea's onPaste while the caret is in it. After a
+  // click on the video, on the timeline or on a comment, the focus is
+  // elsewhere and the paste went to the page — which does nothing with an
+  // image, so the person saw nothing happen and concluded pasting does not
+  // work. Slack and Frame.io treat the composer as the paste target whenever
+  // no other text field owns the focus; so does this. Two guards: a paste
+  // into any OTHER editable (the reply box, the search field, a rename) is
+  // that field's, and only the VISIBLE composer acts — the phone layout keeps
+  // a second, hidden CommentInput mounted, and without the check both would
+  // attach the same image twice.
+  const composerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onDocPaste = (e: ClipboardEvent) => {
+      if (markerMode) return
+      const target = e.target as HTMLElement | null
+      if (composerRef.current && target && composerRef.current.contains(target)) return
+      if (target?.closest?.('input, textarea, [contenteditable="true"], [contenteditable=""]')) return
+      const box = composerRef.current?.getBoundingClientRect()
+      if (!box || box.width === 0 || box.height === 0) return
+      if (!attachmentRef.current || !e.clipboardData) return
+      const images = extractImageFiles(e.clipboardData)
+      if (images.length === 0) return
+      e.preventDefault()
+      attachmentRef.current.pasteUpload(images)
+    }
+    document.addEventListener('paste', onDocPaste)
+    return () => document.removeEventListener('paste', onDocPaste)
+  }, [markerMode])
+
+  // 7.13.0: drop-hover state for the composer's file drop zone; the handlers
+  // live further down, next to the paste handler they share the upload with.
+  const [dropHover, setDropHover] = useState(false)
   const [markerColor, setMarkerColor] = useState<'red' | 'orange' | 'green' | 'blue'>('blue')
   // 4.1.1+: handle to the attachment uploader so pasting an image into
   // the composer auto-attaches it.
@@ -580,26 +616,45 @@ export default function CommentInput({
     if (markerMode) return
     const dt = e.clipboardData
     if (!dt) return
-    const images: File[] = []
-    for (const item of Array.from(dt.items || [])) {
-      if (item.kind === 'file' && item.type.startsWith('image/')) {
-        const file = item.getAsFile()
-        if (!file) continue
-        const hasExt = file.name && /\.[a-z0-9]+$/i.test(file.name)
-        const named = hasExt
-          ? file
-          : new File(
-              [file],
-              `pasted-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
-              { type: file.type || 'image/png' },
-            )
-        images.push(named)
-      }
-    }
+    // 7.13.0: both `items` and `files`, type or extension — see
+    // src/lib/clipboard-files.ts for the clipboards that slipped through.
+    const images = extractImageFiles(dt)
     if (images.length > 0 && attachmentRef.current) {
       e.preventDefault()
       attachmentRef.current.pasteUpload(images)
     }
+  }
+
+
+  // 7.13.0: the composer is a drop target for files. Dragging an image over
+  // "Leave your comment" shows "Drop to attach" over the box and nothing
+  // else — the full-page "Drop files to upload" hint steps aside while the
+  // drag is over this element (GlobalDropOverlay watches for the
+  // `data-comment-dropzone` marker) and is not shown on the player page at
+  // all, because nothing there uploads a dropped file as a video. Dropping
+  // goes through the same silent upload a paste uses.
+  const canAcceptDrop = !markerMode && !!attachmentRef.current
+  const onComposerDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer?.types)) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (!canAcceptDrop) return
+    e.dataTransfer.dropEffect = 'copy'
+    if (!dropHover) setDropHover(true)
+  }
+  const onComposerDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null
+    if (next && e.currentTarget.contains(next)) return
+    setDropHover(false)
+  }
+  const onComposerDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer?.types)) return
+    e.preventDefault()
+    e.stopPropagation()
+    setDropHover(false)
+    if (!canAcceptDrop || !attachmentRef.current) return
+    const files = Array.from(e.dataTransfer.files || [])
+    if (files.length > 0) attachmentRef.current.pasteUpload(files)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -651,7 +706,26 @@ export default function CommentInput({
     // making the placeholder illegible. Give the composer an opaque
     // backing on mobile so it always reads clearly; keep it transparent
     // on lg+ where the panel is tall and the glass bleed looks good.
-    <div className={`border-t border-white/10 p-3 sm:p-4 flex-shrink-0 min-w-0 ${transparentBackground ? 'bg-transparent' : 'bg-background lg:bg-transparent'}`}>
+    <div
+      ref={composerRef}
+      data-comment-dropzone="true"
+      onDragEnter={onComposerDragOver}
+      onDragOver={onComposerDragOver}
+      onDragLeave={onComposerDragLeave}
+      onDrop={onComposerDrop}
+      className={`relative border-t border-white/10 p-3 sm:p-4 flex-shrink-0 min-w-0 ${transparentBackground ? 'bg-transparent' : 'bg-background lg:bg-transparent'}`}
+    >
+      {/* 7.13.0: the only place a dragged file is offered a home on this
+          page — see `onComposerDragOver`. */}
+      {dropHover && (
+        <div
+          className="pointer-events-none absolute inset-2 sm:inset-3 z-30 flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary/70 bg-primary/20 backdrop-blur-[2px] text-white animate-in fade-in duration-100"
+          aria-hidden="true"
+        >
+          <Paperclip className="w-4 h-4" />
+          <span className="text-sm font-semibold">{t('dropToAttach')}</span>
+        </div>
+      )}
       {/* Restriction Warning */}
       {currentVideoRestricted && restrictionMessage && (
         <div className="mb-3 p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">

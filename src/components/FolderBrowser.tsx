@@ -53,6 +53,8 @@ import QuickPreviewOverlay, { type QuickPreviewTarget } from './QuickPreviewOver
 import FolderBrowserTable from './FolderBrowserTable'
 import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
 import { useIsMobile } from '@/lib/use-is-mobile'
+import { useTouchStackDrag } from '@/lib/use-touch-stack-drag'
+import { Layers } from 'lucide-react'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { shouldDownloadAsFiles } from '@/lib/download-mode'
 import GridZoomSlider, { useGridZoomLevel } from '@/components/GridZoomSlider'
@@ -2464,6 +2466,30 @@ function FolderBrowserInner(
     [onMutated, fetchFolders, selectedVideoIds, videoGroups, clearSelection],
   )
 
+  // 7.13.0: the same stacking, driven by a finger. On a phone there is no
+  // HTML5 drag, so the grid listens for a hold-then-drag on its cards (see
+  // src/lib/use-touch-stack-drag.ts): the held card dims exactly like a
+  // mouse-dragged one (`draggingVideoId` is shared), the card under the
+  // finger gets `isStackHoverForced`, and lifting the finger there calls the
+  // handler above — bulk-aware and all. A ghost of the thumbnail rides along
+  // under the finger so the person can see what they are carrying.
+  const touchTravelling = useMemo(
+    () =>
+      draggingVideoId !== null && selectedVideoIds.has(draggingVideoId)
+        ? selectedVideoIds
+        : new Set<string>(),
+    [draggingVideoId, selectedVideoIds],
+  )
+  const touchDrag = useTouchStackDrag({
+    enabled: true,
+    travelling: touchTravelling,
+    onStart: (id) => setDraggingVideoId(id),
+    onEnd: () => setDraggingVideoId(null),
+    onStack: (sourceId, targetId) => {
+      void handleStackVideos(sourceId, targetId)
+    },
+  })
+
   // Drag-video-onto-folder handler (1.0.7+). When the user drops a
   // video card onto a folder card, every version that belongs to the
   // same version group (same `name` in this folder) is reparented to
@@ -3966,6 +3992,7 @@ function FolderBrowserInner(
         // by the slider. The Tailwind classes stay as the phone layout and as
         // the fallback if the stylesheet ever fails to load.
         <div
+          ref={touchDrag.ref}
           className="grid-zoom grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 items-start"
           data-zoom={gridZoomAttr(gridZoom)}
         >
@@ -4173,6 +4200,7 @@ function FolderBrowserInner(
               onStartVideoDrag={(id) => setDraggingVideoId(id)}
               onEndVideoDrag={() => setDraggingVideoId(null)}
               onStackOnto={handleStackVideos}
+              isStackHoverForced={touchDrag.targetId === v.id}
               onDropOSFiles={
                 onUploadFilesAsVersion ? handleDropOSFilesOnVideo : undefined
               }
@@ -4250,6 +4278,31 @@ function FolderBrowserInner(
               <span className="text-xs mt-1 invisible" aria-hidden>.</span>
             </span>
           </button>
+        </div>
+      )}
+
+      {/* 7.13.0: what the finger is carrying during a touch hold-and-drag — a
+          small copy of the held card's thumbnail, above the fingertip so the
+          thumb does not cover it, and a one-word verdict for where it is. */}
+      {touchDrag.ghost && (
+        <div
+          className="pointer-events-none fixed z-[2147483000] flex flex-col items-center gap-1"
+          style={{ left: touchDrag.ghost.x - 48, top: touchDrag.ghost.y - 84 }}
+          aria-hidden
+        >
+          <div className="w-24 aspect-video rounded-lg overflow-hidden ring-2 ring-primary/70 bg-black/70 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.85)]">
+            {touchDrag.ghost.src ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={touchDrag.ghost.src} alt="" draggable={false} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-white/70">
+                <Layers className="w-5 h-5" />
+              </div>
+            )}
+          </div>
+          <span className="rounded-md bg-black/75 px-2 py-0.5 text-[11px] font-medium text-white whitespace-nowrap">
+            {touchDrag.targetId ? 'New version' : 'Drop on a video'}
+          </span>
         </div>
       )}
 

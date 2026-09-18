@@ -213,6 +213,24 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   worker's /tmp is a memory disk. The folder banner polls the job's state
   (GET on the same route) and reports `failed` with the worker's reason
   instead of closing with "Thumbnail updated" after a minute.
+- **Touch stacking is a hold-then-drag, in one hook** (7.13.0): phones have
+  no HTML5 drag, so `useTouchStackDrag` (src/lib/use-touch-stack-drag.ts,
+  rules in src/lib/touch-stack-drag.ts) listens natively on the grid — React
+  touch handlers are passive and cannot stop the page scrolling under the
+  held card. Hold 400 ms without moving → the card lifts (`draggingVideoId`
+  is shared with the mouse path, so the same dimming applies), the card under
+  the finger gets `isStackHoverForced`, lifting there calls the same
+  `handleStackVideos`. Mouse users never enter it; do not add touch handlers
+  to VideoCard itself — a second gesture owner is how taps stop opening.
+- **The comment composer is the paste and drop target for files** (7.13.0):
+  `extractImageFiles` (src/lib/clipboard-files.ts) reads BOTH `items` and
+  `files` and accepts by type or extension — a Finder-copied image can carry
+  an empty type. A paste that lands on no other text field goes to the
+  visible composer (document listener; the phone layout mounts a hidden
+  second CommentInput, so the visibility check is what stops double
+  uploads). The composer wrapper carries `data-comment-dropzone`;
+  GlobalDropOverlay hides while a drag is over it and is never shown on the
+  player page (`/admin/projects/<id>/share`), where nothing uploads a drop.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

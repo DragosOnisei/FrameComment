@@ -26,12 +26,27 @@ export function GlobalDropOverlay() {
   const [active, setActive] = useState(false)
 
   // Pages that don't accept drag-to-upload — never show the hint there.
-  const uploadCapable = !/^\/admin\/(trash|users|settings|profile)(\/|$)/.test(
-    pathname || '',
-  )
+  // 7.13.0: the player page is one of them. Nothing on it uploads a dropped
+  // file as a video; the one thing a drop does there is attach to the comment
+  // being written, and the composer shows its own "Drop to attach" for that.
+  // A full-page "Drop files to upload" over the video promised something the
+  // page could not do.
+  const uploadCapable =
+    !/^\/admin\/(trash|users|settings|profile)(\/|$)/.test(pathname || '') &&
+    !/^\/admin\/projects\/[^/]+\/share(\/|$)/.test(pathname || '')
 
   useEffect(() => {
     let counter = 0
+    // 7.13.0: true while the drag is over the comment composer, which has its
+    // own drop hint; the full-page one yields to it.
+    let overComposer = false
+
+    const overCommentDropzone = (e: DragEvent): boolean =>
+      !!(e.target as Element | null)?.closest?.('[data-comment-dropzone]')
+
+    const apply = () => {
+      setActive(counter > 0 && uploadCapable && !hasEmptyDropZoneVisible() && !overComposer)
+    }
 
     const isFileDrag = (e: DragEvent): boolean => {
       const types = e.dataTransfer?.types
@@ -52,9 +67,8 @@ export function GlobalDropOverlay() {
     const onEnter = (e: DragEvent) => {
       if (!isFileDrag(e)) return
       counter++
-      if (counter === 1 && uploadCapable && !hasEmptyDropZoneVisible()) {
-        setActive(true)
-      }
+      overComposer = overCommentDropzone(e)
+      apply()
     }
     const onLeave = (e: DragEvent) => {
       if (!isFileDrag(e)) return
@@ -66,7 +80,13 @@ export function GlobalDropOverlay() {
     // upload handler navigates the tab to the file (and leaves the hint
     // stuck because the `drop` event never bubbles here).
     const onDragOver = (e: DragEvent) => {
-      if (isFileDrag(e)) e.preventDefault()
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      const over = overCommentDropzone(e)
+      if (over !== overComposer) {
+        overComposer = over
+        apply()
+      }
     }
     const onDrop = (e: DragEvent) => {
       if (isFileDrag(e)) e.preventDefault()

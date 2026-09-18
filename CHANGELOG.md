@@ -14,6 +14,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.13.0] - 2026-09-18
+
+### Added
+
+- **Stack versions with a finger.** On a phone or tablet, hold a video card
+  for a moment until it lifts, drag it over another video, and let go: it
+  becomes that video's next version — the same layering a mouse drag does on
+  a computer, which touch screens simply could not do (a finger either taps
+  or scrolls; there is no drag). While you hold, the card dims, a small copy
+  of its thumbnail rides above your fingertip, the card under it lights up
+  with "New version", and the grid scrolls itself when you reach the top or
+  bottom edge. A short tap still opens; moving straight away still scrolls.
+  Multi-selections travel together, as with the mouse. Nothing changes for
+  mouse users.
+- **Drop a file on the comment box to attach it.** Dragging an image or a
+  document over "Leave your comment" shows "Drop to attach" on the box
+  itself and nowhere else; letting go uploads it as an attachment of the
+  comment you are writing, the way pasting does.
+- **Pasting an image works wherever you are on the page.** ⌘V with the
+  cursor in the comment box attached an image before; now it also does so
+  when the cursor is not in any text field — after a click on the video, on
+  the timeline or on a comment — so the picture lands in the comment you
+  are writing instead of nowhere. A paste into another text field (a reply,
+  the search box) still belongs to that field.
+
+### Fixed
+
+- **Pasting a copied image file attaches it.** The paste reader accepted an
+  image only by its MIME type, and a file copied in the Finder can arrive
+  with that type empty, so the paste did nothing. Images are now recognised
+  by type or by extension, from both lists a clipboard can carry.
+- **No "Drop files to upload" over the video.** The full-page hint appeared
+  on the player page too, where nothing uploads a dropped file as a video;
+  it is no longer shown there, and in folders it steps aside while a drag is
+  over the comment box.
+
 ## [7.12.0] - 2026-09-17
 
 ### Added
