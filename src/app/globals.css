@@ -511,49 +511,62 @@
      white/10` base utility without fighting it. Smooth 220ms
      transition handles the in/out fade. !important wins over the
      base card hover state. */
-  /* 6.14.0: one-shot "here it is" pulse.
-     
-     The persistent lift below tells you WHICH comment is selected once you
-     are looking at it. Arriving from a notification is the other problem:
-     the thread scrolls, and something has to catch the eye at the end of
-     that scroll. A single 520ms scale beat does it without turning into
-     decoration — it plays once, then the steady lift takes over.
-     
-     `transform` only, so it composites on the GPU and cannot reflow the
-     list mid-scroll. Respects reduced-motion: the lift alone is enough. */
-  @keyframes comment-focus-pulse {
-    0%   { transform: scale(1); }
-    35%  { transform: scale(1.035); }
-    100% { transform: scale(1); }
+  /* 7.13.1: one-second glow in the selection's own colour.
+
+     Arriving from a notification, the thread scrolls and something has to
+     catch the eye at the end of that scroll. 6.14.0 did it with a scale
+     beat, which read as a different highlight from the one a click gives —
+     the card grew instead of wearing the accent ring — and that is exactly
+     what was reported. Now the deep link SELECTS the comment the way a click
+     does (CommentSection calls the same `selectFromClick`, so the card gets
+     the `.is-picked` ring below and the `.is-selected` lift), and this rule
+     adds a one-second glow in that same ring colour that fades out and
+     leaves the steady selection behind.
+
+     The glow is a pseudo-element, not an animated `box-shadow` on the card:
+     `.is-picked` and `.is-selected` paint their rings with `!important`, and
+     a CSS animation ranks BELOW `!important` in the cascade, so animating the
+     card's own box-shadow would silently do nothing. The `::after` has its
+     own box-shadow and only its opacity animates. `pointer-events: none`, so
+     it never steals a click; transparent inside, so the text stays crisp. */
+  @keyframes comment-focus-glow {
+    0%   { opacity: 1; }
+    100% { opacity: 0; }
   }
 
-  .comment-card.is-focus-pulse {
-    animation: comment-focus-pulse 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-    will-change: transform;
+  .comment-card.is-focus-glow,
+  .comment-reply.is-focus-glow {
+    position: relative;
+  }
+
+  .comment-card.is-focus-glow::after,
+  .comment-reply.is-focus-glow::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      0 0 0 3px hsl(var(--spotlight-tint, 217 91% 60%) / 0.85),
+      0 0 36px 6px hsl(var(--spotlight-tint, 217 91% 60%) / 0.55);
+    animation: comment-focus-glow 1000ms ease-out both;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .comment-card.is-focus-pulse {
+    .comment-card.is-focus-glow::after,
+    .comment-reply.is-focus-glow::after {
       animation: none;
+      opacity: 0;
     }
   }
 
   /* 7.8.0: a reply can be the target of a deep link too — "X replied to your
      comment" lands on the reply, not on the thread. Replies are not cards, so
-     the two card-only rules get a reply twin: the same pulse, and a lighter
-     selected tint that fits inside the parent card. */
-  .comment-reply.is-focus-pulse {
-    animation: comment-focus-pulse 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-    will-change: transform;
-  }
+     the selected lift gets a reply twin: a lighter tint that fits inside the
+     parent card. (The glow above already covers both.) */
   .comment-reply.is-selected {
     background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.14);
     box-shadow: 0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.35);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .comment-reply.is-focus-pulse {
-      animation: none;
-    }
   }
 
   /* 7.3.3: after a paste, the notes that just arrived say so.

@@ -14,6 +14,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.13.1] - 2026-09-21
+
+### Fixed
+
+- **A team member with a diacritic or an apostrophe in their name can comment
+  again.** Posting a comment or a reply sends the author's name, and the
+  server still checked it against the old watermark rule — plain letters,
+  digits and a few marks — from the days the name was burned into the video.
+  Watermarking has been off since 1.0.8, but the rule stayed, so anyone
+  called Ștefan, Ionuț or Răzvan, or a client named O'Neil, got "Invalid
+  characters in name" on every attempt, in every browser. Names are Unicode
+  now; only angle brackets and control characters are refused, and the limit
+  matches the Users page.
+- **Opening a comment from a notification highlights it like a click does.**
+  The deep link used to add a lift and a small scale beat, which read as a
+  different highlight from the accent ring a clicked comment wears. It now
+  selects the comment exactly the way a click does and adds a one-second glow
+  in the same colour that fades and leaves the ring behind. Replies that are
+  the target of "X replied to your comment" glow the same way.
+
+### Changed
+
+- **A carried-over note marked Done leaves the version.** A comment pasted in
+  from an earlier cut is there so the editor sees, on the new version, what
+  was said about the old one; once it is marked Done there it has served its
+  purpose, and it used to stay in the list greyed out next to the fresh
+  feedback. It now disappears from "All comments" and from the timeline pins
+  of that version. Nothing is deleted: "Completed comments" still lists it,
+  and marking it not done brings it straight back. A comment written on the
+  version itself behaves as before — Done greys it, it does not vanish.
+- **A "Copied comments" filter.** The comments menu (All / Incomplete /
+  Completed) gains a fourth view listing only the notes carried over from
+  another version, done or not — the place to review them, and to find a
+  carried-over note that Done has removed from "All".
+
 ## [7.13.0] - 2026-09-18
 
 ### Added

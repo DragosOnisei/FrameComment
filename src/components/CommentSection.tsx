@@ -31,6 +31,7 @@ import { pasteClippedThreads } from '@/lib/comments-paste'
 import { buildPremiereMarkersXml, premiereMarkersFileName } from '@/lib/premiere-markers'
 import { emoticonOnChange } from '@/lib/emoticons'
 import { handleListKeydown } from '@/lib/comment-list-keys'
+import { withoutRetiredCarryOvers } from '@/lib/comment-visibility'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -668,10 +669,14 @@ export default function CommentSection({
   //   - 'all':        every comment (default)
   //   - 'incomplete': only NOT-resolved comments
   //   - 'completed':  only resolved comments (a "what got Done" view)
+  //   - 'copied':     7.13.1 — only notes carried over from another
+  //                   version, done or not. This is also where a carried-
+  //                   over note that was marked Done (and therefore left
+  //                   "All") can be found and un-done.
   // Persists to localStorage per project so flipping one project's
   // filter doesn't leak into another. Default is 'all' — most users
   // want to see the whole list when they enter a project.
-  type CommentsFilter = 'all' | 'incomplete' | 'completed'
+  type CommentsFilter = 'all' | 'incomplete' | 'completed' | 'copied'
   const [commentsFilter, setCommentsFilterState] = useState<CommentsFilter>('all')
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   // 2.5.1+: trigger ref + viewport-fixed coords so we can portal
@@ -749,7 +754,9 @@ export default function CommentSection({
       ? 'Incomplete comments'
       : commentsFilter === 'completed'
         ? 'Completed comments'
-        : 'All comments'
+        : commentsFilter === 'copied'
+          ? 'Copied comments'
+          : 'All comments'
 
   // 1.2.0+: editable guest display name. Shown only to non-admin viewers
   // under the "Feedback & Discussion" header. Persists to localStorage so
@@ -1008,6 +1015,34 @@ export default function CommentSection({
    * the person sees nothing happen. Same reasoning as 7.3.7's
    * `comment:selectFromTimeline`.
    */
+  // 7.13.1: the deep link selects the comment exactly the way a click does.
+  // `selectFromClick` is declared further down (it depends on the sorted
+  // list); a ref filled by an effect lets this earlier callback reach it
+  // without reordering half the component.
+  const selectLikeClickRef = useRef<((commentId: string) => void) | null>(null)
+
+  // 7.13.1: the glow is REACT state, not a class added to the DOM. Selecting
+  // the comment re-renders its card with a new `className`, and React writes
+  // that attribute wholesale — any class the DOM had picked up in between
+  // (`is-selected`, and the first cut's `is-focus-glow`) is wiped in the same
+  // frame it was added, which is why the glow never showed. Owned by state,
+  // the class survives the re-render because it IS the re-render. Replies are
+  // different: their `className` is static, so the DOM class below survives
+  // there and stays the reply path.
+  const [glowCommentId, setGlowCommentId] = useState<string | null>(null)
+  const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerFocusGlow = useCallback((commentId: string) => {
+    if (glowTimerRef.current) clearTimeout(glowTimerRef.current)
+    // Off then on across a frame, so focusing the same comment twice replays
+    // the animation instead of leaving the class where it already was.
+    setGlowCommentId(null)
+    requestAnimationFrame(() => setGlowCommentId(commentId))
+    glowTimerRef.current = setTimeout(() => {
+      setGlowCommentId((current) => (current === commentId ? null : current))
+      glowTimerRef.current = null
+    }, 1100)
+  }, [])
+
   const focusCommentInList = useCallback((targetId: string): (() => void) => {
     let attempts = 0
     const maxAttempts = 15
@@ -1050,16 +1085,31 @@ export default function CommentSection({
           (element.classList.contains('comment-reply') ? element : null)
         if (card) {
           card.classList.add('is-selected')
-          // 6.14.0: a one-shot scale beat so the eye lands on the right card
-          // at the end of the scroll. Removed when it finishes so re-focusing
-          // the same comment later plays it again.
-          card.classList.remove('is-focus-pulse')
-          // Force a reflow between remove and add, otherwise the browser
-          // coalesces the two and the animation never restarts.
-          void card.offsetWidth
-          card.classList.add('is-focus-pulse')
-          const clear = () => card.classList.remove('is-focus-pulse')
-          card.addEventListener('animationend', clear, { once: true })
+          // 7.13.1: and SELECT it — the thread, when the target is a reply —
+          // through the same path a click takes, so the card wears the same
+          // accent ring (`.is-picked`) a clicked comment wears. The scale beat
+          // that used to play here read as a different highlight; see the
+          // `.is-focus-glow` rule in globals.css for what replaced it.
+          const isReplyTarget = element.classList.contains('comment-reply')
+          const rootAnchor = isReplyTarget
+            ? element.parentElement?.closest<HTMLElement>('[id^="comment-"]') ?? null
+            : element
+          const rootId = rootAnchor?.id.replace(/^comment-/, '')
+          if (rootId) selectLikeClickRef.current?.(rootId)
+          // One-second glow in the selection colour, then the steady ring
+          // stays. A root card gets it through state (see `triggerFocusGlow`);
+          // a reply through the DOM, whose class survives the parent's
+          // re-render. Removed on the same 1.1 s clock either way, so
+          // reduced-motion users — whose animation never ends — are not left
+          // with a stuck class.
+          if (!isReplyTarget && rootId) {
+            triggerFocusGlow(rootId)
+          } else {
+            card.classList.remove('is-focus-glow')
+            void card.offsetWidth
+            card.classList.add('is-focus-glow')
+            window.setTimeout(() => card.classList.remove('is-focus-glow'), 1100)
+          }
         }
         return
       }
@@ -1073,7 +1123,7 @@ export default function CommentSection({
     return () => {
       if (timer) clearTimeout(timer)
     }
-  }, [])
+  }, [triggerFocusGlow])
 
   useEffect(() => {
     if (!focusCommentId) return
@@ -1264,12 +1314,18 @@ export default function CommentSection({
   // just narrow what we show; flipping back to 'all' un-hides
   // everything without a refetch. A parent that gets filtered out
   // also hides its thread (no orphans).
+  //
+  // 7.13.1: "All" is not quite all — a note carried over from an earlier
+  // version and marked Done here is dropped (src/lib/comment-visibility.ts);
+  // "Completed" still lists it, which is how it is found and un-done.
   const visibleComments =
     commentsFilter === 'incomplete'
       ? displayComments.filter((c: any) => !c.isResolved)
       : commentsFilter === 'completed'
         ? displayComments.filter((c: any) => !!c.isResolved)
-        : displayComments
+        : commentsFilter === 'copied'
+          ? displayComments.filter((c: any) => !!c.isCopied)
+          : withoutRetiredCarryOvers(displayComments as any[])
 
   // 3.6.x: order top-level comments by their VIDEO TIMECODE (00:00
   // first → latest last), not by when they were posted. Reviewers read
@@ -1504,6 +1560,10 @@ export default function CommentSection({
     },
     [sortedComments, toggleCommentSelected],
   )
+  useEffect(() => {
+    selectLikeClickRef.current = (commentId) =>
+      selectFromClick(commentId, { shift: false, toggle: false })
+  }, [selectFromClick])
 
   /**
    * 7.3.3 — clicking a bead on the timeline selects its note in the list.
@@ -1957,7 +2017,7 @@ export default function CommentSection({
    * centre.
    *
    * The classList-plus-retry shape is deliberate rather than React state: it is
-   * exactly how `.is-selected` and `.is-focus-pulse` already decorate these
+   * exactly how `.is-selected` and `.is-focus-glow` already decorate these
    * cards, and a transient two-second flourish has no business causing every
    * bubble in a long list to re-render. The retry exists because `fetchComments`
    * resolving does not mean React has painted the new rows yet.
@@ -1991,7 +2051,7 @@ export default function CommentSection({
       }
 
       for (const card of cards) {
-        // Remove-reflow-add, the same dance `.is-focus-pulse` needs: without
+        // Remove-reflow-add, the same dance `.is-focus-glow` needs: without
         // the forced reflow the browser coalesces the two class changes and the
         // animation never restarts, so a second paste onto the same note would
         // be silent.
@@ -2322,6 +2382,7 @@ export default function CommentSection({
                       { v: 'all', label: 'All comments' },
                       { v: 'incomplete', label: 'Incomplete comments' },
                       { v: 'completed', label: 'Completed comments' },
+                      { v: 'copied', label: 'Copied comments' },
                     ] as { v: CommentsFilter; label: string }[]
                   ).map(({ v, label }) => {
                     const isActive = v === commentsFilter
@@ -2618,6 +2679,7 @@ export default function CommentSection({
                       { v: 'all', label: 'All comments' },
                       { v: 'incomplete', label: 'Incomplete comments' },
                       { v: 'completed', label: 'Completed comments' },
+                      { v: 'copied', label: 'Copied comments' },
                     ] as { v: CommentsFilter; label: string }[]
                   ).map(({ v, label }) => (
                     <button
@@ -2867,6 +2929,7 @@ export default function CommentSection({
                       }}
                       comment={comment}
                       isReply={false}
+                      isFocusGlow={glowCommentId === comment.id}
                       onReply={(mentionName) => {
                         setReplyMention(mentionName ?? null)
                         handleReply(comment.id, comment.videoId)

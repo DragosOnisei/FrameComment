@@ -231,11 +231,31 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   uploads). The composer wrapper carries `data-comment-dropzone`;
   GlobalDropOverlay hides while a drag is over it and is never shown on the
   player page (`/admin/projects/<id>/share`), where nothing uploads a drop.
+- **A deep-linked comment is highlighted like a clicked one** (7.13.1):
+  `focusCommentInList` calls `selectFromClick` (via a ref) so the card gets
+  the `.is-picked` ring, plus a 1 s `.is-focus-glow` in the same colour. The
+  glow is a `::after` pseudo-element because `.is-picked`/`.is-selected` paint
+  their rings with `!important` and a CSS animation ranks below `!important`
+  — animating the card's own box-shadow silently does nothing.
+- **Author names are Unicode; the ASCII rule is for ffmpeg only** (7.13.1):
+  `sanitizeAndValidateContent` (src/lib/comment-helpers.ts) rejects only `<`,
+  `>` and control characters in `authorName`, cap 100 like `User.name`. It
+  used to apply the watermark whitelist `[a-zA-Z0-9\s\-_.()]`, so a staff
+  member named Ștefan could not post any comment or reply — every request was
+  a 400 "Invalid characters in name", reported as "his browser". That
+  whitelist stays where ffmpeg drawtext actually runs (watermark text in
+  settings/projects and src/lib/ffmpeg.ts) and nowhere else.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**
   (never duplicate bytes); always carry `storageBackend`/`storageLocations`
   across. Deletion refcounts rows sharing a path before removing the file.
+  A pasted note marked Done is dropped from "All comments" and from the
+  timeline pins (7.13.1, `isRetiredCarryOver` in src/lib/comment-visibility.ts
+  — one predicate for the list AND the player); "Completed comments" still
+  lists it, nothing is deleted, and so does the "Copied comments" filter
+  (`commentsFilter === 'copied'`, `isCopied` done or not). A comment written
+  on the version itself only greys out when done.
 - **AnnotationOverlay** shows a saved drawing only when its comment is
   `activeCommentId` (AND the playhead is in its window). Play clears the
   selection. Do not go back to time-only visibility — it fires randomly during

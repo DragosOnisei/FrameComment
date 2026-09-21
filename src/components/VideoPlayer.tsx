@@ -25,6 +25,7 @@ import { useAnnotation } from '@/contexts/AnnotationContext'
 import { secondsToTimecode } from '@/lib/timecode'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { logError } from '@/lib/logging'
+import { withoutRetiredCarryOvers } from '@/lib/comment-visibility'
 import {
   isRangeEditActive,
   setRangeEditActive,
@@ -745,10 +746,15 @@ export default function VideoPlayer({
   // the currently-playing version so annotations + markers match the
   // per-version comment sidebar. Comments with no videoId (rare, project-
   // level) stay visible on every version.
+  // 7.13.1: and without carried-over notes that were marked Done on this
+  // version — the list hides them, so the timeline must not keep their pin
+  // (src/lib/comment-visibility.ts, one predicate for both).
   const activeVersionComments = useMemo(
     () =>
-      (comments as any[]).filter(
-        (c: any) => !c?.videoId || c.videoId === selectedVideo?.id,
+      withoutRetiredCarryOvers(
+        (comments as any[]).filter(
+          (c: any) => !c?.videoId || c.videoId === selectedVideo?.id,
+        ),
       ),
     [comments, selectedVideo?.id],
   )

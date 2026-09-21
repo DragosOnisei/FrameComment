@@ -75,6 +75,12 @@ interface MessageBubbleProps {
    * which "seen, agreed" is meant to deliver.
    */
   onQuickReply?: (text: string) => Promise<void> | void
+  /**
+   * 7.13.1: play the one-second arrival glow (`.is-focus-glow`) on this card.
+   * State-owned by CommentSection — a DOM-added class would be wiped by the
+   * re-render that selects the card at the same moment.
+   */
+  isFocusGlow?: boolean
   onSeekToTimecode?: (
     timecode: string,
     videoId: string,
@@ -176,6 +182,7 @@ export default function MessageBubble({
   isReply,
   onReply,
   onQuickReply,
+  isFocusGlow,
   onSeekToTimecode,
   onDelete,
   onCopyForPaste,
@@ -694,7 +701,7 @@ export default function MessageBubble({
           // opacity on hover, because the moment you reach for it you want to
           // read it properly.
           isCarriedOver && !isResolved ? 'opacity-60 hover:opacity-100' : ''
-        } comment-card`}
+        } ${isFocusGlow ? 'is-focus-glow' : ''} comment-card`}
       >
         {hasReplies && (
           <div className="absolute left-[18px] top-9 bottom-9 w-px bg-border/50" aria-hidden="true" />

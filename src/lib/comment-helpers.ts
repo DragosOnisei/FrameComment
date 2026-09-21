@@ -129,30 +129,42 @@ export async function sanitizeAndValidateContent(params: {
   // Sanitize HTML content
   const sanitizedContent = sanitizeCommentHtml(content)
 
-  // Sanitize authorName (same rules as watermark text)
+  // 7.13.1: the author's name may be a real name.
+  //
+  // This used to apply the WATERMARK rule — ASCII letters, digits and a few
+  // punctuation marks — because the name was once burned into the video by
+  // ffmpeg's drawtext. Watermarking has been off since 1.0.8, but the rule
+  // stayed, and it meant that a team member called Ștefan, Ionuț or Răzvan,
+  // or a client named O'Neil or García, could not post a single comment or
+  // reply: every attempt came back 400 "Invalid characters in name", which
+  // the composer showed as a failed reply and which was reported (2026-09-21)
+  // as "my colleague can't reply, maybe it's his browser". It was his name.
+  //
+  // The name is plain text everywhere it is shown (React escapes it, e-mail
+  // templates escape it), so the only characters that have no place in it
+  // are angle brackets and control characters. Everything Unicode considers
+  // a letter, mark, number, space or punctuation is a name. The cap matches
+  // `User.name` (100), so a staff name that passed the Users page cannot
+  // fail here.
   let sanitizedAuthorName = authorName || null
   if (sanitizedAuthorName) {
-    // Remove invalid characters
-    const invalidChars = sanitizedAuthorName.match(/[^a-zA-Z0-9\s\-_.()]/g)
-    if (invalidChars) {
+    sanitizedAuthorName = sanitizedAuthorName.replace(/\s+/g, ' ').trim()
+    if (/[<>\u0000-\u001f\u007f]/.test(sanitizedAuthorName)) {
       return {
         valid: false,
         error: 'Invalid characters in name',
         errorStatus: 400
       }
     }
-
-    // Length check
-    if (sanitizedAuthorName.length > 50) {
+    if (sanitizedAuthorName.length === 0) {
+      sanitizedAuthorName = null
+    } else if (sanitizedAuthorName.length > 100) {
       return {
         valid: false,
-        error: 'Name is too long (max 50 characters)',
+        error: 'Name is too long (max 100 characters)',
         errorStatus: 400
       }
     }
-
-    // Trim whitespace
-    sanitizedAuthorName = sanitizedAuthorName.trim()
   }
 
   return {
