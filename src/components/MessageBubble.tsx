@@ -76,11 +76,13 @@ interface MessageBubbleProps {
    */
   onQuickReply?: (text: string) => Promise<void> | void
   /**
-   * 7.13.1: play the one-second arrival glow (`.is-focus-glow`) on this card.
+   * 7.13.1: play the arrival pulse on this card. A number while it should
+   * play (CommentSection's nonce for this arrival, used as the layer's `key`
+   * so a repeat arrival restarts the animation), null/undefined otherwise.
    * State-owned by CommentSection — a DOM-added class would be wiped by the
    * re-render that selects the card at the same moment.
    */
-  isFocusGlow?: boolean
+  focusGlowKey?: number | null
   onSeekToTimecode?: (
     timecode: string,
     videoId: string,
@@ -182,7 +184,7 @@ export default function MessageBubble({
   isReply,
   onReply,
   onQuickReply,
-  isFocusGlow,
+  focusGlowKey,
   onSeekToTimecode,
   onDelete,
   onCopyForPaste,
@@ -701,10 +703,14 @@ export default function MessageBubble({
           // opacity on hover, because the moment you reach for it you want to
           // read it properly.
           isCarriedOver && !isResolved ? 'opacity-60 hover:opacity-100' : ''
-        } ${isFocusGlow ? 'is-focus-glow' : ''} comment-card`}
+        } comment-card`}
       >
         {hasReplies && (
           <div className="absolute left-[18px] top-9 bottom-9 w-px bg-border/50" aria-hidden="true" />
+        )}
+        {/* 7.13.1: the arrival pulse — see `focusGlowKey` and `.comment-focus-glow`. */}
+        {focusGlowKey != null && (
+          <span key={focusGlowKey} className="comment-focus-glow" aria-hidden="true" />
         )}
 
         <div className="grid grid-cols-[28px_1fr] gap-x-2.5 gap-y-3 items-start">

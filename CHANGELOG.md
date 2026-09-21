@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.13.2] - 2026-09-21
+
+### Changed
+
+- **The arrival highlight pulses, and only on the thread.** Opening a comment
+  from a notification now makes its accent ring breathe twice — bright, dim,
+  bright, dim — over two seconds before settling into the steady selection;
+  the single one-second fade of 7.13.1 was easy to miss under a scroll. Only
+  the thread's card lights up: a notification about a reply lands on its
+  thread, and the small reply box no longer gets a highlight of its own,
+  which read as two competing highlights.
+
 ## [7.13.1] - 2026-09-21
 
 ### Fixed

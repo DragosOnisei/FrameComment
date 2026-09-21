@@ -511,7 +511,7 @@
      white/10` base utility without fighting it. Smooth 220ms
      transition handles the in/out fade. !important wins over the
      base card hover state. */
-  /* 7.13.1: one-second glow in the selection's own colour.
+  /* 7.13.1: two pulses of light in the selection's own colour.
 
      Arriving from a notification, the thread scrolls and something has to
      catch the eye at the end of that scroll. 6.14.0 did it with a scale
@@ -520,8 +520,13 @@
      what was reported. Now the deep link SELECTS the comment the way a click
      does (CommentSection calls the same `selectFromClick`, so the card gets
      the `.is-picked` ring below and the `.is-selected` lift), and this rule
-     adds a one-second glow in that same ring colour that fades out and
-     leaves the steady selection behind.
+     makes that ring BREATHE: bright, dim, bright, dim, gone, two seconds in
+     all, leaving the steady selection behind. A single fade was too easy to
+     miss under a scroll; the second pulse is what makes it a signal.
+
+     Only the thread's card pulses, never a reply row — a notification about
+     a reply lands on the thread it belongs to, and lighting up the small
+     reply box as well read as two competing highlights.
 
      The glow is a pseudo-element, not an animated `box-shadow` on the card:
      `.is-picked` and `.is-selected` paint their rings with `!important`, and
@@ -530,43 +535,36 @@
      own box-shadow and only its opacity animates. `pointer-events: none`, so
      it never steals a click; transparent inside, so the text stays crisp. */
   @keyframes comment-focus-glow {
-    0%   { opacity: 1; }
+    0%   { opacity: 0; }
+    18%  { opacity: 1; }
+    45%  { opacity: 0.15; }
+    68%  { opacity: 1; }
     100% { opacity: 0; }
   }
 
-  .comment-card.is-focus-glow,
-  .comment-reply.is-focus-glow {
-    position: relative;
-  }
-
-  .comment-card.is-focus-glow::after,
-  .comment-reply.is-focus-glow::after {
-    content: '';
+  /* The layer is a real child element that MessageBubble mounts with a fresh
+     `key` for every arrival (not a class toggled on the card): a remount
+     restarts the animation with no remove/reflow/add dance and no frame of
+     timing to get wrong, and `both` holds the final frame at opacity 0, so
+     even if the state that removes the layer is late — background tab,
+     throttled timer — nothing visible is left behind. */
+  .comment-focus-glow {
     position: absolute;
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
     box-shadow:
-      0 0 0 3px hsl(var(--spotlight-tint, 217 91% 60%) / 0.85),
-      0 0 36px 6px hsl(var(--spotlight-tint, 217 91% 60%) / 0.55);
-    animation: comment-focus-glow 1000ms ease-out both;
+      0 0 0 3px hsl(var(--spotlight-tint, 217 91% 60%) / 0.95),
+      0 0 26px 4px hsl(var(--spotlight-tint, 217 91% 60%) / 0.75),
+      0 0 60px 14px hsl(var(--spotlight-tint, 217 91% 60%) / 0.45);
+    animation: comment-focus-glow 2000ms ease-in-out both;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .comment-card.is-focus-glow::after,
-    .comment-reply.is-focus-glow::after {
+    .comment-focus-glow {
       animation: none;
       opacity: 0;
     }
-  }
-
-  /* 7.8.0: a reply can be the target of a deep link too — "X replied to your
-     comment" lands on the reply, not on the thread. Replies are not cards, so
-     the selected lift gets a reply twin: a lighter tint that fits inside the
-     parent card. (The glow above already covers both.) */
-  .comment-reply.is-selected {
-    background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.14);
-    box-shadow: 0 0 0 1px hsl(var(--spotlight-tint, 217 91% 60%) / 0.35);
   }
 
   /* 7.3.3: after a paste, the notes that just arrived say so.

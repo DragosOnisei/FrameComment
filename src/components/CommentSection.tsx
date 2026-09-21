@@ -1024,23 +1024,27 @@ export default function CommentSection({
   // 7.13.1: the glow is REACT state, not a class added to the DOM. Selecting
   // the comment re-renders its card with a new `className`, and React writes
   // that attribute wholesale — any class the DOM had picked up in between
-  // (`is-selected`, and the first cut's `is-focus-glow`) is wiped in the same
+  // (`is-selected`, and the first cut's glow class) is wiped in the same
   // frame it was added, which is why the glow never showed. Owned by state,
   // the class survives the re-render because it IS the re-render. Replies are
-  // different: their `className` is static, so the DOM class below survives
-  // there and stays the reply path.
-  const [glowCommentId, setGlowCommentId] = useState<string | null>(null)
+  // Only the thread's card ever glows — a reply target lights up its thread.
+  //
+  // The nonce is the whole trick: MessageBubble mounts the glow layer with it
+  // as `key`, so a second arrival on the same comment remounts the layer and
+  // the animation restarts — no "class off, wait a frame, class on", which
+  // depended on requestAnimationFrame firing before the removal timer and
+  // left a stuck glow when the tab was in the background.
+  const [focusGlow, setFocusGlow] = useState<{ id: string; nonce: number } | null>(null)
   const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const triggerFocusGlow = useCallback((commentId: string) => {
     if (glowTimerRef.current) clearTimeout(glowTimerRef.current)
-    // Off then on across a frame, so focusing the same comment twice replays
-    // the animation instead of leaving the class where it already was.
-    setGlowCommentId(null)
-    requestAnimationFrame(() => setGlowCommentId(commentId))
+    setFocusGlow({ id: commentId, nonce: Date.now() })
+    // Matches the 2 s keyframes in globals.css, plus slack. Late is harmless:
+    // the layer's last frame is opacity 0.
     glowTimerRef.current = setTimeout(() => {
-      setGlowCommentId((current) => (current === commentId ? null : current))
+      setFocusGlow((current) => (current && current.id === commentId ? null : current))
       glowTimerRef.current = null
-    }, 1100)
+    }, 2200)
   }, [])
 
   const focusCommentInList = useCallback((targetId: string): (() => void) => {
@@ -1075,41 +1079,29 @@ export default function CommentSection({
         // class with transition-colors, so the bg + border fade
         // smoothly in/out.
         document
-          .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
+          .querySelectorAll('.comment-card.is-selected')
           .forEach((el) => el.classList.remove('is-selected'))
         // 7.8.0: a reply is a target too ("X replied to your comment" lands
-        // on the reply). Replies are not cards — the anchor element itself
-        // carries `.comment-reply` and takes the same two classes.
-        const card =
-          element.querySelector<HTMLElement>('.comment-card') ??
-          (element.classList.contains('comment-reply') ? element : null)
-        if (card) {
-          card.classList.add('is-selected')
-          // 7.13.1: and SELECT it — the thread, when the target is a reply —
-          // through the same path a click takes, so the card wears the same
-          // accent ring (`.is-picked`) a clicked comment wears. The scale beat
-          // that used to play here read as a different highlight; see the
-          // `.is-focus-glow` rule in globals.css for what replaced it.
-          const isReplyTarget = element.classList.contains('comment-reply')
-          const rootAnchor = isReplyTarget
-            ? element.parentElement?.closest<HTMLElement>('[id^="comment-"]') ?? null
-            : element
-          const rootId = rootAnchor?.id.replace(/^comment-/, '')
-          if (rootId) selectLikeClickRef.current?.(rootId)
-          // One-second glow in the selection colour, then the steady ring
-          // stays. A root card gets it through state (see `triggerFocusGlow`);
-          // a reply through the DOM, whose class survives the parent's
-          // re-render. Removed on the same 1.1 s clock either way, so
-          // reduced-motion users — whose animation never ends — are not left
-          // with a stuck class.
-          if (!isReplyTarget && rootId) {
-            triggerFocusGlow(rootId)
-          } else {
-            card.classList.remove('is-focus-glow')
-            void card.offsetWidth
-            card.classList.add('is-focus-glow')
-            window.setTimeout(() => card.classList.remove('is-focus-glow'), 1100)
-          }
+        // on the reply): the scroll above brings the REPLY into view, but the
+        // highlight belongs to the thread it sits in. 7.13.1: the reply row
+        // itself gets nothing — a tint on the small box plus a ring on the
+        // card read as two competing highlights, and the card is the one the
+        // eye should land on.
+        const isReplyTarget = element.classList.contains('comment-reply')
+        const rootAnchor = isReplyTarget
+          ? element.parentElement?.closest<HTMLElement>('[id^="comment-"]') ?? null
+          : element
+        const rootCard = rootAnchor?.querySelector<HTMLElement>('.comment-card') ?? null
+        const rootId = rootAnchor?.id.replace(/^comment-/, '')
+        if (rootCard) rootCard.classList.add('is-selected')
+        if (rootId) {
+          // 7.13.1: SELECT the thread through the same path a click takes, so
+          // the card wears the same accent ring (`.is-picked`) a clicked
+          // comment wears, and make that ring pulse twice (`triggerFocusGlow`,
+          // state-owned so the selecting re-render cannot wipe it). The scale
+          // beat that used to play here read as a different highlight.
+          selectLikeClickRef.current?.(rootId)
+          triggerFocusGlow(rootId)
         }
         return
       }
@@ -1201,7 +1193,7 @@ export default function CommentSection({
           // class churn → reflowed transitions).
           if (!card.classList.contains('is-selected')) {
             document
-              .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
+              .querySelectorAll('.comment-card.is-selected')
               .forEach((el) => el.classList.remove('is-selected'))
             card.classList.add('is-selected')
           }
@@ -1210,7 +1202,7 @@ export default function CommentSection({
         // Normal card click → make THIS one the selected one.
         if (!card.classList.contains('is-selected')) {
           document
-            .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
+            .querySelectorAll('.comment-card.is-selected')
             .forEach((el) => el.classList.remove('is-selected'))
           card.classList.add('is-selected')
         }
@@ -1218,7 +1210,7 @@ export default function CommentSection({
       }
       // Click landed OUTSIDE every comment card → clear selection.
       document
-        .querySelectorAll('.comment-card.is-selected, .comment-reply.is-selected')
+        .querySelectorAll('.comment-card.is-selected')
         .forEach((el) => el.classList.remove('is-selected'))
       /**
        * 7.3.3: and drop the real selection with it — the ticked circles, which
@@ -2017,7 +2009,7 @@ export default function CommentSection({
    * centre.
    *
    * The classList-plus-retry shape is deliberate rather than React state: it is
-   * exactly how `.is-selected` and `.is-focus-glow` already decorate these
+   * exactly how `.is-selected` and the arrival pulse already decorate these
    * cards, and a transient two-second flourish has no business causing every
    * bubble in a long list to re-render. The retry exists because `fetchComments`
    * resolving does not mean React has painted the new rows yet.
@@ -2051,7 +2043,7 @@ export default function CommentSection({
       }
 
       for (const card of cards) {
-        // Remove-reflow-add, the same dance `.is-focus-glow` needs: without
+        // Remove-reflow-add, the dance a re-applied animation class needs: without
         // the forced reflow the browser coalesces the two class changes and the
         // animation never restarts, so a second paste onto the same note would
         // be silent.
@@ -2929,7 +2921,7 @@ export default function CommentSection({
                       }}
                       comment={comment}
                       isReply={false}
-                      isFocusGlow={glowCommentId === comment.id}
+                      focusGlowKey={focusGlow && focusGlow.id === comment.id ? focusGlow.nonce : null}
                       onReply={(mentionName) => {
                         setReplyMention(mentionName ?? null)
                         handleReply(comment.id, comment.videoId)

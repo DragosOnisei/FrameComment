@@ -232,11 +232,14 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   GlobalDropOverlay hides while a drag is over it and is never shown on the
   player page (`/admin/projects/<id>/share`), where nothing uploads a drop.
 - **A deep-linked comment is highlighted like a clicked one** (7.13.1):
-  `focusCommentInList` calls `selectFromClick` (via a ref) so the card gets
-  the `.is-picked` ring, plus a 1 s `.is-focus-glow` in the same colour. The
-  glow is a `::after` pseudo-element because `.is-picked`/`.is-selected` paint
-  their rings with `!important` and a CSS animation ranks below `!important`
-  — animating the card's own box-shadow silently does nothing.
+  `focusCommentInList` calls `selectFromClick` (via a ref) so the THREAD's
+  card gets the `.is-picked` ring — never the reply row — plus a 2 s
+  two-pulse glow. The glow is a keyed child layer (`.comment-focus-glow`,
+  `focusGlowKey` prop on MessageBubble, nonce state in CommentSection), not a
+  class toggled on the card: `.is-picked`/`.is-selected` paint their rings
+  with `!important` and a CSS animation ranks below `!important`, and a
+  DOM-added class is wiped by the selecting re-render; the remount restarts
+  the animation and `both` parks it at opacity 0 if the removal is late.
 - **Author names are Unicode; the ASCII rule is for ffmpeg only** (7.13.1):
   `sanitizeAndValidateContent` (src/lib/comment-helpers.ts) rejects only `<`,
   `>` and control characters in `authorName`, cap 100 like `User.name`. It
