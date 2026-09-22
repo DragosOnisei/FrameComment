@@ -14,6 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.13.3] - 2026-09-22
+
+### Fixed
+
+- **No more "to exit full screen…" banner on Android phones.** That banner is
+  the browser's own fullscreen notice — Chrome draws it over the bottom of
+  the video whenever a page asks for fullscreen, and since it became a
+  persistent snackbar this spring it stayed there for the whole clip. No page
+  can hide it, so on Android the player now fills the screen by itself
+  instead of asking the browser: the fullscreen button pins the player over
+  the whole viewport with the same floating, auto-hiding controls, the Back
+  gesture leaves fullscreen (not the page), rotating to landscape enters and
+  rotating back leaves, and the end of the clip leaves as before. The trade:
+  Chrome keeps its address bar and the system bars visible in this mode.
+  iPhone, iPad and desktop are unchanged.
+- **The share page's player now tracks playback it did not start.** Its
+  play/pause/ended listeners were bound once, before the video element
+  existed, so the Play icon stayed put when a clip was started from the lock
+  screen and the end of a clip never left fullscreen there. They now bind
+  when the element appears.
+
 ## [7.13.2] - 2026-09-21
 
 ### Changed

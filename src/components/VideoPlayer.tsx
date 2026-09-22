@@ -27,6 +27,12 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { logError } from '@/lib/logging'
 import { withoutRetiredCarryOvers } from '@/lib/comment-visibility'
 import {
+  IN_PAGE_FULLSCREEN_HISTORY_KEY,
+  isInPageFullscreenHistoryState,
+  prefersInPageFullscreen,
+  resolveLandscape,
+} from '@/lib/in-page-fullscreen'
+import {
   isRangeEditActive,
   setRangeEditActive,
 } from '@/lib/comment-range-edit'
@@ -784,6 +790,21 @@ export default function VideoPlayer({
   useEffect(() => {
     if (typeof window !== 'undefined' && window.matchMedia) {
       setCoarsePointer(window.matchMedia('(pointer: coarse)').matches)
+    }
+  }, [])
+  // 7.13.3: Android browsers get the player's OWN fullscreen — see
+  // src/lib/in-page-fullscreen.ts for the why (Chrome's persistent "to exit
+  // full screen…" notice, which no page can hide). `inPageFullscreen` drives
+  // the `fc-inpage-fullscreen` class on the container; `isFullscreen` is set
+  // alongside it so the floating bar, the auto-hide and every other
+  // fullscreen behaviour need no second flag. The ref mirrors the state for
+  // the stable-identity callbacks below.
+  const [useInPageFullscreen, setUseInPageFullscreen] = useState(false)
+  const [inPageFullscreen, setInPageFullscreen] = useState(false)
+  const inPageFullscreenRef = useRef(false)
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      setUseInPageFullscreen(prefersInPageFullscreen(navigator.userAgent))
     }
   }, [])
   useEffect(() => {
@@ -2540,14 +2561,61 @@ export default function VideoPlayer({
   }
 
   /**
+   * 7.13.3: in-page fullscreen (Android). A fixed-position container, a manual
+   * `isFullscreen`, and one history entry so the Back gesture leaves it —
+   * Chrome's own notice teaches "touch the back button" as the way out of
+   * fullscreen, and without the entry that gesture would leave the page.
+   */
+  const enterInPageFullscreen = useCallback(() => {
+    if (inPageFullscreenRef.current) return
+    inPageFullscreenRef.current = true
+    setInPageFullscreen(true)
+    setIsFullscreen(true)
+    try {
+      if (!isInPageFullscreenHistoryState(window.history.state)) {
+        // Next.js patches pushState to carry its router state along, so this
+        // is a first-class entry: Back from it restores the same page without
+        // a fetch or a reload.
+        window.history.pushState({ [IN_PAGE_FULLSCREEN_HISTORY_KEY]: true }, '')
+      }
+    } catch {
+      /* no history (sandboxed frame) — the Minimize button still exits */
+    }
+  }, [])
+
+  const exitInPageFullscreen = useCallback(() => {
+    if (!inPageFullscreenRef.current) return
+    inPageFullscreenRef.current = false
+    setInPageFullscreen(false)
+    setIsFullscreen(false)
+    // Pop our entry if it is still the current one, so a later Back goes
+    // where it went before fullscreen rather than "leaving fullscreen" a
+    // second time. If the page replaced the entry meanwhile (a version switch
+    // runs router.replace) the marker is gone and there is nothing to pop;
+    // the leftover entry then points at this same page, which is harmless.
+    try {
+      if (isInPageFullscreenHistoryState(window.history.state)) {
+        window.history.back()
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  /**
    * Leave fullscreen, whichever way we got in.
    *
-   * Three exits, because there are three entrances: element fullscreen
-   * (desktop, the usual path), the webkit-prefixed variant, and iPhone
-   * Safari's native <video> fullscreen — which `document.exitFullscreen`
-   * does not know about at all, so it has to be dismissed on the element.
+   * Four exits, because there are four entrances: element fullscreen
+   * (desktop, the usual path), the webkit-prefixed variant, iPhone Safari's
+   * native <video> fullscreen — which `document.exitFullscreen` does not know
+   * about at all, so it has to be dismissed on the element — and, since
+   * 7.13.3, the in-page fullscreen Android gets instead of the browser's.
    */
   const exitFullscreenIfActive = useCallback(() => {
+    if (inPageFullscreenRef.current) {
+      exitInPageFullscreen()
+      return
+    }
     const video = videoRef.current as any
     if (document.exitFullscreen && document.fullscreenElement) {
       Promise.resolve(document.exitFullscreen()).catch(() => {})
@@ -2561,10 +2629,17 @@ export default function VideoPlayer({
       }
     }
     setIsFullscreen(false)
-  }, [])
+  }, [exitInPageFullscreen])
 
   const handleToggleFullscreen = () => {
     if (!containerRef.current || !videoRef.current) return
+
+    // 7.13.3: Android never asks the browser — see enterInPageFullscreen.
+    if (useInPageFullscreen) {
+      if (inPageFullscreenRef.current) exitInPageFullscreen()
+      else enterInPageFullscreen()
+      return
+    }
 
     const el = containerRef.current as any
     const video = videoRef.current as any // Type cast for webkit APIs
@@ -2648,7 +2723,22 @@ export default function VideoPlayer({
     if (typeof window === 'undefined' || !window.matchMedia) return
     const mql = window.matchMedia('(orientation: landscape)')
     const onOrientation = () => {
-      const landscape = mql.matches
+      // 7.13.3: physical orientation first — the media query flips under the
+      // on-screen keyboard in some browsers (see resolveLandscape).
+      const landscape = resolveLandscape(
+        typeof screen !== 'undefined' ? screen.orientation?.type : undefined,
+        mql.matches
+      )
+      // 7.13.3: on Android the rotation goes through the in-page fullscreen
+      // too, so the browser's notice never appears. It also starts working
+      // there: Chrome grants requestFullscreen() only to a tap or to an
+      // `orientationchange` handler, and a media-query listener is neither,
+      // so the call below was most likely rejected on every Android phone.
+      if (useInPageFullscreen) {
+        if (landscape) enterInPageFullscreen()
+        else exitInPageFullscreen()
+        return
+      }
       const isFs = !!(
         document.fullscreenElement || (document as any).webkitFullscreenElement
       )
@@ -2676,7 +2766,7 @@ export default function VideoPlayer({
     }
     mql.addEventListener('change', onOrientation)
     return () => mql.removeEventListener('change', onOrientation)
-  }, [coarsePointer])
+  }, [coarsePointer, useInPageFullscreen, enterInPageFullscreen, exitInPageFullscreen])
 
   const handleFrameStep = (direction: 'forward' | 'backward') => {
     if (!videoRef.current || !selectedVideo?.fps) return
@@ -2821,7 +2911,15 @@ export default function VideoPlayer({
       video.removeEventListener('ended', handleEnded)
       video.removeEventListener('volumechange', handleVolumeChangeEvent)
     }
-  }, [resetControlsTimeout, exitFullscreenIfActive, setActiveCommentId])
+    // 7.13.3: `selectedVideo?.id` and `videoUrl` are here for the same reason
+    // they are on the webkit-fullscreen effect below — this effect used to run
+    // once, before the <video> existed on a page whose source URL arrives
+    // late (the share page), and `if (!video) return` then left play, pause,
+    // ended and volumechange with no listener at all. The icon stayed on
+    // "Play" while the clip ran from the lock screen, and the end of the clip
+    // never left fullscreen there (6.15.0's rule). Found while wiring the
+    // in-page fullscreen's exit to `ended`.
+  }, [resetControlsTimeout, exitFullscreenIfActive, setActiveCommentId, selectedVideo?.id, videoUrl])
 
   // Fullscreen change events (desktop). 4.7.x FIX: these DOCUMENT-level
   // listeners must ALWAYS be attached — the old code gated them behind
@@ -2852,6 +2950,20 @@ export default function VideoPlayer({
       document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
     }
   }, [])
+
+  // 7.13.3: the Back gesture leaves in-page fullscreen. Our entry is the one
+  // on top while in it, so the pop that removes it is the signal. The ref is
+  // consulted rather than the state so an exit already under way (which pops
+  // the entry itself) is not run twice.
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      if (!inPageFullscreenRef.current) return
+      if (isInPageFullscreenHistoryState(event.state)) return
+      exitInPageFullscreen()
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [exitInPageFullscreen])
 
   // iOS Safari native <video> fullscreen events. Re-bound whenever the video
   // element (re)mounts so it's never missed when the source arrives late.
@@ -3017,7 +3129,7 @@ export default function VideoPlayer({
         ref={containerRef}
         className={`relative w-full flex flex-col ${
           fillContainer ? 'flex-1 min-h-0' : 'flex-shrink min-h-0 lg:order-1'
-        } ${hideCursor ? 'cursor-none' : ''}`}
+        } ${hideCursor ? 'cursor-none' : ''} ${inPageFullscreen ? 'fc-inpage-fullscreen' : ''}`}
       >
         {hasDisplayableSource ? (
           <>
@@ -3331,9 +3443,10 @@ export default function VideoPlayer({
                     (selectedVideo as any)?.mediaType !== 'IMAGE' &&
                     (selectedVideo as any)?.status === 'READY'
                       ? () => {
-                          if (document.fullscreenElement) {
-                            document.exitFullscreen().catch(() => {})
-                          }
+                          // 7.13.3: one exit for every kind of fullscreen —
+                          // the in-page one included, whose fixed container
+                          // is a sibling of this dialog.
+                          exitFullscreenIfActive()
                           setSaveSpeedError(null)
                           setShowSaveSpeed(true)
                         }

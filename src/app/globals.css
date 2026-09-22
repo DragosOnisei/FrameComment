@@ -972,7 +972,8 @@ textarea,
    fills the screen; the <video> stays `object-contain`, so portrait clips
    just letterbox with black bars instead of shrinking. */
 :fullscreen .fc-video-stage,
-:-webkit-full-screen .fc-video-stage {
+:-webkit-full-screen .fc-video-stage,
+.fc-inpage-fullscreen .fc-video-stage {
   max-height: none !important;
   aspect-ratio: auto !important;
   height: 100% !important;
@@ -980,11 +981,31 @@ textarea,
   min-height: 0 !important;
 }
 :fullscreen .fc-video-stage video,
-:-webkit-full-screen .fc-video-stage video {
+:-webkit-full-screen .fc-video-stage video,
+.fc-inpage-fullscreen .fc-video-stage video {
   width: 100% !important;
   height: 100% !important;
   max-height: none !important;
   object-fit: contain;
+}
+
+/* 7.13.3: in-page fullscreen (Android). The browser is never asked for
+   fullscreen there — its "to exit full screen…" notice cannot be hidden by a
+   page — so the player container pins itself over the viewport and the fill
+   rules above apply to it as well. `inset: 0` rather than a 100vh height:
+   Chrome's 100vh is the viewport WITHOUT the address bar, which is only true
+   after a scroll, while the edges follow whatever is visible right now. The
+   z-index sits above the page (its own layers stop at z-50) and below the
+   player's dialogs (z-[95]) and its portaled menus (z-[200]).
+   Why all of this: src/lib/in-page-fullscreen.ts */
+.fc-inpage-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 90;
+  background: #000;
+}
+.fc-inpage-fullscreen > div {
+  border-radius: 0 !important;
 }
 
 /* ─── 5.14.0: public marketing pages (landing / privacy / terms) ─────────

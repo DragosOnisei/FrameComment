@@ -248,6 +248,22 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   a 400 "Invalid characters in name", reported as "his browser". That
   whitelist stays where ffmpeg drawtext actually runs (watermark text in
   settings/projects and src/lib/ffmpeg.ts) and nowhere else.
+- **Android never gets browser fullscreen** (7.13.3): every Chromium
+  browser on Android answers `requestFullscreen()` with its own notice —
+  "framecomment.com – to exit full screen, drag from the top and touch the
+  back button" — drawn by the browser process (ExclusiveAccessManager, a
+  persistent snackbar since spring 2026); no CSS, API or option hides it.
+  So on Android (`prefersInPageFullscreen`, src/lib/in-page-fullscreen.ts,
+  by user agent) the player fills the viewport itself: container class
+  `fc-inpage-fullscreen` (fixed, inset 0, z-90, fill rules shared with
+  `:fullscreen` in globals.css), `isFullscreen` set by hand so the floating
+  bar behaves as in real fullscreen, and ONE history entry so the Back
+  gesture leaves fullscreen instead of the page (`popstate` listener; the
+  marker in `history.state`). Rotate-to-fullscreen goes through the same
+  path there. Every exit — button, Back, `ended`, the Save-speed dialog —
+  runs through `exitFullscreenIfActive`; do not add a
+  `document.exitFullscreen()` next to it, it does nothing for this mode.
+  iPhone/iPad keep native/element fullscreen (WebKit has no such notice).
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**
