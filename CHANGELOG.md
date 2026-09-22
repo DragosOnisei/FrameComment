@@ -14,6 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.14.0] - 2026-09-22
+
+### Added
+
+- **Import Premiere Pro markers as comments.** The comments menu (the three
+  dots, next to "Export markers for Premiere") now has "Import markers from
+  Premiere…". Pick a Final Cut Pro 7 XML exported from Premiere Pro (File →
+  Export → Final Cut Pro XML) and every marker on the sequence becomes a
+  comment on the open video, at the marker's exact frame and in your name:
+  the marker's name on the first line, its comment below, a marker with a
+  duration as a ranged comment. A dialog shows what will happen before
+  anything is posted — the file, the sequence and its frame rate, who the
+  comments will be posted as, and what will be skipped: markers past the end
+  of the video, empty markers, and markers identical to a comment already on
+  the video, so importing the same file twice does not double the list.
+  Frames are read at the sequence's own rate (29.97 and 23.976 included), so
+  a 24 fps sequence lands on the right second of a 25 fps export. Clip
+  markers and nested sequences are left alone. Admin only, like the export.
+
 ## [7.13.3] - 2026-09-22
 
 ### Fixed

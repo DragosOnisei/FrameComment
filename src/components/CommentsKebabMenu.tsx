@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { MoreVertical, ClipboardCopy, ClipboardPaste, FileDown } from 'lucide-react'
+import { MoreVertical, ClipboardCopy, ClipboardPaste, FileDown, FileUp } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 /**
@@ -44,6 +44,12 @@ export interface CommentsKebabMenuProps {
   onExport?: () => Promise<void> | void
   /** Comments the export would contain — shown next to the item; 0 disables it. */
   exportCount?: number
+  /**
+   * 7.14.0: "Import markers from Premiere…". The host opens its file picker;
+   * everything after the choice (reading, the confirmation, the posting) is
+   * the host's. Present under the same conditions as the export.
+   */
+  onImport?: () => void
 }
 
 export default function CommentsKebabMenu({
@@ -54,6 +60,7 @@ export default function CommentsKebabMenu({
   nameSection,
   onExport,
   exportCount = 0,
+  onImport,
 }: CommentsKebabMenuProps) {
   const t = useTranslations('comments')
   const [open, setOpen] = useState(false)
@@ -257,6 +264,21 @@ export default function CommentsKebabMenu({
               {exportCount > 0 && (
                 <span className="text-xs text-white/55 tabular-nums">{exportCount}</span>
               )}
+            </button>
+          )}
+          {onImport && (
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                onImport()
+              }}
+              title={t('importPremiereMarkersHint')}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors text-left hover:bg-white/[0.08]"
+            >
+              <FileUp className="w-4 h-4 shrink-0" />
+              <span className="flex-1">{t('importPremiereMarkers')}</span>
             </button>
           )}
         </div>,

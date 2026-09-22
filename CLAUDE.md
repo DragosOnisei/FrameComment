@@ -264,6 +264,19 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   runs through `exitFullscreenIfActive`; do not add a
   `document.exitFullscreen()` next to it, it does nothing for this mode.
   iPhone/iPad keep native/element fullscreen (WebKit has no such notice).
+- **Premiere markers come in through the paste loop, untagged** (7.14.0):
+  `src/lib/premiere-markers-import.ts` reads a Final Cut Pro 7 XML with its
+  own small tree reader (no DOMParser, so a node script exercises the same
+  code on a real Premiere export), takes the `<marker>` children of every
+  `<sequence>` that has no `<clipitem>` ancestor — clip markers and nested
+  sequences are not imported, by decision — converts frames at the
+  SEQUENCE's rate (`<timebase>` + `<ntsc>`) to seconds and to a timecode at
+  the VIDEO's rate, skips markers past the video's end and ones identical
+  to a comment already there (same ms, same text), and posts through
+  `pasteClippedThreads` with `isCopied: false`. That flag exists for this
+  caller alone: a "Copied" import would grey out and, once done, hide an
+  editor's own notes. Text is name on the first line, comment below, HTML
+  characters escaped. Admin only, like the export, in the same kebab.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

@@ -78,6 +78,17 @@ export interface PasteArgs {
   items: ClippedComment[]
   /** Marks the new rows internal — true when an admin is pasting. */
   isInternal: boolean
+  /**
+   * 7.14.0: whether the new rows carry the "Copied" tag. True (the default)
+   * for every paste — the rows ARE copies of notes written elsewhere. False
+   * for the Premiere marker import, which posts through this same loop
+   * because the loop is where the rate-limit waiting and the created-id
+   * bookkeeping live, but whose rows are fresh notes written on this cut:
+   * tagging them "Copied" would grey them out and hide them once done
+   * (`isRetiredCarryOver`), which is the treatment for carried-over notes,
+   * not for an editor's own.
+   */
+  isCopied?: boolean
   post: CommentPoster
   /** Recorded on the new rows when the threads came from a known version. */
   source?: PasteSource
@@ -106,6 +117,7 @@ export async function pasteClippedThreads({
   post,
   source,
   onProgress,
+  isCopied = true,
 }: PasteArgs): Promise<PasteResult> {
   let created = 0
   let filesExpected = 0
@@ -169,7 +181,7 @@ export async function pasteClippedThreads({
       content: item.content,
       isInternal,
       // 3.8.x: flag pasted comments so the thread shows a "Copied" tag.
-      isCopied: true,
+      isCopied,
     }
     if (item.timecodeEnd) body.timecodeEnd = item.timecodeEnd
     if (typeof item.timestampMs === 'number') body.timestampMs = item.timestampMs
@@ -238,7 +250,7 @@ export async function pasteClippedThreads({
         timecode: item.timecode,
         content: reply.content,
         isInternal,
-        isCopied: true,
+        isCopied,
         parentId,
       }
       if (reply.authorName) replyBody.authorName = reply.authorName

@@ -28,6 +28,14 @@ import {
   type ClippedComment,
 } from '@/lib/comments-clipboard'
 import { pasteClippedThreads } from '@/lib/comments-paste'
+import {
+  parsePremiereMarkersXml,
+  pickSequence,
+  planMarkerImport,
+  XmlReadError,
+  type MarkerImportPlan,
+  type ParsedSequence,
+} from '@/lib/premiere-markers-import'
 import { buildPremiereMarkersXml, premiereMarkersFileName } from '@/lib/premiere-markers'
 import { emoticonOnChange } from '@/lib/emoticons'
 import { handleListKeydown } from '@/lib/comment-list-keys'
@@ -1740,6 +1748,34 @@ export default function CommentSection({
    */
   const [bulkBusy, setBulkBusy] = useState(false)
   const [pendingBulkDeleteIds, setPendingBulkDeleteIds] = useState<string[] | null>(null)
+  // 7.14.0: Premiere markers → comments. The chosen file is read and planned
+  // in the browser and nothing is posted until the confirmation; the notice
+  // dialog carries the outcome (or the reason nothing happened). See
+  // src/lib/premiere-markers-import.ts.
+  //
+  // ONE dialog with two faces (the plan, then the outcome or a notice), not
+  // two dialogs. A Radix dialog that opens in the same commit another one
+  // closes overlaps it for the exit animation, and overlapping modal layers
+  // are how `body { pointer-events: none }` gets left behind: the new layer
+  // records the body's current value — the closing layer's "none" — as the
+  // one to restore. Switching the content inside the open dialog means no
+  // layer ever overlaps another. (While testing this on 2026-09-22 the page
+  // did end up unclickable, but that turned out to be the hidden tab: in a
+  // background tab Chrome stalls CSS animations, so EVERY closing dialog,
+  // the delete confirmation included, stays mounted until the tab is shown.
+  // Not a bug here, noted so nobody chases it again.)
+  const markerFileInputRef = useRef<HTMLInputElement>(null)
+  type MarkerDialog =
+    | { kind: 'plan'; fileName: string; sequence: ParsedSequence; plan: MarkerImportPlan }
+    | { kind: 'notice'; title: string; description: string }
+  const [markerDialog, setMarkerDialog] = useState<MarkerDialog | null>(null)
+  // What the dialog renders while it animates closed — `markerDialog` is
+  // already null then, and an empty title would flash for the exit frames.
+  const lastMarkerDialogRef = useRef<MarkerDialog | null>(null)
+  if (markerDialog) lastMarkerDialogRef.current = markerDialog
+  const shownMarkerDialog = markerDialog ?? lastMarkerDialogRef.current
+  const [markerImportBusy, setMarkerImportBusy] = useState(false)
+  const [markerImportWait, setMarkerImportWait] = useState<number | null>(null)
 
   /**
    * 7.x — a comment's marker was dragged to a new moment on the timeline.
@@ -2068,6 +2104,8 @@ export default function CommentSection({
       items: ClippedComment[],
       source?: { videoId: string; versionLabel: string },
       onProgress?: (state: { kind: 'waiting'; seconds: number }) => void,
+      // 7.14.0: `isCopied: false` for rows that are not copies — see PasteArgs.
+      opts?: { isCopied?: boolean },
     ) => {
       if (!selectedVideoId) throw new Error('No video selected')
       // 7.1.0: the mechanics moved to src/lib/comments-paste.ts, so the folder
@@ -2083,6 +2121,7 @@ export default function CommentSection({
         post: postComment,
         source,
         onProgress,
+        isCopied: opts?.isCopied ?? true,
       })
       await fetchComments()
       if (typeof window !== 'undefined') {
@@ -2241,6 +2280,142 @@ export default function CommentSection({
     }
     return { count: created, filesMissing }
   }, [projectId, pasteThreads, t])
+
+  /**
+   * 7.14.0: Premiere Pro markers → comments, the export's opposite.
+   *
+   * An editor who reviews a cut in Premiere marks the moments there, not in a
+   * browser tab; retyping those markers into the sidebar was the request
+   * (2026-09-22). The file is the same Final Cut Pro 7 XML the export writes,
+   * exported from Premiere with File → Export → Final Cut Pro XML. Every
+   * SEQUENCE marker becomes one comment at its frame, in the importer's name;
+   * clip markers and nested sequences are left alone (see the lib).
+   *
+   * The posting runs through `pasteThreads` — the same loop the paste uses —
+   * because that loop already waits out the server's comment rate limit,
+   * reports refusals honestly, refreshes the list and highlights the new
+   * rows. `isCopied: false`: these are fresh notes on this cut, and the
+   * "Copied" treatment (grey, hidden once done) would be wrong for them.
+   *
+   * Same availability as the export: admin view, a video with a frame rate.
+   */
+  const canImportMarkers = canExportMarkers
+  const handleImportMarkersClick = useCallback(() => {
+    markerFileInputRef.current?.click()
+  }, [])
+  const handleMarkerFileChosen = useCallback(
+    async (event: { target: HTMLInputElement }) => {
+      const input = event.target
+      const file = input.files?.[0]
+      // Cleared at once so choosing the same file again fires `change` again
+      // — a second import of the same file is a legitimate retry after a
+      // rate-limit refusal, and the duplicate check keeps it from doubling.
+      input.value = ''
+      if (!file || !currentVideo || !currentVideo.fps) return
+      let sequences: ParsedSequence[]
+      try {
+        const text = await file.text()
+        sequences = parsePremiereMarkersXml(text)
+      } catch (error) {
+        setMarkerDialog({
+          kind: 'notice',
+          title: t('importPremiereMarkersFailedTitle'),
+          description:
+            error instanceof XmlReadError
+              ? t('importPremiereMarkersNotXml')
+              : t('importPremiereMarkersUnreadable'),
+        })
+        return
+      }
+      const sequence = pickSequence(sequences)
+      if (!sequence) {
+        setMarkerDialog({
+          kind: 'notice',
+          title: t('importPremiereMarkersNothingTitle'),
+          description: t('importPremiereMarkersNoSequence'),
+        })
+        return
+      }
+      if (sequence.markers.length === 0) {
+        setMarkerDialog({
+          kind: 'notice',
+          title: t('importPremiereMarkersNothingTitle'),
+          description: t('importPremiereMarkersNoMarkers', { name: sequence.name || file.name }),
+        })
+        return
+      }
+      const existing = (displayComments as any[])
+        .filter((c) => !c.parentId)
+        .map((c) => ({
+          timecode: String(c.timecode ?? ''),
+          timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
+          content: String(c.content ?? ''),
+        }))
+      const plan = planMarkerImport(
+        sequence,
+        { fps: currentVideo.fps, duration: Number(currentVideo.duration) || 0 },
+        existing,
+        adminUser?.name || null,
+      )
+      if (plan.items.length === 0) {
+        const reasons = [
+          plan.skippedDuplicate > 0
+            ? t('importPremiereMarkersSkippedDuplicate', { count: plan.skippedDuplicate })
+            : '',
+          plan.skippedBeyondEnd > 0
+            ? t('importPremiereMarkersSkippedBeyondEnd', { count: plan.skippedBeyondEnd })
+            : '',
+          plan.skippedEmpty > 0
+            ? t('importPremiereMarkersSkippedEmpty', { count: plan.skippedEmpty })
+            : '',
+        ].filter(Boolean)
+        setMarkerDialog({
+          kind: 'notice',
+          title: t('importPremiereMarkersNothingTitle'),
+          description: reasons.join(' '),
+        })
+        return
+      }
+      setMarkerDialog({ kind: 'plan', fileName: file.name, sequence, plan })
+    },
+    [currentVideo, displayComments, adminUser, t],
+  )
+  const handleConfirmMarkerImport = useCallback(async () => {
+    if (!markerDialog || markerDialog.kind !== 'plan' || markerImportBusy) return
+    const { plan } = markerDialog
+    setMarkerImportBusy(true)
+    setMarkerImportWait(null)
+    try {
+      const r = await pasteThreads(
+        plan.items,
+        undefined,
+        (state) => setMarkerImportWait(state.seconds),
+        { isCopied: false },
+      )
+      const parts = [t('importPremiereMarkersDone', { count: r.created })]
+      if (r.failed > 0) {
+        parts.push(
+          r.rateLimited
+            ? t('importPremiereMarkersRateLimited', { count: r.failed })
+            : t('importPremiereMarkersFailed', { count: r.failed }),
+        )
+      }
+      setMarkerDialog({
+        kind: 'notice',
+        title: t('importPremiereMarkersDoneTitle'),
+        description: parts.join(' '),
+      })
+    } catch {
+      setMarkerDialog({
+        kind: 'notice',
+        title: t('importPremiereMarkersFailedTitle'),
+        description: t('importPremiereMarkersPostFailed'),
+      })
+    } finally {
+      setMarkerImportBusy(false)
+      setMarkerImportWait(null)
+    }
+  }, [markerDialog, markerImportBusy, pasteThreads, t])
 
   // 1.3.2+: bridge between this section and the top-level PlayerTopMenu.
   // The menu lives outside CommentSection (in the title bar) but Copy /
@@ -2442,6 +2617,7 @@ export default function CommentSection({
               onCopy={handleCopyComments}
               onPaste={handlePasteComments}
               onExport={canExportMarkers ? handleExportMarkers : undefined}
+              onImport={canImportMarkers ? handleImportMarkersClick : undefined}
               exportCount={exportableComments.length}
             />
             {showToggleButton && onToggleVisibility && (
@@ -2705,6 +2881,7 @@ export default function CommentSection({
                 onCopy={handleCopyComments}
                 onPaste={handlePasteComments}
                 onExport={canExportMarkers ? handleExportMarkers : undefined}
+                onImport={canImportMarkers ? handleImportMarkersClick : undefined}
                 exportCount={exportableComments.length}
                 /* 4.x: on mobile the guest "Name" editor lives INSIDE this
                    kebab menu instead of taking its own row under the header. */
@@ -3248,6 +3425,99 @@ export default function CommentSection({
         const id = pendingDeleteCommentId
         if (!id) return
         await handleDeleteComment(id)
+      }}
+    />
+
+    {/* 7.14.0: Premiere markers → comments. The picker is a hidden input the
+        kebab item clicks; the one dialog shows the plan (what will be posted,
+        what will be skipped and why), then the outcome in the same dialog. */}
+    {canImportMarkers && (
+      <input
+        ref={markerFileInputRef}
+        type="file"
+        accept=".xml,text/xml,application/xml"
+        className="hidden"
+        onChange={(e) => {
+          void handleMarkerFileChosen(e)
+        }}
+      />
+    )}
+    <ConfirmDialog
+      open={markerDialog !== null}
+      onOpenChange={(next) => {
+        if (!next && !markerImportBusy) setMarkerDialog(null)
+      }}
+      hideCancel={shownMarkerDialog?.kind === 'notice'}
+      title={
+        shownMarkerDialog?.kind === 'plan'
+          ? t('importPremiereMarkersConfirmTitle', { count: shownMarkerDialog.plan.items.length })
+          : shownMarkerDialog?.title ?? ''
+      }
+      description={
+        shownMarkerDialog?.kind === 'plan' ? (
+          <span className="block space-y-1.5 text-left">
+            <span className="block">
+              <span className="text-white/55">{t('importPremiereMarkersFile')}:</span>{' '}
+              <span className="break-all">{shownMarkerDialog.fileName}</span>
+            </span>
+            <span className="block">
+              <span className="text-white/55">{t('importPremiereMarkersSequence')}:</span>{' '}
+              {shownMarkerDialog.sequence.name || '—'}{' '}
+              <span className="text-white/55 tabular-nums">
+                ({Math.round(shownMarkerDialog.plan.fps * 1000) / 1000} fps)
+              </span>
+            </span>
+            {adminUser?.name && (
+              <span className="block">
+                <span className="text-white/55">{t('importPremiereMarkersAuthor')}:</span>{' '}
+                {adminUser.name}
+              </span>
+            )}
+            {shownMarkerDialog.plan.assumedVideoFps && (
+              <span className="block text-amber-300/90">
+                {t('importPremiereMarkersAssumedFps', {
+                  fps: Math.round(shownMarkerDialog.plan.fps * 1000) / 1000,
+                })}
+              </span>
+            )}
+            {shownMarkerDialog.plan.skippedDuplicate > 0 && (
+              <span className="block text-white/70">
+                {t('importPremiereMarkersSkippedDuplicate', {
+                  count: shownMarkerDialog.plan.skippedDuplicate,
+                })}
+              </span>
+            )}
+            {shownMarkerDialog.plan.skippedBeyondEnd > 0 && (
+              <span className="block text-white/70">
+                {t('importPremiereMarkersSkippedBeyondEnd', {
+                  count: shownMarkerDialog.plan.skippedBeyondEnd,
+                })}
+              </span>
+            )}
+            {shownMarkerDialog.plan.skippedEmpty > 0 && (
+              <span className="block text-white/70">
+                {t('importPremiereMarkersSkippedEmpty', {
+                  count: shownMarkerDialog.plan.skippedEmpty,
+                })}
+              </span>
+            )}
+          </span>
+        ) : (
+          shownMarkerDialog?.description ?? ''
+        )
+      }
+      confirmLabel={
+        shownMarkerDialog?.kind === 'plan'
+          ? markerImportWait != null
+            ? t('importPremiereMarkersWaiting', { seconds: markerImportWait })
+            : t('importPremiereMarkersConfirm', { count: shownMarkerDialog.plan.items.length })
+          : t('importPremiereMarkersOk')
+      }
+      cancelLabel={t('cancel')}
+      closeOnConfirm={false}
+      onConfirm={() => {
+        if (markerDialog?.kind === 'plan') return handleConfirmMarkerImport()
+        setMarkerDialog(null)
       }}
     />
     </>
