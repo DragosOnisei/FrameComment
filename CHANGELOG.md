@@ -14,6 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.14.1] - 2026-09-23
+
+### Fixed
+
+- **A colleague's photo no longer turns into initials until you reload.**
+  The comment list fetches each person's photo once per page and reuses it
+  on every note — and it remembered a FAILED fetch the same way, for as long
+  as the tab lived. One refused request, for any passing reason (a busy
+  server, a token that expired in that second, a network blip, a deploy
+  mid-request), meant initials for that person on every comment until a
+  reload emptied the cache. A photo is still kept for the session, but "no
+  photo" is now remembered for a minute and a refusal only for a few seconds,
+  after which the list quietly asks again and the face appears by itself.
+  A photo already on screen is never replaced by initials because a later
+  payload forgot to say the person has one; and two routes that return
+  comments with their author — the project route and the share page's
+  comments route — now include the photo flag they used to leave out. A
+  refusal is logged with its status so the next report can name the cause.
+
 ## [7.14.0] - 2026-09-22
 
 ### Added

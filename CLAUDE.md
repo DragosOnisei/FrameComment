@@ -277,6 +277,19 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   caller alone: a "Copied" import would grey out and, once done, hide an
   editor's own notes. Text is name on the first line, comment below, HTML
   characters escaped. Admin only, like the export, in the same kebab.
+- **A failed avatar fetch is not the answer** (7.14.1): `UserAvatar`
+  caches a person's photo per page load, and the first version cached a
+  FAILED fetch the same way — so one refused `/api/users/[id]/avatar`
+  (rate-limited burst, expired token, network blip, deploy mid-request)
+  meant initials for that person on every note until a reload. The policy
+  is `createAvatarStore` in src/lib/avatar-cache.ts (pure, exercised by a
+  node script with a failing fetcher): a photo is kept for the session,
+  404 for a minute, a transient refusal for a 2–30 s backoff, and the
+  mounted hook retries when it ends. A photo already known wins over a
+  payload whose author carries no `hasAvatar` — and every route that
+  returns comments with `user` must select `avatarUrl`, because the
+  sanitizer derives the flag from it (`/api/projects/[id]` and the share
+  comments route did not, until 7.14.1).
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

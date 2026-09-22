@@ -100,6 +100,9 @@ export async function GET(
                 name: true,
                 username: true,
                 email: true,
+                // 7.14.1: the sanitizer turns this into `hasAvatar`; without it a
+                // comment from this route said "no photo" for people who have one.
+                avatarUrl: true,
               }
             },
             replies: {
@@ -110,6 +113,9 @@ export async function GET(
                     name: true,
                     username: true,
                     email: true,
+                    // 7.14.1: the sanitizer turns this into `hasAvatar`; without it a
+                    // comment from this route said "no photo" for people who have one.
+                    avatarUrl: true,
                   }
                 }
               },

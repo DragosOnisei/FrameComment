@@ -4,6 +4,12 @@ import { useEffect, useState } from 'react'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { apiFetch } from '@/lib/api-client'
 import { useAuth } from '@/components/AuthProvider'
+import { logError } from '@/lib/logging'
+import {
+  createAvatarStore,
+  outcomeForStatus,
+  type AvatarFetchOutcome,
+} from '@/lib/avatar-cache'
 
 /**
  * 7.4.1 — an avatar that shows the person's face, falling back to their
@@ -18,28 +24,44 @@ import { useAuth } from '@/components/AuthProvider'
  * single component — the avatar on a comment, on its timeline pin and on a
  * reply are three separate mounts asking for the same picture.
  *
- * A failed fetch is remembered as `null`, so a user whose avatar is missing or
- * unreadable is asked for once and then quietly draws initials for the rest of
- * the session instead of retrying on every render.
+ * 7.14.1: a failed fetch is NOT remembered as the answer. It used to be —
+ * "asked for once and then quietly draws initials for the rest of the
+ * session" — and that one sentence is why a colleague's face turned into
+ * initials on every note until the page was reloaded: any single refused
+ * request (a rate-limited burst, a token that expired in that second, a
+ * network blip, a deploy mid-request) was cached as "no photo" for as long as
+ * the tab lived. The policy now lives in src/lib/avatar-cache.ts: a photo is
+ * kept for the session, "no photo" (404) for a minute, a transient refusal
+ * only for a short backoff, and a mounted component retries when the backoff
+ * ends. The fetcher below is the only browser-specific part.
  */
-const cache = new Map<string, Promise<string | null>>()
-
-function loadAvatar(userId: string): Promise<string | null> {
-  const hit = cache.get(userId)
-  if (hit) return hit
-  const p = (async () => {
+async function fetchAvatar(userId: string): Promise<AvatarFetchOutcome> {
+  let res: Response
+  try {
+    res = await apiFetch(`/api/users/${userId}/avatar`)
+  } catch (error) {
+    logError('[avatar] request failed:', error)
+    return { kind: 'transient' }
+  }
+  const kind = outcomeForStatus(res.status)
+  if (kind === 'ok') {
     try {
-      const res = await apiFetch(`/api/users/${userId}/avatar`)
-      if (!res.ok) return null
       const blob = await res.blob()
-      return URL.createObjectURL(blob)
-    } catch {
-      return null
+      return { kind: 'ok', url: URL.createObjectURL(blob) }
+    } catch (error) {
+      logError('[avatar] body unreadable:', error)
+      return { kind: 'transient' }
     }
-  })()
-  cache.set(userId, p)
-  return p
+  }
+  if (kind === 'transient') {
+    // Named in the console so the next "initials again" report can say which
+    // status it was, instead of "sometimes".
+    logError(`[avatar] ${res.status} for ${userId}; will retry`)
+  }
+  return kind === 'missing' ? { kind: 'missing' } : { kind: 'transient', status: res.status }
 }
+
+const store = createAvatarStore(fetchAvatar)
 
 /** The cached avatar for a user, or null. Shared with the timeline pin. */
 export function useAvatarUrl(userId?: string | null, hasAvatar?: boolean): string | null {
@@ -63,16 +85,47 @@ export function useAvatarUrl(userId?: string | null, hasAvatar?: boolean): strin
       setUrl(ownAvatar)
       return
     }
-    if (!userId || !hasAvatar) {
+    if (!userId) {
+      setUrl(null)
+      return
+    }
+    // 7.14.1: a photo already fetched wins over a payload that carries no
+    // flag — a row rebuilt by a route that does not select `avatarUrl`
+    // must not turn a face that is on screen back into initials.
+    const known = store.peek(userId)
+    if (known) {
+      setUrl(known)
+      return
+    }
+    if (!hasAvatar) {
       setUrl(null)
       return
     }
     let cancelled = false
-    void loadAvatar(userId).then((u) => {
-      if (!cancelled) setUrl(u)
-    })
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let attempts = 0
+    const attempt = () => {
+      void store.load(userId).then((result) => {
+        if (cancelled) return
+        if (result.url !== null) {
+          setUrl(result.url)
+          return
+        }
+        // Transient refusals are retried while this component is mounted —
+        // the list stays on screen for minutes, and the face should arrive
+        // without anyone reloading. A confirmed "no photo" waits its minute
+        // out and is asked once more, in case the flag was the stale party.
+        // Capped so a server that keeps refusing is asked six times, not
+        // forever.
+        attempts += 1
+        if (attempts >= 6) return
+        timer = setTimeout(attempt, result.retryInMs)
+      })
+    }
+    attempt()
     return () => {
       cancelled = true
+      if (timer) clearTimeout(timer)
     }
   }, [userId, hasAvatar, ownAvatar])
   return url
