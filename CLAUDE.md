@@ -240,6 +240,13 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   with `!important` and a CSS animation ranks below `!important`, and a
   DOM-added class is wiped by the selecting re-render; the remount restarts
   the animation and `both` parks it at opacity 0 if the removal is late.
+  The list's "scroll to the newest comment" effect (on `displayComments
+  .length`) yields while a deep link lands (`focusScrollGuardRef`, 7.15.0):
+  it fired as the list filled, cancelled the smooth scroll to the target
+  midway and left the first card half under the panel's top edge — "no
+  highlight for comments, only for replies", because replies sit mid-list.
+  Two settle checks re-scroll without animation if the card is not fully
+  inside its scroller.
 - **Author names are Unicode; the ASCII rule is for ffmpeg only** (7.13.1):
   `sanitizeAndValidateContent` (src/lib/comment-helpers.ts) rejects only `<`,
   `>` and control characters in `authorName`, cap 100 like `User.name`. It
@@ -276,7 +283,17 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `pasteClippedThreads` with `isCopied: false`. That flag exists for this
   caller alone: a "Copied" import would grey out and, once done, hide an
   editor's own notes. Text is name on the first line, comment below, HTML
-  characters escaped. Admin only, like the export, in the same kebab.
+  characters escaped. Admin only, like the .srt export, in the same kebab.
+- **Comments export as .srt, never overlapping** (7.15.0): the kebab's
+  export is `buildCommentsSrt` (src/lib/comments-srt.ts): one cue per
+  moment, `timestampMs` preferred over the frame-rounded timecode, author
+  prefixed, replies under the note, blank lines removed (a blank line ends
+  an SRT cue), same-frame notes merged into one cue, a point note shown for
+  4 s and cut short when the next arrives — Premiere puts an .srt on ONE
+  caption track and two captions cannot share a moment. UTF-8 with BOM and
+  CRLF so Premiere/Windows do not read ș/ț as Latin-1. The 7.8.0 Final Cut
+  XML builder stays in premiere-markers.ts (the import round-trips through
+  it) but has no menu item.
 - **A failed avatar fetch is not the answer** (7.14.1): `UserAvatar`
   caches a person's photo per page load, and the first version cached a
   FAILED fetch the same way — so one refused `/api/users/[id]/avatar`

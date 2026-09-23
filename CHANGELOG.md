@@ -14,6 +14,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.15.0] - 2026-09-23
+
+### Changed
+
+- **Comments export as subtitles (.srt) instead of Premiere markers.** The
+  comments menu's export now writes an .srt: one caption per comment at its
+  exact moment, the author's name in front, replies underneath. Dropped on a
+  caption track in Premiere Pro (File → Import), Resolve or any player, the
+  notes are read over the picture at the moment they are about — which
+  editors find easier than markers. A comment with no range stays on for four
+  seconds and steps aside when the next one arrives, so captions never
+  overlap; two notes on the same frame become one caption. The file is UTF-8
+  with a byte-order mark and Windows line ends so Premiere reads ș and ț
+  correctly. The Final Cut XML export is gone from the menu; importing
+  Premiere markers (7.14.0) is unchanged.
+- **The browser-notification test now names what can still hide a banner on
+  a Mac.** Its third step lists the system-level causes in the order to
+  check: a Focus mode (one switched on from the iPhone applies to the Mac,
+  and Reduce Interruptions filters most third-party notifications), the
+  "when mirroring or sharing the display" permission that is off by default,
+  Chrome's own entry and scheduled summary in System Settings, and Chrome
+  having to be running.
+
+### Fixed
+
+- **A notification about a comment lands with the comment in view.** Opening
+  a "new comments" notification scrolled to the comment and then the list's
+  own "jump to the newest comment" ran as it filled, cancelling that scroll
+  midway — the target, usually the first card, ended half hidden under the
+  top of the panel, ring and pulse out of sight. Replies sit mid-list, where
+  the same collision still left the card visible, which is why highlights
+  seemed to work for replies only. The jump now waits while a notification
+  is landing, and the landing re-checks that the card is fully on screen.
+- **Deleting a reply asks "Delete this reply?"**, not "Delete this comment?".
+
 ## [7.14.1] - 2026-09-23
 
 ### Fixed

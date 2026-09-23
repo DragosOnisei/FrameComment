@@ -751,8 +751,8 @@
   },
   "comments": {
     "feedbackAndDiscussion": "All comments",
-    "exportPremiereMarkers": "Export markers for Premiere",
-    "exportPremiereMarkersHint": "Downloads a Final Cut Pro 7 XML file. In Premiere Pro, File \u2192 Import creates a sequence with one marker per comment.",
+    "exportSubtitles": "Export comments as subtitles (.srt)",
+    "exportSubtitlesHint": "Downloads an .srt file with one caption per comment, at its timecode, replies included. Drop it on a caption track (Premiere Pro: File \u2192 Import) to read the notes over the picture.",
     "importPremiereMarkers": "Import markers from Premiere…",
     "importPremiereMarkersHint": "Choose a Final Cut Pro 7 XML exported from Premiere Pro (File → Export → Final Cut Pro XML). Each sequence marker becomes a comment at its timecode, in your name.",
     "importPremiereMarkersConfirmTitle": "Import {count, plural, =1 {1 marker} other {# markers}} as comments?",
@@ -1543,7 +1543,7 @@
       "testStepReceived": "2. Received by this browser at {time} ({title}).",
       "testStepNotReceived": "2. Not received by this browser within 15 seconds.",
       "testHintNotReceived": "The push service accepted the message, so it is stuck between Google's servers and this browser. On a managed Mac or over a VPN, Chrome's push channel is often blocked: open chrome://gcm-internals and check that Connection State says CONNECTED. If two copies of Chrome are installed, the subscription belongs to the copy that enabled it.",
-      "testHintReceived": "3. The browser received it. If no banner appeared, the system hid it: System Settings → Notifications → Google Chrome must use Banners or Alerts (not None), and no Focus mode may be active.",
+      "testHintReceived": "3. The browser received it and asked the system to show it. If no banner appeared, the system held it back. Check, in this order: a Focus mode (the moon in the menu bar — one turned on from your iPhone applies here too, and Reduce Interruptions filters most third-party notifications); System Settings → Notifications → \"Allow notifications when mirroring or sharing the display\" (off by default, so nothing shows during a screen share); System Settings → Notifications → Google Chrome → allowed, style Banners or Alerts, and no scheduled summary; and Chrome must be running — on a Mac nothing is delivered while it is quit.",
       "lastPushReceived": "Last push received by this browser: {time} ({title})",
       "removeTitle": "Remove subscription",
       "bellAlwaysOn": "Your own notifications (new feedback on your cuts, replies to your comments, cuts sent to you) always reach every device listed here. The switches below add company-wide events on top."

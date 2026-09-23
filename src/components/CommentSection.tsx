@@ -36,7 +36,7 @@ import {
   type MarkerImportPlan,
   type ParsedSequence,
 } from '@/lib/premiere-markers-import'
-import { buildPremiereMarkersXml, premiereMarkersFileName } from '@/lib/premiere-markers'
+import { buildCommentsSrt, commentsSrtFileName } from '@/lib/comments-srt'
 import { emoticonOnChange } from '@/lib/emoticons'
 import { handleListKeydown } from '@/lib/comment-list-keys'
 import { withoutRetiredCarryOvers } from '@/lib/comment-visibility'
@@ -1004,6 +1004,10 @@ export default function CommentSection({
 
   const lastFocusedCommentRef = useRef<string | null>(null)
 
+  // 7.15.0: while a deep link is being brought into view, the "scroll to the
+  // newest comment" effect below must not run — see focusCommentInList.
+  const focusScrollGuardRef = useRef(0)
+
   /**
    * Scroll to a comment (or a reply) and light it up; returns a cancel.
    *
@@ -1070,13 +1074,49 @@ export default function CommentSection({
     const isMobile =
       typeof window !== 'undefined' && window.innerWidth < 640
 
+    // 7.15.0: hold the auto-scroll off for as long as this can take; refreshed
+    // once the card is found so the settle checks below run unopposed.
+    focusScrollGuardRef.current = Date.now() + 5000
+    const settleTimers: ReturnType<typeof setTimeout>[] = []
+
     const tryScroll = () => {
       attempts += 1
       const element = document.getElementById(`comment-${targetId}`)
       if (element) {
         lastFocusedCommentRef.current = targetId
+        focusScrollGuardRef.current = Date.now() + 4000
         if (!isMobile) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          /**
+           * 7.15.0: make sure it actually ended up on screen.
+           *
+           * The smooth scroll above is an animation, and anything that sets the
+           * list's scrollTop while it runs — the "newest comment" auto-scroll as
+           * the list fills, a layout shift while the player mounts — cancels it
+           * midway. Seen on 2026-09-23: a notification for the FIRST comment of
+           * a cut landed with that card half under the panel's top edge, ring
+           * and pulse invisible, so "the highlight does not work for comments,
+           * only for replies" — replies sit mid-list, where a spoiled scroll
+           * still leaves the card in view. Two later checks re-scroll without
+           * animation if the card is not fully inside its scroller.
+           */
+          const settle = () => {
+            const card = document.getElementById(`comment-${targetId}`)
+            if (!card) return
+            let scroller: HTMLElement | null = card.parentElement
+            while (scroller) {
+              const oy = getComputedStyle(scroller).overflowY
+              if (oy === 'auto' || oy === 'scroll') break
+              scroller = scroller.parentElement
+            }
+            if (!scroller) return
+            const c = scroller.getBoundingClientRect()
+            const r = card.getBoundingClientRect()
+            if (r.top < c.top || r.bottom > c.bottom) {
+              card.scrollIntoView({ behavior: 'auto', block: 'center' })
+            }
+          }
+          settleTimers.push(setTimeout(settle, 700), setTimeout(settle, 1600))
         }
         // 1.9.1+: PERSISTENT glossy lift. Add .is-selected to the
         // clicked comment's card and clear it from every other one
@@ -1122,6 +1162,7 @@ export default function CommentSection({
     timer = setTimeout(tryScroll, 100)
     return () => {
       if (timer) clearTimeout(timer)
+      for (const t of settleTimers) clearTimeout(t)
     }
   }, [triggerFocusGlow])
 
@@ -1363,6 +1404,11 @@ export default function CommentSection({
   // Auto-scroll to bottom when new comments appear
   // Scrolls only the messages container, not the entire page
   useEffect(() => {
+    // 7.15.0: not while a deep link is landing. This effect fires as the list
+    // first fills, which is exactly when focusCommentInList is scrolling to
+    // the comment a notification pointed at; jumping to the bottom here
+    // cancelled that scroll and left the target half hidden (see there).
+    if (Date.now() < focusScrollGuardRef.current) return
     if (messagesContainerRef.current) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
     }
@@ -1479,6 +1525,11 @@ export default function CommentSection({
   // with the same themed ConfirmDialog used elsewhere (project delete,
   // archive, etc.) for visual consistency.
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
+  // 7.15.0: the confirmation names what it deletes. Replies go through the
+  // same dialog as threads, and it said "Delete this comment?" for both —
+  // alarming when the thing under the cursor was a one-line answer, and
+  // wrong. The kind is recorded where the id is, by the caller that knows.
+  const [pendingDeleteIsReply, setPendingDeleteIsReply] = useState(false)
 
   /**
    * 7.3.0 — select several comments and act on them at once.
@@ -1947,15 +1998,19 @@ export default function CommentSection({
   }, [displayComments, projectId])
 
   /**
-   * 7.8.0: the notes as Premiere Pro markers.
+   * 7.15.0: the notes as subtitles (.srt) — 7.8.0 exported them as Premiere
+   * markers (Final Cut XML), and the menu item is now this instead.
    *
    * Every top-level comment on the active cut — carried-over ones included,
-   * since a marker is about the cut, not about where the note was first
-   * written — becomes one marker in a Final Cut Pro 7 XML file that Premiere
-   * imports (File → Import). Built in the browser from what the sidebar
-   * already holds and handed over as a download; nothing is stored. Admin
-   * only, and only for a video with a frame rate (an image has no timeline).
-   * See src/lib/premiere-markers.ts for the format.
+   * since a caption is about the cut, not about where the note was first
+   * written — becomes one caption at its moment, with its replies under it.
+   * An .srt drops onto a caption track in any NLE or player, and the note is
+   * then read over the picture at the moment it is about, which is what
+   * editors asked for over markers ("așa e mai ușor pentru editori",
+   * 2026-09-23). Built in the browser from what the sidebar already holds and
+   * handed over as a download; nothing is stored. Admin only, and only for a
+   * video with a frame rate (an image has no timeline). Rules of the format
+   * and why cues never overlap: src/lib/comments-srt.ts.
    */
   const exportableComments = useMemo(
     () => (displayComments as any[]).filter((c) => !c.parentId),
@@ -1963,20 +2018,19 @@ export default function CommentSection({
   )
   const canExportMarkers =
     isAdminView && !!currentVideo && typeof currentVideo.fps === 'number' && currentVideo.fps > 0
-  const handleExportMarkers = useCallback(() => {
+  const handleExportSubtitles = useCallback(() => {
     if (!currentVideo || !currentVideo.fps) return
-    const xml = buildPremiereMarkersXml(
+    const srt = buildCommentsSrt(
       {
         name: currentVideo.name,
         versionLabel: currentVideo.versionLabel,
         fps: currentVideo.fps,
-        duration: currentVideo.duration,
-        width: currentVideo.width,
-        height: currentVideo.height,
+        duration: Number(currentVideo.duration) || 0,
       },
       exportableComments.map((c: any) => ({
         timecode: c.timecode,
         timecodeEnd: c.timecodeEnd ?? null,
+        timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
         authorName: c.authorName || c.user?.name || c.user?.email || null,
         content: c.content ?? '',
         replies: Array.isArray(c.replies)
@@ -1987,11 +2041,13 @@ export default function CommentSection({
           : [],
       })),
     )
-    const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
+    // `application/x-subrip` is the registered type; `text/plain` would make
+    // some browsers append .txt to the name.
+    const blob = new Blob([srt], { type: 'application/x-subrip;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = premiereMarkersFileName(currentVideo)
+    a.download = commentsSrtFileName(currentVideo)
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -2616,7 +2672,7 @@ export default function CommentSection({
               hasClipboard={hasClipboardForProject}
               onCopy={handleCopyComments}
               onPaste={handlePasteComments}
-              onExport={canExportMarkers ? handleExportMarkers : undefined}
+              onExport={canExportMarkers ? handleExportSubtitles : undefined}
               onImport={canImportMarkers ? handleImportMarkersClick : undefined}
               exportCount={exportableComments.length}
             />
@@ -2880,7 +2936,7 @@ export default function CommentSection({
                 hasClipboard={hasClipboardForProject}
                 onCopy={handleCopyComments}
                 onPaste={handlePasteComments}
-                onExport={canExportMarkers ? handleExportMarkers : undefined}
+                onExport={canExportMarkers ? handleExportSubtitles : undefined}
                 onImport={canImportMarkers ? handleImportMarkersClick : undefined}
                 exportCount={exportableComments.length}
                 /* 4.x: on mobile the guest "Name" editor lives INSIDE this
@@ -3120,7 +3176,10 @@ export default function CommentSection({
                         // token session id via `isMyComment`. Server-side
                         // DELETE /api/comments/[id] enforces the same.
                         isAdminView || isMyComment(comment)
-                          ? () => setPendingDeleteCommentId(comment.id)
+                          ? () => {
+                              setPendingDeleteIsReply(false)
+                              setPendingDeleteCommentId(comment.id)
+                            }
                           : undefined
                       }
                       onEdit={(newContent) => handleEditComment(comment.id, newContent)}
@@ -3136,6 +3195,7 @@ export default function CommentSection({
                         const canDeleteReply =
                           isAdminView || (!!reply && isMyComment(reply))
                         if (!canDeleteReply) return
+                        setPendingDeleteIsReply(true)
                         setPendingDeleteCommentId(replyId)
                       }}
                       timestampLabel={timestampLabel}
@@ -3417,7 +3477,7 @@ export default function CommentSection({
       open={pendingDeleteCommentId !== null}
       onOpenChange={(next) => { if (!next) setPendingDeleteCommentId(null) }}
       variant="destructive"
-      title="Delete this comment?"
+      title={pendingDeleteIsReply ? 'Delete this reply?' : 'Delete this comment?'}
       description="This cannot be undone."
       confirmLabel={t('deleteComment')}
       cancelLabel={t('cancel')}

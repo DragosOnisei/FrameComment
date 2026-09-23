@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { MoreVertical, ClipboardCopy, ClipboardPaste, FileDown, FileUp } from 'lucide-react'
+import { MoreVertical, ClipboardCopy, ClipboardPaste, Captions, FileUp } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 /**
@@ -38,7 +38,8 @@ export interface CommentsKebabMenuProps {
    *  inside the popover don't close it. */
   nameSection?: ReactNode
   /**
-   * 7.8.0: "Export markers for Premiere". Present only where the host can
+   * 7.8.0: "Export markers for Premiere"; 7.15.0: the same slot exports the
+   * comments as subtitles (.srt) instead. Present only where the host can
    * build the file (admin view, a video with a frame rate); absent = no item.
    */
   onExport?: () => Promise<void> | void
@@ -252,15 +253,15 @@ export default function CommentsKebabMenu({
               type="button"
               onClick={runExport}
               disabled={!canExport}
-              title={t('exportPremiereMarkersHint')}
+              title={t('exportSubtitlesHint')}
               className={`
                 w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
                 transition-colors text-left
                 ${canExport ? 'hover:bg-white/[0.08]' : 'opacity-40 cursor-not-allowed'}
               `}
             >
-              <FileDown className="w-4 h-4 shrink-0" />
-              <span className="flex-1">{t('exportPremiereMarkers')}</span>
+              <Captions className="w-4 h-4 shrink-0" />
+              <span className="flex-1">{t('exportSubtitles')}</span>
               {exportCount > 0 && (
                 <span className="text-xs text-white/55 tabular-nums">{exportCount}</span>
               )}
