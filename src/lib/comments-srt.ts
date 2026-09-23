@@ -5,7 +5,10 @@
  * as timeline markers: an .srt drops onto any NLE's caption track (Premiere,
  * Resolve, Final Cut via a converter) and onto any player, and the note is
  * then READ over the picture at the moment it is about — "logo too small"
- * appears while the logo is on screen. The 7.8.0 Final Cut XML export did
+ * appears while the logo is on screen. Which comments go in is the caller's
+ * decision (CommentSection: fresh, open, top-level notes only since 7.15.1);
+ * the builder itself takes whatever it is given, replies included, so a
+ * future "everything" export needs no second builder. The 7.8.0 Final Cut XML export did
  * the same with markers and was retired from the menu on 2026-09-23 at
  * Dragos's request ("așa e mai ușor pentru editori"); its builder stays in
  * premiere-markers.ts because the import (7.14.0) shares its text helpers

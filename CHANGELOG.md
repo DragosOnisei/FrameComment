@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.15.1] - 2026-09-23
+
+### Changed
+
+- **The .srt export is the editor's to-do list.** It now contains only the
+  comments that are new on this cut and still open: notes carried over from
+  an earlier version are left out, notes marked Done are left out, and
+  replies no longer appear under a caption. The count next to the menu item
+  shows the same set, so you know how many captions you get before you
+  export.
+
 ## [7.15.0] - 2026-09-23
 
 ### Changed

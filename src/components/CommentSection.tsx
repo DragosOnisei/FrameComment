@@ -2001,9 +2001,11 @@ export default function CommentSection({
    * 7.15.0: the notes as subtitles (.srt) — 7.8.0 exported them as Premiere
    * markers (Final Cut XML), and the menu item is now this instead.
    *
-   * Every top-level comment on the active cut — carried-over ones included,
-   * since a caption is about the cut, not about where the note was first
-   * written — becomes one caption at its moment, with its replies under it.
+   * Every OPEN, FRESH top-level comment on the active cut becomes one caption
+   * at its moment — no carried-over notes, no Done ones, no replies (7.15.1;
+   * see `exportableComments`). The editor imports the file to work through
+   * what is still to do on this cut, and a caption for a note already handled
+   * or written about a previous cut is noise on the picture.
    * An .srt drops onto a caption track in any NLE or player, and the note is
    * then read over the picture at the moment it is about, which is what
    * editors asked for over markers ("așa e mai ușor pentru editori",
@@ -2013,7 +2015,12 @@ export default function CommentSection({
    * and why cues never overlap: src/lib/comments-srt.ts.
    */
   const exportableComments = useMemo(
-    () => (displayComments as any[]).filter((c) => !c.parentId),
+    () =>
+      // 7.15.1: only what is NEW on this cut and still open — the editor's
+      // to-do list, not the archive. Carried-over notes were written about an
+      // earlier cut; Done ones are handled; replies are the conversation about
+      // a note, not a note. Dragos asked for exactly this set on 2026-09-23.
+      (displayComments as any[]).filter((c) => !c.parentId && !c.isCopied && !c.isResolved),
     [displayComments],
   )
   const canExportMarkers =
@@ -2033,12 +2040,8 @@ export default function CommentSection({
         timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
         authorName: c.authorName || c.user?.name || c.user?.email || null,
         content: c.content ?? '',
-        replies: Array.isArray(c.replies)
-          ? c.replies.map((r: any) => ({
-              authorName: r.authorName || r.user?.name || r.user?.email || null,
-              content: r.content ?? '',
-            }))
-          : [],
+        // 7.15.1: no replies in the caption — the note alone.
+        replies: [],
       })),
     )
     // `application/x-subrip` is the registered type; `text/plain` would make

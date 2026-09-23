@@ -287,13 +287,16 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
 - **Comments export as .srt, never overlapping** (7.15.0): the kebab's
   export is `buildCommentsSrt` (src/lib/comments-srt.ts): one cue per
   moment, `timestampMs` preferred over the frame-rounded timecode, author
-  prefixed, replies under the note, blank lines removed (a blank line ends
+  prefixed, blank lines removed (a blank line ends
   an SRT cue), same-frame notes merged into one cue, a point note shown for
   4 s and cut short when the next arrives — Premiere puts an .srt on ONE
   caption track and two captions cannot share a moment. UTF-8 with BOM and
-  CRLF so Premiere/Windows do not read ș/ț as Latin-1. The 7.8.0 Final Cut
-  XML builder stays in premiere-markers.ts (the import round-trips through
-  it) but has no menu item.
+  CRLF so Premiere/Windows do not read ș/ț as Latin-1. The SET is the
+  editor's to-do list (7.15.1, `exportableComments`): top-level, not
+  `isCopied`, not `isResolved`, and no replies in the text — the builder
+  still accepts replies for a future "everything" export. The 7.8.0 Final
+  Cut XML builder stays in premiere-markers.ts (the import round-trips
+  through it) but has no menu item.
 - **A failed avatar fetch is not the answer** (7.14.1): `UserAvatar`
   caches a person's photo per page load, and the first version cached a
   FAILED fetch the same way — so one refused `/api/users/[id]/avatar`
