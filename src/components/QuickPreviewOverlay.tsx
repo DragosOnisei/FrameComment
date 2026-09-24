@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, Film, Image as ImageIcon, Folder as FolderIcon } from 'lucide-react'
+import { X, ArrowLeft, Film, Image as ImageIcon, Folder as FolderIcon } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { apiFetch } from '@/lib/api-client'
 import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
@@ -25,6 +26,16 @@ import { storyboardGridOf } from '@/lib/storyboard-grid'
  *
  * Esc or Space closes. The overlay traps focus, locks body scroll,
  * and stops Space from scrolling the page underneath.
+ *
+ * 7.16.1: a folder preview is browsable. Click a video tile to select it,
+ * Space previews it right here — the same video card the grid opens with
+ * Space — ←/→ (or ↑/↓) step through the folder's videos, and Space or Esc
+ * goes back to the folder, the last one still selected; Space or Esc again
+ * closes. Asked for by Dragos (2026-09-24): peeking into a folder of eight
+ * cuts used to mean closing the peek and opening the folder to watch one.
+ * The nested video is the overlay's own state — the parent's `target` stays
+ * the folder, so FolderBrowser's grid shortcuts (which bail while a preview
+ * is open) stay out of the way.
  */
 
 export interface QuickPreviewVideo {
@@ -66,20 +77,15 @@ interface QuickPreviewOverlayProps {
 }
 
 export default function QuickPreviewOverlay({ target, onClose, projectId }: QuickPreviewOverlayProps) {
-  // Esc / Space close. We listen on the document so the binding
-  // works regardless of which child has focus. `preventDefault` on
-  // Space also stops the page from scrolling.
+  const t = useTranslations('videos')
+  // 7.16.1: the folder preview's own selection and the video opened from it.
+  const [selectedInFolder, setSelectedInFolder] = useState<string | null>(null)
+  const [nestedVideoId, setNestedVideoId] = useState<string | null>(null)
+  const targetKey = target ? `${target.kind}:${target.id}` : null
   useEffect(() => {
-    if (!target) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.code === 'Space' || e.key === ' ') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [target, onClose])
+    setSelectedInFolder(null)
+    setNestedVideoId(null)
+  }, [targetKey])
 
   // Lock body scroll while open so the underlying grid doesn't
   // jump when the cursor crosses into the overlay.
@@ -151,6 +157,12 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
           storyboardUrl: v.storyboardUrl ?? null,
           duration: typeof v.duration === 'number' ? v.duration : null,
           mediaType: v.mediaType,
+          // 7.16.1: what the video card needs when opened from here.
+          width: typeof v.width === 'number' ? v.width : null,
+          height: typeof v.height === 'number' ? v.height : null,
+          versionLabel: v.versionLabel ?? null,
+          uploaderName: v.createdBy?.name ?? null,
+          createdAt: v.createdAt ?? null,
         }))
         setFolderContents({ folders: subFolders, videos: previewVideos })
       } catch {
@@ -161,6 +173,90 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
       cancelled = true
     }
   }, [folderKey])
+
+  const folderVideos = useMemo(() => folderContents?.videos ?? [], [folderContents])
+  const nestedVideo: QuickPreviewVideo | null = useMemo(() => {
+    if (!nestedVideoId) return null
+    const v = folderVideos.find((x) => x.id === nestedVideoId)
+    if (!v) return null
+    return {
+      kind: 'video',
+      id: v.id,
+      name: v.name,
+      duration: v.duration ?? null,
+      width: v.width ?? null,
+      height: v.height ?? null,
+      mediaType: v.mediaType,
+      thumbnailUrl: v.thumbnailUrl,
+      previewUrl: v.previewUrl ?? null,
+      versionLabel: v.versionLabel ?? null,
+      uploaderName: v.uploaderName ?? null,
+      createdAt: v.createdAt ?? null,
+    }
+  }, [nestedVideoId, folderVideos])
+
+  const stepNested = useCallback(
+    (dir: number) => {
+      if (!nestedVideoId) return
+      const idx = folderVideos.findIndex((v) => v.id === nestedVideoId)
+      const next = folderVideos[idx + dir]
+      if (idx === -1 || !next) return
+      setNestedVideoId(next.id)
+      setSelectedInFolder(next.id)
+    },
+    [nestedVideoId, folderVideos],
+  )
+
+  // Esc / Space close. We listen on the document so the binding
+  // works regardless of which child has focus. `preventDefault` on
+  // Space also stops the page from scrolling.
+  //
+  // 7.16.1: capture phase, so the arrows reach us before a focused
+  // <video controls> seeks with them, and three layers: a video opened from
+  // the folder goes BACK on Space/Esc and steps on the arrows; the folder
+  // opens its selected video on Space; everything else closes.
+  useEffect(() => {
+    if (!target) return
+    const onKey = (e: KeyboardEvent) => {
+      const isSpace = e.code === 'Space' || e.key === ' '
+      const isEsc = e.key === 'Escape'
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (nestedVideoId) {
+        if (isSpace || isEsc) {
+          e.preventDefault()
+          e.stopPropagation()
+          setNestedVideoId(null)
+          return
+        }
+        let dir = 0
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') dir = 1
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') dir = -1
+        if (dir !== 0 && !e.shiftKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          stepNested(dir)
+        }
+        return
+      }
+      if (
+        isSpace &&
+        target.kind === 'folder' &&
+        selectedInFolder &&
+        folderVideos.some((v) => v.id === selectedInFolder)
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        setNestedVideoId(selectedInFolder)
+        return
+      }
+      if (isEsc || isSpace) {
+        e.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [target, onClose, nestedVideoId, selectedInFolder, folderVideos, stepNested])
 
   if (!target) return null
 
@@ -222,14 +318,35 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
           <X className="w-4 h-4" />
         </button>
 
+        {nestedVideo && target.kind === 'folder' && (
+          <button
+            type="button"
+            onClick={() => setNestedVideoId(null)}
+            className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 h-8 max-w-[60%] px-2.5 rounded-md ring-1 ring-white/15 hover:ring-white/25 text-xs text-white/85 hover:text-white transition-colors"
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+            aria-label={t('quickPreviewBackToFolder', { name: target.name })}
+            title={t('quickPreviewBackToFolder', { name: target.name })}
+          >
+            <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{target.name}</span>
+          </button>
+        )}
         {target.kind === 'video' ? (
           <VideoPreviewBody video={target} />
+        ) : nestedVideo ? (
+          <VideoPreviewBody video={nestedVideo} />
         ) : (
           <FolderPreviewBody
             folder={target}
             projectId={projectId}
             onClose={onClose}
             contents={folderContents!}
+            selectedVideoId={selectedInFolder}
+            onSelectVideo={setSelectedInFolder}
           />
         )}
       </div>
@@ -366,6 +483,11 @@ interface FolderContents {
     storyboardUrl?: string | null
     duration?: number | null
     mediaType?: 'VIDEO' | 'IMAGE'
+    width?: number | null
+    height?: number | null
+    versionLabel?: string | null
+    uploaderName?: string | null
+    createdAt?: string | Date | null
   }>
 }
 
@@ -597,6 +719,8 @@ function FolderPreviewBody({
   projectId,
   onClose,
   contents,
+  selectedVideoId,
+  onSelectVideo,
 }: {
   folder: QuickPreviewFolder
   projectId?: string
@@ -605,6 +729,9 @@ function FolderPreviewBody({
    *  passed in as a prop, so the body renders fully-populated on
    *  first paint — no loading state, no skeleton, no width snap. */
   contents: FolderContents
+  /** 7.16.1: the tile a click picked; Space previews it (the parent's keys). */
+  selectedVideoId?: string | null
+  onSelectVideo?: (id: string) => void
 }) {
   const router = useRouter()
 
@@ -742,6 +869,10 @@ function FolderPreviewBody({
                 key={`video-${v.id}`}
                 role="button"
                 tabIndex={0}
+                aria-pressed={selectedVideoId === v.id}
+                // 7.16.1: a click selects, the way a click selects a card in
+                // the folder grid; Space then previews it (overlay keys).
+                onClick={() => onSelectVideo?.(v.id)}
                 onDoubleClick={() => openVideo(v.name)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -752,8 +883,12 @@ function FolderPreviewBody({
                 // 2.0.x+: see folder tile above — `min-w-0` keeps the
                 // grid column from being inflated by the <video>'s
                 // intrinsic size on first hover-scrub render.
-                className="min-w-0 rounded-md overflow-hidden ring-1 ring-white/10 bg-white/[0.04] flex flex-col cursor-pointer hover:ring-primary/40 hover:bg-white/[0.07] transition-colors"
-                title={`${v.name} — double-click to open`}
+                className={`min-w-0 rounded-md overflow-hidden bg-white/[0.04] flex flex-col cursor-pointer hover:bg-white/[0.07] transition-colors ${
+                  selectedVideoId === v.id
+                    ? 'ring-2 ring-primary'
+                    : 'ring-1 ring-white/10 hover:ring-primary/40'
+                }`}
+                title={`${v.name} — click and press Space to preview, double-click to open`}
               >
                 <ScrubThumbnail video={v} />
                 <div className="px-2 py-1.5 text-xs truncate text-white" title={v.name}>

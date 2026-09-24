@@ -7,6 +7,7 @@ import { validateCommentLength, containsSuspiciousPatterns, sanitizeCommentHtml 
 import { sendImmediateNotification, queueNotification } from '@/lib/notifications'
 import { enqueueExternalNotification } from '@/lib/external-notifications/enqueueExternalNotification'
 import { getAppDomain } from '@/lib/url'
+import { notificationDeepLink } from '@/lib/notification-links'
 import { formatTimecodeDisplay, timecodeToSeekSeconds } from '@/lib/timecode'
 import { htmlToText } from 'html-to-text'
 import { logError, logMessage } from '@/lib/logging'
@@ -211,7 +212,7 @@ export async function handleCommentNotifications(params: {
     const video = videoId
       ? await prisma.video.findUnique({
           where: { id: videoId },
-          select: { name: true, versionLabel: true, version: true, fps: true },
+          select: { name: true, versionLabel: true, version: true, fps: true, folderId: true },
         })
       : null
 
@@ -283,7 +284,29 @@ export async function handleCommentNotifications(params: {
           authorName,
           content: rawContent,
           email: authorEmail || undefined,
-          url: adminShareUrl || undefined,
+          // 7.16.1: the link a CLICK on the Mac/phone notification follows —
+          // the bell's own deep link (video, stable id, folder, comment), not
+          // `adminShareUrl`. That one is the e-mail/Apprise link and goes
+          // through /login?returnUrl=…, which is right for a message read in
+          // a mail client and wrong for a push to a device that is already
+          // signed in: the login page does not forward a live session, so a
+          // click landed on the sign-in form instead of the comment
+          // (reported 2026-09-24 with the "New comment on DFT_DRAMATIC…"
+          // banner). Relative, so the service worker opens it on its own
+          // origin; it also drops `t` and `version`, which the bell never
+          // carried — the comment decides where the player goes.
+          url:
+            (videoId && video?.name
+              ? notificationDeepLink({
+                  projectId: project.id,
+                  videoId,
+                  videoName: video.name,
+                  folderId: video.folderId ?? null,
+                  commentId: comment?.id ? String(comment.id) : null,
+                })
+              : null) ||
+            adminShareUrl ||
+            undefined,
         },
       }).catch((notificationError) => {
         logError('[COMMENT-NOTIFICATION] Failed to enqueue external notification', notificationError)

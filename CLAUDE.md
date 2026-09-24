@@ -146,6 +146,17 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   persistent (`requireInteraction` defaults to true in the service worker)
   and sent with `urgency: 'high'`; a true "Time Sensitive" interruption
   level does not exist for web push on any platform (7.8.4).
+  A CLICK on a system notification (7.16.1) goes through the same path as a
+  bell row: the service worker (`notificationclick` in public/sw.js) picks
+  the focused tab of this origin, focuses it and posts `fc:open-url`;
+  `ServiceWorkerProvider` (root layout — the bell is not mounted on the
+  player page) answers on the port, `router.push`es and fires
+  `comment:focus`. Only when no tab answers does the worker `navigate()` or
+  `openWindow()`. `data.url` must be the in-app deep link
+  (`notificationDeepLink`), never the e-mail link: the client-comment
+  broadcast carried `/login?returnUrl=…` and a click opened the sign-in
+  form, because /login does not forward a live session. The worker still
+  unwraps a same-origin /login link for notifications delivered before.
   `runWithOrgContext(org, fn)` only covers what `fn` AWAITS
   inside it: a bare `prisma.x.find…()` returned from `fn` is a lazy
   PrismaPromise that executes at the outer `await`, outside the context, and

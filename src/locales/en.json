@@ -511,6 +511,7 @@
     "fileSizeMustBePositiveInteger": "fileSize must be a positive integer"
   },
   "videos": {
+    "quickPreviewBackToFolder": "Back to {name} (Space / Esc)",
     "tooManyRequestsSlowDown": "Too many requests. Please slow down.",
     "uploadVideo": "Upload Video",
     "uploadVideos": "Upload Videos",

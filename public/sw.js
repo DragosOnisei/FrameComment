@@ -87,22 +87,29 @@ self.addEventListener('push', (event) => {
   event.waitUntil(Promise.all([announce, show]))
 })
 
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close()
-
-  const data = event.notification.data || {}
+/**
+ * 7.16.1: where a click on a notification goes.
+ *
+ * Every push carries `data.url`. The client-comment broadcast used to carry
+ * the e-mail link, `/login?returnUrl=<the comment>`, and the login page does
+ * not forward a session that is already live — so clicking "New comment on
+ * …" on a Mac opened the sign-in form, not the comment. The server now sends
+ * the direct link; notifications already sitting in Notification Center still
+ * hold the old one, so a same-origin /login link is unwrapped here to its
+ * returnUrl (same rule as the login page: a path, not `//host` or `/\host`).
+ * Same-origin links are reduced to path + query so they can be handed to the
+ * app's router.
+ */
+function resolveClickUrl(data) {
   let url = '/admin'
-
-  if (data.url) {
+  if (data && data.url) {
     url = data.url
   } else {
-    switch (data.type) {
+    switch (data && data.type) {
       case 'CLIENT_COMMENT':
       case 'CLIENT_UPLOAD':
       case 'SHARE_ACCESS':
-        if (data.projectId) {
-          url = `/admin/projects/${data.projectId}`
-        }
+        if (data.projectId) url = `/admin/projects/${data.projectId}`
         break
       case 'ADMIN_ACCESS':
       case 'SECURITY_ALERT':
@@ -112,21 +119,101 @@ self.addEventListener('notificationclick', (event) => {
         url = '/admin'
     }
   }
+  try {
+    const u = new URL(url, self.location.origin)
+    if (u.origin !== self.location.origin) return u.href
+    if (u.pathname === '/login') {
+      const ret = u.searchParams.get('returnUrl')
+      if (ret && /^\/(?![/\\])/.test(ret)) return ret
+    }
+    return u.pathname + u.search + u.hash
+  } catch {
+    return '/admin'
+  }
+}
 
+/**
+ * Ask an open FrameComment tab to go there itself, the way a click on a bell
+ * row does: a client-side navigation plus a `comment:focus` event, so the
+ * player lands on the comment and pulses it (ServiceWorkerProvider listens).
+ * `client.navigate()` would reload the whole app instead, and it throws for a
+ * tab this worker does not control. Resolves true only when the page answered
+ * that it handled it; a tab with no listener (an old build, a page mid-load)
+ * answers nothing and the caller falls back.
+ */
+function askPageToOpen(client, url, data) {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (ok) => {
+      if (settled) return
+      settled = true
+      resolve(ok)
+    }
+    const timer = setTimeout(() => finish(false), 800)
+    try {
+      const channel = new MessageChannel()
+      channel.port1.onmessage = (e) => {
+        clearTimeout(timer)
+        finish(!!(e.data && e.data.ok))
+      }
+      client.postMessage(
+        { type: 'fc:open-url', url, notificationId: (data && data.notificationId) || null },
+        [channel.port2],
+      )
+    } catch {
+      clearTimeout(timer)
+      finish(false)
+    }
+  })
+}
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
   if (event.action === 'dismiss') return
 
+  const data = event.notification.data || {}
+  const url = resolveClickUrl(data)
+  const inApp = url.startsWith('/')
+
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if (client.url.includes('/admin') && 'focus' in client) {
-          client.navigate(url)
-          return client.focus()
+    (async () => {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      // The tab the person is looking at first, then any visible one, then an
+      // admin page, then anything of ours. The old handler took the first
+      // "/admin" tab in whatever order the browser listed them — often a
+      // background tab in another window.
+      const rank = (c) =>
+        c.focused ? 0 : c.visibilityState === 'visible' ? 1 : c.url.includes('/admin') ? 2 : 3
+      const ours = inApp
+        ? all
+            .filter((c) => {
+              try {
+                return new URL(c.url).origin === self.location.origin
+              } catch {
+                return false
+              }
+            })
+            .sort((a, b) => rank(a) - rank(b))
+        : []
+      const target = ours[0]
+      if (target) {
+        try {
+          await target.focus()
+        } catch {
+          /* focus is best-effort; the navigation below still happens */
+        }
+        if (await askPageToOpen(target, url, data)) return
+        try {
+          if ('navigate' in target) {
+            const navigated = await target.navigate(url)
+            if (navigated) return
+          }
+        } catch {
+          /* not controlled by this worker — open a window instead */
         }
       }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(url)
-      }
-    })
+      if (self.clients.openWindow) await self.clients.openWindow(url)
+    })(),
   )
 })
 

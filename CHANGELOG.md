@@ -14,6 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.16.1] - 2026-09-24
+
+### Fixed
+
+- **Clicking a comment notification on the Mac (or phone) lands on the
+  comment, like clicking it in the bell.** The "New comment on …"
+  notification carried the e-mail link, which goes through the sign-in page
+  — and the sign-in page does not forward someone who is already signed in,
+  so a click opened the login form instead of the comment. It now carries
+  the same direct link as the bell. The click is also handled like a bell
+  click: the FrameComment tab you are looking at comes to the front and
+  moves to the video without reloading, the comment is selected, scrolled
+  into view and pulses. Before, the first admin tab the browser listed —
+  often one in the background — was reloaded. Notifications already waiting
+  in Notification Center with the old link open the comment too.
+
+### Added
+
+- **Preview a video from inside a folder preview.** With a folder open in
+  Quick Look (Space on a folder), click one of its videos and press Space:
+  the video plays right there, in the same card the folder grid shows.
+  The arrow keys step to the previous or next video of that folder, and
+  Space or Esc goes back to the folder with the last video still selected —
+  Space or Esc again closes it. Double-click still opens the video's page.
+
 ## [7.16.0] - 2026-09-24
 
 ### Changed
