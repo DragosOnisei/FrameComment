@@ -672,6 +672,34 @@ export default function CommentSection({
     [clientSessionId],
   )
 
+  /**
+   * 7.16.0: Edit belongs to the author, and to nobody else.
+   *
+   * Until now any admin could edit any comment or reply, the way an admin can
+   * delete any. Dragos asked (2026-09-24) for editing to be the author's
+   * alone: a reviewer's words are theirs, and a staff member rewording a
+   * client's note — even to fix a typo — changes who said what. Signed-in
+   * staff own the comments carrying their `userId`; a guest owns the ones
+   * carrying their browser's session id (`isMyComment`). Delete is untouched:
+   * removing a note is moderation, editing it is authorship.
+   *
+   * UI only, on purpose. The PATCH route still lets an admin change a
+   * comment they did not write, because the same route moves a comment's
+   * time when a range is dragged on the timeline — a legitimate act on
+   * anyone's note — and tightening it would break that. What this removes is
+   * the Edit button and the right-click Edit item on other people's notes.
+   */
+  const canEditComment = useCallback(
+    (commentOrReply: any): boolean => {
+      if (isAdminView) {
+        const me = adminUser?.id
+        return !!me && commentOrReply?.userId === me
+      }
+      return isMyComment(commentOrReply)
+    },
+    [isAdminView, adminUser?.id, isMyComment],
+  )
+
   // 2.2.6+: comments filter dropdown — three discrete states the
   // user picks by tapping the section title.
   //   - 'all':        every comment (default)
@@ -3187,8 +3215,8 @@ export default function CommentSection({
                       }
                       onEdit={(newContent) => handleEditComment(comment.id, newContent)}
                       onEditReply={(replyId, newContent) => handleEditComment(replyId, newContent)}
-                      canEdit={isAdminView || isMyComment(comment)}
-                      canEditReply={(reply) => isAdminView || isMyComment(reply)}
+                      canEdit={canEditComment(comment)}
+                      canEditReply={(reply) => canEditComment(reply)}
                       formatMessageTime={formatMessageTime}
                       commentsDisabled={commentsDisabled}
                       sequenceNumber={sequenceNumber}
@@ -3384,7 +3412,9 @@ export default function CommentSection({
                 {menuCount === 1 ? 'Copy' : `Copy ${menuCount} comments`}
               </span>
             </button>
-            {commentMenu.ids.length === 1 && (
+            {commentMenu.ids.length === 1 &&
+              // 7.16.0: only the author's own note offers Edit here too.
+              canEditComment((displayComments as any[]).find((c: any) => c.id === commentMenu.ids[0])) && (
               <button
                 role="menuitem"
                 type="button"

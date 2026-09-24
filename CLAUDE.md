@@ -310,6 +310,14 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   returns comments with `user` must select `avatarUrl`, because the
   sanitizer derives the flag from it (`/api/projects/[id]` and the share
   comments route did not, until 7.14.1).
+- **Edit is the author's alone; Delete is moderation** (7.16.0):
+  `canEditComment` in CommentSection decides the Edit button on cards and
+  reply rows AND the right-click Edit item — staff own comments carrying
+  their `userId`, guests the ones carrying their session id
+  (`isMyComment`). Admins still see Delete on everything. This is UI only:
+  PATCH /api/comments/[id] keeps letting an admin change any comment
+  because dragging a range on the timeline goes through the same route on
+  anyone's note; do not tighten it without moving that first.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

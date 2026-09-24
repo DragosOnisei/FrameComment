@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.16.0] - 2026-09-24
+
+### Changed
+
+- **Only the author can edit a comment or a reply.** The Edit button on a
+  comment, on a reply and in the right-click menu now appears only for the
+  person who wrote it: for staff, the account that posted it; for a guest on
+  a share link, the browser that left it. Until now any staff member could
+  edit anyone's note. Delete is unchanged — staff can still remove any
+  comment; removing a note is moderation, rewording it is authorship.
+
 ## [7.15.1] - 2026-09-23
 
 ### Changed
