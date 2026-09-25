@@ -70,11 +70,26 @@ export function WebPushSection({ active }: { active: boolean }) {
   const [testError, setTestError] = useState<string | null>(null)
   const [lastReceived, setLastReceived] = useState<{ at: number; title: string } | null>(null)
   const testTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /**
+   * 7.16.2: the fourth step — did a CLICK on the test notification reach us?
+   * The service worker announces every click it receives
+   * (`fc:notification-clicked`). A click macOS never hands to Chrome produces
+   * no message at all, which is the known Chrome-on-macOS failure; a click
+   * that arrives proves the rest of the chain, including this app's handler.
+   * `testPersistent` records which style the last test used, so the result
+   * names it: the lost clicks are reported mostly for the style that stays.
+   */
+  const [lastClick, setLastClick] = useState<{ at: number } | null>(null)
+  const [testPersistent, setTestPersistent] = useState(true)
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
     const onMessage = (event: MessageEvent) => {
       const data = event.data
+      if (data && data.type === 'fc:notification-clicked' && data.tag === 'test') {
+        setLastClick({ at: typeof data.at === 'number' ? data.at : Date.now() })
+        return
+      }
       if (!data || data.type !== 'fc:push-received') return
       const at = typeof data.receivedAt === 'number' ? data.receivedAt : Date.now()
       const title = typeof data.title === 'string' ? data.title : 'FrameComment'
@@ -256,16 +271,21 @@ export function WebPushSection({ active }: { active: boolean }) {
   }
 
   // 7.8.1: test THIS device and report each step (see TestPhase above).
-  const handleTestThisDevice = async () => {
+  const handleTestThisDevice = async (persistent: boolean = true) => {
     if (!currentSubscriptionId) return
     setError(null)
     setSuccess(null)
     setTestError(null)
     setTestStatusCode(null)
+    setLastClick(null)
+    setTestPersistent(persistent)
     setTestPhase('sending')
     if (testTimerRef.current) clearTimeout(testTimerRef.current)
     try {
-      const data = await apiPost('/api/push/test', { subscriptionId: currentSubscriptionId })
+      const data = await apiPost('/api/push/test', {
+        subscriptionId: currentSubscriptionId,
+        persistent,
+      })
       setTestSentAt(Date.now())
       setTestStatusCode(typeof data?.statusCode === 'number' ? data.statusCode : null)
       setTestPhase((phase) => (phase === 'received' ? phase : 'sent'))
@@ -388,19 +408,38 @@ export function WebPushSection({ active }: { active: boolean }) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {currentDeviceSubscribed && currentSubscriptionId && (
-              <Button
-                onClick={handleTestThisDevice}
-                variant="secondary"
-                disabled={testPhase === 'sending'}
-                title={t('sendTestTitle')}
-              >
-                {testPhase === 'sending' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                <span className="ml-2">{t('testThisDevice')}</span>
-              </Button>
+              <>
+                <Button
+                  // An arrow, not the handler itself: the handler's first
+                  // argument is the style, and a click event is truthy.
+                  onClick={() => void handleTestThisDevice(true)}
+                  variant="secondary"
+                  disabled={testPhase === 'sending'}
+                  title={t('sendTestTitle')}
+                >
+                  {testPhase === 'sending' && testPersistent ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  <span className="ml-2">{t('testThisDevice')}</span>
+                </Button>
+                {/* 7.16.2: the same test as an ordinary banner, to compare
+                    whether clicks reach the app with each style. */}
+                <Button
+                  onClick={() => void handleTestThisDevice(false)}
+                  variant="outline"
+                  disabled={testPhase === 'sending'}
+                  title={t('testBannerTitle')}
+                >
+                  {testPhase === 'sending' && !testPersistent ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  <span className={testPhase === 'sending' && !testPersistent ? 'ml-2' : ''}>
+                    {t('testBanner')}
+                  </span>
+                </Button>
+              </>
             )}
             <Button
               onClick={currentDeviceSubscribed ? handleUnsubscribe : handleSubscribe}
@@ -440,6 +479,18 @@ export function WebPushSection({ active }: { active: boolean }) {
                   {t('testStepReceived', { time: clock(lastReceived.at), title: lastReceived.title })}
                 </p>
                 <p className="text-muted-foreground">{t('testHintReceived')}</p>
+                {/* 7.16.2: step 4 — the click. */}
+                {lastClick && testSentAt && lastClick.at >= testSentAt ? (
+                  <p className="text-green-600 dark:text-green-400">
+                    {t(testPersistent ? 'testStepClickedAlert' : 'testStepClickedBanner', {
+                      time: clock(lastClick.at),
+                    })}
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    {t(testPersistent ? 'testStepClickWaitingAlert' : 'testStepClickWaitingBanner')}
+                  </p>
+                )}
               </>
             )}
             {testPhase === 'not-received' && (

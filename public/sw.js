@@ -1,5 +1,12 @@
 const CACHE_NAME = 'framecomment-v1'
 
+// 7.16.2: macOS, by user agent — the worker has no other way to know. Every
+// browser on a Mac still reports "Macintosh"/"Mac OS X" (Chrome's reduced
+// user agent keeps the platform), which is the only fact the rule below
+// needs. An iPad in desktop mode also says Macintosh; it ignores
+// requireInteraction anyway, so being included costs nothing.
+const IS_MAC = /Macintosh|Mac OS X/.test((self.navigator && self.navigator.userAgent) || '')
+
 self.addEventListener('install', () => {
   self.skipWaiting()
 })
@@ -48,7 +55,20 @@ self.addEventListener('push', (event) => {
     // requireInteraction notification through its "alerts" helper, which
     // stays until clicked or dismissed regardless of the Banners/Alerts
     // style chosen for Chrome. The payload can opt out per notification.
-    requireInteraction: payload.requireInteraction !== false,
+    //
+    // 7.16.2: except on a Mac, where that helper is exactly what loses the
+    // click. Measured on Dragos's own machine on 2026-09-25 with the Settings
+    // test's click step: the alert that stays on screen was clicked and no
+    // `notificationclick` ever reached this worker; the same test sent as a
+    // banner arrived on the first click (Chromium 370536109 / 375640809 —
+    // macOS 15 and later). A notification that stays but cannot be opened is
+    // worse than one that slides into Notification Center and can, so on
+    // macOS every notification is a banner. The one exception is the
+    // Settings test's persistent variant, kept so the day Chrome fixes this
+    // can be seen from that page rather than guessed.
+    requireInteraction:
+      payload.requireInteraction !== false &&
+      !(IS_MAC && !(payload.data && payload.data.type === 'TEST')),
     silent: false,
     renotify: true,
     actions: payload.actions || [],
@@ -178,6 +198,45 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     (async () => {
       const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      // 7.16.2: say that a click ARRIVED, to every open page, before doing
+      // anything with it. Chrome on macOS 15 and later often drops clicks on
+      // notifications between the system and the browser (Chromium issues
+      // 370536109, 375640809) — Chrome comes to the front and this handler
+      // never runs. From the outside that looks exactly like a handler that
+      // runs and fails, so Settings → Notifications listens for this and its
+      // test can say which of the two happened.
+      for (const c of all) {
+        try {
+          c.postMessage({
+            type: 'fc:notification-clicked',
+            tag: event.notification.tag || null,
+            dataType: data.type || null,
+            at: Date.now(),
+          })
+        } catch {
+          /* a closing tab — nothing to tell */
+        }
+      }
+      // The test notification exists to be clicked from the Settings page, so
+      // its click brings the browser forward and stays put: navigating would
+      // take the page that is reporting the result away from under it.
+      if (data.type === 'TEST') {
+        const own = all.find((c) => {
+          try {
+            return new URL(c.url).origin === self.location.origin
+          } catch {
+            return false
+          }
+        })
+        if (own) {
+          try {
+            await own.focus()
+          } catch {
+            /* best-effort */
+          }
+        }
+        return
+      }
       // The tab the person is looking at first, then any visible one, then an
       // admin page, then anything of ours. The old handler took the first
       // "/admin" tab in whatever order the browser listed them — often a

@@ -157,6 +157,22 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   broadcast carried `/login?returnUrl=…` and a click opened the sign-in
   form, because /login does not forward a live session. The worker still
   unwraps a same-origin /login link for notifications delivered before.
+  Chrome on macOS 15+ often LOSES the click before the worker sees it
+  (Chromium 370536109 / 375640809: Chrome comes forward, no
+  `notificationclick`), reported mostly for the persistent "Alerts" style
+  delivered by Google Chrome Helper (Alerts). Nothing in the page can see
+  or repair that, so the worker announces every click it does receive
+  (`fc:notification-clicked`, before anything else) and Settings →
+  Notifications' test shows a 4th step — click reached us, or not — with a
+  "Test as banner" twin (`persistent: false` → `requireInteraction:
+  false`) to compare the two styles on a device. A TEST click only focuses
+  a tab; navigating would take away the page reporting the result.
+  Measured 2026-09-25 on Dragos's Mac: the persistent alert's click never
+  arrived, the banner's did. So on macOS (`IS_MAC` in sw.js, by user agent)
+  every notification is shown with `requireInteraction: false` — a banner
+  that slides into Notification Center and CAN be opened — except the
+  Settings test's persistent variant, kept to see when Chrome fixes it.
+  Other platforms keep 7.8.4's persistent notifications.
   `runWithOrgContext(org, fn)` only covers what `fn` AWAITS
   inside it: a bare `prisma.x.find…()` returned from `fn` is a lazy
   PrismaPromise that executes at the outer `await`, outside the context, and

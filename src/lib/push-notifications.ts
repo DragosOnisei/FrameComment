@@ -314,7 +314,16 @@ export async function sendPushNotifications(
  * Send a test push notification to a specific subscription
  */
 export async function sendTestNotification(
-  subscriptionId: string
+  subscriptionId: string,
+  /**
+   * 7.16.2: `persistent: false` sends the test as an ordinary banner instead
+   * of an alert that stays until clicked. On a Mac the two are delivered by
+   * different parts of Chrome (the alert style goes through its "Google
+   * Chrome Helper (Alerts)" app), and the clicks that macOS loses are
+   * reported mostly for the second; the Settings test offers both so a
+   * device can be tested with each.
+   */
+  opts: { persistent?: boolean } = {},
 ): Promise<{ success: boolean; error?: string; statusCode?: number }> {
   const { webPush } = await getPushLocaleText()
 
@@ -333,9 +342,10 @@ export async function sendTestNotification(
       .replace('{device}', subscription.deviceName || webPush.thisDevice || 'this device'),
     icon: '/brand/icon-192.png',
     tag: 'test',
+    requireInteraction: opts.persistent !== false,
     // 7.8.1: the send time travels with the payload so the notification can be
     // matched to the click that caused it.
-    data: { type: 'TEST', sentAt: Date.now() },
+    data: { type: 'TEST', sentAt: Date.now(), persistent: opts.persistent !== false },
   }
 
   return sendToSubscription(subscription, payload)

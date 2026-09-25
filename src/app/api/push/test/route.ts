@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { subscriptionId } = body
+    // 7.16.2: optional; absent means the usual persistent alert.
+    const persistent = body?.persistent === false ? false : true
 
     if (!subscriptionId) {
       return NextResponse.json(
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const result = await sendTestNotification(subscriptionId)
+    const result = await sendTestNotification(subscriptionId, { persistent })
 
     if (result.success) {
       // 7.8.1: the push service's status code, so Settings can show "accepted

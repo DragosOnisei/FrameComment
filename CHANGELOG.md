@@ -14,6 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.16.2] - 2026-09-25
+
+### Fixed
+
+- **Clicking a notification on a Mac opens it.** Chrome on macOS 15 and
+  later loses the click on notifications that stay on screen until clicked:
+  Chrome comes to the front and the page is never told. Those notifications
+  are drawn by a separate part of Chrome, and the click gets lost on the way
+  back. Tested on a real Mac, the notification that stayed on screen did
+  nothing when clicked, while the same notification as an ordinary banner
+  opened on the first click. So on a Mac every FrameComment notification
+  is now a banner: it slides into Notification Center after a few seconds,
+  and clicking it there or on screen takes you to the comment or reply,
+  highlighted. Windows and Android keep notifications that stay on screen.
+
+### Added
+
+- **The notification test shows whether your click arrived.** Settings →
+  Notifications' test now has a fourth step that turns green when your click
+  on the test notification reaches FrameComment, and a "Test as banner"
+  button to compare the two notification styles on a device. The regular
+  test keeps the style that stays on screen, so it will show when Chrome
+  fixes the Mac bug.
+
 ## [7.16.1] - 2026-09-24
 
 ### Fixed
