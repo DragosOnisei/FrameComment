@@ -79,7 +79,8 @@ export async function enqueueExternalNotification(job: ExtendedNotificationJob):
         }
       }
 
-      await sendPushNotifications(eventType, payload)
+      // 7.17.0: the video id narrows a CLIENT_COMMENT to its audience.
+      await sendPushNotifications(eventType, payload, { videoId: pushData.videoId ?? null })
     } catch (error) {
       // Don't fail the main notification if push fails
       logError('[PUSH-NOTIFICATIONS] Failed to send push:', error)

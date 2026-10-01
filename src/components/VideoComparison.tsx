@@ -415,6 +415,9 @@ export default function VideoComparison({
     const handleKeyboard = (e: KeyboardEvent) => {
       // Escape: close comparison (no Ctrl needed)
       if (e.key === 'Escape') {
+        // 7.17.0: "used" — this Esc closed compare, it must not also leave
+        // the player (src/lib/escape-back.ts).
+        e.preventDefault()
         closeWithState()
         return
       }

@@ -101,7 +101,11 @@ export default function NotificationBell() {
       }
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        // 7.17.0: "used" — this Esc closed the panel, it must not also go Back.
+        e.preventDefault()
+        setOpen(false)
+      }
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)

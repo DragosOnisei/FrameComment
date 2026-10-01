@@ -545,7 +545,11 @@ export default function CustomVideoControls({
       }
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenFlagId(null)
+      if (e.key === 'Escape') {
+        // 7.17.0: "used" — this Esc closed the marker popover, not the page.
+        e.preventDefault()
+        setOpenFlagId(null)
+      }
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)

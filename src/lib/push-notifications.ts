@@ -6,6 +6,7 @@ import { loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
 import { notificationDeepLink } from '@/lib/notification-links'
 import { commentPlainText } from '@/lib/premiere-markers'
+import { clientCommentAudience } from '@/lib/push-audience'
 
 async function getPushLocaleText() {
   const settings = await prisma.settings.findUnique({
@@ -238,7 +239,14 @@ async function sendToSubscription(
  */
 export async function sendPushNotifications(
   eventType: NotificationEventType,
-  payload: PushNotificationPayload
+  payload: PushNotificationPayload,
+  /**
+   * 7.17.0: the video a CLIENT_COMMENT is about. With it, the audience is
+   * narrowed by src/lib/push-audience.ts — editors only for their own
+   * uploads, Owner/Admin/Project Manager for everything. Without it (other
+   * events, or a legacy caller) every subscribed device is kept, as before.
+   */
+  opts: { videoId?: string | null } = {},
 ): Promise<{ sent: number; failed: number }> {
   try {
     // 7.8.1: PNG — an SVG icon makes macOS drop the whole notification (see
@@ -251,7 +259,7 @@ export async function sendPushNotifications(
     }
 
     // Get all subscriptions that include this event type
-    const subscriptions = await prisma.pushSubscription.findMany({
+    const allSubscriptions = await prisma.pushSubscription.findMany({
       where: {
         subscribedEvents: {
           has: eventType,
@@ -262,8 +270,32 @@ export async function sendPushNotifications(
         endpoint: true,
         p256dh: true,
         auth: true,
+        userId: true,
+        user: { select: { role: true } },
       },
     })
+
+    // 7.17.0: a client comment about a video reaches editors only when the
+    // video is theirs. See src/lib/push-audience.ts for the rule and the
+    // report that produced it. The uploader is read here, through the armed
+    // client, so RLS answers "which company's video" for free.
+    let subscriptions = allSubscriptions
+    if (eventType === 'CLIENT_COMMENT' && opts.videoId) {
+      const video = await prisma.video.findUnique({
+        where: { id: opts.videoId },
+        select: { createdById: true },
+      })
+      subscriptions = clientCommentAudience(
+        allSubscriptions.map((s) => ({ device: s, userId: s.userId, role: s.user?.role ?? null })),
+        video?.createdById ?? null,
+      )
+      if (subscriptions.length !== allSubscriptions.length) {
+        logMessage(
+          `[WEB-PUSH] CLIENT_COMMENT video=${opts.videoId}: ${subscriptions.length} of ${allSubscriptions.length} devices ` +
+            `(uploader=${video?.createdById ?? 'unknown'}; editors hear only their own uploads)`,
+        )
+      }
+    }
 
     if (subscriptions.length === 0) {
       return { sent: 0, failed: 0 }

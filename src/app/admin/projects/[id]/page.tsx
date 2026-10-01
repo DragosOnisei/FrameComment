@@ -300,7 +300,8 @@ export default function ProjectPage() {
   const topbarSlots = (
     <>
       <TopbarLeftSlot>
-        <Link href="/admin/projects">
+        {/* 7.17.0: `data-esc-back` — Esc presses this (src/lib/escape-back.ts). */}
+        <Link href="/admin/projects" data-esc-back="">
           <Button
             variant="ghost"
             size="sm"

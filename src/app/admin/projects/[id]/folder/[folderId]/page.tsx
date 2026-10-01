@@ -250,12 +250,14 @@ export default function ProjectFolderPage() {
   const topbarSlots = (
     <>
       <TopbarLeftSlot>
+        {/* 7.17.0: `data-esc-back` — Esc presses this (src/lib/escape-back.ts). */}
         <Link
           href={
             folder?.parentFolderId
               ? `/admin/projects/${projectId}/folder/${folder.parentFolderId}`
               : `/admin/projects/${projectId}`
           }
+          data-esc-back=""
         >
           <Button
             variant="ghost"

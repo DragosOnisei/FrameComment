@@ -175,6 +175,8 @@ export default function PlayerSettingsMenu({
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // 7.17.0: "used" — this Esc closed the menu, it must not also go Back.
+        e.preventDefault()
         if (submenu) {
           setSubmenu(null)
         } else {

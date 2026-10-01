@@ -14,6 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.0] - 2026-10-01
+
+### Added
+
+- **Esc works as Back.** On the player, Esc returns to the folder; in a
+  folder, to the parent folder or the project; on a project or its
+  analytics, one level up. It does so only when it had nothing else to
+  close: with a menu, a dialog, Quick Look, the notification panel, the
+  player settings, Compare, a drawing or a range edit open, Esc closes that
+  first and the next press goes back. While typing in a field, or in
+  fullscreen, Esc never leaves the page. Pages without a Back button are
+  unchanged, and so is Project Settings, where Esc after an edit would throw
+  unsaved changes away.
+
+### Fixed
+
+- **Editors are no longer notified about other people's videos.** The
+  company-wide "New comment on …" push went to every enrolled device, so an
+  editor's Mac rang for a client comment on a colleague's cut. It now reaches
+  an editor (Editor, Senior Video Editor, Team Leader, Marketing, Producer)
+  only for videos they uploaded; Owners, Admins and Project Managers keep
+  receiving it for every video. The bell and its own push already worked
+  this way.
+
 ## [7.16.2] - 2026-09-25
 
 ### Fixed

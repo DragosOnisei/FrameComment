@@ -409,6 +409,9 @@ export default function ThumbnailReel({
                 variant="ghost"
                 size="sm"
                 onClick={onBackToGrid}
+                // 7.17.0: Esc presses this when it closed nothing else
+                // (src/lib/escape-back.ts).
+                data-esc-back=""
                 // 2.5.1+: glass pill matching the rest of the v2.5
                 // back buttons (project / folder pages). White text,
                 // hairline ring, low-opacity bg with hover lift.

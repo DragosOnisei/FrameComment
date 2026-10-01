@@ -132,6 +132,13 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `publishNotification` is also pushed to the recipient's enrolled devices
   (src/lib/push-notifications.ts `sendBellPush`), unconditionally — the
   per-device event switches only govern the company-wide broadcasts. The
+  CLIENT_COMMENT broadcast itself is narrowed per video since 7.17.0
+  (`clientCommentAudience`, src/lib/push-audience.ts): content-only roles
+  (level 50 — Editor, Senior Video Editor, Team Leader, Marketing,
+  Producer) get it only for a video they uploaded; Owner, Admin and
+  Project Manager get every one. Alin's Mac rang for Victor's cut before
+  that. The uploader is `Video.createdById`; a legacy row without it
+  reaches the privileged roles only.
   lookup runs through the ARMED client, so a caller outside the recipient's
   org context (today: the founder answering feedback) must pass
   `{ organizationId }`; without it RLS matches zero devices, silently. VAPID
@@ -345,6 +352,20 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   PATCH /api/comments/[id] keeps letting an admin change any comment
   because dragging a range on the timeline goes through the same route on
   anyone's note; do not tighten it without moving that first.
+- **Esc is Back only when it closed nothing** (7.17.0): `EscapeBack`
+  (root layout, rules in src/lib/escape-back.ts) presses the page's Back
+  control — a real click on the element carrying `data-esc-back` (project,
+  folder, analytics, the player's reel pill) — and only when (1) at capture
+  time, before any handler ran, focus is not in a text field, nothing in
+  `ESC_LAYER_SELECTOR` is open (dialog/menu/listbox/aria-modal/
+  `data-esc-layer`) and the player is not fullscreen, and (2) after the
+  dispatch, no handler called `preventDefault()`. So every Esc handler that
+  closes something WITHOUT a role on its popup must call
+  `e.preventDefault()` (the bell panel, player settings, Feedback, the
+  timeline marker popover, compare, the attachment viewer do); a new one
+  that forgets makes Esc close it AND leave the page. Project settings has
+  no `data-esc-back` on purpose: Esc after an edit would drop unsaved
+  changes.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

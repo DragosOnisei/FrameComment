@@ -48,7 +48,12 @@ export default function FeedbackButton() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !sending) setOpen(false)
+      if (e.key === 'Escape') {
+        // 7.17.0: "used" even while sending — the dialog is up either way,
+        // and Esc must not go Back from under it.
+        e.preventDefault()
+        if (!sending) setOpen(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

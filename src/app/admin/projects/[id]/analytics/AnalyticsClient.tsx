@@ -152,7 +152,8 @@ export default function AnalyticsClient({ id }: { id: string }) {
       <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <Link href={`/admin/projects/${id}`}>
+            {/* 7.17.0: `data-esc-back` — Esc presses this (src/lib/escape-back.ts). */}
+            <Link href={`/admin/projects/${id}`} data-esc-back="">
               <Button variant="ghost" size="default" className="justify-start px-3 mb-2">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">{t('backToProject')}</span>
