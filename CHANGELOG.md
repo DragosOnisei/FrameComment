@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.1] - 2026-10-01
+
+### Security
+
+- **Next.js updated to 16.3.8.** A critical advisory (remote code execution
+  through `next/og`, which draws the link-preview image) was published
+  against 16.2.0–16.3.5 and stopped the 7.17.0 image from building: the
+  Dockerfile refuses to build with a critical vulnerability installed.
+  7.17.1 is 7.17.0 with the patched Next.js; nodemailer and the DOM
+  sanitizer moved to their patched releases in the same step. Four high
+  nodemailer advisories remain — the fix is a major version and is a
+  separate change.
+
 ## [7.17.0] - 2026-10-01
 
 ### Added
