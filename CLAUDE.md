@@ -420,6 +420,15 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   attempt) and a later hook is a conditional hook. The textarea carries
   `custom-scrollbar`, the shared themed bar; it was the one text box still
   showing the browser's grey-on-white one.
+- **The comment edit box grows to a ceiling, then scrolls** (7.17.5):
+  `EditTextarea` in MessageBubble measures `scrollHeight`, checks itself
+  once (content still overflowing → add the gap), re-measures on parent
+  width changes and `document.fonts.ready`, and stops at `EDIT_MAX_VH`
+  (45%, never under 160 px) with `overflow-y: auto` + `custom-scrollbar`.
+  The 3.9.x "no inner scrollbar, ever" box was exactly as tall as one
+  mount-time measurement; on Dragos's phone that came up a line short and
+  the end of a long comment was unreachable. Do not return to overflow
+  hidden with no ceiling.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

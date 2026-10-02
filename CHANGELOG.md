@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.5] - 2026-10-02
+
+### Fixed
+
+- **Editing a long comment no longer cuts off the end of the text.** The
+  edit box was sized once to its content with the overflow hidden, so when
+  that measurement came up short (seen on a phone) the last line was cut in
+  half and there was no scrollbar to reach it. The box now grows with the
+  text up to about 45% of the screen, then keeps that height and scrolls
+  inside, with the app's thin scrollbar; the measurement checks itself and
+  is redone when the box changes width or fonts finish loading. The inline
+  reply box, which already scrolled past its ceiling, uses the same
+  scrollbar.
+
 ## [7.17.4] - 2026-10-02
 
 ### Fixed

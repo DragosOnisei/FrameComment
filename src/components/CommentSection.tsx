@@ -169,7 +169,10 @@ function InlineReplyForm({
         placeholder={placeholder}
         rows={1}
         maxLength={6000}
-        className="w-full resize-none border-0 bg-transparent text-base sm:text-sm leading-snug placeholder:text-muted-foreground focus:outline-none px-1"
+        // 7.17.5: `custom-scrollbar` — past ~30 % of the viewport this box
+        // scrolls, and it was showing the browser's bar like the composer and
+        // the edit box did.
+        className="w-full resize-none border-0 bg-transparent text-base sm:text-sm leading-snug placeholder:text-muted-foreground focus:outline-none px-1 custom-scrollbar"
       />
       <div className="flex items-center justify-end gap-2 mt-1.5">
         <button

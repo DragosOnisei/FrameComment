@@ -1367,14 +1367,35 @@ export default function MessageBubble({
   )
 }
 
+/** 7.17.5: the edit box grows with the comment up to this share of the
+ *  viewport height (never below `EDIT_MIN_MAX_PX`), then scrolls inside. The
+ *  composer applies the same idea (40% / 120 px in CommentInput). */
+const EDIT_MAX_VH = 0.45
+const EDIT_MIN_MAX_PX = 160
+
 /**
  * 3.9.x: glass edit input for comments/replies. Replaces the old
  * `bg-background` (near-black) textarea with the app's v2.5 glass
  * vocabulary, and fixes two UX papercuts:
- *   - AUTO-GROW: the box expands to fit the whole comment (no inner
- *     scrollbar) instead of being capped at 8 rows.
+ *   - AUTO-GROW: the box expands to fit the whole comment instead of being
+ *     capped at 8 rows.
  *   - Enter SAVES, Shift+Enter inserts a newline, Esc cancels — matches
  *     the "Leave your comment" composer.
+ *
+ * 7.17.5: the growth has a ceiling again, and the box scrolls past it.
+ * "No inner scrollbar, ever" meant the box had to be exactly as tall as its
+ * content, measured once from `scrollHeight` at mount. On Dragos's phone a
+ * long comment opened for editing came up a few pixels short — the last
+ * line cut in half, no scrollbar because overflow was hidden, and no way to
+ * reach the end (2026-10-02). Whatever leaves a mobile WebKit measurement a
+ * line short, a box that cannot scroll has no way to recover from it. So:
+ * the height is re-measured whenever the box's width changes (the phone
+ * keyboard, a resized panel, fonts arriving — a ResizeObserver on the
+ * parent, plus `document.fonts.ready`), the measurement checks itself once
+ * (if the content still overflows after the height is applied, the gap is
+ * added), and above ~45% of the viewport the box stops growing and scrolls
+ * inside, with the app's thin scrollbar — the Save / Cancel buttons stay
+ * within reach under a 60-line comment.
  */
 function EditTextarea({
   value,
@@ -1393,13 +1414,23 @@ function EditTextarea({
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
-  // Grow the textarea to fit its content so the full comment is visible
-  // without an inner scrollbar.
+  // Grow the textarea to fit its content, up to the ceiling; past it the
+  // box keeps its height and scrolls (see the 7.17.5 note above).
   const resize = () => {
     const el = ref.current
     if (!el) return
+    const max = Math.max(EDIT_MIN_MAX_PX, Math.floor(window.innerHeight * EDIT_MAX_VH))
     el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
+    let wanted = el.scrollHeight
+    el.style.height = `${Math.min(wanted, max)}px`
+    // Self-check: if the content still overflows the height just applied,
+    // the measurement was short — add the gap rather than cut a line.
+    const gap = el.scrollHeight - el.clientHeight
+    if (gap > 0 && wanted < max) {
+      wanted = Math.min(wanted + gap, max)
+      el.style.height = `${wanted}px`
+    }
+    el.style.overflowY = el.scrollHeight > el.clientHeight + 1 ? 'auto' : 'hidden'
   }
 
   // Size + focus (caret at end) on mount.
@@ -1423,6 +1454,27 @@ function EditTextarea({
     resize()
   }, [value])
 
+  // 7.17.5: re-measure when the box's width changes (keyboard, panel
+  // resize, rotation) or when web fonts land after the first paint — a
+  // height measured at another width or in a fallback font is wrong.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onViewport = () => resize()
+    window.addEventListener('resize', onViewport)
+    let ro: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined' && el.parentElement) {
+      ro = new ResizeObserver(() => resize())
+      ro.observe(el.parentElement)
+    }
+    const fonts = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts
+    fonts?.ready?.then(() => resize()).catch(() => {})
+    return () => {
+      window.removeEventListener('resize', onViewport)
+      ro?.disconnect()
+    }
+  }, [])
+
   return (
     <textarea
       ref={ref}
@@ -1442,7 +1494,9 @@ function EditTextarea({
           onCancel()
         }
       }}
-      className="w-full resize-none overflow-hidden rounded-lg bg-white/[0.06] ring-1 ring-white/15 px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+      // 7.17.5: overflow-y is set by `resize` (hidden while the content
+      // fits, auto past the ceiling); `custom-scrollbar` is the app's bar.
+      className="w-full resize-none custom-scrollbar rounded-lg bg-white/[0.06] ring-1 ring-white/15 px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
     />
   )
 }
