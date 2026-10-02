@@ -386,6 +386,27 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   invoice can be audited from the worker log alone. Re-collecting after a
   refund: `/admin/settings?section=billing&retry-payment=1` → "Retry payment"
   (two-step, runs `chargeInstance` in the web process, anchor untouched).
+- **The grid and the player's arrows share ONE comparator** (7.17.3):
+  `compareBySortMode` (src/lib/sort-mode-compare.ts) orders the folder
+  grid's cards (FolderBrowser, folders and video groups) AND the version
+  reel's previous / next list (ThumbnailReel `sortMode`, passed by the
+  admin player page as `isMobile ? 'alphabetical' : adminSortMode`, the
+  same fallback FolderBrowser applies). The reel used to sort plain A→Z, so
+  with the grid on "Oldest → Newest" the first card showed a "previous"
+  arrow and "next" went to the alphabetical neighbour. A group's date is
+  its latest version's `createdAt`, which both callers read from the
+  latest-first row; equal dates fall back to the name. The public share
+  player passes no `sortMode` and stays A→Z. Never put a second inline
+  sort switch next to either caller.
+- **Quick Look is as wide as the video, never as wide as the title**
+  (7.17.3): in video mode QuickPreviewOverlay's card carries `--qp-w` =
+  `min(95vw, PREVIEW_MEDIA_MAX_VH vh × aspect)` (class `sm:w-[var(--qp-w,
+  auto)]`; folder mode leaves the variable unset) and the media box uses the
+  same `PREVIEW_MEDIA_MAX_VH` cap — change one and the card and the media
+  disagree. The title is one line fitted with a MIDDLE ellipsis
+  (`middleEllipsis`, src/lib/middle-ellipsis.ts — pure, canvas-measured by
+  `MiddleEllipsisTitle`, refit on resize, full name in the tooltip); CSS
+  `text-overflow` cuts the end, which is where "_9×16_V7" lives.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

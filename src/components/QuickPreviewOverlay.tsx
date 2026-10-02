@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { X, ArrowLeft, Film, Image as ImageIcon, Folder as FolderIcon } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -9,6 +9,7 @@ import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { ScrubTile } from './FolderCard'
 import { storyboardGridOf } from '@/lib/storyboard-grid'
+import { fontOf, measureTextWidth, middleEllipsis } from '@/lib/middle-ellipsis'
 
 /**
  * 1.7.0+: macOS Quick Look-style preview overlay. Opens when the
@@ -265,6 +266,17 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
   // real tiles. No empty frame, no skeleton, no width snap.
   if (target.kind === 'folder' && folderContents === null) return null
 
+  // 7.17.3: the aspect ratio of the media being previewed (a video card, or a
+  // video opened inside a folder preview) drives the card's width; null in
+  // folder mode.
+  const previewVideo = target.kind === 'video' ? target : nestedVideo
+  const previewAspect =
+    previewVideo
+      ? previewVideo.width && previewVideo.height && previewVideo.width > 0 && previewVideo.height > 0
+        ? previewVideo.width / previewVideo.height
+        : 16 / 9
+      : null
+
   return (
     <div
       // 2.5.1+: scrim made fully transparent — user explicitly
@@ -288,8 +300,16 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
           ring + elevation shadow). Replaces the old `bg-card`
           flat dark grey. */}
       <div
-        className="relative rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white overflow-hidden max-w-[95vw] max-h-[92vh] w-full sm:w-auto flex flex-col"
+        // 7.17.3: in video mode the card is exactly as wide as the media
+        // box below will be — `--qp-w` = min(95vw, 75vh × aspect) — so the
+        // title can no longer widen it (a 9:16 clip opened in a wide box
+        // with black bars on both sides because its 85-character name
+        // wanted one line). The title is fitted into that width with a
+        // middle ellipsis (MiddleEllipsisTitle). In folder mode the variable
+        // is unset and `auto` applies, as before.
+        className="relative rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white overflow-hidden max-w-[95vw] max-h-[92vh] w-full sm:w-[var(--qp-w,auto)] flex flex-col"
         style={{
+          ...(previewAspect ? { ['--qp-w' as string]: `min(95vw, calc(${PREVIEW_MEDIA_MAX_VH}vh * ${previewAspect}))` } : {}),
           backgroundColor: 'rgba(22, 37, 51, 0.62)',
           backgroundImage:
             'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
@@ -356,6 +376,45 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
 
 /* ---------------- VIDEO / IMAGE body ---------------- */
 
+/** The media box is capped at this share of the viewport height so the
+ *  metadata strip below always stays visible; the card's width is derived
+ *  from the same number (see `--qp-w` above). One constant, two places. */
+const PREVIEW_MEDIA_MAX_VH = 75
+
+/**
+ * 7.17.3: a single-line title with the ellipsis in the middle, re-fitted
+ * whenever its box changes width (ResizeObserver). The fitting itself is
+ * `middleEllipsis` (src/lib/middle-ellipsis.ts), measured with a canvas in
+ * the element's own font; 2 px are kept in reserve because canvas and DOM
+ * text metrics can differ by a hair, and the box is overflow-hidden so a
+ * miss can only ever clip, never widen the card. useLayoutEffect, so the
+ * fitted text is painted on the same frame as the box.
+ */
+function MiddleEllipsisTitle({ text, className }: { text: string; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [shown, setShown] = useState(text)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const fit = () => {
+      const width = el.clientWidth - 2
+      if (width <= 0) return
+      const font = fontOf(getComputedStyle(el))
+      setShown(middleEllipsis(text, width, (s) => measureTextWidth(s, font)))
+    }
+    fit()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => fit())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [text])
+  return (
+    <div ref={ref} className={`whitespace-nowrap overflow-hidden ${className ?? ''}`} title={text}>
+      {shown}
+    </div>
+  )
+}
+
 function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
   const isImage = video.mediaType === 'IMAGE'
   const aspectRatio =
@@ -390,7 +449,7 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
         // the aspect ratio naturally.
         style={{
           aspectRatio,
-          maxHeight: '75vh',
+          maxHeight: `${PREVIEW_MEDIA_MAX_VH}vh`,
           maxWidth: '95vw',
         }}
       >
@@ -430,9 +489,9 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
         )}
       </div>
       <div className="px-4 py-3 border-t border-white/10 min-w-0">
-        <div className="text-sm font-medium break-words [overflow-wrap:anywhere] text-white">
-          {video.name}
-        </div>
+        {/* 7.17.3: one line, ellipsis in the middle, full name in the
+            tooltip — the card is as wide as the video, not as the title. */}
+        <MiddleEllipsisTitle text={video.name} className="text-sm font-medium text-white" />
         <div className="text-xs text-white/55 mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
           {video.versionLabel && <span>{video.versionLabel}</span>}
           {!isImage && typeof video.duration === 'number' && video.duration > 0 && (

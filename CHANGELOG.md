@@ -14,6 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.3] - 2026-10-02
+
+### Fixed
+
+- **The player's previous / next arrows walk the folder in the grid's
+  order.** They sorted the videos plain alphabetically, whatever order the
+  grid was set to, so with "Oldest → Newest" the first card opened with a
+  "previous" arrow and "next" jumped to the alphabetical neighbour instead
+  of the second card. The grid and the arrows now use one comparator
+  (`compareBySortMode`), including the phone rule where the grid is always
+  A→Z; the public share player keeps its alphabetical list.
+- **Quick Look is as wide as the video, not as wide as its title.** Space
+  on a 9:16 clip opened a wide window with black bars on both sides because
+  the long filename wanted a single line. The window now takes exactly the
+  width the video will have, and the title is fitted into it with the
+  ellipsis in the middle — the first characters, "…", the last characters,
+  as many as fit, refitted when the window is resized. The full name stays
+  in the tooltip. Folder previews are unchanged.
+
 ## [7.17.2] - 2026-10-02
 
 ### Fixed

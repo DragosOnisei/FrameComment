@@ -5,6 +5,8 @@ import { useRef, useEffect, useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { ArrowLeft, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Film, GitCompareArrows, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { compareBySortMode } from '@/lib/sort-mode-compare'
+import type { AdminSortMode } from '@/lib/use-admin-sort-mode'
 import { videoUploadMeta } from '@/lib/video-upload-meta'
 import { useNowMs } from '@/lib/use-now'
 import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
@@ -54,6 +56,10 @@ interface ThumbnailReelProps {
    *  the reel renders a generic placeholder per version (no
    *  thumbnail, no scrub) but the version-switch UX still works. */
   activeVersionsTokenized?: any[]
+  /** 7.17.3: the admin's sort preference, so the previous / next arrows walk
+   *  the folder in the SAME order as the grid the video was opened from. The
+   *  public share player leaves it out and keeps plain A→Z. */
+  sortMode?: AdminSortMode
 }
 
 export default function ThumbnailReel({
@@ -73,6 +79,7 @@ export default function ThumbnailReel({
   topRightMenu,
   activeVideoId,
   activeVersionsTokenized,
+  sortMode = 'alphabetical',
 }: ThumbnailReelProps) {
   const tShare = useTranslations('share')
   // 7.1.0: drives the "(22 Hours ago)" tag under the title.
@@ -225,10 +232,18 @@ export default function ThumbnailReel({
   // 6.11.0: plain alphabetical. The list used to put "for review" before
   // "approved", which meant approving a clip moved it — the order shifted
   // under you as a side effect of an unrelated action.
-  const videoNames = useMemo(
-    () => Object.keys(videosByName).sort((a, b) => a.localeCompare(b)),
-    [videosByName],
-  )
+  // 7.17.3: in the admin's chosen order. Alphabetical was right only while
+  // the grid was alphabetical; with the grid on "Oldest → Newest" the first
+  // card had a "previous" arrow and "next" went to the alphabetical
+  // neighbour. The date of a group is its latest version's upload date —
+  // the same row the grid card is built from (videosByName groups are
+  // sorted latest-first).
+  const videoNames = useMemo(() => {
+    const dateOf = (name: string) => videosByName[name]?.[0]?.createdAt ?? null
+    return Object.keys(videosByName).sort((a, b) =>
+      compareBySortMode(sortMode, { name: a, createdAt: dateOf(a) }, { name: b, createdAt: dateOf(b) }),
+    )
+  }, [videosByName, sortMode])
 
   // Used by the expanded thumbnail grid below the bar to highlight the
   // active row. The previous "1/N" counter + prev/next arrows have been

@@ -52,6 +52,7 @@ import { SplitVersionsModal, type SplitVersionRow } from './SplitVersionsModal'
 import QuickPreviewOverlay, { type QuickPreviewTarget } from './QuickPreviewOverlay'
 import FolderBrowserTable from './FolderBrowserTable'
 import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
+import { compareBySortMode } from '@/lib/sort-mode-compare'
 import { useIsMobile } from '@/lib/use-is-mobile'
 import { useTouchStackDrag } from '@/lib/use-touch-stack-drag'
 import { Layers } from 'lucide-react'
@@ -1146,28 +1147,13 @@ function FolderBrowserInner(
   const [sortMode] = useAdminSortMode()
   // 4.x: phones always sort A→Z (the order toggle is hidden on mobile).
   const effectiveSortMode = isMobile ? 'alphabetical' : sortMode
-  const sortedFolders = useMemo(() => {
-    const timeOf = (x?: string | Date | null) => {
-      if (!x) return 0
-      const t = new Date(x).getTime()
-      return Number.isFinite(t) ? t : 0
-    }
-    const list = [...folders]
-    list.sort((a, b) => {
-      switch (effectiveSortMode) {
-        case 'alphabetical-reverse':
-          return b.name.localeCompare(a.name)
-        case 'date-newest':
-          return timeOf(b.createdAt) - timeOf(a.createdAt)
-        case 'date-oldest':
-          return timeOf(a.createdAt) - timeOf(b.createdAt)
-        case 'alphabetical':
-        default:
-          return a.name.localeCompare(b.name)
-      }
-    })
-    return list
-  }, [folders, effectiveSortMode])
+  // 7.17.3: the comparator is shared with the player's previous / next
+  // arrows (src/lib/sort-mode-compare.ts) — the grid and the arrows must
+  // agree on what "the next video" is.
+  const sortedFolders = useMemo(
+    () => [...folders].sort((a, b) => compareBySortMode(effectiveSortMode, a, b)),
+    [folders, effectiveSortMode],
+  )
 
   // ─── video helpers ─────────────────────────────────────────
   // Group videos by name so multiple versions of the same asset
@@ -1243,24 +1229,8 @@ function FolderBrowserInner(
     }
     // Order the unified grid by the shared admin sort mode: name A→Z / Z→A,
     // or upload date (the group's latest version createdAt) newest / oldest.
-    const timeOf = (x?: string | Date) => {
-      if (!x) return 0
-      const t = new Date(x).getTime()
-      return Number.isFinite(t) ? t : 0
-    }
-    groups.sort((a, b) => {
-      switch (effectiveSortMode) {
-        case 'alphabetical-reverse':
-          return b.name.localeCompare(a.name)
-        case 'date-newest':
-          return timeOf(b.createdAt) - timeOf(a.createdAt)
-        case 'date-oldest':
-          return timeOf(a.createdAt) - timeOf(b.createdAt)
-        case 'alphabetical':
-        default:
-          return a.name.localeCompare(b.name)
-      }
-    })
+    // 7.17.3: through the ONE comparator the player's arrows use too.
+    groups.sort((a, b) => compareBySortMode(effectiveSortMode, a, b))
     return groups
   }, [videos, rootVideos, effectiveSortMode])
 

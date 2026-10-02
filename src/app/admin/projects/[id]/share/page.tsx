@@ -19,6 +19,8 @@ import ThemeToggle from '@/components/ThemeToggle'
 import PlayerTopMenu from '@/components/PlayerTopMenu'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
+import { useAdminSortMode } from '@/lib/use-admin-sort-mode'
+import { useIsMobile } from '@/lib/use-is-mobile'
 import { useTranslations } from 'next-intl'
 
 const MAX_TOKEN_FETCH_ATTEMPTS = 2
@@ -103,6 +105,13 @@ function AdminSharePageInner() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
+  // 7.17.3: the reel's previous / next arrows follow the grid's sort order.
+  // Phones always show the grid A→Z (FolderBrowser hides the sort menu
+  // there), so the arrows do the same — one rule, one place: effectiveSortMode
+  // in FolderBrowser and reelSortMode here must stay equal.
+  const [adminSortMode] = useAdminSortMode()
+  const isMobile = useIsMobile()
+  const reelSortMode = isMobile ? 'alphabetical' : adminSortMode
   const pathname = usePathname()
   const id = params?.id as string
 
@@ -1571,6 +1580,7 @@ function AdminSharePageInner() {
           page keeps the original ThemeToggle. */}
       <ThumbnailReel
         videosByName={playerVideosByName}
+        sortMode={reelSortMode}
         thumbnailsByName={thumbnailsByName}
         activeVideoName={activeVideoName}
         activeVideoId={activeVideoId}
