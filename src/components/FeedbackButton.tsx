@@ -32,7 +32,16 @@ type Kind = 'BUG' | 'IDEA'
 const MAX_FILES = 4
 const MAX_BYTES = 25 * 1024 * 1024
 
-export default function FeedbackButton() {
+/**
+ * 7.17.6: two ways to open it.
+ *  - `floating` (default): the round button bottom-right — now phones only
+ *    (`md:hidden`), where there is no sidebar.
+ *  - `inline`: a small "Feedback" button rendered IN PLACE, used by the admin
+ *    sidebar's footer next to the version number (the Frame Manager layout
+ *    Dragos asked for). The panel still opens through the portal, anchored
+ *    bottom-left so it rises from where the button is.
+ */
+export default function FeedbackButton({ trigger = 'floating' }: { trigger?: 'floating' | 'inline' } = {}) {
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<Kind>('BUG')
   const [message, setMessage] = useState('')
@@ -135,22 +144,40 @@ export default function FeedbackButton() {
 
   if (!mounted) return null
 
-  return createPortal(
+  const inlineTrigger =
+    trigger === 'inline' ? (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="Send feedback"
+        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground hover:bg-foreground/5 transition-colors"
+      >
+        <MessageSquarePlus className="h-4 w-4" />
+        Feedback
+      </button>
+    ) : null
+
+  const portal = createPortal(
     <>
-      {!open && (
+      {!open && trigger === 'floating' && (
         <button
           type="button"
           onClick={() => setOpen(true)}
           title="Send feedback"
           aria-label="Send feedback"
-          className="fixed bottom-4 right-4 z-[2147483500] inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_12px_32px_-8px_rgba(0,0,0,0.7)] ring-1 ring-white/15 transition-transform hover:scale-105 active:scale-95"
+          className="md:hidden fixed bottom-4 right-4 z-[2147483500] inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_12px_32px_-8px_rgba(0,0,0,0.7)] ring-1 ring-white/15 transition-transform hover:scale-105 active:scale-95"
         >
           <MessageSquarePlus className="h-5 w-5" />
         </button>
       )}
 
       {open && (
-        <div className="brand-menu-surface fixed bottom-4 right-4 z-[2147483500] w-[min(380px,calc(100vw-2rem))] rounded-xl p-3 text-white ring-1 ring-white/10 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)]">
+        <div
+          className={cn(
+            'brand-menu-surface fixed bottom-4 z-[2147483500] w-[min(380px,calc(100vw-2rem))] rounded-xl p-3 text-white ring-1 ring-white/10 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)]',
+            trigger === 'inline' ? 'left-4' : 'right-4',
+          )}
+        >
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-semibold">Send feedback</span>
             <button
@@ -268,5 +295,12 @@ export default function FeedbackButton() {
       )}
     </>,
     document.body,
+  )
+
+  return (
+    <>
+      {inlineTrigger}
+      {portal}
+    </>
   )
 }

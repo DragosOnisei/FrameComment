@@ -4,6 +4,15 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts')
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
+  // 7.17.6: the version the app shows (sidebar footer) and reports
+  // (/api/health). The Docker build passes NEXT_PUBLIC_APP_VERSION from the
+  // git tag; a dev server or a plain `next build` falls back to package.json,
+  // which the release bump keeps equal to the tag anyway. Defined here so no
+  // client component has to import package.json (and ship the whole file).
+  env: {
+    NEXT_PUBLIC_APP_VERSION:
+      process.env.NEXT_PUBLIC_APP_VERSION || require('./package.json').version,
+  },
   // Allow LAN IPs to access the dev server (phone testing on local Wi-Fi).
   // Next.js 15+ blocks cross-origin _next/* requests in dev with 403 otherwise.
   // Only affects dev mode — production is unaffected.

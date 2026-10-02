@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
 import { useTranslations } from 'next-intl'
 import WordMark from '@/components/WordMark'
+import FeedbackButton from '@/components/FeedbackButton'
 import ProjectCoverImage from '@/components/ProjectCoverImage'
 
 /**
@@ -366,6 +367,22 @@ export default function AdminSidebar() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* 7.17.6: footer under the user cluster, its own section under a
+          hairline — the running version on the left, Feedback on the right —
+          the layout Frame Manager uses. The version comes from
+          NEXT_PUBLIC_APP_VERSION (next.config: the tag at Docker build, else
+          package.json); Feedback is the same panel the floating button opened,
+          which now exists only on phones (no sidebar there). */}
+      <div className="border-t border-white/10 mt-1 pt-2 flex items-center justify-between gap-2 px-1">
+        <span
+          className="font-mono text-[11px] text-muted-foreground pl-1.5 truncate"
+          title={`FrameComment v${process.env.NEXT_PUBLIC_APP_VERSION ?? ''}`}
+        >
+          v{process.env.NEXT_PUBLIC_APP_VERSION ?? '?'}
+        </span>
+        <FeedbackButton trigger="inline" />
       </div>
     </aside>
   )

@@ -25,6 +25,7 @@ import UserAvatar from '@/components/UserAvatar'
 import CommentAttachments from './CommentAttachments'
 import { useOptionalAnnotation } from '@/contexts/AnnotationContext'
 import { emoticonOnChange } from '@/lib/emoticons'
+import { EDIT_OUTSIDE_IGNORE_SELECTOR, shouldExitEditOnOutsideClick } from '@/lib/edit-outside-click'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -434,6 +435,7 @@ export default function MessageBubble({
     }
   }
 
+
   // Get effective author name for color generation
   // For internal comments without authorName, fall back to user.name or user.email
   const effectiveAuthorName = comment.authorName ||
@@ -456,6 +458,56 @@ export default function MessageBubble({
   // comment again. Falls back to no-op when no provider is mounted.
   const annotationCtx = useOptionalAnnotation()
   const isAnnotationFocused = annotationCtx?.activeCommentId === comment.id
+
+  /**
+   * 7.17.6: a click outside an open edit box closes it when nothing was
+   * changed, and does nothing when something was (rules and the reasons in
+   * src/lib/edit-outside-click.ts). One listener serves the comment's own
+   * edit and a reply's edit; `editBoxRef` points at whichever box is open.
+   * `pointerdown` in the capture phase: it fires before the click lands
+   * anywhere, so a tap that starts a drag or focuses another field still
+   * counts, and it is seen before any handler could stop propagation.
+   * The latest facts are read through a ref so the listener is bound once
+   * per edit session, not once per keystroke. Declared after
+   * `annotationCtx`, which it reads — a `const` used before its line is a
+   * crash at render, not a lint warning.
+   */
+  const editBoxRef = useRef<HTMLDivElement | null>(null)
+  const editingReply = editingReplyId ? (replies ?? []).find((r) => r.id === editingReplyId) ?? null : null
+  const outsideFactsRef = useRef<{ unchanged: boolean; drawing: boolean; cancel: () => void }>({
+    unchanged: true,
+    drawing: false,
+    cancel: () => {},
+  })
+  outsideFactsRef.current = isEditing
+    ? {
+        unchanged: editValue === htmlToPlainText(comment.content),
+        drawing: !!annotationCtx?.isDrawingMode,
+        cancel: handleCancelEdit,
+      }
+    : {
+        unchanged: !!editingReply && replyEditValue === htmlToPlainText(editingReply.content),
+        drawing: !!annotationCtx?.isDrawingMode,
+        cancel: handleCancelEditReply,
+      }
+  const editSessionOpen = isEditing || editingReplyId !== null
+  useEffect(() => {
+    if (!editSessionOpen) return
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Element | null
+      if (!target) return
+      const facts = outsideFactsRef.current
+      const exit = shouldExitEditOnOutsideClick({
+        insideEditor: !!editBoxRef.current?.contains(target),
+        insideIgnoredLayer: !!target.closest(EDIT_OUTSIDE_IGNORE_SELECTOR),
+        drawing: facts.drawing,
+        unchanged: facts.unchanged,
+      })
+      if (exit) facts.cancel()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [editSessionOpen])
   const handleBubbleClick = (e: React.MouseEvent) => {
     // Don't toggle while interacting with form fields, buttons or links
     // inside the bubble — those have their own click semantics.
@@ -820,7 +872,7 @@ export default function MessageBubble({
               line instead of stacked.
             */}
             {isEditing ? (
-              <div className="mt-1 flex flex-col gap-2">
+              <div ref={editBoxRef} className="mt-1 flex flex-col gap-2">
                 <EditTextarea
                   value={editValue}
                   onChange={setEditValue}
@@ -1241,7 +1293,7 @@ export default function MessageBubble({
                     </span>
                   </div>
                   {editingReplyId === reply.id ? (
-                    <div className="mt-1 flex flex-col gap-2">
+                    <div ref={editBoxRef} className="mt-1 flex flex-col gap-2">
                       <EditTextarea
                         value={replyEditValue}
                         onChange={setReplyEditValue}

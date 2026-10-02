@@ -101,6 +101,12 @@ FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 
 ARG APP_VERSION
+# 7.17.6: the runner's server process reads this at runtime for /api/health
+# (the builder stage sets the same variable for the build). Without it the
+# route falls back to npm_package_version, which `npm start` provides — but the
+# version a release is confirmed by must not depend on how the process was
+# started.
+ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
 LABEL org.opencontainers.image.title="FrameComment"
 LABEL org.opencontainers.image.description="Video review and approval platform"
 LABEL org.opencontainers.image.source="https://github.com/DragosOnisei/FrameComment"

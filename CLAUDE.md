@@ -80,6 +80,21 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
 - Tag `v<X.Y.Z>` must equal `package.json` version AND the `VERSION` file; the
   CHANGELOG must contain `## [X.Y.Z]` — CI extracts it as release notes and
   fails otherwise. Bump all three together.
+- **Deploy is automatic since 7.17.6** (DEPLOY_TRUENAS.md, in Romanian): the
+  tag builds the image (~6 min), the release workflow moves `:latest`, and
+  Watchtower on the TrueNAS box (`ix-watchtower-watchtower-1`, interval 300 s)
+  recreates `framecomment-app` and `framecomment-worker`, which run
+  `dragosonisei/framecomment:latest` since 2026-10-02. Nobody edits the app
+  in TrueNAS for an update any more. A release is confirmed live when
+  `https://framecomment.com/api/health` reports the new `version` (field
+  added in 7.17.6, `NEXT_PUBLIC_APP_VERSION` baked from the tag). Watch
+  Docker Hub (`/v2/repositories/dragosonisei/framecomment/tags/<v>`) for the
+  build, then health for the deploy; 6–11 minutes in all. Postgres and Redis
+  are never added to Watchtower's list. Rollback = a fixed tag (no "v") on
+  both images via `midclt call app.update framecomment …` (recipe in the doc;
+  a TrueNAS-side update restarts the whole stack, Watchtower only the two).
+  Dockerfile stays non-standalone on purpose: the worker needs the full
+  node_modules (tsx) and the boot gain would be small.
 - Give him push commands as copy-paste blocks starting with
   `cd ~/Downloads/FrameComment`, and **only the latest tag**:
   `git push origin main` then `git push origin v<latest>`.
@@ -429,6 +444,14 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   mount-time measurement; on Dragos's phone that came up a line short and
   the end of a long comment was unreachable. Do not return to overflow
   hidden with no ceiling.
+- **A click outside an open edit closes it only when nothing changed**
+  (7.17.6): `shouldExitEditOnOutsideClick` (src/lib/edit-outside-click.ts)
+  decides; MessageBubble binds ONE capture-phase `pointerdown` listener per
+  edit session (comment or reply, `editBoxRef` on whichever box is open).
+  Never closes for a click inside the box, in a popup layer, in the comment
+  composer (`data-comment-dropzone` — it attaches files and drawings to the
+  open edit) or while drawing mode is on. "Unchanged" compares against
+  `htmlToPlainText(content)`, the value the edit started from.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

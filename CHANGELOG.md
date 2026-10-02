@@ -14,6 +14,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.6] - 2026-10-02
+
+### Added
+
+- **Automatic deploys.** A release now reaches the server by itself: the tag
+  builds the image, the release workflow moves `:latest`, and Watchtower on
+  the TrueNAS box replaces the app and worker containers within five
+  minutes — nobody edits the app in TrueNAS any more. `GET /api/health`
+  reports the running `version` so a release can be confirmed live;
+  `DEPLOY_TRUENAS.md` (in Romanian) documents the setup, the daily flow,
+  rollback and troubleshooting.
+- **Version and Feedback in the sidebar footer.** Under the account block,
+  in its own section: the running version on the left, a Feedback button on
+  the right. The round floating Feedback button remains on phones only.
+
+### Changed
+
+- **A click outside an open comment edit closes it when nothing changed,**
+  as Cancel would; when the text was changed the click does nothing, as
+  before. Clicks in the composer, in a menu or dialog, or while drawing
+  never close the edit. Same for editing a reply.
+
 ## [7.17.5] - 2026-10-02
 
 ### Fixed
