@@ -407,6 +407,19 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   (`middleEllipsis`, src/lib/middle-ellipsis.ts — pure, canvas-measured by
   `MiddleEllipsisTitle`, refit on resize, full name in the tooltip); CSS
   `text-overflow` cuts the end, which is where "_9×16_V7" lives.
+- **The composer's timecode chip scrolls with line one** (7.17.4): the
+  chip is absolutely positioned over the textarea (a textarea has no
+  children), so on a long comment the text scrolled under a pinned chip.
+  `syncChipToScroll` in CommentInput (textarea `onScroll` + the auto-resize
+  effect) translates the chip by `-scrollTop` and clips the part above the
+  box with `clip-path: inset(scrollTop − CHIP_TOP_PX …)`; `CHIP_TOP_PX` must
+  equal the chip's `top-[2px]`. Both are declared with the other refs,
+  BEFORE the auto-resize effect that lists the callback in its deps and
+  before `commentsDisabled`'s early return — a later `const` is in its
+  temporal dead zone when the deps array is built (crashed the first
+  attempt) and a later hook is a conditional hook. The textarea carries
+  `custom-scrollbar`, the shared themed bar; it was the one text box still
+  showing the browser's grey-on-white one.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

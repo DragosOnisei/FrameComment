@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.4] - 2026-10-02
+
+### Fixed
+
+- **The comment composer's timecode chip scrolls away with the text.** On a
+  comment long enough to make the box scroll, the text moved under a chip
+  that stayed pinned to the top-left corner. The chip is a label for the
+  first line, so it now travels with it: it moves up with the text, is cut
+  off at the top edge of the box and is gone once the first line is, then
+  comes back when the text is scrolled back, sent or cleared.
+- **The composer uses the app's scrollbar.** It was the one text box still
+  showing the browser's grey-on-white bar; it now has the same thin,
+  accent-coloured bar as the comment list.
+
 ## [7.17.3] - 2026-10-02
 
 ### Fixed

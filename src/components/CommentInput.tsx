@@ -224,10 +224,48 @@ export default function CommentInput({
   // gone. By listening on the raw element we get the new value
   // *before* React's render cycle can wipe it.
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // 7.17.4: the timecode chip element (set by the measuring callback ref
+  // further down), for `syncChipToScroll`. Declared here, with the other
+  // refs, because the auto-resize effect below lists the callback in its
+  // dependencies — a `const` declared after that effect is still in its
+  // temporal dead zone when the dependency array is built ("Cannot access
+  // 'syncChipToScroll' before initialization", seen on the first render of
+  // the first attempt) — and because everything past `commentsDisabled`'s
+  // early return is a conditional hook call.
+  const chipElRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * 7.17.4: the chip scrolls away with the text instead of staying pinned.
+   *
+   * The chip is absolutely positioned over the textarea's top-left corner
+   * (the first line is indented past it, see `chipGutter`), and a textarea
+   * cannot contain children — so once a long comment made the textarea
+   * scroll, the text moved under a chip that stayed where it was, like a
+   * sticky header nobody asked for. It is a label for line ONE, so it must
+   * travel with line one. On every scroll the chip is translated up by the
+   * textarea's `scrollTop` and the part that has passed the box's top edge is
+   * cut off with `clip-path` (the chip sits `CHIP_TOP_PX` down, so the box
+   * edge is `scrollTop − CHIP_TOP_PX` into the chip); once that exceeds the
+   * chip's height nothing is left, which is exactly "it disappears when I
+   * scroll". Clipping the chip itself, not the wrapper, keeps its focus ring
+   * and the range-edit shadow intact at rest. Inline styles via the ref, no
+   * state: scroll fires per frame and must not re-render the composer.
+   */
+  const syncChipToScroll = useCallback(() => {
+    const el = textareaRef.current
+    const chip = chipElRef.current
+    if (!el || !chip) return
+    const s = el.scrollTop
+    chip.style.transform = s > 0 ? `translateY(${-s}px)` : ''
+    chip.style.clipPath = s > CHIP_TOP_PX ? `inset(${s - CHIP_TOP_PX}px 0 0 0)` : ''
+  }, [])
   // 1.3.1+: max length is enforced by the textarea's native
   // `maxLength` attribute (also passed to the server-side validator).
   // 6 000 chars matches a long paragraph — way past anything someone
   // would type in a single comment.
+/** 7.17.4: how far down the timecode chip sits in the composer (`top-[2px]`
+ *  on the chip). `syncChipToScroll` needs the same number to know where the
+ *  box's top edge falls inside the chip once the text has scrolled. */
+const CHIP_TOP_PX = 2
   const MAX_COMMENT_LENGTH = 6000
   // Keep the latest `newComment` in a ref so the native listener
   // closure stays valid across renders without re-binding on every
@@ -250,7 +288,10 @@ export default function CommentInput({
     const next = Math.min(el.scrollHeight, maxHeight)
     el.style.height = `${next}px`
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
-  }, [newComment])
+    // 7.17.4: shrinking back (or clearing after send) resets scrollTop to 0
+    // without a scroll event — put the chip back where line one is.
+    syncChipToScroll()
+  }, [newComment, syncChipToScroll])
 
   // 1.3.2+: inline reply input is rendered inside the target
   // MessageBubble (see CommentSection.InlineReplyForm). No need for
@@ -518,6 +559,7 @@ export default function CommentInput({
   const timestampChipRef = useCallback((el: HTMLDivElement | null) => {
     chipObserverRef.current?.disconnect()
     chipObserverRef.current = null
+    chipElRef.current = el
     if (!el) {
       setChipWidth(0)
       return
@@ -1055,8 +1097,12 @@ export default function CommentInput({
                    * see `COMPOSER_LINE_HEIGHT` and `chipGutter` for why a utility
                    * class was not enough for either.
                    */
-                  className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full"
+                  // 7.17.4: `custom-scrollbar` — the composer is the one place
+                  // the browser's grey-on-white bar still showed, on a long
+                  // comment; `onScroll` keeps the timecode chip on line one.
+                  className="resize-none min-h-0 border-0 bg-transparent rounded-none px-0 py-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none w-full custom-scrollbar"
                   style={{ textIndent: chipGutter, lineHeight: COMPOSER_LINE_HEIGHT }}
+                  onScroll={syncChipToScroll}
                   rows={1}
                 />
                 {!newComment && (
