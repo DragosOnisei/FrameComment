@@ -2,7 +2,6 @@ import type Stripe from 'stripe'
 import { prisma, orgSettingsWhere, currentOrgId } from '@/lib/db'
 import { getStripe } from '@/lib/stripe'
 import { logError, logMessage } from '@/lib/logging'
-import { legacyBackend } from '@/lib/storage-backends'
 import { verifyDraftInvoice, type ExpectedInvoice } from '@/lib/billing-verify'
 
 /**
@@ -49,25 +48,50 @@ const BYTES_PER_GIB = 1024 ** 3
 export interface BillingUsage {
   userCount: number
   storageBytes: number
+  /** 7.17.2: the split behind `storageBytes`, for the charge log — bytes on
+   *  rows tagged fc (or kept on fc), and bytes on untagged pre-4.2.0 rows. */
+  taggedFcBytes?: number
+  untaggedBytes?: number
 }
 
 /**
- * 4.2.0+ (Phase 3): Prisma `where` matching files physically stored on the
- * FrameComment Server backend ('fc'). Per-GB storage is billed ONLY for these
- * — Local / R2 / AWS are the customer's own storage and cost per user only.
+ * 4.2.0+ (Phase 3): Prisma `where` matching files stored on the FrameComment
+ * Server backend ('fc'). Per-GB storage is billed ONLY for these — Local / R2
+ * / AWS are the customer's own storage and cost per user only.
  *
  * A file counts as fc when its storageBackend is 'fc', OR its storageLocations
- * list contains 'fc' (kept on fc after a transfer), OR — on an instance whose
- * legacy env backend is fc (STORAGE_PROVIDER=s3) — its storageBackend is NULL
- * (pre-4.2.0 rows that resolve to fc).
+ * list contains 'fc' (kept on fc after a transfer), OR its storageBackend is
+ * NULL — a row written before files were tagged (4.2.0).
+ *
+ * 7.17.2: the NULL rule no longer asks the process. It used to include
+ * untagged rows only when `legacyBackend() === 'fc'` — a value that depends
+ * on the environment AND on a module-level cache that only a Settings read
+ * for org-1 fills — and the Billing page and the invoice are computed in two
+ * different processes (web container, worker container). On 2026-10-02 both
+ * containers had STORAGE_PROVIDER=local and no S3 endpoint (checked on the
+ * box), so the environment alone said 'local'; the web process had org-1's
+ * chosen backend 'fc' in that cache (fc on the operator's own disk counts as
+ * a local-filesystem backend, so the cache wins) and counted CPC's 2.9 TB,
+ * while the worker's cache was still empty and the invoice counted 328 GB:
+ * $331.80 instead of $596.20, the second under-collection in two months.
+ * The worker's cache can stay empty for hours: it is written only by an
+ * org-1 read, its 30 s refresh stamp is shared by every company's call, and
+ * outside billing only a running job would fill it. The 7.4.3 verification
+ * gate passed because both of its recomputations ran in the same process.
+ * Untagged rows are always operator storage: before tagging existed a file
+ * could only land on the operator's S3 bucket or the operator's own disk —
+ * the customer's R2/AWS/Local did not exist yet — so there is nothing to
+ * ask. The page's number is unchanged by this (it already resolved to fc);
+ * the worker's now equals it by construction.
  */
 export function fcStorageWhere(): any {
-  const or: any[] = [
-    { storageBackend: 'fc' },
-    { storageLocations: { contains: 'fc' } },
-  ]
-  if (legacyBackend() === 'fc') or.push({ storageBackend: null })
-  return { OR: or }
+  return {
+    OR: [
+      { storageBackend: 'fc' },
+      { storageLocations: { contains: 'fc' } },
+      { storageBackend: null },
+    ],
+  }
 }
 
 /**
@@ -89,27 +113,36 @@ export async function computeBillingUsage(): Promise<BillingUsage> {
   // runWithOrgContext wrapper — each company is metered on ITS users/bytes.
   const organizationId = currentOrgId()
   const where = { AND: [fcStorageWhere(), { organizationId }] }
-  const [userCount, videoSum, videoAssetSum, projectUploadSum] =
+  // 7.17.2: the untagged share is measured separately so the charge log can
+  // say how much of the bill rests on pre-4.2.0 rows — the part that the two
+  // containers used to disagree on.
+  const untaggedWhere = { AND: [{ storageBackend: null }, { organizationId }] }
+  const [userCount, videoSum, videoAssetSum, projectUploadSum, untaggedVideo, untaggedAsset, untaggedUpload] =
     await Promise.all([
       (prisma as any).user.count({ where: { organizationId } }),
       (prisma as any).video.aggregate({ _sum: { originalFileSize: true }, where }),
       (prisma as any).videoAsset.aggregate({ _sum: { fileSize: true }, where }),
       (prisma as any).projectUpload.aggregate({ _sum: { fileSize: true }, where }),
+      (prisma as any).video.aggregate({ _sum: { originalFileSize: true }, where: untaggedWhere }),
+      (prisma as any).videoAsset.aggregate({ _sum: { fileSize: true }, where: untaggedWhere }),
+      (prisma as any).projectUpload.aggregate({ _sum: { fileSize: true }, where: untaggedWhere }),
     ])
 
-  const masterBytes = videoSum._sum.originalFileSize
-    ? Number(videoSum._sum.originalFileSize)
-    : 0
-  const assetBytes = videoAssetSum._sum.fileSize
-    ? Number(videoAssetSum._sum.fileSize)
-    : 0
-  const uploadBytes = projectUploadSum._sum.fileSize
-    ? Number(projectUploadSum._sum.fileSize)
-    : 0
+  const num = (v: unknown) => (v ? Number(v) : 0)
+  const masterBytes = num(videoSum._sum.originalFileSize)
+  const assetBytes = num(videoAssetSum._sum.fileSize)
+  const uploadBytes = num(projectUploadSum._sum.fileSize)
+  const untaggedBytes =
+    num(untaggedVideo._sum.originalFileSize) +
+    num(untaggedAsset._sum.fileSize) +
+    num(untaggedUpload._sum.fileSize)
+  const storageBytes = masterBytes + assetBytes + uploadBytes
 
   return {
     userCount,
-    storageBytes: masterBytes + assetBytes + uploadBytes,
+    storageBytes,
+    taggedFcBytes: Math.max(0, storageBytes - untaggedBytes),
+    untaggedBytes,
   }
 }
 
@@ -279,8 +312,16 @@ export async function chargeInstance(): Promise<ChargeResult> {
     const periodStart = settings.lastChargedAt
       ? new Date(settings.lastChargedAt)
       : new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
-    const { bill } = await computeCurrentBillable()
+    const { usage, bill } = await computeCurrentBillable()
     const totalCents = bill.totalCents
+    // 7.17.2: the storage behind this bill, split the way the 2026-10-02
+    // under-collection hid — so the next invoice can be audited from the log
+    // alone (GiB tagged fc / GiB untagged / users).
+    logMessage(
+      `[billing] bill basis: ${usage.userCount} users, ${(usage.storageBytes / BYTES_PER_GIB).toFixed(1)} GiB on fc ` +
+        `(${((usage.taggedFcBytes ?? 0) / BYTES_PER_GIB).toFixed(1)} tagged + ${((usage.untaggedBytes ?? 0) / BYTES_PER_GIB).toFixed(1)} untagged) ` +
+        `→ ${bill.billableUsers} × $${BILLING_PRICING.perUserPerMonth} + ${bill.billableGiB} GB × $${BILLING_PRICING.perGibPerMonth} = $${(totalCents / 100).toFixed(2)}`,
+    )
 
     if (totalCents <= 0) {
       // Within the free tier for the whole period — nothing to charge.

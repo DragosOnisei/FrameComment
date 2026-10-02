@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.2] - 2026-10-02
+
+### Fixed
+
+- **The invoice now counts the same storage the Billing page shows.** On
+  2 October the page said $596.20 and Stripe collected $331.80: the users
+  line matched, the storage line did not (318 GB billed against 2,962 GB
+  shown). The page and the invoice are computed by two different
+  processes — the web container and the worker container — and the rule
+  deciding whether a company's pre-4.2.0 files (rows written before files
+  carried a storage tag) count as FrameComment Server storage asked the
+  process: an in-memory cache filled only by an org-1 Settings read, and
+  the environment when that cache was empty. The web process had the
+  company's chosen backend cached and counted 2.9 TB; the worker, restarted
+  by the 7.17.1 deploy the evening before, still had an empty cache when the
+  billing day came, read `STORAGE_PROVIDER=local` and left 2.6 TB out. The
+  7.4.3 verification gate could not see it, because both of its
+  recomputations run in the worker. Untagged files are counted
+  unconditionally now — before tagging existed a file could only land on
+  the operator's storage — so the two processes agree by construction. The
+  worker logs the basis of every charge (users, GiB tagged + untagged, the
+  formula), and a read-only command run inside the worker container
+  reproduced the wrong total in seconds before the fix; the same command
+  must print the page's total after it. The re-collection path is
+  unchanged: refund in Stripe, then "Retry payment" on the Billing page
+  opened with `?retry-payment=1`.
+
 ## [7.17.1] - 2026-10-01
 
 ### Security

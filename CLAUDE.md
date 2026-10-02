@@ -366,6 +366,26 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   that forgets makes Esc close it AND leave the page. Project settings has
   no `data-esc-back` on purpose: Esc after an edit would drop unsaved
   changes.
+- **Billed storage never asks the environment** (7.17.2): `fcStorageWhere()`
+  (src/lib/billing.ts) counts rows tagged fc, rows kept on fc after a
+  transfer, AND untagged pre-4.2.0 rows, unconditionally. It used to include
+  the untagged rows only when `legacyBackend()` resolved to fc — a function
+  of THIS PROCESS's env (STORAGE_PROVIDER / DEFAULT_STORAGE_BACKEND /
+  FC_S3_ENDPOINT) plus a module cache that only an org-1 Settings read
+  fills, whose 30 s refresh stamp every company's call shares — and the
+  Billing page and the invoice are computed in two different processes
+  (web container, worker container). On 2026-10-02 both containers had
+  STORAGE_PROVIDER=local and no S3 endpoint; the web process had org-1's
+  chosen 'fc' in the cache and counted CPC's 2.9 TB, the worker's cache was
+  empty, env said 'local', and the invoice counted 328 GB: $331.80 instead
+  of $596.20, the second under-collection in two months. The 7.4.3
+  verification gate cannot see this class of bug — both of its
+  recomputations run in the worker. Rule: everything that feeds `computeBillingUsage` comes from the
+  database or from constants, never from `process.env` or a process-local
+  cache. `chargeInstance` logs the basis (users, GiB tagged + untagged) so an
+  invoice can be audited from the worker log alone. Re-collecting after a
+  refund: `/admin/settings?section=billing&retry-payment=1` → "Retry payment"
+  (two-step, runs `chargeInstance` in the web process, anchor untouched).
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**
