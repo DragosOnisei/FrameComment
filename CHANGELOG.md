@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.7] - 2026-10-04
+
+### Changed
+
+- **Compact counts on the project cards.** The dashboard shows
+  "1.2k folders · 2.7k videos" instead of "1169 folders · 2668 videos";
+  numbers under 1,000 stay exact, and the exact numbers remain in the
+  tooltip. The table view's folder and video columns follow the same rule.
+
 ## [7.17.6] - 2026-10-02
 
 ### Added

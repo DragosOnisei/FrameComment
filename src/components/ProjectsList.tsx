@@ -17,6 +17,7 @@ import { projectGradient, formatBytes, formatRelativeTime } from '@/lib/project-
 import ProjectCoverImage from '@/components/ProjectCoverImage'
 import GridZoomSlider, { useGridZoomLevel } from '@/components/GridZoomSlider'
 import { gridZoomAttr } from '@/lib/grid-zoom'
+import { formatCompactNumber } from '@/lib/compact-number'
 
 interface Project {
   id: string
@@ -321,9 +322,11 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                       className="text-white/80 text-xs tabular-nums mt-1 flex flex-wrap gap-x-1.5"
                       title={`${folderCount} ${folderCount === 1 ? 'folder' : 'folders'} · ${videoCount} ${videoCount === 1 ? 'video' : 'videos'} · ${sizeLabel}`}
                     >
-                      <span>{folderCount} {folderCount === 1 ? 'folder' : 'folders'}</span>
+                      {/* 7.17.7: compact counts (1.2k, 2.7k) on the card; the
+                          exact numbers stay in the tooltip above. */}
+                      <span>{formatCompactNumber(folderCount)} {folderCount === 1 ? 'folder' : 'folders'}</span>
                       <span aria-hidden>·</span>
-                      <span>{videoCount} {videoCount === 1 ? 'video' : 'videos'}</span>
+                      <span>{formatCompactNumber(videoCount)} {videoCount === 1 ? 'video' : 'videos'}</span>
                       <span aria-hidden>·</span>
                       <span>{sizeLabel}</span>
                     </div>
@@ -484,8 +487,8 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                     )}
                   </div>
                   <span className="flex-1 min-w-0 font-medium truncate text-white">{project.title}</span>
-                  <span className="w-20 text-center text-xs text-white/65 tabular-nums hidden lg:block">{folderCount}</span>
-                  <span className="w-20 text-center text-xs text-white/65 tabular-nums hidden lg:block">{videoCount}</span>
+                  <span className="w-20 text-center text-xs text-white/65 tabular-nums hidden lg:block" title={String(folderCount)}>{formatCompactNumber(folderCount)}</span>
+                  <span className="w-20 text-center text-xs text-white/65 tabular-nums hidden lg:block" title={String(videoCount)}>{formatCompactNumber(videoCount)}</span>
                   <span className="w-24 text-right text-xs text-white/65 tabular-nums hidden lg:block">{sizeLabel}</span>
                   <span className="w-24 text-xs text-white/55 hidden xl:block">
                     {formatDate(project.createdAt)}
