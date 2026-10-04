@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.10] - 2026-10-04
+
+### Fixed
+
+- **No more double scrollbars.** On the folder page the window grew a
+  scrollbar of its own next to the content column's: elements positioned
+  against an ancestor above the column escaped its clipping and stretched
+  the document. The column is now the containing block for everything
+  inside it, so on desktop only the column ever scrolls.
+
 ## [7.17.9] - 2026-10-04
 
 ### Fixed

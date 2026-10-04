@@ -197,7 +197,16 @@ export default function AdminLayout({
             // to the content's 3440 px and `h-dvh` was ignored (measured).
             <div className="spotlight-bg flex flex-1 min-h-0 md:flex-none md:h-dvh md:overflow-hidden select-none">
               <AdminSidebar />
-              <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-x-hidden md:overflow-y-auto">
+              {/* 7.17.10: `relative` is load-bearing. A scroll container only
+                  clips descendants whose containing block is inside it; an
+                  `absolute` element whose nearest positioned ancestor sat
+                  ABOVE this column escaped the clip and stretched the
+                  document, so the folder page showed two scrollbars — the
+                  column's and the window's (measured live: html.scrollHeight
+                  1788 with the column static, 761 with it relative). With
+                  the column positioned, every absolute descendant is clipped
+                  by it and the window never has anything to scroll. */}
+              <div className="relative flex-1 min-w-0 min-h-0 flex flex-col overflow-x-hidden md:overflow-y-auto">
                 {/* 7.7.0: "Enable notifications" bar — chromed pages only, so
                     it never sits over a video in the player preview. */}
                 <PushEnrollmentBanner />

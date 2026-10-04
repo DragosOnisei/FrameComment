@@ -462,7 +462,14 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   makes that ancestor the sticky's scroll container), and `h-dvh` alone was
   ignored because the shell is a `flex-1` item of the root layout's column
   — flex-basis decides a flex item's main size before `height` does, so
-  `flex-none` is what makes the height stick. Phones keep document
+  `flex-none` is what makes the height stick. The column is also
+  `relative` (7.17.10): a scroll container clips only descendants whose
+  containing block is inside it, and an `absolute` element positioned
+  against an ancestor above the column escaped the clip, stretched the
+  document and put a second (window) scrollbar next to the column's on
+  the folder page. Two scrollbars on an admin page always mean a
+  descendant escaped the column — look for the containing block before
+  touching overflow. Phones keep document
   scrolling (hidden sidebar, collapsing address bar). Pages scroll inside
   their own `overflow-y-auto` boxes, as Settings always did; every popover
   listens for `scroll` in the capture phase, so they still close/reposition.
