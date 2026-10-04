@@ -318,8 +318,15 @@ export default function ProjectsList({ projects, onProjectMutated, onNewProject 
                         layout naturally wraps to a second row
                         instead of clipping if there's not enough
                         room. */}
+                    {/* 7.17.8: always two lines tall (`min-h-8` = 2 × the
+                        text-xs line box). The stats wrap onto a second line on
+                        some cards ("1.2k folders · 2.7k videos ·" / "165.5 GB")
+                        and not on others, which made neighbouring cards differ
+                        in height by one line. With the minimum, a one-line card
+                        reserves the second line empty; a two-line card simply
+                        fills it — no spacer element to show or hide. */}
                     <div
-                      className="text-white/80 text-xs tabular-nums mt-1 flex flex-wrap gap-x-1.5"
+                      className="text-white/80 text-xs tabular-nums mt-1 min-h-8 content-start flex flex-wrap gap-x-1.5"
                       title={`${folderCount} ${folderCount === 1 ? 'folder' : 'folders'} · ${videoCount} ${videoCount === 1 ? 'video' : 'videos'} · ${sizeLabel}`}
                     >
                       {/* 7.17.7: compact counts (1.2k, 2.7k) on the card; the

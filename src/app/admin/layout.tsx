@@ -170,9 +170,19 @@ export default function AdminLayout({
             // Inner pages drop their own `bg-background` wrappers too
             // so the wash bleeds across the dashboard area to bottom-
             // right.
-            <div className="spotlight-bg flex flex-1 min-h-0 overflow-x-hidden select-none">
+            // 7.17.8: NO overflow on this wrapper. The sidebar is
+            // `position: sticky; top: 0`, and sticky holds against the
+            // nearest ancestor with any overflow other than visible — the
+            // `overflow-x-hidden` that used to sit here made THIS box that
+            // ancestor, so on a dashboard taller than the screen the sidebar
+            // scrolled away with the page and left a hole under it (Dragos,
+            // 2026-10-04, nine project cards). The horizontal clamp moves to
+            // the content column, which is what it was for; `body` keeps its
+            // own `overflow-x-hidden`, which propagates to the viewport and
+            // does not create a scroll container.
+            <div className="spotlight-bg flex flex-1 min-h-0 select-none">
               <AdminSidebar />
-              <div className="flex-1 min-w-0 flex flex-col">
+              <div className="flex-1 min-w-0 flex flex-col overflow-x-hidden">
                 {/* 7.7.0: "Enable notifications" bar — chromed pages only, so
                     it never sits over a video in the player preview. */}
                 <PushEnrollmentBanner />

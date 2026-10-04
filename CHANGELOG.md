@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.8] - 2026-10-04
+
+### Fixed
+
+- **The sidebar stays put while the dashboard scrolls.** On a dashboard
+  taller than the screen the left menu scrolled away with the page and left
+  a hole under it: the wrapper around sidebar and content carried an
+  `overflow-x: hidden` that turned it into the sidebar's scroll container.
+  The horizontal clamp now sits on the content column only.
+- **Project cards are the same height.** The folders / videos / size line
+  always reserves two lines, so a card whose stats fit on one line is as
+  tall as a neighbour whose stats wrap onto two.
+
 ## [7.17.7] - 2026-10-04
 
 ### Changed
