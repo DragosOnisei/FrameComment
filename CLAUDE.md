@@ -452,6 +452,23 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   composer (`data-comment-dropzone` — it attaches files and drawings to the
   open edit) or while drawing mode is on. "Unchanged" compares against
   `htmlToPlainText(content)`, the value the edit started from.
+- **On desktop the admin shell is the viewport; the content column scrolls**
+  (7.17.9): the chromed branch in src/app/admin/layout.tsx is
+  `md:flex-none md:h-dvh md:overflow-hidden`, the column beside the sidebar
+  `min-h-0 md:overflow-y-auto`. The window never scrolls from md: up, so the
+  sidebar (and the sticky top bar inside the column) cannot move. Two
+  earlier attempts failed and are worth knowing: `sticky` alone broke
+  because an ancestor carried `overflow-x-hidden` (any non-visible overflow
+  makes that ancestor the sticky's scroll container), and `h-dvh` alone was
+  ignored because the shell is a `flex-1` item of the root layout's column
+  — flex-basis decides a flex item's main size before `height` does, so
+  `flex-none` is what makes the height stick. Phones keep document
+  scrolling (hidden sidebar, collapsing address bar). Pages scroll inside
+  their own `overflow-y-auto` boxes, as Settings always did; every popover
+  listens for `scroll` in the capture phase, so they still close/reposition.
+  Scrollbars are themed GLOBALLY since 7.17.9 (universal rules at the end
+  of globals.css, outside the layers): a new scroller never needs
+  `custom-scrollbar`, which is now a no-op; `scrollbar-hide` still works.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

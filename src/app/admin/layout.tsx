@@ -180,9 +180,24 @@ export default function AdminLayout({
             // the content column, which is what it was for; `body` keeps its
             // own `overflow-x-hidden`, which propagates to the viewport and
             // does not create a scroll container.
-            <div className="spotlight-bg flex flex-1 min-h-0 select-none">
+            //
+            // 7.17.9: that was not enough — on the live dashboard the sidebar
+            // still travelled with the page. So from md: up the shell is the
+            // viewport itself (`h-dvh`, nothing below it) and the CONTENT
+            // COLUMN is the scroller (`overflow-y-auto`): the window never
+            // scrolls, and a sidebar that is never asked to stick cannot come
+            // unstuck. This is how Settings already behaves (its panes scroll
+            // inside a fixed-height box). Phones keep document scrolling: the
+            // sidebar is hidden there and the address bar collapsing on scroll
+            // depends on it. Every popover listens for `scroll` in the capture
+            // phase, so inner scrolling still closes and repositions them.
+            // `md:flex-none` matters: this box is a flex item of the root
+            // layout's column, and `flex-1` (basis 0, grow 1) decides a flex
+            // item's main size before `height` does — with it, the shell grew
+            // to the content's 3440 px and `h-dvh` was ignored (measured).
+            <div className="spotlight-bg flex flex-1 min-h-0 md:flex-none md:h-dvh md:overflow-hidden select-none">
               <AdminSidebar />
-              <div className="flex-1 min-w-0 flex flex-col overflow-x-hidden">
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-x-hidden md:overflow-y-auto">
                 {/* 7.7.0: "Enable notifications" bar — chromed pages only, so
                     it never sits over a video in the player preview. */}
                 <PushEnrollmentBanner />

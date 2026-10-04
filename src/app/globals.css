@@ -950,6 +950,50 @@
   }
 }
 
+/* 7.17.9: the themed scrollbar is the DEFAULT, everywhere.
+   `.custom-scrollbar` had to be remembered on every scrolling box, and
+   every box that forgot it — the composer until 7.17.4, the comment edit
+   box until 7.17.5, the dashboard's content column the moment it became
+   the scroller in 7.17.9 — showed the browser's grey-on-white bar in the
+   middle of the glass UI. These rules put the same bar on every element
+   and on the page itself, so a new scroller is themed by default and
+   `.custom-scrollbar` becomes a no-op kept for the places that carry it.
+   `.scrollbar-hide` still wins: a class outranks the universal selector,
+   and `display: none` on the pseudo-element is what Chrome/Safari honour.
+   Chrome ≥ 121 applies the standard `scrollbar-width` / `scrollbar-color`
+   and ignores the `::-webkit-scrollbar` rules once those are set; Safari
+   is the other way round — so both forms are declared, as in
+   `.custom-scrollbar`. Outside the layers so it is not reordered. */
+*,
+html {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.42) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.34);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.55);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: hsl(var(--spotlight-tint, 217 91% 60%) / 0.72);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* 3.5.x: the admin shell + the player/review chrome set
    `user-select: none` to stop accidental text/element selection while
    click-dragging (selecting the video, sidebar labels, breadcrumbs,

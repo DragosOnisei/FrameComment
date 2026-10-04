@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.17.9] - 2026-10-04
+
+### Fixed
+
+- **The sidebar really stays put now.** 7.17.8's change was not enough on
+  the live dashboard. From desktop widths up, the admin shell is exactly the
+  height of the window and only the content column scrolls — the way
+  Settings always worked — so the left menu and the top bar cannot move.
+  Phones keep page scrolling.
+- **Every scrollbar is the app's.** The thin, accent-coloured bar is now the
+  default for every element and for the page itself, so no scrolling box
+  can show the browser's grey bar again.
+
 ## [7.17.8] - 2026-10-04
 
 ### Fixed
