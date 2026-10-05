@@ -3,8 +3,9 @@ import { prisma } from '@/lib/db'
 import { isS3Mode } from '@/lib/storage'
 import { s3CompleteMultipartUpload } from '@/lib/s3-storage'
 import { sanitizeContentType } from '@/lib/file-validation'
+import { skipsEncoding } from '@/lib/media-kind'
 import { verifyS3UploadAccess } from '@/lib/s3-upload-auth'
-import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
+import { videoQueue, getAssetQueue, getProjectUploadQueue, enqueueRegenerateThumbnail } from '@/lib/queue'
 import { logError, logMessage } from '@/lib/logging'
 import { rateLimit } from '@/lib/rate-limit'
 import { handleReverseShareUploadNotification } from '@/lib/upload-notifications'
@@ -100,14 +101,14 @@ export async function POST(request: NextRequest) {
     // ── Derive S3 key from DB (never trust client-supplied key) ───────────────
     // Auth helper already resolved s3Key. For videos, re-check status (TOCTOU guard).
     let s3Key = authResult.s3Key
-    let dbVideo: { id: string; originalStoragePath: string; projectId: string; status: string } | null = null
+    let dbVideo: { id: string; originalStoragePath: string; projectId: string; status: string; mediaType?: string | null } | null = null
     let dbAsset: { id: string; storagePath: string; category: string | null } | null = null
     let dbProjectUpload: { id: string; storagePath: string; projectId: string; fileName: string; uploadedByName: string | null; uploadedByEmail: string | null } | null = null
 
     if (videoId) {
       const video = await prisma.video.findUnique({
         where: { id: videoId },
-        select: { id: true, originalStoragePath: true, projectId: true, status: true },
+        select: { id: true, originalStoragePath: true, projectId: true, status: true, mediaType: true },
       })
       if (!video) return NextResponse.json({ error: 'Video record not found' }, { status: 404 })
       if (video.status !== 'UPLOADING') {
@@ -145,7 +146,35 @@ export async function POST(request: NextRequest) {
     logMessage(`[S3 COMPLETE] Multipart upload complete for key: ${s3Key}`)
 
     // ── Update DB and trigger worker (mirrors TUS onUploadFinish) ─────────────
-    if (dbVideo) {
+    if (dbVideo && skipsEncoding(dbVideo.mediaType)) {
+      // 7.18.0: images, audio and documents never meet the worker — the
+      // same exit the TUS hook takes. An image's original is its thumbnail;
+      // audio has none; a document gets the top of its first page from the worker (below).
+      // No duration probe here: the bytes are in the bucket, not on disk,
+      // and the player trusts the media element's own duration anyway.
+      await prisma.video.update({
+        where: { id: dbVideo.id },
+        data: {
+          status: 'READY',
+          processingProgress: 100,
+          ...(dbVideo.mediaType === 'IMAGE' ? { thumbnailPath: dbVideo.originalStoragePath } : {}),
+        } as any,
+      })
+      logMessage(`[S3 COMPLETE] ${dbVideo.mediaType} ${dbVideo.id} upload complete, marked READY (worker skipped)`)
+      // 7.18.0: a document's cover (top of page one) comes from the worker's
+      // regenerate-thumbnail job; it downloads the original from the bucket.
+      if (dbVideo.mediaType === 'DOCUMENT') {
+        try {
+          await enqueueRegenerateThumbnail({
+            videoId: dbVideo.id,
+            projectId: dbVideo.projectId,
+            originalStoragePath: dbVideo.originalStoragePath,
+          })
+        } catch (err) {
+          logError(`[S3 COMPLETE] Could not enqueue the document cover for ${dbVideo.id} (non-fatal):`, err)
+        }
+      }
+    } else if (dbVideo) {
       await prisma.video.update({
         where: { id: dbVideo.id },
         data: { status: 'PROCESSING', processingProgress: 0 },

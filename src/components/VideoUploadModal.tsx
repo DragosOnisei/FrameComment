@@ -27,6 +27,7 @@ import {
 } from '@/lib/tus-context'
 import { useStorageProvider } from '@/components/StorageConfigProvider'
 import { useS3MultipartUpload } from '@/hooks/useS3MultipartUpload'
+import { isAcceptedMediaFile, mediaKindFromFile, UPLOAD_ACCEPT } from '@/lib/media-kind'
 
 interface PendingUpload {
   id: string
@@ -295,10 +296,11 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
   // 1.0.9+: returns true when the file is one of the supported image
   // kinds. We branch on this before the MP4/MOV magic-byte check so
   // PNG / JPG / WebP / GIF uploads aren't rejected.
-  const isImageUpload = (file: File): boolean => {
-    if (file.type && file.type.startsWith('image/')) return true
-    return /\.(jpe?g|png|webp|gif)$/i.test(file.name)
-  }
+  // 7.18.0: audio and documents skip it too — only a VIDEO goes through the
+  // MP4/MOV atom check; src/lib/media-kind.ts decides the kind the same way
+  // the server does when it creates the row.
+  const isImageUpload = (file: File): boolean =>
+    mediaKindFromFile(file.name, file.type) !== 'VIDEO'
 
   const validateVideoFile = async (file: File): Promise<{ valid: boolean; error?: string }> => {
     if (file.size === 0) {
@@ -364,12 +366,9 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
   // 1.0.9+: accept BOTH videos and images. Some macOS .mov / .avi
   // files report an empty MIME, so we also accept the canonical
   // FrameComment media extensions as a safety net.
+  // 7.18.0: plus audio and documents — one list, src/lib/media-kind.ts.
   const isAcceptedUpload = (f: File) =>
-    f.type.startsWith('video/') ||
-    f.type.startsWith('image/') ||
-    /\.(mp4|mov|avi|mkv|webm|m4v|mxf|prores|jpg|jpeg|png|webp|gif)$/i.test(
-      f.name,
-    )
+    isAcceptedMediaFile(f.name, f.type) || /\.(mxf|prores)$/i.test(f.name)
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
@@ -1375,7 +1374,7 @@ function UploadBannerView({
     <input
       ref={fileInputRef}
       type="file"
-      accept="video/*,image/jpeg,image/png,image/webp,image/gif"
+      accept={UPLOAD_ACCEPT}
       multiple
       onChange={handleFileSelect}
       className="hidden"
@@ -1389,7 +1388,7 @@ function UploadBannerView({
     <input
       ref={resumeInputRef}
       type="file"
-      accept="video/*,image/jpeg,image/png,image/webp,image/gif"
+      accept={UPLOAD_ACCEPT}
       onChange={onResumePick}
       className="hidden"
     />

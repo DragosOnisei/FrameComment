@@ -20,7 +20,9 @@ import {
   UploadCloud,
   Layers,
   FileText,
+  Music,
 } from 'lucide-react'
+import { type MediaKind } from '@/lib/media-kind'
 import { computePopoverStyle } from '@/lib/popover-position'
 import { useProcessingStatus } from '@/contexts/ProcessingStatusContext'
 import { storageLocationLabels } from '@/lib/storage-labels'
@@ -216,8 +218,9 @@ export interface VideoCardProps {
   /** 1.0.9+: distinguishes a real video asset from an image upload.
    *  `IMAGE` hides duration / hover-scrub / version label / the
    *  Split-versions action — none of which make sense for a still
-   *  image — and swaps the empty-state Film icon for a Photo icon. */
-  mediaType?: 'VIDEO' | 'IMAGE'
+   *  image — and swaps the empty-state Film icon for a Photo icon.
+   *  7.18.0: AUDIO (music glyph) and DOCUMENT (document glyph) too. */
+  mediaType?: MediaKind
   /** 1.1.0+: download this card (sequential per version) — when
    *  ≥ 1 selected the parent's bulk download handler is called
    *  instead, which fans out across the full selection. */
@@ -389,6 +392,12 @@ export default function VideoCard({
   onDuplicate,
 }: VideoCardProps) {
   const isImage = mediaType === 'IMAGE'
+  // 7.18.0: the two kinds that have no thumbnail and no encode. "isVideo"
+  // guards everything that only a real video has — storyboard scrub,
+  // quality chip, rendition picker.
+  const isAudio = mediaType === 'AUDIO'
+  const isDocument = mediaType === 'DOCUMENT'
+  const isVideo = !isImage && !isAudio && !isDocument
   // Bulk-aware kebab gating (1.0.9+). When the user has 2+ videos
   // selected, single-target actions (Rename, Share, Split versions)
   // are hidden because they don't make sense across the selection.
@@ -532,9 +541,9 @@ export default function VideoCard({
   // <video> seeking when only previewUrl is available (legacy rows
   // that pre-date the storyboard worker step). Images never scrub —
   // there's nothing to seek through.
-  const hasStoryboard = !!storyboardUrl && !isImage
+  const hasStoryboard = !!storyboardUrl && isVideo
   const canScrub =
-    !isImage &&
+    isVideo &&
     (hasStoryboard || !!previewUrl) &&
     typeof duration === 'number' &&
     duration > 0
@@ -860,7 +869,7 @@ export default function VideoCard({
             onError={() => setThumbErrored(true)}
             className="absolute inset-0 w-full h-full object-contain rounded-t-xl"
           />
-        ) : isProcessing && !isImage ? (
+        ) : isProcessing && isVideo ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground/70">
             <span
               className="inline-block w-7 h-7 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
@@ -870,8 +879,14 @@ export default function VideoCard({
           </div>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60">
+            {/* 7.18.0: the kind's glyph is the whole thumbnail for audio and
+                documents — there is no frame to show. */}
             {isImage ? (
               <ImageIcon className="w-8 h-8" />
+            ) : isAudio ? (
+              <Music className="w-10 h-10" />
+            ) : isDocument ? (
+              <FileText className="w-10 h-10" />
             ) : (
               <FilmIcon className="w-8 h-8" />
             )}
@@ -1100,7 +1115,7 @@ export default function VideoCard({
                   would be a promise this app cannot keep; and a still IMAGE,
                   which has no renditions to choose between. */}
               {showDownload && (
-                isBulk || isImage ? (
+                isBulk || !isVideo ? (
                   <button
                     role="menuitem"
                     type="button"
@@ -1139,7 +1154,7 @@ export default function VideoCard({
                   <Share2 className="w-4 h-4 shrink-0" />
                   {/* 6.3.1: name the thing you are actually sharing. A still
                       offering "Share video" reads like the wrong menu. */}
-                  {isImage ? 'Share image' : 'Share video'}
+                  {isImage ? 'Share image' : isAudio ? 'Share audio' : isDocument ? 'Share document' : 'Share video'}
                 </button>
               )}
               {(showDownload || showShare) && (showDuplicate || showRename || showSplit || showRegenThumb || showTranscript) && (
@@ -1309,7 +1324,7 @@ export default function VideoCard({
           <div className="flex flex-wrap items-center gap-1 mt-1.5">
           {/* 6.14.0: quality first — it is the thing that changes per
             version and the thing a stopped encode makes ambiguous. */}
-          {!isImage && qualityLabel && (
+          {isVideo && qualityLabel && (
             <span className="shrink-0 inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
             {qualityLabel}
             </span>

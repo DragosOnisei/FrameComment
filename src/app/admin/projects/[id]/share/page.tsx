@@ -9,6 +9,8 @@ import CommentSection from '@/components/CommentSection'
 import { AnnotationProvider } from '@/contexts/AnnotationContext'
 import ThumbnailReel from '@/components/ThumbnailReel'
 import ResizableSidebar from '@/components/ResizableSidebar'
+import DocumentViewer from '@/components/DocumentViewer'
+import { documentKind } from '@/lib/media-kind'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Loader2 } from 'lucide-react'
@@ -194,6 +196,20 @@ function AdminSharePageInner() {
   // highlight the active row in the version dropdown.
   const [activeVideoId, setActiveVideoId] = useState<string | undefined>(undefined)
   const [activeVideos, setActiveVideos] = useState<any[]>([])
+  // 7.18.0: when the active item is a DOCUMENT the player is not mounted, so
+  // nobody reports the chosen version through onVideoStateChange. The reel's
+  // version dropdown dispatches `selectVideoVersion` for the player; for a
+  // document this listener answers it instead. Declared here, before the
+  // loading / error early returns — a hook below them is a conditional hook.
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const id = (e as CustomEvent<{ videoId?: string }>).detail?.videoId
+      const row = id ? activeVideos.find((v: any) => v.id === id) : null
+      if (row && row.mediaType === 'DOCUMENT') setActiveVideoId(id)
+    }
+    window.addEventListener('selectVideoVersion', onSelect)
+    return () => window.removeEventListener('selectVideoVersion', onSelect)
+  }, [activeVideos])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
   // 2.2.0+: Cache the last successfully-tokenized activeVideos so we
@@ -1494,6 +1510,11 @@ function AdminSharePageInner() {
   const activeVersionLabel = activeVideo?.versionLabel
     || (activeVideo?.version ? `v${activeVideo.version}` : null)
 
+  // 7.18.0: a DOCUMENT takes the player's place (DocumentViewer) and has no
+  // comments column. The version dropdown still works for it through the
+  // `selectVideoVersion` listener declared with the state above.
+  const activeIsDocument = (activeVideo as any)?.mediaType === 'DOCUMENT'
+
   // 3.2.1+: render-time override — same fix as SharePageClient.tsx.
   // When the admin opens the share preview with a deep-link to a
   // specific video (?video=<name>), force the player branch even
@@ -1592,7 +1613,7 @@ function AdminSharePageInner() {
         onBackToGrid={handleBackToGrid}
         showBackButton={true}
         showLanguageToggle={false}
-        showCommentToggle={!project.hideFeedback}
+        showCommentToggle={!project.hideFeedback && !activeIsDocument}
         isCommentPanelVisible={!hideComments}
         onToggleCommentPanel={() => setHideComments(!hideComments)}
         topRightMenu={
@@ -1778,7 +1799,26 @@ function AdminSharePageInner() {
                 column so the `.spotlight-bg` wash from the page
                 wrapper bleeds through the margins around the video
                 (which is black on its own). */}
-            <div className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
+            <div className={`shrink-0 lg:shrink lg:h-full lg:min-h-0 lg:flex-1 min-w-0 flex flex-col ${showCommentPanel && !activeIsDocument ? 'xl:flex-[2] 2xl:flex-[2.5]' : ''}`}>
+              {activeIsDocument ? (
+                // 7.18.0: a document is read, not played — zoom, pan, pages;
+                // the original is the only representation, and the admin
+                // token plan always carries it in the stream slots.
+                <DocumentViewer
+                  key={activeVideo.id}
+                  url={
+                    (activeVideo as any).streamUrl480p ||
+                    (activeVideo as any).streamUrl720p ||
+                    (activeVideo as any).streamUrl1080p ||
+                    (activeVideo as any).streamUrl2160p ||
+                    ''
+                  }
+                  kind={documentKind(activeVideo.originalFileName)}
+                  name={activeVideo.name}
+                  downloadUrl={(activeVideo as any).downloadUrl ?? null}
+                  className="min-h-[60vh] lg:min-h-0"
+                />
+              ) : (
               <VideoPlayer
                 videos={readyVideos}
                 projectId={project.id}
@@ -1809,10 +1849,12 @@ function AdminSharePageInner() {
                 }}
                 onRealDurationDetected={handleRealDuration}
               />
+              )}
             </div>
 
-            {/* Comments Section - max one screen height on mobile, side panel on desktop */}
-            {showCommentPanel && (
+            {/* Comments Section - max one screen height on mobile, side panel on desktop.
+                7.18.0: never for a document. */}
+            {showCommentPanel && !activeIsDocument && (
               <ResizableSidebar
                 storageKey={`framecomment:sidebar-width:${project.id}`}
                 defaultWidth={360}

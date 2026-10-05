@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, ArrowLeft, Film, Image as ImageIcon, Folder as FolderIcon } from 'lucide-react'
+import { X, ArrowLeft, Film, Image as ImageIcon, Folder as FolderIcon, Music, FileText, Play, Pause, Volume2, VolumeX } from 'lucide-react'
+import { isTimelineMedia, type MediaKind } from '@/lib/media-kind'
 import { useTranslations } from 'next-intl'
 import { apiFetch } from '@/lib/api-client'
 import { formatDuration } from '@/lib/utils'
@@ -46,7 +47,8 @@ export interface QuickPreviewVideo {
   duration?: number | null
   width?: number | null
   height?: number | null
-  mediaType?: 'VIDEO' | 'IMAGE'
+  mediaType?: MediaKind
+  originalFileName?: string | null
   thumbnailUrl?: string | null
   previewUrl?: string | null
   versionLabel?: string | null
@@ -276,6 +278,23 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
         ? previewVideo.width / previewVideo.height
         : 16 / 9
       : null
+  // 7.18.0: audio and documents have no picture to size the card by. A
+  // 0×0 "video" fell back to 16:9 at 75% of the screen height — a huge
+  // black box with native controls at the bottom (Dragos: "trebuie să fie
+  // mult mai mic"). They get a compact card instead: a small 16:9 tile for
+  // audio with the artwork in the middle, a portrait tile for a document.
+  const previewWidthCss = !previewVideo
+    ? null
+    : previewVideo.mediaType === 'AUDIO'
+      ? 'min(95vw, 480px)'
+      : previewVideo.mediaType === 'DOCUMENT'
+        ? // A document WITH a cover (top of page one, 16:9) gets a card wide
+          // enough to read the title; one still waiting for it keeps the
+          // narrow portrait tile with the glyph.
+          previewVideo.thumbnailUrl
+          ? 'min(95vw, 640px)'
+          : 'min(95vw, 360px)'
+        : `min(95vw, calc(${PREVIEW_MEDIA_MAX_VH}vh * ${previewAspect}))`
 
   return (
     <div
@@ -309,7 +328,7 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
         // is unset and `auto` applies, as before.
         className="relative rounded-xl ring-1 ring-white/15 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75)] text-white overflow-hidden max-w-[95vw] max-h-[92vh] w-full sm:w-[var(--qp-w,auto)] flex flex-col"
         style={{
-          ...(previewAspect ? { ['--qp-w' as string]: `min(95vw, calc(${PREVIEW_MEDIA_MAX_VH}vh * ${previewAspect}))` } : {}),
+          ...(previewWidthCss ? { ['--qp-w' as string]: previewWidthCss } : {}),
           backgroundColor: 'rgba(22, 37, 51, 0.62)',
           backgroundImage:
             'radial-gradient(140% 80% at 0% 0%, hsl(var(--spotlight-tint) / 0.22) 0%, hsl(var(--spotlight-tint) / 0.06) 45%, transparent 75%)',
@@ -374,6 +393,117 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
   )
 }
 
+/**
+ * 7.18.0: the transport bar for an audio Quick Look — the app's own chrome
+ * (glass pill, accent progress, mono time) instead of the browser's native
+ * controls, which Dragos read as "not our style". Deliberately small: play /
+ * pause, elapsed / total, a click-to-seek progress track, mute. It drives
+ * the <video> element the body already renders (hidden picture, audio only)
+ * through the shared ref, and mirrors its state from the element's own
+ * events so the bar is never out of step with what is actually playing.
+ */
+function QuickAudioBar({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement | null> }) {
+  const [playing, setPlaying] = useState(false)
+  const [muted, setMuted] = useState(false)
+  const [time, setTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+    const sync = () => {
+      setPlaying(!el.paused && !el.ended)
+      setMuted(el.muted)
+      setTime(el.currentTime || 0)
+      setDuration(Number.isFinite(el.duration) ? el.duration : 0)
+    }
+    sync()
+    const events = ['play', 'pause', 'ended', 'timeupdate', 'durationchange', 'loadedmetadata', 'volumechange']
+    events.forEach((ev) => el.addEventListener(ev, sync))
+    return () => events.forEach((ev) => el.removeEventListener(ev, sync))
+  }, [videoRef])
+
+  // `timeupdate` fires about four times a second, so a playhead driven by it
+  // alone hops in quarter-second steps (Dragos: "sare, nu e smooth"). While
+  // playing, the position is read every animation frame instead; the event
+  // listeners above still cover seeks and the paused state.
+  useEffect(() => {
+    if (!playing) return
+    let raf = 0
+    const tick = () => {
+      const el = videoRef.current
+      if (el) setTime(el.currentTime || 0)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [playing, videoRef])
+
+  const toggle = () => {
+    const el = videoRef.current
+    if (!el) return
+    if (el.paused || el.ended) void el.play().catch(() => {})
+    else el.pause()
+  }
+  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = videoRef.current
+    if (!el || !duration) return
+    const r = e.currentTarget.getBoundingClientRect()
+    const f = Math.min(1, Math.max(0, (e.clientX - r.left) / Math.max(1, r.width)))
+    el.currentTime = f * duration
+  }
+  const pct = duration > 0 ? Math.min(100, (time / duration) * 100) : 0
+  const btn =
+    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[0.08] ring-1 ring-white/15 text-white/85 hover:bg-white/[0.16] hover:text-white transition-colors'
+
+  return (
+    <div
+      className="brand-menu-surface absolute inset-x-3 bottom-3 z-20 flex items-center gap-3 rounded-xl px-3 py-2 ring-1 ring-white/10 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)]"
+      style={{
+        backgroundColor: 'color-mix(in srgb, hsl(var(--spotlight-tint)) 18%, hsl(var(--background)))',
+        transform: 'translateZ(0)',
+        isolation: 'isolate',
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button type="button" onClick={toggle} className={btn} aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : 'Play'}>
+        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
+      </button>
+      <span className="shrink-0 font-mono text-[11px] tabular-nums text-white/80">
+        {formatDuration(time)} / {formatDuration(duration)}
+      </span>
+      <div
+        className="group relative h-6 flex-1 cursor-pointer select-none"
+        onClick={seek}
+        role="slider"
+        aria-label="Seek"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(duration)}
+        aria-valuenow={Math.round(time)}
+      >
+        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/15" />
+        <div className="absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-primary" style={{ width: `${pct}%` }} />
+        <div
+          className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background shadow"
+          style={{ left: `${pct}%` }}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          const el = videoRef.current
+          if (el) el.muted = !el.muted
+        }}
+        className={btn}
+        aria-label={muted ? 'Unmute' : 'Mute'}
+        title={muted ? 'Unmute' : 'Mute'}
+      >
+        {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+  )
+}
+
 /* ---------------- VIDEO / IMAGE body ---------------- */
 
 /** The media box is capped at this share of the viewport height so the
@@ -417,8 +547,15 @@ function MiddleEllipsisTitle({ text, className }: { text: string; className?: st
 
 function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
   const isImage = video.mediaType === 'IMAGE'
-  const aspectRatio =
-    video.width && video.height && video.width > 0 && video.height > 0
+  const isAudio = video.mediaType === 'AUDIO'
+  const isDocument = video.mediaType === 'DOCUMENT'
+  // 7.18.0: a document tile is portrait like a page; audio stays 16:9 but
+  // the card is capped narrow by the overlay (see `previewWidthCss`).
+  const aspectRatio = isDocument
+    ? video.thumbnailUrl
+      ? '16 / 9'
+      : '3 / 4'
+    : video.width && video.height && video.width > 0 && video.height > 0
       ? `${video.width} / ${video.height}`
       : '16 / 9'
 
@@ -443,7 +580,7 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
   return (
     <>
       <div
-        className="bg-black flex items-center justify-center"
+        className="relative bg-black flex items-center justify-center"
         // Cap the media at 75% of the viewport height so the
         // metadata strip below always stays visible. Width tracks
         // the aspect ratio naturally.
@@ -453,6 +590,25 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
           maxWidth: '95vw',
         }}
       >
+        {/* 7.18.0: audio artwork over the (pictureless) media element —
+            the same mark the player shows. pointer-events-none keeps the
+            native controls under it clickable; kept clear of the bottom
+            48 px where those controls live. */}
+        {isAudio && (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 bottom-12 z-10 flex flex-col items-center justify-center gap-2 select-none"
+            style={{
+              background:
+                'radial-gradient(ellipse 70% 60% at 50% 45%, hsl(var(--spotlight-tint) / 0.28) 0%, hsl(var(--spotlight-tint) / 0.08) 55%, transparent 100%)',
+            }}
+            aria-hidden
+          >
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/15 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.8)]">
+              <Music className="h-7 w-7 text-white/80" />
+            </div>
+          </div>
+        )}
+        {isAudio && video.previewUrl && <QuickAudioBar videoRef={videoRef} />}
         {isImage && video.thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -460,13 +616,21 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
             alt={video.name}
             className="w-full h-full object-contain"
           />
-        ) : video.previewUrl ? (
+        ) : video.previewUrl && video.mediaType !== 'DOCUMENT' ? (
+          // 7.18.0: audio arrives here too — the folder API hands over the
+          // original as previewUrl when no encoded tier exists, and a
+          // <video> element plays an mp3 fine (black stage, native
+          // controls). A DOCUMENT's "preview" is the PDF itself, which is
+          // nothing for a media element: it falls through to the glyph.
           <video
             key={video.id}
             ref={videoRef}
             src={video.previewUrl}
             poster={video.thumbnailUrl || undefined}
-            controls
+            // 7.18.0: audio gets the app's own bar (QuickAudioBar) instead
+            // of the browser's grey controls, which read as foreign chrome
+            // on the glass card. Video keeps the native controls for now.
+            controls={!isAudio}
             autoPlay
             preload="metadata"
             playsInline
@@ -484,6 +648,14 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
           />
         ) : isImage ? (
           <ImageIcon className="w-12 h-12 text-white/40" />
+        ) : video.mediaType === 'AUDIO' ? (
+          // 7.18.0: an audio file with no playable URL yet, or a document —
+          // the kind's glyph, same as the card. Audio WITH a previewUrl
+          // (the original, streamed) took the <video> branch above and
+          // plays with the native controls.
+          <Music className="w-12 h-12 text-white/40" />
+        ) : video.mediaType === 'DOCUMENT' ? (
+          <FileText className="w-12 h-12 text-white/40" />
         ) : (
           <Film className="w-12 h-12 text-white/40" />
         )}
@@ -494,7 +666,7 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
         <MiddleEllipsisTitle text={video.name} className="text-sm font-medium text-white" />
         <div className="text-xs text-white/55 mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
           {video.versionLabel && <span>{video.versionLabel}</span>}
-          {!isImage && typeof video.duration === 'number' && video.duration > 0 && (
+          {isTimelineMedia(video.mediaType) && typeof video.duration === 'number' && video.duration > 0 && (
             <span>{formatDuration(video.duration)}</span>
           )}
           {video.width && video.height ? (
@@ -541,7 +713,7 @@ interface FolderContents {
      *  (CSS background-position, instant). */
     storyboardUrl?: string | null
     duration?: number | null
-    mediaType?: 'VIDEO' | 'IMAGE'
+    mediaType?: MediaKind
     width?: number | null
     height?: number | null
     versionLabel?: string | null

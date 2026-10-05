@@ -76,6 +76,10 @@ _*.tmp
 _local-deploy/
 *-SECRETS.txt
 
+# 7.18.0 — pdf.js worker copied from node_modules by scripts/copy-pdf-worker.mjs
+# (predev / prebuild). Derived from the installed package; never committed.
+/public/vendor/
+
 # 6.18.0 — produced by scripts/build-security-artifacts.mjs during the image
 # build. Committing them would mean the manifest in git drifts from the one in
 # the image, and the integrity check would report noise instead of intrusions.

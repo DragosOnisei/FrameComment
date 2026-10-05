@@ -5,10 +5,11 @@ import { pipeline } from 'stream/promises'
 import { RegenerateThumbnailJob } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { logMessage, logError } from '../lib/logging'
-import { downloadFile, getLocalSourcePath, getStorageFileSize } from '../lib/storage'
+import { downloadFile, getLocalSourcePath, getStorageFileSize, uploadFile } from '../lib/storage'
 import { getVideoBackend } from '../lib/storage-backends'
 import { getVideoMetadata } from '../lib/ffmpeg'
 import { pickThumbnailSource } from '../lib/thumbnail-source'
+import { renderDocumentThumbnail } from '../lib/document-thumbnail'
 import { TEMP_DIR } from './cleanup'
 import {
   TempFiles,
@@ -57,6 +58,8 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
       where: { id: videoId },
       select: {
         id: true,
+        mediaType: true,
+        originalFileName: true,
         preview480Path: true,
         preview720Path: true,
         preview1080Path: true,
@@ -73,6 +76,59 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
     // the legacy download-into-/tmp behaviour for S3 mode.
     // 4.2.0+: resolve the video's storage backend for the source read.
     const backend = await getVideoBackend(videoId)
+
+    // 7.18.0: a DOCUMENT's cover is the top of its first page, painted by
+    // src/lib/document-thumbnail.ts — no ffmpeg, no storyboard. Both upload
+    // hooks enqueue this job for every document right after marking it
+    // READY, and the per-video "Regenerate thumbnail" button reaches here
+    // too. An AUDIO file has no picture at all: ffmpeg would fail on it, so
+    // say so and stop instead of leaving a failed job under the fixed id.
+    if (existing.mediaType === 'AUDIO') {
+      logMessage(`[WORKER] regenerate-thumbnail ${videoId}: audio has no cover, skipping`)
+      return
+    }
+    if (existing.mediaType === 'DOCUMENT') {
+      const localSource = getLocalSourcePath(originalStoragePath, backend)
+      let sourcePath: string
+      if (localSource) {
+        sourcePath = localSource
+        logMessage(`[WORKER] regenerate-thumbnail ${videoId}: rendering the document from local disk`)
+      } else {
+        // Documents have no encoded tiers; the original is the only
+        // source, capped at 500 MB by the upload route.
+        const docTemp = path.join(TEMP_DIR, `${videoId}-document-original`)
+        const size = await getStorageFileSize(originalStoragePath, backend).catch(() => null)
+        logMessage(
+          `[WORKER] regenerate-thumbnail ${videoId}: downloading the document` +
+            (size !== null ? ` (${(size / 1024 / 1024).toFixed(1)} MB)` : ''),
+        )
+        const stream = await downloadFile(originalStoragePath, backend)
+        await pipeline(stream, fs.createWriteStream(docTemp))
+        tempFiles.input = docTemp
+        sourcePath = docTemp
+      }
+
+      const jpeg = await renderDocumentThumbnail(sourcePath, existing.originalFileName ?? '')
+      const newThumbnailPath = `projects/${projectId}/videos/${videoId}/thumbnail.jpg`
+      await uploadFile(newThumbnailPath, jpeg, jpeg.length, 'image/jpeg', backend)
+
+      try {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: { thumbnailPath: newThumbnailPath },
+        })
+      } catch (err: any) {
+        if (err?.code === 'P2025') {
+          logMessage(`[WORKER] regenerate-thumbnail ${videoId}: row deleted before persist, skipping`)
+          return
+        }
+        throw err
+      }
+      logMessage(
+        `[WORKER] regenerate-thumbnail for document ${videoId} done in ${((Date.now() - start) / 1000).toFixed(2)}s`,
+      )
+      return
+    }
 
     // 7.12.0: when the master is not on local disk, read an encoded TIER
     // instead of downloading the whole original — see

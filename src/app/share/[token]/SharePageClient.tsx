@@ -12,6 +12,8 @@ import ThumbnailGrid from '@/components/ThumbnailGrid'
 import ThumbnailReel from '@/components/ThumbnailReel'
 import { detectAdminAccessToProject, detectLoggedInAdmin } from '@/lib/share-auth'
 import ResizableSidebar from '@/components/ResizableSidebar'
+import DocumentViewer from '@/components/DocumentViewer'
+import { documentKind } from '@/lib/media-kind'
 import { OTPInput } from '@/components/OTPInput'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -266,6 +268,20 @@ function SharePageClientInner({ token }: SharePageClientProps) {
 
 
   const [activeVideos, setActiveVideos] = useState<any[]>([])
+  // 7.18.0: when the active item is a DOCUMENT the player is not mounted, so
+  // nobody reports the chosen version through onVideoStateChange. The reel's
+  // version dropdown dispatches `selectVideoVersion` for the player; for a
+  // document this listener answers it instead. Declared here, before the
+  // early returns — a hook below them is a conditional hook.
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const id = (e as CustomEvent<{ videoId?: string }>).detail?.videoId
+      const row = id ? activeVideos.find((v: any) => v.id === id) : null
+      if (row && row.mediaType === 'DOCUMENT') setActiveVideoId(id)
+    }
+    window.addEventListener('selectVideoVersion', onSelect)
+    return () => window.removeEventListener('selectVideoVersion', onSelect)
+  }, [activeVideos])
   const [activeVideosRaw, setActiveVideosRaw] = useState<any[]>([])
   const [tokensLoading, setTokensLoading] = useState(false)
   // 6.3.4: one quiet loading state instead of a chain of cards.
@@ -854,8 +870,21 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           streamToken720p = token720
           streamToken1080p = token1080
           streamToken2160p = token2160
-          if (project?.allowAssetDownload) {
-            downloadToken = await fetchVideoTokenWithRetry(video.id, 'original')
+          // 7.18.0: audio and documents have no ladder — the original is the
+          // only thing to stream, and the token route mints it for these two
+          // kinds whether or not downloads are allowed. It fills every stream
+          // slot (the player's "highest available" picker then finds it);
+          // the download button still follows the project setting.
+          const streamsOriginalOnly = video.mediaType === 'AUDIO' || video.mediaType === 'DOCUMENT'
+          if (project?.allowAssetDownload || streamsOriginalOnly) {
+            const originalToken = await fetchVideoTokenWithRetry(video.id, 'original')
+            if (project?.allowAssetDownload) downloadToken = originalToken
+            if (streamsOriginalOnly && originalToken) {
+              streamToken480p = originalToken
+              streamToken720p = originalToken
+              streamToken1080p = originalToken
+              streamToken2160p = originalToken
+            }
           }
 
           let thumbnailUrl = null
@@ -1779,6 +1808,10 @@ function SharePageClientInner({ token }: SharePageClientProps) {
     readyVideos.find((v: any) => v.id === activeVideoId) || readyVideos[0]
   const activeVideoDownloadUrl: string | null =
     activeReadyVideoForDownload?.downloadUrl || null
+  // 7.18.0: a DOCUMENT takes the player's place (DocumentViewer) and has no
+  // comments column. The version dropdown still works for it through the
+  // `selectVideoVersion` listener declared with the state above.
+  const activeIsDocument = (activeReadyVideoForDownload as any)?.mediaType === 'DOCUMENT'
   const showToolbarDownload = !!(
     project.allowAssetDownload &&
     activeVideoDownloadUrl &&
@@ -2064,7 +2097,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
           // Folder/project shares keep the button so the client can go
           // back to the folder grid.
           showBackButton={!isSingleVideoShare}
-          showCommentToggle={!project.hideFeedback && !isGuest}
+          showCommentToggle={!project.hideFeedback && !isGuest && !activeIsDocument}
           isCommentPanelVisible={!hideComments}
           onToggleCommentPanel={() => setHideComments(!hideComments)}
           showThemeToggle={false}
@@ -2205,6 +2238,24 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               // height; on desktop leave it to the lg: flex sizing.
               style={isMobileLayout && mobileVideoHeight ? { height: `${mobileVideoHeight}px` } : undefined}
             >
+              {activeIsDocument ? (
+                // 7.18.0: a document is read, not played — zoom, pan, pages;
+                // the stream slots carry the original for this kind.
+                <DocumentViewer
+                  key={activeReadyVideoForDownload.id}
+                  url={
+                    activeReadyVideoForDownload.streamUrl480p ||
+                    activeReadyVideoForDownload.streamUrl720p ||
+                    activeReadyVideoForDownload.streamUrl1080p ||
+                    activeReadyVideoForDownload.streamUrl2160p ||
+                    ''
+                  }
+                  kind={documentKind(activeReadyVideoForDownload.originalFileName)}
+                  name={activeReadyVideoForDownload.name}
+                  downloadUrl={project.allowAssetDownload ? activeVideoDownloadUrl : null}
+                  className="min-h-[60vh] lg:min-h-0"
+                />
+              ) : (
               <VideoPlayer
                 videos={readyVideos}
                 projectId={project.id}
@@ -2234,6 +2285,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                   setActiveVideoId(state.selectedVideo?.id)
                 }}
               />
+              )}
               {/* 3.8.x: first-visit 3-step onboarding (name → range handle
                   → annotate). Only runs once, and never for a logged-in
                   admin. Mounts with the player so its anchors exist. */}
@@ -2245,7 +2297,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 shrink/grow the comments). Double-click resets to the
                 natural split. Hidden from lg+ where the side
                 ResizableSidebar handles resizing instead. */}
-            {showCommentPanel && (
+            {showCommentPanel && !activeIsDocument && (
               <div
                 role="separator"
                 aria-orientation="horizontal"
@@ -2270,7 +2322,7 @@ function SharePageClientInner({ token }: SharePageClientProps) {
                 glass-card corners, and drop the opaque `bg-card` so the inner
                 CommentSection's frosted glass surface (white/[0.04] + spotlight
                 radial) is what we see, not a flat dark fill on top of it. */}
-            {showCommentPanel && (
+            {showCommentPanel && !activeIsDocument && (
               <ResizableSidebar
                 storageKey={`framecomment:sidebar-width:${project.id}`}
                 defaultWidth={360}

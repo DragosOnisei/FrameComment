@@ -23,6 +23,7 @@ import {
   uniqueDirectoryPaths,
   type FileTreeEntry,
 } from '@/lib/folder-upload'
+import { anyStillSettling } from '@/lib/live-refresh'
 
 // Force dynamic rendering (no static pre-rendering)
 export const dynamic = 'force-dynamic'
@@ -249,12 +250,9 @@ export default function ProjectPage() {
     // window, so polling through the ladder lets the card pick it up
     // live instead of needing a manual refresh. Legacy rows have
     // plannedTiers === null and behave exactly as before.
-    const hasProcessingVideos = project.videos.some((video: any) => {
-      if (video.status === 'PROCESSING' || video.status === 'UPLOADING') return true
-      const planned = Array.isArray(video.plannedTiers) ? video.plannedTiers : []
-      const completed = Array.isArray(video.completedTiers) ? video.completedTiers : []
-      return planned.length > 0 && completed.length < planned.length
-    })
+    // 7.18.0: the rule lives in src/lib/live-refresh.ts (shared with the
+    // folder page) and also covers a fresh document waiting for its cover.
+    const hasProcessingVideos = anyStillSettling(project.videos)
 
     if (hasProcessingVideos) {
       // Poll every 5 seconds while videos are processing (reduced from 3s to reduce load)

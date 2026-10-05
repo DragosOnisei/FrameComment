@@ -98,6 +98,9 @@ interface CustomVideoControlsProps {
   /** Resolved quality for the current stream — used as a small read-only
    *  badge on the right-hand side of the bar (e.g. HD/4K). */
   resolvedPlaybackQuality?: '720p' | '1080p' | '2160p' | '480p'
+  /** 7.18.0: true for audio — the only "tier" is the original file, so a
+   *  "HD+" badge would describe a picture that does not exist. */
+  hideQualityBadge?: boolean
   /** 1.3.2+: Settings popup state — Quality / Guides / Rulers /
    *  Download Still. All optional so the player can drop the menu when
    *  the parent doesn't wire it up (e.g. comparison view). */
@@ -437,6 +440,7 @@ export default function CustomVideoControls({
   onPlaybackSpeedChange,
   onSaveSpeed,
   resolvedPlaybackQuality,
+  hideQualityBadge = false,
   availableQualities,
   pendingQualities,
   qualityChoice,
@@ -3701,7 +3705,7 @@ export default function CustomVideoControls({
               onDownloadStill={onDownloadStill}
             />
           ) : (
-            resolvedPlaybackQuality && (
+            resolvedPlaybackQuality && !hideQualityBadge && (
               <span
                 className="hidden sm:inline-flex items-center px-1.5 h-5 rounded text-[10px] font-bold tracking-wide bg-white/10 text-white/80 ring-1 ring-white/15"
                 title={`Streaming ${resolvedPlaybackQuality}`}

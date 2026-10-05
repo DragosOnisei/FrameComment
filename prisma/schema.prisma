@@ -635,6 +635,12 @@ enum VideoStatus {
 enum MediaType {
   VIDEO
   IMAGE
+  // 7.18.0: audio files (mp3/wav/m4a/aac) play in the player over a static
+  // artwork, with the timeline and timecoded comments of a video; documents
+  // (pdf/txt/docx) open in the in-page viewer, without comments. Both skip
+  // the FFmpeg pipeline like IMAGE and are READY the moment the upload lands.
+  AUDIO
+  DOCUMENT
 }
 
 model Comment {

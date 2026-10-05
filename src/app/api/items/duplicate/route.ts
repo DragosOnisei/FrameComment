@@ -46,7 +46,8 @@ import { resolveFileBackend, backendIsLocalFilesystem, type StorageBackend } fro
 import { generateUniqueFolderSlug } from '@/lib/folder-helpers'
 import { newStackId } from '@/lib/video-versions'
 import { stackKeyOf } from '@/lib/video-stack'
-import { videoQueue } from '@/lib/queue'
+import { originalContentType, skipsEncoding, type MediaKind } from '@/lib/media-kind'
+import { videoQueue, enqueueRegenerateThumbnail } from '@/lib/queue'
 import { Readable } from 'stream'
 
 export const runtime = 'nodejs'
@@ -124,8 +125,11 @@ async function duplicateVideoRow(
   newName: string,
   adminId: string | null,
 ): Promise<string> {
-  const mediaType: 'VIDEO' | 'IMAGE' = (source.mediaType as any) || 'VIDEO'
+  const mediaType: MediaKind = (source.mediaType as any) || 'VIDEO'
   const isImage = mediaType === 'IMAGE'
+  // 7.18.0: audio and documents are copied like images — no worker, READY
+  // at once; only an image's original doubles as its thumbnail.
+  const noWorker = skipsEncoding(mediaType)
 
   const ext = (() => {
     const dot = source.originalFileName?.lastIndexOf('.') ?? -1
@@ -138,15 +142,7 @@ async function duplicateVideoRow(
   // Copy the original file. Mime is just a hint — uploadFile uses it
   // for the S3 ContentType header; the downstream worker only cares
   // about extension.
-  const mime = isImage
-    ? source.originalFileName?.toLowerCase().endsWith('.png')
-      ? 'image/png'
-      : source.originalFileName?.toLowerCase().endsWith('.webp')
-        ? 'image/webp'
-        : source.originalFileName?.toLowerCase().endsWith('.gif')
-          ? 'image/gif'
-          : 'image/jpeg'
-    : 'video/mp4'
+  const mime = originalContentType(source.originalFileName).split(';')[0]
   // 4.2.0+: keep the duplicate on the same backend as the source.
   const srcBackend = resolveFileBackend(source.storageBackend)
   await copyStorageFile(source.originalStoragePath, newOriginalPath, mime, srcBackend)
@@ -169,8 +165,8 @@ async function duplicateVideoRow(
     height: source.height,
     fps: source.fps ?? null,
     codec: source.codec ?? null,
-    status: (isImage ? 'READY' : 'PROCESSING') as 'READY' | 'PROCESSING',
-    processingProgress: isImage ? 100 : 0,
+    status: (noWorker ? 'READY' : 'PROCESSING') as 'READY' | 'PROCESSING',
+    processingProgress: noWorker ? 100 : 0,
     thumbnailPath: isImage ? newOriginalPath : null,
     mediaType,
     storageBackend: srcBackend,
@@ -188,7 +184,7 @@ async function duplicateVideoRow(
   // For videos, enqueue the worker so the derived assets get
   // regenerated from the new original. The worker re-uses the same
   // pipeline as a fresh upload.
-  if (!isImage) {
+  if (!noWorker) {
     try {
       // 2.2.0+: enqueue prepare-video (prio 1) instead of legacy
       // process-video. The breadth-first pipeline fans out into
@@ -204,6 +200,19 @@ async function duplicateVideoRow(
       )
     } catch (err) {
       logError('[duplicate] enqueue failed', err)
+    }
+  } else if (mediaType === 'DOCUMENT') {
+    // 7.18.0: the copy gets its own cover (top of page one) from the
+    // worker, like a fresh upload — its thumbnail path belongs under ITS
+    // id, so the source's cover is not shared.
+    try {
+      await enqueueRegenerateThumbnail({
+        videoId: created.id,
+        projectId: source.projectId,
+        originalStoragePath: newOriginalPath,
+      })
+    } catch (err) {
+      logError('[duplicate] document cover enqueue failed (non-fatal)', err)
     }
   }
   return created.id

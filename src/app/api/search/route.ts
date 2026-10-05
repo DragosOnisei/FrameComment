@@ -177,7 +177,9 @@ export async function GET(request: NextRequest) {
         // then 1080p, then 2160p. Images don't get a preview URL —
         // the renderer falls back to the thumbnail tag.
         let previewUrl: string | null = null
-        if (v.mediaType !== 'IMAGE') {
+        // 7.18.0: nor documents — a PDF is nothing for a <video> tag. Audio
+        // has no encoded tier either, so `quality` stays null for it below.
+        if (v.mediaType !== 'IMAGE' && v.mediaType !== 'DOCUMENT') {
           const quality = v.preview720Path
             ? '720p'
             : v.preview1080Path

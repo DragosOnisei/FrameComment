@@ -23,6 +23,7 @@ import {
 } from '@/lib/tus-context'
 import { useS3MultipartUpload } from '@/hooks/useS3MultipartUpload'
 import { useStorageProvider } from '@/components/StorageConfigProvider'
+import { isAcceptedMediaFile, UPLOAD_ACCEPT } from '@/lib/media-kind'
 
 interface VideoUploadProps {
   projectId: string
@@ -455,8 +456,8 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete, in
 
     if (!uploading && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0]
-      // Only accept video files
-      if (droppedFile.type.startsWith('video/')) {
+      // 7.18.0: any media kind the app takes (video, image, audio, document).
+      if (isAcceptedMediaFile(droppedFile.name, droppedFile.type)) {
         setFile(droppedFile)
       } else {
         setError(t('dropVideoHere'))
@@ -504,7 +505,7 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete, in
             ref={fileInputRef}
             id="file"
             type="file"
-            accept="video/*,image/jpeg,image/png,image/webp,image/gif"
+            accept={UPLOAD_ACCEPT}
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             disabled={uploading}
             className="hidden"

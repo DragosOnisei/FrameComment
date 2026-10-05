@@ -57,6 +57,7 @@ import { useIsMobile } from '@/lib/use-is-mobile'
 import { useTouchStackDrag } from '@/lib/use-touch-stack-drag'
 import { Layers } from 'lucide-react'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
+import { mediaKindLabel, UPLOAD_ACCEPT, type MediaKind } from '@/lib/media-kind'
 import { shouldDownloadAsFiles } from '@/lib/download-mode'
 import GridZoomSlider, { useGridZoomLevel } from '@/components/GridZoomSlider'
 import { gridZoomAttr } from '@/lib/grid-zoom'
@@ -237,15 +238,16 @@ function aspectRatioLabel(w?: number | null, h?: number | null): string | null {
   return reduceRatio(Math.round(w), Math.round(h))
 }
 
-/** Short "type" label for a video/image card chip. */
+/** Short "type" label for a card chip: "Video 9:16", "Image", "Audio",
+ *  "PDF", "Text", "Word". 7.18.0: the words live in src/lib/media-kind.ts;
+ *  this only adds the grid's aspect-ratio label for videos. */
 function mediaTypeLabel(
-  mediaType: 'VIDEO' | 'IMAGE' | undefined,
+  mediaType: MediaKind | undefined,
+  filename?: string | null,
   width?: number | null,
   height?: number | null,
 ): string {
-  if (mediaType === 'IMAGE') return 'Image'
-  const ar = aspectRatioLabel(width, height)
-  return ar ? `Video ${ar}` : 'Video'
+  return mediaKindLabel(mediaType, filename, aspectRatioLabel(width, height))
 }
 
 interface FolderRow {
@@ -321,8 +323,9 @@ interface VideoRow {
     username: string | null
     email: string
   } | null
-  /** 1.0.9+: distinguishes a real video upload from an image asset. */
-  mediaType?: 'VIDEO' | 'IMAGE'
+  /** 1.0.9+: distinguishes a real video upload from an image asset;
+   *  7.18.0: AUDIO and DOCUMENT join. */
+  mediaType?: MediaKind
 }
 
 /** One card per video name; we collapse multiple versions of the
@@ -365,7 +368,7 @@ interface VideoGroup {
   /** ISO timestamp of the latest version's upload. */
   createdAt?: string | Date
   /** 1.0.9+: media type of the latest version. */
-  mediaType?: 'VIDEO' | 'IMAGE'
+  mediaType?: MediaKind
   /** Byte size of the latest version's source file — List view Size. */
   originalFileSize?: string | number | null
   /** 4.2.0+: storage backend(s) of the latest version — rendered as tags. */
@@ -1212,6 +1215,7 @@ function FolderBrowserInner(
         mediaType: latest.mediaType,
         typeLabel: mediaTypeLabel(
           latest.mediaType,
+          (latest as any).originalFileName,
           (latest as any).width,
           (latest as any).height,
         ),
@@ -3878,7 +3882,7 @@ function FolderBrowserInner(
         ref={filesInputRef}
         type="file"
         multiple
-        accept="video/*,image/jpeg,image/png,image/webp,image/gif"
+        accept={UPLOAD_ACCEPT}
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files || [])

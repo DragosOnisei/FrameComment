@@ -4,6 +4,14 @@
  */
 
 import { logMessage } from './logging'
+import {
+  AUDIO_EXTENSIONS,
+  AUDIO_MIME_TYPES,
+  DOCUMENT_EXTENSIONS,
+  DOCUMENT_MIME_TYPES,
+  IMAGE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from './media-kind'
 
 // Allowed video MIME types
 export const ALLOWED_VIDEO_TYPES = [
@@ -32,35 +40,32 @@ export const ALLOWED_IMAGE_TYPES = [
   'image/gif',
 ]
 
-// Union of both — convenient for MIME validation paths that accept
-// either kind of media.
+// Union of every kind — convenient for MIME validation paths that accept
+// any media. 7.18.0: audio and documents join (src/lib/media-kind.ts holds
+// the lists; this module only re-exports them into the validators).
 export const ALLOWED_MEDIA_TYPES = [
   ...ALLOWED_VIDEO_TYPES,
   ...ALLOWED_IMAGE_TYPES,
+  ...AUDIO_MIME_TYPES,
+  ...DOCUMENT_MIME_TYPES,
 ]
 
-// File configuration. `ALLOWED_EXTENSIONS` is now the union of video
-// + image extensions so the existing extension validators (e.g.
-// `validateFileExtension`) accept image uploads without any code
-// changes at the call sites. The split arrays below are exposed so
-// callers that need to discriminate (e.g. picking the upload pipeline
-// to use) can do so cheaply.
+// File configuration. `ALLOWED_EXTENSIONS` is the union of every media
+// kind so the existing extension validators (e.g. `validateFileExtension`)
+// accept them without any code changes at the call sites. The split arrays
+// below are exposed so callers that need to discriminate (e.g. picking the
+// upload pipeline to use) can do so cheaply.
 export const FILE_LIMITS = {
-  ALLOWED_VIDEO_EXTENSIONS: ['.mp4', '.m4v', '.mov', '.avi', '.webm', '.mkv'],
-  ALLOWED_IMAGE_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.webp', '.gif'],
+  ALLOWED_VIDEO_EXTENSIONS: [...VIDEO_EXTENSIONS] as string[],
+  ALLOWED_IMAGE_EXTENSIONS: [...IMAGE_EXTENSIONS] as string[],
+  ALLOWED_AUDIO_EXTENSIONS: [...AUDIO_EXTENSIONS] as string[],
+  ALLOWED_DOCUMENT_EXTENSIONS: [...DOCUMENT_EXTENSIONS] as string[],
   ALLOWED_EXTENSIONS: [
-    '.mp4',
-    '.m4v',
-    '.mov',
-    '.avi',
-    '.webm',
-    '.mkv',
-    '.jpg',
-    '.jpeg',
-    '.png',
-    '.webp',
-    '.gif',
-  ],
+    ...VIDEO_EXTENSIONS,
+    ...IMAGE_EXTENSIONS,
+    ...AUDIO_EXTENSIONS,
+    ...DOCUMENT_EXTENSIONS,
+  ] as string[],
 }
 
 /** Returns true when the filename's extension is one we treat as an image. */

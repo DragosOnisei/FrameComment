@@ -215,6 +215,11 @@ export async function GET(
           height: true,
           fps: true,
           status: true,
+          // 7.18.0: the kind and the file name decide the card's glyph and
+          // chip ("Audio", "PDF", "Text", "Word") on the shared folder grid,
+          // and whether the preview URL is something a <video> can play.
+          mediaType: true,
+          originalFileName: true,
           thumbnailPath: true,
           // 1.9.4+ Phase A: 480p tier is the fastest progressive
           // preview and is preferred for hover-scrub fallback

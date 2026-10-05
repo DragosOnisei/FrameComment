@@ -53,6 +53,7 @@ export async function GET(
       preview720Path: true,
       preview1080Path: true,
       preview2160Path: true,
+      mediaType: true,
     } as any,
   }) as any
 
@@ -63,7 +64,13 @@ export async function GET(
   // 6.11.0: approval no longer exists. The original is available whenever
   // the project allows client downloads — one rule instead of two that
   // disagreed with each other.
-  if (quality === 'original' && !project.allowAssetDownload) {
+  // 7.18.0: audio and documents have NO other representation — the worker
+  // never encodes them — so their original is what the player and the
+  // document viewer stream, download allowed or not. The content route's
+  // `download=true` branch still consults the project setting for the
+  // save-to-disk case; this token only lets the file be shown.
+  const streamsOriginalOnly = video.mediaType === 'AUDIO' || video.mediaType === 'DOCUMENT'
+  if (quality === 'original' && !project.allowAssetDownload && !streamsOriginalOnly) {
     return NextResponse.json({ error: shareMessages?.originalQualityUnavailable || 'Original quality unavailable' }, { status: 403 })
   }
 

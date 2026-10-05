@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useTranslations } from 'next-intl'
 import { Video, ProjectStatus, Comment } from '@prisma/client'
 import { Button } from './ui/button'
-import { AlertTriangle, CheckCircle2, GitCompareArrows, Loader2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, GitCompareArrows, Loader2, Music } from 'lucide-react'
 import CustomVideoControls from './CustomVideoControls'
 import { PLAYBACK_SPEEDS, nearestSpeedIndex } from './PlaybackSpeedMenu'
 import { prefersNativeHls } from '@/lib/native-hls'
@@ -38,6 +38,7 @@ import {
 } from '@/lib/comment-range-edit'
 import { apiJson, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 import { getClientId } from '@/lib/client-id'
+import AudioReactiveRing from '@/components/AudioReactiveRing'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -694,6 +695,11 @@ export default function VideoPlayer({
   // `videoUrl` for BOTH, so opening a still left the spinner turning forever
   // because images never go through the HLS/MP4 ladder that sets it.
   const isImageAsset = (selectedVideo as any)?.mediaType === 'IMAGE'
+  // 7.18.0: an audio file plays through the same <video> element (a media
+  // element does not care that the stream has no picture), so the timeline,
+  // the comments and every control work unchanged; the stage would just be
+  // black, so an artwork overlay (below the <video>) names what is playing.
+  const isAudioAsset = (selectedVideo as any)?.mediaType === 'AUDIO'
   const hasDisplayableSource = isImageAsset
     ? !!(
         (selectedVideo as any)?.thumbnailUrl ||
@@ -3280,6 +3286,36 @@ export default function VideoPlayer({
                   />
                 )}
 
+                {/* 7.18.0: audio artwork — the stage has no picture, so say
+                    what is playing. pointer-events-none: clicks still reach
+                    the <video> (play/pause) and the annotation layer. */}
+                {isAudioAsset && (
+                  <div
+                    className="absolute inset-0 z-[5] flex flex-col items-center justify-center gap-3 pointer-events-none select-none"
+                    style={{
+                      background:
+                        'radial-gradient(ellipse 70% 60% at 50% 45%, hsl(var(--spotlight-tint) / 0.28) 0%, hsl(var(--spotlight-tint) / 0.08) 55%, transparent 100%)',
+                    }}
+                    aria-hidden
+                  >
+                    {/* 7.18.0: the ring of bars around the icon follows the
+                        music (AudioReactiveRing — Web Audio analyser on the
+                        same <video> element; same-origin only, see the file). */}
+                    <div className="relative flex h-24 w-24 items-center justify-center">
+                      <AudioReactiveRing
+                        mediaRef={videoRef}
+                        playing={isPlaying}
+                        innerDiameter={96}
+                        reach={44}
+                        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+                      />
+                      <div className="relative flex h-24 w-24 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/15 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.8)] backdrop-blur-[2px]">
+                        <Music className="h-11 w-11 text-white/80" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* 4.1.3+: buffering overlay — covers the player until the
                     video can actually play, so the controls don't tease a
                     Play button that stalls for a few seconds on first load
@@ -3374,6 +3410,7 @@ export default function VideoPlayer({
               >
                 <CustomVideoControls
                   videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+                  hideQualityBadge={isAudioAsset}
                   videoDuration={videoDuration}
                   currentTime={currentTimeState}
                   isPlaying={isPlaying || (reverse && reverseRunning)}

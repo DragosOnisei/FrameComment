@@ -249,6 +249,11 @@ export async function GET(
       fps: video.fps,
       codec: video.codec,
       status: video.status,
+      // 7.18.0: the kind decides the client's token plan (audio and
+      // documents stream the original) and which surface renders it (the
+      // player with artwork, or the document viewer). It was never sent, so
+      // a document opened on a share link sat on "Loading Video…" forever.
+      mediaType: video.mediaType ?? 'VIDEO',
       thumbnailPath: video.thumbnailPath,
       // 3.8.x: storyboard sprite path — lets SharePageClient mint a
       // storyboard token so the player timeline gets the same

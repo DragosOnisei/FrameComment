@@ -3,11 +3,13 @@ import { Server } from '@tus/server'
 import { FileStore } from '@tus/file-store'
 import { prisma, prismaPrivileged, orgSettingsWhere } from '@/lib/db'
 import { enterOrgContext } from '@/lib/org-context'
-import { videoQueue, getAssetQueue, getProjectUploadQueue } from '@/lib/queue'
+import { videoQueue, getAssetQueue, getProjectUploadQueue, enqueueRegenerateThumbnail } from '@/lib/queue'
 import { ALL_ALLOWED_EXTENSIONS } from '@/lib/asset-validation'
 import { uploadFile, moveFile, initStorage, getTusUploadDir, isS3Mode, getFilePath } from '@/lib/storage'
 import { getActiveBackend, backendIsLocalFilesystem, type StorageBackend } from '@/lib/storage-backends'
-import { generateThumbnail } from '@/lib/ffmpeg'
+import { generateThumbnail, probeMediaDurationSeconds } from '@/lib/ffmpeg'
+import { skipsEncoding, type MediaKind } from '@/lib/media-kind'
+import { FILE_LIMITS } from '@/lib/file-validation'
 import path from 'path'
 import fs from 'fs'
 import { PassThrough, Readable } from 'stream'
@@ -458,26 +460,58 @@ async function handleVideoUploadFinish(tusFilePath: string, upload: any, videoId
   // and point `thumbnailPath` at the uploaded original so the folder
   // grid and player can sign a URL for it just like a normal video
   // thumbnail.
-  const mediaType: 'VIDEO' | 'IMAGE' =
-    ((video as any).mediaType as 'VIDEO' | 'IMAGE' | undefined) || 'VIDEO'
-  if (mediaType === 'IMAGE') {
+  //
+  // 7.18.0: audio and documents take the same exit. Neither has a
+  // thumbnail (the cards draw the kind's glyph); an audio file gets its
+  // duration probed here when the bytes are on local disk, so the card and
+  // the timeline know the length before the player ever loads it — the
+  // player still trusts the media element's own duration once it plays.
+  const mediaType: MediaKind = ((video as any).mediaType as MediaKind | undefined) || 'VIDEO'
+  if (skipsEncoding(mediaType)) {
+    let probedDuration: number | null = null
+    if (mediaType === 'AUDIO' && backendIsLocalFilesystem(activeBackend)) {
+      try {
+        probedDuration = await probeMediaDurationSeconds(getFilePath(video.originalStoragePath))
+      } catch (err) {
+        logError(`[UPLOAD] Audio duration probe failed for ${videoId} (non-fatal):`, err)
+      }
+    }
     await prisma.video.update({
       where: { id: videoId },
       data: {
         status: 'READY',
         processingProgress: 100,
-        thumbnailPath: video.originalStoragePath,
+        ...(mediaType === 'IMAGE' ? { thumbnailPath: video.originalStoragePath } : {}),
+        ...(probedDuration && Number.isFinite(probedDuration) && probedDuration > 0
+          ? { duration: probedDuration }
+          : {}),
         storageBackend: activeBackend, // 4.2.0+: where the original landed
-        // Duration / width / height stay at the seed values from the
-        // upload route (0). Width/height ideally come from probing the
-        // image with sharp, but the player + grid already render fine
-        // off the natural dimensions of the <img>, so we skip the
-        // server-side probe for the MVP.
+        // Width / height stay at the seed values from the upload route
+        // (0). For images they ideally come from probing with sharp, but
+        // the player + grid already render fine off the natural dimensions
+        // of the <img>, so we skip the server-side probe for the MVP.
       } as any,
     })
     logMessage(
-      `[UPLOAD] Image ${videoId} upload complete, marked READY (worker skipped)`,
+      `[UPLOAD] ${mediaType} ${videoId} upload complete, marked READY (worker skipped${
+        probedDuration ? `, duration ${probedDuration.toFixed(1)}s` : ''
+      })`,
     )
+    // 7.18.0: a document's cover (top of page one) is painted by the worker
+    // — the same regenerate-thumbnail job the button uses, so the file is
+    // READY and openable right away and the card fills in a second later.
+    // Soft failure: a missing cover is not a failed upload.
+    if (mediaType === 'DOCUMENT') {
+      try {
+        await enqueueRegenerateThumbnail({
+          videoId,
+          projectId: video.projectId,
+          originalStoragePath: video.originalStoragePath,
+        })
+      } catch (err) {
+        logError(`[UPLOAD] Could not enqueue the document cover for ${videoId} (non-fatal):`, err)
+      }
+    }
     await cleanupTUSFile(tusFilePath)
     return {}
   }
@@ -687,10 +721,13 @@ async function validateVideoFile(tusFilePath: string, filename?: string) {
     // 1.0.9+: accept image extensions too. Image uploads travel
     // through the same `/api/uploads` TUS pipeline but bypass the
     // worker — see `handleVideoUploadFinish` below.
-    const allowedExtensions = [
-      '.mp4', '.mov', '.avi', '.webm', '.mkv',
-      '.jpg', '.jpeg', '.png', '.webp', '.gif',
-    ]
+    // 7.18.0: ONE list for every media kind (src/lib/file-validation.ts,
+    // fed by src/lib/media-kind.ts). This function kept a private copy
+    // that knew only video and image extensions, so the first .mp3 / .pdf
+    // / .txt uploads were created by /api/videos, accepted by the TUS
+    // server, and then thrown out HERE on the last chunk with a 500 —
+    // after which the browser deleted the rows it had just made.
+    const allowedExtensions = FILE_LIMITS.ALLOWED_EXTENSIONS
 
     if (!allowedExtensions.includes(ext)) {
       await cleanupTUSFile(tusFilePath)

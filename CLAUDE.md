@@ -476,6 +476,61 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   Scrollbars are themed GLOBALLY since 7.17.9 (universal rules at the end
   of globals.css, outside the layers): a new scroller never needs
   `custom-scrollbar`, which is now a no-op; `scrollbar-hide` still works.
+- **Four media kinds, decided in one place** (7.18.0): `MediaType` is
+  VIDEO | IMAGE | AUDIO | DOCUMENT and `src/lib/media-kind.ts` owns the
+  extension/MIME lists, `mediaKindFromFile` (the upload route), the chip
+  labels (`mediaKindLabel`: Video 9:16 / Image / Audio / PDF / Text /
+  Word), `skipsEncoding` (IMAGE, AUDIO, DOCUMENT never reach the worker —
+  both upload hooks flip them READY; only an image's original doubles as
+  its thumbnail; audio gets its duration from ffprobe when the bytes are on
+  local disk) and `originalContentType` (the content route's Content-Type
+  for originals — an .mp3 served as video/mp4 under nosniff may not play).
+  Audio and documents stream the ORIGINAL: the share token route mints
+  'original' for them regardless of `allowAssetDownload`, both players fill
+  every stream slot with it, and the share project payload carries
+  `mediaType` (it did not, so a document sat on "Loading Video…"). AUDIO
+  plays in VideoPlayer over an artwork overlay with timeline comments and
+  no quality badge; DOCUMENT renders in `DocumentViewer` (pdfjs-dist for
+  PDF, mammoth + DOMPurify for .docx, `<pre>` for .txt — wheel zoom, drag
+  pan, ↑/↓ pages) in place of the player, with NO comments column; the
+  reel's `selectVideoVersion` event is answered by a page-level listener
+  declared with the state (a hook after the early returns is conditional).
+  The pdf.js worker is copied to public/vendor by
+  scripts/copy-pdf-worker.mjs (`predev` / `prebuild`, gitignored).
+  Documents stop at 500 MB (`DOCUMENT_MAX_BYTES`). Every private extension
+  list that still exists is a bug: the TUS hook had one and rejected the
+  first .mp3/.pdf/.txt with a 500 after the row was created.
+- **A document's cover is the top of page one, painted by the worker**
+  (7.18.0): `src/lib/document-thumbnail.ts` renders a 1280×720 JPEG (page
+  scaled to the card's width, cut at the bottom — the title is up there in
+  99% of briefs) with pdf.js's Node build + `@napi-rs/canvas` for PDF,
+  mammoth → blocks for .docx and the first lines for .txt, drawn with the
+  Liberation Sans that ships inside pdfjs-dist (the runner has no Arial).
+  It runs in the regenerate-thumbnail job ONLY: both upload hooks and the
+  duplicate route enqueue `enqueueRegenerateThumbnail` for a DOCUMENT
+  right after marking it READY, and the per-video button reaches the same
+  branch; AUDIO is skipped there with a log (ffmpeg has no frame to grab).
+  Never import that module from src/app — webpack would try to bundle the
+  native binding. The binding is per libc: `npm ci` runs on Alpine (musl)
+  and the runner is Debian (glibc), so the Dockerfile's runner stage packs
+  the matching `@napi-rs/canvas-linux-<arch>-gnu` from the registry into
+  node_modules and loads it once as a build-time check. Because the cover lands a second AFTER the
+  upload-complete refresh, the project and folder pages poll through
+  `anyStillSettling` (src/lib/live-refresh.ts): a READY document without
+  a cover counts as in flight for two minutes after `createdAt`, then
+  stops — a failed render must not keep every visitor polling forever.
+- **Audio is proxied, not redirected, and the ring listens to it** (7.18.0):
+  `AudioReactiveRing` (around the note in VideoPlayer's artwork) reads the
+  sound with a Web Audio analyser on the SAME <video> element — one
+  `createMediaElementSource` per element for its whole life (module
+  WeakMap), wired analyser → destination at once, `resume()` on every
+  `play`. A media element captured this way goes SILENT when its bytes
+  come from another origin without CORS, so the content route's S3 branch
+  serves AUDIO itself, range by range (`s3GetObjectRange`), instead of the
+  presigned redirect every other stream gets; and the ring still probes
+  one byte with `redirect: 'manual'` before capturing — on a redirect it
+  only breathes on a timer and never touches the element. Quick Look keeps
+  its own `QuickAudioBar` and no analyser.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**

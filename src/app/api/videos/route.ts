@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, currentOrgId } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
-import {
-  isImageExtension,
-  isImageMime,
-  validateUploadedFile,
-} from '@/lib/file-validation'
+import { validateUploadedFile } from '@/lib/file-validation'
+import { DOCUMENT_MAX_BYTES, mediaKindFromFile } from '@/lib/media-kind'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 import { newStackId, stackVideoIntoGroup } from '@/lib/video-versions'
@@ -144,10 +141,19 @@ export async function POST(request: NextRequest) {
     }
     const nextVersion = 1
 
-    // Detect whether this upload is an image or a real video (1.0.9+).
-    const isImage =
-      isImageMime(mimeType || '') ||
-      isImageExtension(originalFileName || '')
+    // Which kind of media this is (1.0.9 image / video; 7.18.0 audio and
+    // documents too) — decided once, in src/lib/media-kind.ts, from the name
+    // and the browser's MIME type. The upload hooks read the kind back from
+    // the row to decide whether the worker is needed.
+    const mediaKind = mediaKindFromFile(originalFileName, mimeType)
+    // 7.18.0: documents stop at 500 MB. Video and audio keep the instance's
+    // upload limit (enforced by the upload hooks on the real byte count).
+    if (mediaKind === 'DOCUMENT' && Number(originalFileSize || 0) > DOCUMENT_MAX_BYTES) {
+      return NextResponse.json(
+        { error: `Documents can be at most ${Math.round(DOCUMENT_MAX_BYTES / (1024 * 1024))} MB` },
+        { status: 413 },
+      )
+    }
 
     const baseCreate = {
       projectId,
@@ -166,7 +172,7 @@ export async function POST(request: NextRequest) {
       duration: 0,
       width: probedWidth,
       height: probedHeight,
-      mediaType: isImage ? 'IMAGE' : 'VIDEO',
+      mediaType: mediaKind,
       // 5.4: explicit org — belt to the current_setting(...) column default.
       // The uploader's org is DB-fresh on the AuthUser; never trust the client.
       organizationId: (admin as any).organizationId ?? currentOrgId(),

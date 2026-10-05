@@ -181,6 +181,24 @@ COPY --from=builder --link /app/package.json ./package.json
 COPY --from=builder --link /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --link /app/next.config.js ./next.config.js
 COPY --from=builder --link /app/worker.mjs ./worker.mjs
+
+# 7.18.0: @napi-rs/canvas (document covers, worker) is a native module that
+# ships one prebuilt package per platform AND libc. `npm ci` ran in the
+# Alpine deps stage, so node_modules holds the linux-<arch>-MUSL binding;
+# this runner is Debian (glibc) and would find none and fail every document
+# cover with "Cannot find module '@napi-rs/canvas-linux-x64-gnu'". Fetch the
+# matching gnu package straight from the registry and unpack it next to the
+# others — no `npm install` here, which would re-resolve the whole tree
+# against a package.json with no lockfile. Verified 2026-10-05 in
+# node:24-bookworm-slim (arm64): the loader picks the gnu binding and draws.
+RUN set -e; \
+    case "$TARGETARCH" in arm64) NA=arm64;; *) NA=x64;; esac; \
+    V=$(node -p "require('/app/node_modules/@napi-rs/canvas/package.json').version"); \
+    cd /tmp && npm pack --silent "@napi-rs/canvas-linux-${NA}-gnu@${V}" >/dev/null \
+    && mkdir -p "/app/node_modules/@napi-rs/canvas-linux-${NA}-gnu" \
+    && tar -xzf "napi-rs-canvas-linux-${NA}-gnu-${V}.tgz" -C "/app/node_modules/@napi-rs/canvas-linux-${NA}-gnu" --strip-components=1 \
+    && rm -f "napi-rs-canvas-linux-${NA}-gnu-${V}.tgz" \
+    && cd /app && node -e "require('@napi-rs/canvas').createCanvas(2,2).toBuffer('image/jpeg',80); console.log('@napi-rs/canvas glibc binding OK')"
 COPY --link --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --link previewlut.cube /usr/share/ffmpeg/previewlut.cube
 

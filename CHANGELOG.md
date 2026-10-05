@@ -14,6 +14,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.0] - 2026-10-05
+
+### Added
+
+- **Audio and document files can be uploaded.** `.mp3`, `.wav`, `.m4a` and
+  `.aac` play in the player over a note-in-a-circle artwork, with the
+  timeline and timecoded comments a video has; `.pdf`, `.txt` and `.docx`
+  open in an in-page viewer (wheel zoom toward the centre with a smooth
+  glide, click-and-drag pan with a rubber band so the page can never be
+  dragged out of sight, ↑/↓ for pages, zoom back to fit on every page
+  change, and a rubber band below 100% that springs back). Documents have no
+  comments column, on the admin player and on share links alike. Cards carry
+  the kind under the name — Audio, PDF, Text, Word — and documents stop at
+  500 MB. None of the three kinds goes through the encoder; they are ready
+  the moment the upload ends and stream the original.
+- **A document's cover is the top of its first page**, where the title
+  lives: the worker renders it (pdf.js for PDF, mammoth for Word, the first
+  lines for text) right after the upload, and the folder fills it in without
+  a refresh. "Regenerate thumbnail" works on documents too.
+- **The audio player's ring moves with the music**: a circle of bars around
+  the note follows the spectrum, with a soft halo that breathes on the bass,
+  calibrated so a mastered track moves with the beat instead of pinning
+  every bar at full length.
+- **Quick Look for audio** is a compact card with the app's own play bar and
+  a smooth playhead; Quick Look for a document shows its cover.
+
+### Changed
+
+- Audio is streamed through the app rather than redirected to the storage
+  bucket, so the browser can read the sound for the ring (and keep playing
+  it) on every storage backend.
+
 ## [7.17.10] - 2026-10-04
 
 ### Fixed

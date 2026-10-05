@@ -5,6 +5,7 @@ import { ReadStream } from 'fs'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
 import { s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3FileExists, s3GetFileSize, s3ListKeys } from './s3-storage'
+import { originalContentType } from './media-kind'
 import {
   type StorageBackend,
   type S3BackendConfig,
@@ -409,27 +410,24 @@ export async function listStorageDirectory(dirPath: string, backend?: StorageBac
   return out
 }
 
-const VIDEO_MIME_MAP: Record<string, string> = {
-  '.mp4': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.avi': 'video/x-msvideo',
-  '.webm': 'video/webm',
-  '.mkv': 'video/x-matroska',
-}
-
+/**
+ * Content-Type for an ORIGINAL file by its name. 7.18.0: one table for every
+ * media kind (src/lib/media-kind.ts) — an .mp3 served as video/mp4 under
+ * `X-Content-Type-Options: nosniff` is a file the browser may refuse to play,
+ * and a .pdf needs application/pdf for the viewer to accept it. Unknown
+ * names still say video/mp4, as before.
+ */
 export function getVideoContentType(filename: string): string {
-  if (!filename) return 'video/mp4'
-  const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'))
-  return VIDEO_MIME_MAP[ext] || 'video/mp4'
+  return originalContentType(filename)
 }
 
-/** Convert a Node.js ReadStream to a Web ReadableStream for NextResponse. */
-export function createWebReadableStream(fileStream: ReadStream): ReadableStream {
+/** Convert a Node.js readable (a file stream, or an S3 body — 7.18.0) to a Web ReadableStream for NextResponse. */
+export function createWebReadableStream(fileStream: ReadStream | Readable): ReadableStream {
   return new ReadableStream({
     start(controller) {
-      fileStream.on('data', (chunk) => controller.enqueue(chunk))
+      fileStream.on('data', (chunk: Buffer | string) => controller.enqueue(chunk))
       fileStream.on('end', () => controller.close())
-      fileStream.on('error', (err) => controller.error(err))
+      fileStream.on('error', (err: Error) => controller.error(err))
     },
     cancel() {
       fileStream.destroy()

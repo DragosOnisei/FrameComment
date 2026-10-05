@@ -4,7 +4,7 @@ import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader, getVideoContentType, createWebReadableStream } from '@/lib/storage'
-import { s3GetPresignedDownloadUrl, s3GetPresignedStreamUrl, s3FileExists } from '@/lib/s3-storage'
+import { s3GetPresignedDownloadUrl, s3GetPresignedStreamUrl, s3FileExists, s3GetFileSize, s3GetObjectRange } from '@/lib/s3-storage'
 import { resolveReadTarget } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
@@ -409,6 +409,36 @@ export async function GET(
         return NextResponse.redirect(presignedUrl, {
           status: 302,
           headers: { 'Cache-Control': 'no-store' },
+        })
+      } else if (!assetId && (video as any).mediaType === 'AUDIO') {
+        // 7.18.0: AUDIO is proxied through the app instead of redirected to
+        // the bucket. The player's reactive ring listens to the sound with
+        // Web Audio, and a browser lets a page analyse only same-origin
+        // media — a presigned bucket URL is another origin, so the analyser
+        // (and, because the element's output runs through it, the speaker)
+        // would go silent. Audio files are small; one bounded range per
+        // request, 206 like the local branch, so seeking works.
+        const size = await s3GetFileSize(filePath, readTarget.config)
+        const ct = getVideoContentType(video.originalFileName || '')
+        const rangeHeader = request.headers.get('range')
+        const parsedRange = parseBoundedRangeHeader(rangeHeader || 'bytes=0-', size, STREAM_CHUNK_SIZE_BYTES)
+        if (!parsedRange) {
+          return new NextResponse(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
+        }
+        const { start, end } = parsedRange
+        const body = await s3GetObjectRange(filePath, start, end, readTarget.config)
+        return new NextResponse(createWebReadableStream(body), {
+          status: 206,
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': (end - start + 1).toString(),
+            'Content-Type': ct,
+            'Cache-Control': 'public, max-age=3600',
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'SAMEORIGIN',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+          },
         })
       } else {
         // Streaming (video player): long-lived presigned URL so range requests hit S3 directly

@@ -277,6 +277,34 @@ export async function s3DownloadFile(key: string, config?: S3BackendConfig): Pro
   return res.Body as Readable
 }
 
+/**
+ * 7.18.0: one byte range of an object, as a stream — for the content route's
+ * AUDIO proxy. The route hands every other stream to the bucket with a
+ * presigned redirect, which is right for video, but the audio player's
+ * reactive ring reads the sound through Web Audio, and a browser lets a page
+ * analyse only SAME-ORIGIN media: bytes that arrive from another origin
+ * without CORS come out of the analyser as silence — and so does the
+ * speaker, because the element's output is routed through the graph. So
+ * audio is proxied through the app, range by range, like a local file.
+ */
+export async function s3GetObjectRange(
+  key: string,
+  start: number,
+  end: number,
+  config?: S3BackendConfig,
+): Promise<Readable> {
+  let res
+  try {
+    res = await getS3Client(config).send(
+      new GetObjectCommand({ Bucket: getS3Bucket(config), Key: key, Range: `bytes=${start}-${end}` }),
+    )
+  } catch (err) {
+    throw formatS3Error('GET', key, err)
+  }
+  if (!res.Body) throw new Error(`S3 object body missing for key: ${key}`)
+  return res.Body as Readable
+}
+
 /** Delete a single object. */
 export async function s3DeleteFile(key: string, config?: S3BackendConfig): Promise<void> {
   try {

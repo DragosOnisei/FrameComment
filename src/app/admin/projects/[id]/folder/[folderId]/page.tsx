@@ -26,6 +26,7 @@ import {
   uniqueDirectoryPaths,
   type FileTreeEntry,
 } from '@/lib/folder-upload'
+import { anyStillSettling } from '@/lib/live-refresh'
 
 export const dynamic = 'force-dynamic'
 
@@ -205,20 +206,12 @@ export default function ProjectFolderPage() {
   // thumbnail without the user having to refresh manually (1.0.6+).
   useEffect(() => {
     if (!videos || videos.length === 0) return
-    const stillWorking = videos.some((v: any) => {
-      if (v.status === 'UPLOADING' || v.status === 'PROCESSING') return true
-      // 3.5.x: status flips to READY at the FIRST (SD) tier, but the HD
-      // tiers AND the hover-scrub storyboard sprite are still being
-      // produced (in parallel) for several more seconds. Keep polling
-      // through the whole encode ladder so the card picks up the
-      // storyboard live — otherwise hover-scrub only works after a
-      // manual refresh. Legacy rows have plannedTiers === null and are
-      // unaffected (poll still stops at READY for them).
-      const planned = Array.isArray(v.plannedTiers) ? v.plannedTiers : []
-      const completed = Array.isArray(v.completedTiers) ? v.completedTiers : []
-      if (planned.length > 0 && completed.length < planned.length) return true
-      return false
-    })
+    // 3.5.x: status flips to READY at the FIRST (SD) tier, but the HD
+    // tiers AND the hover-scrub storyboard sprite are still being produced
+    // for several more seconds — keep polling through the whole ladder.
+    // 7.18.0: the rule moved to src/lib/live-refresh.ts (shared with the
+    // project page) and also covers a fresh document waiting for its cover.
+    const stillWorking = anyStillSettling(videos)
     if (!stillWorking) return
     const interval = setInterval(() => {
       // Silent: don't flash the full-screen "Loading…" view on each poll.

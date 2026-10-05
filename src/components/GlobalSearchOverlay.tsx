@@ -8,6 +8,7 @@ import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import { triggerDownload } from '@/lib/trigger-download'
+import type { MediaKind } from '@/lib/media-kind'
 import {
   Search,
   X,
@@ -58,7 +59,7 @@ interface SearchResult {
   duration: number
   width: number
   height: number
-  mediaType: 'VIDEO' | 'IMAGE'
+  mediaType: MediaKind
   originalFileName: string
   originalFileSize: string
   createdAt: string

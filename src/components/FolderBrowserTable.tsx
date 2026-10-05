@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Folder as FolderIcon, Film, Image as ImageIcon } from 'lucide-react'
 import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
+import { isTimelineMedia, mediaKindLabel, type MediaKind } from '@/lib/media-kind'
 
 /**
  * 1.7.0+: compact "table" layout for the FolderBrowser grid. Same data
@@ -40,7 +41,8 @@ interface VideoGroup {
   versionLabel?: string
   versionCount?: number
   thumbnailUrl?: string | null
-  mediaType?: 'VIDEO' | 'IMAGE'
+  mediaType?: MediaKind
+  originalFileName?: string | null
   originalFileSize?: string | number | null
 }
 
@@ -357,10 +359,10 @@ export default function FolderBrowserTable({
                 )}
               </div>
               <div className="text-white/55 self-center">
-                {isImage ? 'Image' : 'Video'}
+                {mediaKindLabel(v.mediaType, v.originalFileName)}
               </div>
               <div className="text-white/55 self-center tabular-nums">
-                {!isImage && typeof v.duration === 'number' && v.duration > 0
+                {isTimelineMedia(v.mediaType) && typeof v.duration === 'number' && v.duration > 0
                   ? formatDuration(v.duration)
                   : '—'}
               </div>
