@@ -534,7 +534,11 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   frosted circle, resting ring, all from `--spotlight-tint`) is ONE
   component, `AudioArtwork` (7.18.2), on the card, in Quick Look and in
   the player — the player passes the live ring as children and turns the
-  static one off. Do not redraw the circle inline anywhere.
+  static one off. Do not redraw the circle inline anywhere. It takes a
+  `glyph` (7.18.4): folders wear it too — an empty folder's cover, a
+  folder tile inside a mosaic (smaller, ring only on the big tile) and
+  the folder's Quick Look (FolderCard and QuickPreviewOverlay's
+  FolderCover).
 - **The accent is the company's, fetched WITH the token** (7.18.3):
   `/api/settings/theme` answers with the platform's theme for an anonymous
   caller and with the company's own only when a bearer arms the org.

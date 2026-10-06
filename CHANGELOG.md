@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.4] - 2026-10-07
+
+### Changed
+
+- **Folders wear the same artwork as audio.** An empty folder's cover, a
+  folder tile inside another folder's mosaic and the folder tiles in Quick
+  Look show the folder glyph in the frosted circle with the accent glow and
+  the resting ring, instead of a flat outline on the glass.
+
 ## [7.18.3] - 2026-10-06
 
 ### Fixed

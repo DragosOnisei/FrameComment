@@ -868,18 +868,17 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
   // FolderCard (w-14 instead of the old w-10), so a Quick Preview
   // peek into a sub-folder reads consistently with the main folder
   // grid up top.
+  // 7.18.4: the shared artwork with the folder glyph, as on FolderCard.
   if (items.length === 0) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center" aria-hidden>
-        <FolderIcon className="w-14 h-14 text-primary/70" />
-      </div>
+      <AudioArtwork glyph={FolderIcon} circle={64} icon={28} withBase className="absolute inset-0" />
     )
   }
   // 2.5.2+: tile fill matches FolderCard's `bg-white/[0.03]` so the
   // mosaic cells read as a frosted-glass surface, not as black boxes
   // covering the popup's glass tint.
   const baseTile =
-    'overflow-hidden bg-white/[0.03] flex items-center justify-center'
+    'relative overflow-hidden bg-white/[0.03] flex items-center justify-center'
   const tileKey = (t: PreviewTile) =>
     t.kind === 'video' ? `v:${t.videoId}` : `f:${t.folderId}`
   const renderTile = (t: PreviewTile, size: 'big' | 'small') => {
@@ -896,8 +895,13 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
     // 2.5.2+: matches FolderCard's `w-10` / `w-7` so folder glyphs in
     // a sub-folder's mosaic stay legible at Quick Preview tile size.
     return (
-      <FolderIcon
-        className={`text-primary/70 ${size === 'big' ? 'w-10 h-10' : 'w-7 h-7'}`}
+      <AudioArtwork
+        glyph={FolderIcon}
+        circle={size === 'big' ? 48 : 36}
+        icon={size === 'big' ? 22 : 16}
+        staticRing={size === 'big'}
+        withBase
+        className="absolute inset-0"
       />
     )
   }

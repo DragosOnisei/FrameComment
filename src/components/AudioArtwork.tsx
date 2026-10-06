@@ -1,6 +1,6 @@
 'use client'
 
-import { Music } from 'lucide-react'
+import { Music, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 /**
@@ -18,8 +18,15 @@ import type { ReactNode } from 'react'
  * Look keep the static ring — a repeating conic gradient masked to a thin
  * band, i.e. the bars of the live ring at rest, with no canvas and no
  * JavaScript.
+ *
+ * 7.18.4: the same picture carries a FOLDER too (`glyph`): an empty folder's
+ * card, a folder inside a folder's mosaic and the folder's Quick Look showed
+ * a flat folder outline on the glass — Dragos asked for this design there
+ * as well. Any kind can pass its own lucide glyph; audio is the default.
  */
 export interface AudioArtworkProps {
+  /** The glyph inside the circle; the audio note by default. */
+  glyph?: LucideIcon
   /** Diameter of the frosted circle, CSS px. */
   circle: number
   /** Size of the note glyph, CSS px. */
@@ -35,6 +42,7 @@ export interface AudioArtworkProps {
 }
 
 export default function AudioArtwork({
+  glyph: Glyph = Music,
   circle,
   icon,
   staticRing = true,
@@ -75,7 +83,7 @@ export default function AudioArtwork({
           className="relative flex items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/15 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.8)] backdrop-blur-[2px]"
           style={{ width: circle, height: circle }}
         >
-          <Music className="text-white/80" style={{ width: icon, height: icon }} />
+          <Glyph className="text-white/80" style={{ width: icon, height: icon }} />
         </div>
       </div>
     </div>

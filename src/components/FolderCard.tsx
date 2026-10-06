@@ -16,6 +16,7 @@ import {
 import { computePopoverStyle } from '@/lib/popover-position'
 import { storyboardGridOf } from '@/lib/storyboard-grid'
 import { formatBytes } from '@/lib/project-gradient'
+import AudioArtwork from '@/components/AudioArtwork'
 
 /**
  * Frame.io-style folder card used in the admin folder browser. A
@@ -753,15 +754,17 @@ function FolderCover({
 }) {
   const items = (previewItems ?? []).slice(0, 4)
 
-  // Empty folder → big folder glyph centred in the cover area.
+  // Empty folder → the shared artwork (glow, frosted circle, resting ring)
+  // with the folder glyph, the picture the audio card wears (7.18.4).
   if (items.length === 0) {
     return (
-      <div
-        aria-hidden
-        className="absolute inset-0 flex items-center justify-center"
-      >
-        <FolderIcon className="w-14 h-14 text-primary/70" />
-      </div>
+      <AudioArtwork
+        glyph={FolderIcon}
+        circle={56}
+        icon={26}
+        withBase
+        className="absolute inset-0"
+      />
     )
   }
 
@@ -772,7 +775,7 @@ function FolderCover({
   // glass show through while still giving each cell enough contrast
   // to separate visually.
   const baseTile =
-    'overflow-hidden bg-white/[0.03] flex items-center justify-center'
+    'relative overflow-hidden bg-white/[0.03] flex items-center justify-center'
 
   type Tile = NonNullable<FolderCardProps['previewItems']>[number]
   const tileKey = (t: Tile) =>
@@ -799,11 +802,16 @@ function FolderCover({
         />
       )
     }
+    // 7.18.4: a folder inside the mosaic wears the same artwork, smaller;
+    // the resting ring only where the tile has room for it.
     return (
-      <FolderIcon
-        className={`text-primary/70 ${
-          size === 'big' ? 'w-10 h-10' : 'w-7 h-7'
-        }`}
+      <AudioArtwork
+        glyph={FolderIcon}
+        circle={size === 'big' ? 48 : 36}
+        icon={size === 'big' ? 22 : 16}
+        staticRing={size === 'big'}
+        withBase
+        className="absolute inset-0"
       />
     )
   }
