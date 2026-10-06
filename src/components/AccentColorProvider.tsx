@@ -4,6 +4,8 @@ import { useEffect, useCallback } from 'react'
 import { ACCENT_COLORS, AccentColorKey } from '@/components/settings/AppearanceSection'
 import { setPublicShareOrigin } from '@/lib/public-share-origin'
 import { spotlightTopColorFromTriplet } from '@/lib/status-bar-color'
+import { apiFetch } from '@/lib/api-client'
+import { getAccessToken, subscribe as subscribeToTokens } from '@/lib/token-store'
 
 /**
  * 2.5.0+: Convert a #RRGGBB hex string to an HSL triplet formatted the
@@ -131,12 +133,23 @@ export function applyAccentColor(colorKeyOrHex: AccentColorKey | string) {
 /**
  * Applies the accent color CSS variables and caches admin theme defaults
  * Fetches from API and caches in localStorage for faster subsequent loads
+ *
+ * 7.18.3: the request carries the signed-in person's token. /api/settings/theme
+ * answers with the PLATFORM's theme for an anonymous caller and with the
+ * company's own only when a bearer token arms the org (5.6.1) — and this
+ * provider used a bare `fetch`, so every tenant admin page painted the
+ * platform's accent, overwrote the localStorage cache with it, and the
+ * company's saved colour (purple, a custom hex) came back only inside the
+ * Settings swatches, which load through apiFetch. "I pick purple, refresh,
+ * it's blue again." The token lives in memory and arrives a moment after
+ * the first paint, so the fetch also re-runs when the token store changes.
  */
 export function AccentColorProvider() {
   const applyAppearanceSettings = useCallback(async () => {
     try {
-      // Fetch current setting from API
-      const response = await fetch('/api/settings/theme')
+      // Fetch current setting from API — with the bearer token when there
+      // is one, so a company gets its own theme (see the note above).
+      const response = await apiFetch('/api/settings/theme')
       if (response.ok) {
         const data = await response.json()
         const colorKey = (data.accentColor || 'blue') as AccentColorKey
@@ -179,6 +192,15 @@ export function AccentColorProvider() {
 
   useEffect(() => {
     applyAppearanceSettings()
+    // Re-fetch once a token appears (or changes to another account): the
+    // anonymous answer painted before it is the platform's, not the
+    // company's.
+    let lastToken = getAccessToken()
+    return subscribeToTokens(({ accessToken }) => {
+      if (accessToken === lastToken) return
+      lastToken = accessToken
+      if (accessToken) void applyAppearanceSettings()
+    })
   }, [applyAppearanceSettings])
 
   const applyDefaultTheme = (_defaultTheme: string) => {

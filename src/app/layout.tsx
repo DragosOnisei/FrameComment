@@ -160,9 +160,27 @@ export default async function RootLayout({
                     gold: { light: '37 56% 65%', dark: '37 56% 72%' }
                   };
                   var accentKey = localStorage.getItem('adminAccentColor') || serverAccentColor;
+                  // 7.18.3: a custom accent is a #RRGGBB hex, not a preset key.
+                  // Without this branch the first paint fell back to the
+                  // server default and the custom colour only arrived with
+                  // the provider's fetch — a visible flash on every load.
+                  var hsl = null;
                   if (accentKey && accentColors[accentKey]) {
                     var color = accentColors[accentKey];
-                    var hsl = isDark ? color.dark : color.light;
+                    hsl = isDark ? color.dark : color.light;
+                  } else if (accentKey && /^#[0-9a-fA-F]{6}$/.test(accentKey)) {
+                    var r = parseInt(accentKey.slice(1, 3), 16) / 255, g = parseInt(accentKey.slice(3, 5), 16) / 255, b = parseInt(accentKey.slice(5, 7), 16) / 255;
+                    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, hh = 0, ss = 0;
+                    if (mx !== mn) {
+                      var d = mx - mn;
+                      ss = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+                      if (mx === r) hh = (g - b) / d + (g < b ? 6 : 0); else if (mx === g) hh = (b - r) / d + 2; else hh = (r - g) / d + 4;
+                      hh *= 60;
+                    }
+                    var rd = function (n) { return Math.round(n * 10) / 10; };
+                    hsl = rd(hh) + ' ' + rd(ss * 100) + '% ' + rd(l * 100) + '%';
+                  }
+                  if (hsl) {
                     var parts = hsl.split(' ');
                     var h = parts[0], s = parts[1];
                     document.documentElement.style.setProperty('--primary', hsl);

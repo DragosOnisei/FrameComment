@@ -535,6 +535,20 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   component, `AudioArtwork` (7.18.2), on the card, in Quick Look and in
   the player — the player passes the live ring as children and turns the
   static one off. Do not redraw the circle inline anywhere.
+- **The accent is the company's, fetched WITH the token** (7.18.3):
+  `/api/settings/theme` answers with the platform's theme for an anonymous
+  caller and with the company's own only when a bearer arms the org.
+  `AccentColorProvider` used a bare `fetch`, so a tenant admin page always
+  painted the platform's accent (and cached it in localStorage), while
+  the Settings swatches, loaded through `apiFetch`, showed the saved
+  purple — "pick purple, refresh, it's blue". It now goes through
+  `apiFetch` and re-runs when the token store changes (the token arrives
+  after first paint). The layout bootstrap script applies a cached
+  CUSTOM hex too (it only knew preset keys). The colour saves from its own
+  "Save Color" button (`handleSaveAccentColor`, PATCH `{ accentColor }`);
+  the tenant auto-save no longer carries it. Any other client of that
+  route must use `apiFetch` as well (AdminSidebar does; BrandLogo reads
+  only the logo path).
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   **A copy is credited to its original author** (7.18.1): the paste sends

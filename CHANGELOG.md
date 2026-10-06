@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.3] - 2026-10-06
+
+### Fixed
+
+- **The saved accent colour comes back after a reload.** A company's
+  chosen accent (a preset or a custom colour) was stored, and the Settings
+  swatches showed it, but every page painted the platform's default on
+  load: the accent was fetched without the session, and without it the
+  server answers with the platform's theme. The fetch now carries the
+  session, and a custom colour is applied from the first paint instead of
+  arriving a moment later.
+
+### Changed
+
+- **Appearance has explicit save buttons**: "Save Name" next to the company
+  name and "Save Color" on the accent card, which confirms with "Color
+  saved". The accent no longer rides a silent auto-save.
+
 ## [7.18.2] - 2026-10-06
 
 ### Changed

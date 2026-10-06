@@ -48,6 +48,11 @@ interface AppearanceSectionProps {
    *  from its own button right here in the card. */
   onSaveCompanyName?: () => void | Promise<void>
   savingCompanyName?: boolean
+  /** 7.18.3: the accent has its own Save Color button — see the card. */
+  onSaveAccentColor?: () => void | Promise<void>
+  savingAccentColor?: boolean
+  /** True for a moment after a successful colour save ("Color saved"). */
+  accentColorSaved?: boolean
 }
 
 export function AppearanceSection({
@@ -65,6 +70,9 @@ export function AppearanceSection({
   setCompanyName,
   onSaveCompanyName,
   savingCompanyName,
+  onSaveAccentColor,
+  savingAccentColor,
+  accentColorSaved,
 }: AppearanceSectionProps) {
   const t = useTranslations('settings')
   // 5.11.1: shared "Save Changes"/"Saving…" labels for the inline
@@ -189,7 +197,7 @@ export function AppearanceSection({
                   <Save className="w-4 h-4 sm:mr-2" />
                 )}
                 <span className="hidden sm:inline">
-                  {savingCompanyName ? tc('saving') : tc('saveChanges')}
+                  {savingCompanyName ? tc('saving') : t('appearance.saveName')}
                 </span>
               </Button>
             )}
@@ -238,7 +246,39 @@ export function AppearanceSection({
           Active swatch is marked by the checkmark alone — no extra
           outline ring. */}
       <div className="space-y-3 p-4 rounded-xl bg-white/[0.04] ring-1 ring-white/10">
-        <Label className="text-white">{t('appearance.accentColor')}</Label>
+        {/* 7.18.3: the colour saves from its own button, like the name.
+            Clicking a swatch previews live and nothing more; the debounced
+            auto-save it used to ride on was invisible, so "did it stick?"
+            had no answer on the page — and when the saved colour then
+            failed to come back on reload (AccentColorProvider asked for the
+            platform's theme, not the company's), it looked like the save
+            itself was broken. Now the button says so: "Color saved". */}
+        <div className="flex items-center justify-between gap-2">
+          <Label className="text-white">{t('appearance.accentColor')}</Label>
+          {onSaveAccentColor && (
+            <Button
+              type="button"
+              onClick={() => void onSaveAccentColor()}
+              disabled={savingAccentColor}
+              className="shrink-0"
+            >
+              {savingAccentColor ? (
+                <Loader2 className="w-4 h-4 sm:mr-2 animate-spin" />
+              ) : accentColorSaved ? (
+                <Check className="w-4 h-4 sm:mr-2" />
+              ) : (
+                <Save className="w-4 h-4 sm:mr-2" />
+              )}
+              <span className="hidden sm:inline">
+                {savingAccentColor
+                  ? tc('saving')
+                  : accentColorSaved
+                    ? t('appearance.colorSaved')
+                    : t('appearance.saveColor')}
+              </span>
+            </Button>
+          )}
+        </div>
         <div className="flex flex-wrap gap-3">
           {Object.entries(ACCENT_COLORS).map(([key, color]) => {
             const isSelected = accentColor === key

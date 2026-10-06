@@ -240,6 +240,9 @@ export default function GlobalSettingsPage() {
   // 5.11.1: tenant-only — spinner state for the inline Company Name save
   // (the global Save Changes button is platform-only now).
   const [savingCompanyName, setSavingCompanyName] = useState(false)
+  // 7.18.3: the accent colour has its own Save Color button.
+  const [savingAccentColor, setSavingAccentColor] = useState(false)
+  const [accentColorSaved, setAccentColorSaved] = useState(false)
 
   const [showAppearance, setShowAppearance] = useState(false)
   const [showBranding, setShowBranding] = useState(false)
@@ -738,10 +741,44 @@ export default function GlobalSettingsPage() {
     }
   }
 
+  /**
+   * 7.18.3: Save Color — the accent persists from its own button, for every
+   * org. It used to ride the tenant auto-save below, silently: nothing on
+   * the page said whether the colour had stuck, and when the saved colour
+   * failed to come back on reload (AccentColorProvider fetched the
+   * platform's theme) the save itself looked broken. One PATCH with the
+   * colour alone; the cache and the "saved" event keep the live preview's
+   * baseline in step, as the global Save flow does.
+   */
+  async function handleSaveAccentColor() {
+    if (savingAccentColor) return
+    setSavingAccentColor(true)
+    setError('')
+    try {
+      const value = accentColor || 'blue'
+      await apiPatch('/api/settings', { accentColor: value })
+      try {
+        localStorage.setItem('adminAccentColor', value)
+        window.dispatchEvent(new CustomEvent('accentcolor:saved', { detail: { accentColor: value } }))
+      } catch {
+        // localStorage can throw in private mode — non-fatal.
+      }
+      setAccentColorSaved(true)
+      setTimeout(() => setAccentColorSaved(false), 2500)
+      // The SSR status-bar colour and the brand logo read the saved accent.
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToSave'))
+    } finally {
+      setSavingAccentColor(false)
+    }
+  }
+
   // 5.11.1: tenants have NO global Save button — everything they can touch
-  // outside Company Name (accent color, video-processing defaults) is
-  // auto-persisted here with a short debounce, matching how the page
-  // already FEELS (accent previews live, toggles flip instantly).
+  // outside Company Name and the accent colour (video-processing defaults)
+  // is auto-persisted here with a short debounce, matching how the page
+  // already FEELS (toggles flip instantly). 7.18.3: the accent left this
+  // list — it saves from its own button, see handleSaveAccentColor.
   // Platform org keeps the classic top-bar Save Changes flow untouched.
   const tenantAutoSaveReadyRef = useRef(false)
   useEffect(() => {
@@ -758,7 +795,6 @@ export default function GlobalSettingsPage() {
     const timer = setTimeout(async () => {
       try {
         await apiPatch('/api/settings', {
-          accentColor: accentColor || 'blue',
           defaultPreviewResolution: defaultPreviewResolution || 'auto',
           defaultSkipTranscoding,
           defaultWatermarkEnabled,
@@ -768,16 +804,6 @@ export default function GlobalSettingsPage() {
           defaultWatermarkFontSize: defaultWatermarkFontSize || 'medium',
           defaultApplyPreviewLut,
         })
-        // Keep the accent cache + AppearanceSection's unmount-revert
-        // baseline in sync (same as the platform Save flow does).
-        try {
-          localStorage.setItem('adminAccentColor', accentColor || 'blue')
-          window.dispatchEvent(
-            new CustomEvent('accentcolor:saved', { detail: { accentColor: accentColor || 'blue' } }),
-          )
-        } catch {
-          // localStorage can throw in private mode — non-fatal.
-        }
       } catch (err) {
         setError(err instanceof Error ? err.message : t('failedToSave'))
       }
@@ -785,7 +811,7 @@ export default function GlobalSettingsPage() {
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    isPlatformOrg, loading, accentColor,
+    isPlatformOrg, loading,
     defaultPreviewResolution, defaultSkipTranscoding,
     defaultWatermarkEnabled, defaultWatermarkText, defaultWatermarkPositions,
     defaultWatermarkOpacity, defaultWatermarkFontSize, defaultApplyPreviewLut,
@@ -885,6 +911,7 @@ export default function GlobalSettingsPage() {
     // 5.11.1: …and save it with the inline button (no top-bar Save for tenants).
     showCompanyName: !isPlatformOrg, companyName, setCompanyName,
     onSaveCompanyName: handleSaveCompanyName, savingCompanyName,
+    onSaveAccentColor: handleSaveAccentColor, savingAccentColor, accentColorSaved,
   }
 
   const brandingProps = {
