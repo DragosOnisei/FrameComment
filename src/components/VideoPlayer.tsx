@@ -39,6 +39,7 @@ import {
 import { apiJson, apiPost, apiPatch, apiDelete } from '@/lib/api-client'
 import { getClientId } from '@/lib/client-id'
 import AudioReactiveRing from '@/components/AudioReactiveRing'
+import AudioArtwork from '@/components/AudioArtwork'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -3290,30 +3291,25 @@ export default function VideoPlayer({
                     what is playing. pointer-events-none: clicks still reach
                     the <video> (play/pause) and the annotation layer. */}
                 {isAudioAsset && (
-                  <div
-                    className="absolute inset-0 z-[5] flex flex-col items-center justify-center gap-3 pointer-events-none select-none"
-                    style={{
-                      background:
-                        'radial-gradient(ellipse 70% 60% at 50% 45%, hsl(var(--spotlight-tint) / 0.28) 0%, hsl(var(--spotlight-tint) / 0.08) 55%, transparent 100%)',
-                    }}
-                    aria-hidden
+                  // 7.18.2: the shared AudioArtwork (also on the card and in
+                  // Quick Look); here the live ring replaces the static one.
+                  // 7.18.0: the ring of bars around the icon follows the music
+                  // (AudioReactiveRing — Web Audio analyser on the same <video>
+                  // element; same-origin only, see the file).
+                  <AudioArtwork
+                    circle={96}
+                    icon={44}
+                    staticRing={false}
+                    className="absolute inset-0 z-[5] pointer-events-none"
                   >
-                    {/* 7.18.0: the ring of bars around the icon follows the
-                        music (AudioReactiveRing — Web Audio analyser on the
-                        same <video> element; same-origin only, see the file). */}
-                    <div className="relative flex h-24 w-24 items-center justify-center">
-                      <AudioReactiveRing
-                        mediaRef={videoRef}
-                        playing={isPlaying}
-                        innerDiameter={96}
-                        reach={44}
-                        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-                      />
-                      <div className="relative flex h-24 w-24 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/15 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.8)] backdrop-blur-[2px]">
-                        <Music className="h-11 w-11 text-white/80" />
-                      </div>
-                    </div>
-                  </div>
+                    <AudioReactiveRing
+                      mediaRef={videoRef}
+                      playing={isPlaying}
+                      innerDiameter={96}
+                      reach={44}
+                      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+                    />
+                  </AudioArtwork>
                 )}
 
                 {/* 4.1.3+: buffering overlay — covers the player until the

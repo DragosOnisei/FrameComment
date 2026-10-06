@@ -11,6 +11,7 @@ import { formatBytes } from '@/lib/project-gradient'
 import { ScrubTile } from './FolderCard'
 import { storyboardGridOf } from '@/lib/storyboard-grid'
 import { fontOf, measureTextWidth, middleEllipsis } from '@/lib/middle-ellipsis'
+import AudioArtwork from '@/components/AudioArtwork'
 
 /**
  * 1.7.0+: macOS Quick Look-style preview overlay. Opens when the
@@ -595,18 +596,11 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
             native controls under it clickable; kept clear of the bottom
             48 px where those controls live. */}
         {isAudio && (
-          <div
-            className="pointer-events-none absolute inset-x-0 top-0 bottom-12 z-10 flex flex-col items-center justify-center gap-2 select-none"
-            style={{
-              background:
-                'radial-gradient(ellipse 70% 60% at 50% 45%, hsl(var(--spotlight-tint) / 0.28) 0%, hsl(var(--spotlight-tint) / 0.08) 55%, transparent 100%)',
-            }}
-            aria-hidden
-          >
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/15 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.8)]">
-              <Music className="h-7 w-7 text-white/80" />
-            </div>
-          </div>
+          <AudioArtwork
+            circle={64}
+            icon={28}
+            className="pointer-events-none absolute inset-x-0 top-0 bottom-12 z-10"
+          />
         )}
         {isAudio && video.previewUrl && <QuickAudioBar videoRef={videoRef} />}
         {isImage && video.thumbnailUrl ? (

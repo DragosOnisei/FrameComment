@@ -530,7 +530,11 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   presigned redirect every other stream gets; and the ring still probes
   one byte with `redirect: 'manual'` before capturing — on a redirect it
   only breathes on a timer and never touches the element. Quick Look keeps
-  its own `QuickAudioBar` and no analyser.
+  its own `QuickAudioBar` and no analyser. The artwork itself (glow,
+  frosted circle, resting ring, all from `--spotlight-tint`) is ONE
+  component, `AudioArtwork` (7.18.2), on the card, in Quick Look and in
+  the player — the player passes the live ring as children and turns the
+  static one off. Do not redraw the circle inline anywhere.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   **A copy is credited to its original author** (7.18.1): the paste sends

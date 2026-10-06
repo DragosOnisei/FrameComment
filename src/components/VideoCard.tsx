@@ -57,6 +57,7 @@ function highestTierLabel(completedTiers?: string[] | null): string | null {
 import { fetchActiveBackendInfo, type ActiveBackendInfo } from '@/lib/active-backend-client'
 import { apiPost } from '@/lib/api-client'
 import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
+import AudioArtwork from '@/components/AudioArtwork'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -877,14 +878,16 @@ export default function VideoCard({
             />
             <span className="text-xs">Generating thumbnail…</span>
           </div>
+        ) : isAudio ? (
+          // 7.18.2: the player's artwork, at card size — glow, frosted circle
+          // and resting ring in the app's accent (AudioArtwork).
+          <AudioArtwork circle={56} icon={26} withBase className="absolute inset-0 rounded-t-xl" />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60">
-            {/* 7.18.0: the kind's glyph is the whole thumbnail for audio and
-                documents — there is no frame to show. */}
+            {/* 7.18.0: the kind's glyph is the whole thumbnail for images
+                still loading and documents without a cover. */}
             {isImage ? (
               <ImageIcon className="w-8 h-8" />
-            ) : isAudio ? (
-              <Music className="w-10 h-10" />
             ) : isDocument ? (
               <FileText className="w-10 h-10" />
             ) : (

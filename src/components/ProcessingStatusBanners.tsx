@@ -423,7 +423,10 @@ function StatusBanner({
     kind === 'upload'
       ? isDone
         ? 'All uploads complete'
-        : 'Uploading videos'
+        : // 7.18.2: audio and documents go up through the same banner as
+          // video, so the title names the thing it counts. Dragos's call:
+          // "Uploading assets" — one word for all four kinds.
+          'Uploading assets'
       : isDone
       ? 'All processing complete'
       : 'Encoding tiers'
@@ -566,7 +569,7 @@ function StatusBanner({
           <div className="border-t border-white/10 max-h-[260px] overflow-y-auto custom-scrollbar">
             {visibleVideos.length === 0 ? (
               <div className="px-3 py-4 text-[11px] text-white/55 text-center">
-                {isDone ? 'All done. The banner will close shortly.' : 'No videos in this state.'}
+                {isDone ? 'All done. The banner will close shortly.' : 'Nothing in this state.'}
               </div>
             ) : (
               <ul className="divide-y divide-white/10">

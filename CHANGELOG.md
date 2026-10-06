@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.2] - 2026-10-06
+
+### Changed
+
+- **Audio cards wear the player's artwork.** The folder card and Quick Look
+  for an audio file show the same picture the player does — the soft glow,
+  the frosted circle with the note and the resting ring around it — in the
+  app's accent colour, instead of a bare glyph on grey.
+- The bottom-right upload banner says **"Uploading assets"**: video, audio
+  and documents all go up through it now.
+
 ## [7.18.1] - 2026-10-06
 
 ### Fixed
