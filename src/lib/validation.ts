@@ -493,6 +493,12 @@ export const createCommentSchema = z
     // project as the paste target, and the whole field is ignored for anyone
     // who is not signed-in staff — see the route.
     copyAssetsFromCommentId: cuidSchema.optional().nullable(),
+    // 7.18.1: the comment this one is a copy OF — sent with every pasted
+    // thread and reply, attachments or not, so the server can carry the
+    // original author's `userId` across (the avatar follows `userId`, and a
+    // copy used to carry the paster's). Same trust rule as the field above:
+    // read only for signed-in staff, honoured only within the same project.
+    sourceCommentId: cuidSchema.optional().nullable(),
   })
   // A comment must have *something* — text, an attachment (e.g. voice
   // message), or an annotation. Empty-on-all-fronts comments would render

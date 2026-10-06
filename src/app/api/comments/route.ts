@@ -262,6 +262,7 @@ export async function POST(request: NextRequest) {
       assetIds,
       annotations,
       copyAssetsFromCommentId,
+      sourceCommentId,
     } = validation.data
 
     // Enforce configurable max comment attachments
@@ -382,6 +383,37 @@ export async function POST(request: NextRequest) {
     // Keep API behavior: if version is omitted, infer from current video record.
     const finalVideoVersion = videoVersion || video.version
 
+    /**
+     * 7.18.1: a pasted comment is credited to its ORIGINAL author, not to the
+     * person pasting.
+     *
+     * `userId` used to be the poster's id on every row, copies included, and
+     * the avatar (and, for a staff note with no `authorName`, the name) is
+     * drawn from `userId` — so after "copy comments from V7" every carried
+     * note on V8 wore Dragos's face: the client's who wrote it, the editor's
+     * who answered, all of them. The paste names the source comment
+     * (`sourceCommentId`, sent for threads and replies alike); for a copy by
+     * signed-in staff the source row's `userId` is carried across when it
+     * sits in the same project — a guest's note (no `userId`) stays a guest's
+     * note and shows its initials. A copy whose source cannot be resolved
+     * gets no `userId` at all rather than the wrong one: copied notes are
+     * never editable, so nothing downstream needs an owner on them.
+     */
+    let creditedUserId: string | null = authContext.user?.id || null
+    if (isCopied) {
+      creditedUserId = null
+      const lookupId = sourceCommentId || copyAssetsFromCommentId
+      if (lookupId && isAdmin) {
+        const sourceRow = await prisma.comment.findUnique({
+          where: { id: lookupId },
+          select: { projectId: true, userId: true },
+        })
+        if (sourceRow && sourceRow.projectId === projectId) {
+          creditedUserId = sourceRow.userId ?? null
+        }
+      }
+    }
+
     // Create comment in database
     const comment = await prisma.comment.create({
       data: {
@@ -396,7 +428,7 @@ export async function POST(request: NextRequest) {
         authorEmail: finalAuthorEmail,
         isInternal: isInternal || false,
         parentId: parentId || null,
-        userId: authContext.user?.id || null,
+        userId: creditedUserId,
         annotations: annotations || undefined,
         // Track the share-token session id of the author so they can
         // edit their own comment from the same browser session later.

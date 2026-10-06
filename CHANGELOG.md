@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.1] - 2026-10-06
+
+### Fixed
+
+- **Copied comments are credited to their original author.** Pasting a
+  previous version's notes onto the current cut gave every copy the face
+  (and, for a staff note, the name) of the person pasting — the client who
+  wrote the note and the editor who answered both showed the admin's
+  avatar. A copy now carries the original author's account: a guest's note
+  shows the guest's initials, a colleague's note shows the colleague. Notes
+  already copied before this fix keep the wrong face; delete them and paste
+  again.
+
 ## [7.18.0] - 2026-10-05
 
 ### Added

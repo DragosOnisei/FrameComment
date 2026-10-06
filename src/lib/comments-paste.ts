@@ -188,6 +188,9 @@ export async function pasteClippedThreads({
     if (item.authorName) body.authorName = item.authorName
     // 6.22.0: the drawing rides along as data; the files by reference.
     if (item.annotations) body.annotations = item.annotations
+    // 7.18.1: always name the source comment, so the copy is credited to the
+    // ORIGINAL author's account (avatar and name), not to whoever pasted.
+    if (item.sourceCommentId) body.sourceCommentId = item.sourceCommentId
     if (item.sourceCommentId && (item.attachmentCount || 0) > 0) {
       body.copyAssetsFromCommentId = item.sourceCommentId
       filesExpected += item.attachmentCount || 0
@@ -255,6 +258,7 @@ export async function pasteClippedThreads({
       }
       if (reply.authorName) replyBody.authorName = reply.authorName
       if (reply.annotations) replyBody.annotations = reply.annotations
+      if (reply.sourceCommentId) replyBody.sourceCommentId = reply.sourceCommentId
       if (reply.sourceCommentId && (reply.attachmentCount || 0) > 0) {
         replyBody.copyAssetsFromCommentId = reply.sourceCommentId
         filesExpected += reply.attachmentCount || 0

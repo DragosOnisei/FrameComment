@@ -533,6 +533,13 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   its own `QuickAudioBar` and no analyser.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
+  **A copy is credited to its original author** (7.18.1): the paste sends
+  `sourceCommentId` for every thread and reply (comments-paste.ts), and
+  POST /api/comments carries the source row's `userId` across for a copy
+  by signed-in staff within the same project — null for a guest's note,
+  null when the source cannot be resolved. The avatar and a staff name are
+  drawn from `userId`, so before this every carried note wore the paster's
+  face. Never put `authContext.user.id` on an `isCopied` row.
   Attachments copy as new VideoAsset rows **sharing the same `storagePath`**
   (never duplicate bytes); always carry `storageBackend`/`storageLocations`
   across. Deletion refcounts rows sharing a path before removing the file.

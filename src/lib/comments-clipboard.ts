@@ -225,14 +225,17 @@ export function toClipped(list: any[]): ClippedComment[] {
     timecode: c.timecode,
     timecodeEnd: c.timecodeEnd ?? null,
     timestampMs: typeof c.timestampMs === 'number' ? c.timestampMs : null,
-    authorName: c.authorName ?? null,
+    // 7.18.1: a staff note carries its author on the `user` relation and
+    // often no `authorName`; without this fallback a copy whose source row
+    // cannot be resolved on the server would show the paster's name.
+    authorName: c.authorName ?? c.user?.name ?? null,
     annotations: carryableAnnotations(c.annotations),
     sourceCommentId: c.id ?? null,
     attachmentCount: Array.isArray(c.assets) ? c.assets.length : 0,
     replies: Array.isArray(c.replies)
       ? c.replies.map((r: any) => ({
           content: r.content,
-          authorName: r.authorName ?? null,
+          authorName: r.authorName ?? r.user?.name ?? null,
           annotations: carryableAnnotations(r.annotations),
           sourceCommentId: r.id ?? null,
           attachmentCount: Array.isArray(r.assets) ? r.assets.length : 0,
