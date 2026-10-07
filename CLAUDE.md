@@ -425,7 +425,14 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   true }` per card per page (`shouldRequestStoryboard`); the job rebuilds
   only `storyboardPath` and leaves the cover alone — the full run would
   overwrite a custom thumbnail with an auto frame, which no hover may do.
-  Guests never trigger work. Both sweeps still run full jobs.
+  Guests never trigger work. Both sweeps still run full jobs. The same
+  cap applies to Quick Look's folder tiles (`ScrubThumbnail`), and those
+  tiles carry `storyboardCols/Rows` since 7.18.9 — the folder-contents
+  mapping in QuickPreviewOverlay dropped them, so a 20×20 sheet was read
+  as 10×10 and a long clip scrubbed as the same frame four times (the
+  6.15.2 bug, in the one copy of the mapping that never got the fix).
+  Every place that hands a storyboard URL to a tile must hand the grid
+  with it.
 - **Folder covers are fetched per folder** (7.18.7): `fetchFolderPreviewData`
   (src/lib/folder-previews.ts) used to run ONE query over every folder on
   the page with a shared cap, newest first — so a folder whose videos were

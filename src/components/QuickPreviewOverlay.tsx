@@ -10,6 +10,7 @@ import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { ScrubTile } from './FolderCard'
 import { storyboardGridOf } from '@/lib/storyboard-grid'
+import { legacyScrubAllowed } from '@/lib/card-scrub'
 import { fontOf, measureTextWidth, middleEllipsis } from '@/lib/middle-ellipsis'
 import AudioArtwork from '@/components/AudioArtwork'
 
@@ -159,6 +160,12 @@ export default function QuickPreviewOverlay({ target, onClose, projectId }: Quic
           thumbnailUrl: v.thumbnailUrl ?? null,
           previewUrl: v.previewUrl ?? null,
           storyboardUrl: v.storyboardUrl ?? null,
+          // 7.18.9: the sprite's real grid. Without it the tile did 10×10
+          // maths over a 20×20 sheet and drew a 2×2 block of frames — "the
+          // same video four times" on every long clip (6.15.2 fixed this for
+          // the folder card; this copy of the mapping never got it).
+          storyboardCols: typeof v.storyboardCols === 'number' ? v.storyboardCols : null,
+          storyboardRows: typeof v.storyboardRows === 'number' ? v.storyboardRows : null,
           duration: typeof v.duration === 'number' ? v.duration : null,
           mediaType: v.mediaType,
           // 7.16.1: what the video card needs when opened from here.
@@ -686,6 +693,9 @@ type PreviewTile =
       // 3.5.x: hover-scrub the sub-folder mosaic tiles inside Quick
       // Preview too, same as the main folder grid.
       storyboardUrl?: string
+      // 7.18.9: the sprite's grid, as the API sends it (6.15.2).
+      storyboardCols?: number | null
+      storyboardRows?: number | null
     }
   | { kind: 'folder'; folderId: string }
 
@@ -706,6 +716,8 @@ interface FolderContents {
     /** Storyboard sprite-sheet URL — preferred hover-scrub source
      *  (CSS background-position, instant). */
     storyboardUrl?: string | null
+    storyboardCols?: number | null
+    storyboardRows?: number | null
     duration?: number | null
     mediaType?: MediaKind
     width?: number | null
@@ -741,9 +753,12 @@ function ScrubThumbnail({ video: v }: { video: FolderContents['videos'][number] 
   const isImage = v.mediaType === 'IMAGE'
   const hasThumb = !!v.thumbnailUrl && !thumbErrored
   const hasStoryboard = !!v.storyboardUrl && !isImage
+  // 7.18.9: the <video> fallback is for SHORT clips only, as on the folder
+  // card (src/lib/card-scrub.ts) — on a 37-minute clip it painted a black
+  // tile while the browser fetched megabytes per seek.
   const canScrub =
     !isImage &&
-    (hasStoryboard || !!v.previewUrl) &&
+    (hasStoryboard || (!!v.previewUrl && legacyScrubAllowed(v.duration))) &&
     typeof v.duration === 'number' &&
     v.duration > 0
 
@@ -889,7 +904,12 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
       // folder grid. Falls back to a static thumbnail when the clip has
       // no storyboard.
       return (
-        <ScrubTile thumbnailUrl={t.thumbnailUrl} storyboardUrl={t.storyboardUrl} />
+        <ScrubTile
+          thumbnailUrl={t.thumbnailUrl}
+          storyboardUrl={t.storyboardUrl}
+          storyboardCols={t.storyboardCols}
+          storyboardRows={t.storyboardRows}
+        />
       )
     }
     // 2.5.2+: matches FolderCard's `w-10` / `w-7` so folder glyphs in

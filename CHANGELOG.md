@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.9] - 2026-10-08
+
+### Fixed
+
+- **Quick Look scrubs long clips correctly.** A folder's Quick Look tiles
+  read every scrub sprite as a 10×10 sheet, so on a long clip (a 20×20
+  sheet) hovering showed the same frame four times. The tiles now use the
+  sprite's real grid, as the folder cards already did, and the sub-folder
+  mosaic inside Quick Look too. The seek fallback for clips without a
+  sprite is limited to short clips there as well, instead of painting a
+  black tile while a long preview loaded.
+
 ## [7.18.8] - 2026-10-08
 
 ### Fixed
