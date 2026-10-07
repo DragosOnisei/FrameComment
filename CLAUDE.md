@@ -413,6 +413,19 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   latest-first row; equal dates fall back to the name. The public share
   player passes no `sortMode` and stays A→Z. Never put a second inline
   sort switch next to either caller.
+- **A card never streams a long video to scrub it** (7.18.8): the `<video>`
+  fallback for rows without a storyboard sprite is allowed only up to
+  `LEGACY_SCRUB_MAX_SECONDS` (180, src/lib/card-scrub.ts, pure,
+  node-tested). On live, two 37-minute 4K interviews without sprites made
+  every hover a storm of 4 MB range requests (108 MB per crossing), the
+  rate limiter's Redis timed out under it and answered 503 — "fail
+  closed" in rate-limit.ts — and the preview showed nothing. Instead, an
+  admin hovering a READY, encoded video with no sprite fires ONE
+  `POST /api/videos/[id]/regenerate-thumbnail` with `{ storyboardOnly:
+  true }` per card per page (`shouldRequestStoryboard`); the job rebuilds
+  only `storyboardPath` and leaves the cover alone — the full run would
+  overwrite a custom thumbnail with an auto frame, which no hover may do.
+  Guests never trigger work. Both sweeps still run full jobs.
 - **Folder covers are fetched per folder** (7.18.7): `fetchFolderPreviewData`
   (src/lib/folder-previews.ts) used to run ONE query over every folder on
   the page with a shared cap, newest first — so a folder whose videos were

@@ -64,10 +64,22 @@ export async function POST(
       )
     }
 
+    // 7.18.8: `{ storyboardOnly: true }` from a hovered folder card rebuilds
+    // just the hover-scrub sprite (src/lib/card-scrub.ts); the kebab's click
+    // sends no body and keeps the full run. Anything unparsable is a full run.
+    let storyboardOnly = false
+    try {
+      const body = await request.json()
+      storyboardOnly = body?.storyboardOnly === true
+    } catch {
+      storyboardOnly = false
+    }
+
     const job: RegenerateThumbnailJob = {
       videoId: video.id,
       projectId: video.projectId,
       originalStoragePath: video.originalStoragePath,
+      ...(storyboardOnly ? { storyboardOnly: true } : {}),
     }
     // 7.12.0: a finished or failed job under this video's id is replaced, so
     // the click always results in a run; one still queued or running is

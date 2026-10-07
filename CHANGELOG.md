@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.8] - 2026-10-08
+
+### Fixed
+
+- **Hovering a long video without a scrub sprite no longer streams it.** A
+  card whose video never got its storyboard sprite fell back to seeking a
+  low-res copy on every mouse move — on a 37-minute 4K interview that was a
+  4 MB request per seek, over 100 MB for one hover, enough to trip the rate
+  limiter into 503s and leave the preview blank. The seek fallback is now
+  for clips up to 3 minutes; a longer clip shows its cover, and an admin's
+  hover asks the worker to build just the sprite (the cover is left alone),
+  so the next visit scrubs.
+
 ## [7.18.7] - 2026-10-07
 
 ### Fixed

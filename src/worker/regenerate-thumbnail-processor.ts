@@ -194,14 +194,12 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
     // pick the timestamp inside the clip).
     const metadata = await getVideoMetadata(sourcePath)
 
-    const newThumbnailPath = await processThumbnail(
-      videoId,
-      projectId,
-      sourcePath,
-      metadata.duration,
-      tempFiles,
-      backend,
-    )
+    // 7.18.8: a storyboard-only run leaves the cover alone — it is asked for
+    // by a folder card hovered over a video that has no sprite, and a hover
+    // must never replace a custom thumbnail with an auto frame.
+    const newThumbnailPath = job.data.storyboardOnly
+      ? null
+      : await processThumbnail(videoId, projectId, sourcePath, metadata.duration, tempFiles, backend)
 
     // 6.9.3: rebuild the hover-scrub sprite too, at the new density.
     //
@@ -224,7 +222,7 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
       await prisma.video.update({
         where: { id: videoId },
         data: {
-          thumbnailPath: newThumbnailPath,
+          ...(newThumbnailPath ? { thumbnailPath: newThumbnailPath } : {}),
           ...(newStoryboardPath ? { storyboardPath: newStoryboardPath } : {}),
         },
       })
@@ -237,7 +235,7 @@ export async function processRegenerateThumbnail(job: Job<RegenerateThumbnailJob
     }
 
     logMessage(
-      `[WORKER] regenerate-thumbnail for ${videoId} done in ${((Date.now() - start) / 1000).toFixed(2)}s`,
+      `[WORKER] regenerate-thumbnail${job.data.storyboardOnly ? ' (storyboard only)' : ''} for ${videoId} done in ${((Date.now() - start) / 1000).toFixed(2)}s`,
     )
   } catch (err) {
     logError(`[WORKER] regenerate-thumbnail for ${videoId} failed:`, err)

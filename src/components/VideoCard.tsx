@@ -45,6 +45,9 @@ const TIER_CHIP: Record<string, string> = {
 }
 const TIER_RANK = ['480p', '720p', '1080p', '2160p']
 
+/** 7.18.8: videos this page already asked a storyboard for (one request each). */
+const storyboardRequested = new Set<string>()
+
 function highestTierLabel(completedTiers?: string[] | null): string | null {
   if (!Array.isArray(completedTiers) || completedTiers.length === 0) return null
   let best = -1
@@ -56,6 +59,8 @@ function highestTierLabel(completedTiers?: string[] | null): string | null {
 }
 import { fetchActiveBackendInfo, type ActiveBackendInfo } from '@/lib/active-backend-client'
 import { apiPost } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/token-store'
+import { legacyScrubAllowed, shouldRequestStoryboard } from '@/lib/card-scrub'
 import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
 import AudioArtwork from '@/components/AudioArtwork'
 
@@ -543,9 +548,12 @@ export default function VideoCard({
   // that pre-date the storyboard worker step). Images never scrub —
   // there's nothing to seek through.
   const hasStoryboard = !!storyboardUrl && isVideo
+  // 7.18.8: the <video> fallback is for SHORT clips only — on a long one
+  // every seek is a multi-MB range request (src/lib/card-scrub.ts). A long
+  // clip without a sprite shows its cover and asks for a sprite instead.
   const canScrub =
     isVideo &&
-    (hasStoryboard || !!previewUrl) &&
+    (hasStoryboard || (!!previewUrl && legacyScrubAllowed(duration))) &&
     typeof duration === 'number' &&
     duration > 0
 
@@ -833,7 +841,27 @@ export default function VideoCard({
       <div
         ref={coverRef}
         className="relative aspect-video bg-black/40 rounded-t-xl overflow-hidden"
-        onMouseEnter={() => canScrub && setPreviewArmed(true)}
+        onMouseEnter={() => {
+          if (canScrub) setPreviewArmed(true)
+          // 7.18.8: no sprite for an encoded video — ask the worker to build
+          // one (storyboard only; the cover is left alone), once per card per
+          // page load. Fire-and-forget: the next visit scrubs.
+          if (
+            !storyboardRequested.has(id) &&
+            shouldRequestStoryboard({
+              isVideo,
+              hasStoryboard,
+              status,
+              completedTiers,
+              signedIn: !!getAccessToken(),
+            })
+          ) {
+            storyboardRequested.add(id)
+            apiPost(`/api/videos/${id}/regenerate-thumbnail`, { storyboardOnly: true }).catch(() => {
+              /* best effort — the card is not the place to report it */
+            })
+          }
+        }}
         onMouseMove={handleScrub}
         onPointerMove={handleScrub}
         onMouseLeave={() => {

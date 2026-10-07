@@ -88,6 +88,13 @@ export interface RegenerateThumbnailJob {
   videoId: string
   projectId: string
   originalStoragePath: string
+  /**
+   * 7.18.8: rebuild ONLY the hover-scrub storyboard and leave the cover
+   * alone. Sent by a folder card hovered over a video that has no sprite
+   * (src/lib/card-scrub.ts); the full job would overwrite a custom
+   * thumbnail with an auto frame, which no hover may do.
+   */
+  storyboardOnly?: boolean
 }
 
 // Union over every shape a single job on the video-processing
