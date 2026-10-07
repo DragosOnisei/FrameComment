@@ -1157,3 +1157,20 @@ textarea,
 .fc-document-prose img { max-width: 100%; height: auto; }
 .fc-document-prose strong { font-weight: 700; }
 .fc-document-prose em { font-style: italic; }
+
+/* 7.18.6: the top bar's controls are frosted glass, the bar is not.
+   Back, the search pill, sort, the view toggle, Upload, Download and the bell
+   float over the page on a CLEAR bar (Dragos: "the buttons should look like
+   they float"), so each of them blurs what scrolls beneath it instead. One
+   scoped rule, because the controls are rendered into the bar's slots by
+   half a dozen pages and components; an attribute on the <header> marks the
+   scope. Menu items are excluded: a popover's own surface is opaque and its
+   rows need no layer each. The blur keeps the button's own translucent fill
+   (bg-white/6) — the fill gives the glass its edge, the blur its depth. */
+[data-topbar] button:not([role='menuitem']):not(.brand-menu-surface button) {
+  /* Standard property only: with an explicit -webkit- twin next to it the
+     dev CSS pipeline (lightningcss) emitted ONLY the prefixed one and Chrome
+     dropped the declaration — the computed style stayed `none`. It adds the
+     prefix itself for the browsers that need it. */
+  backdrop-filter: blur(24px) saturate(160%);
+}

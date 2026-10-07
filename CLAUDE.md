@@ -601,6 +601,25 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   push deep links all do, and both player pages resolve the group by id
   first. Two identical filenames (a 4:5 and a 9:16 cut) opened the wrong one
   without it.
+- **The top bar is clear; its controls are frosted** (7.18.6): the
+  `<header>` in AdminTopBar stays `bg-transparent` so Back, the search
+  pill and the right-hand buttons float, and ONE scoped rule at the end of
+  globals.css (`[data-topbar] button…`, menu items excluded) gives every
+  control a `backdrop-filter`. Scoped by attribute because the controls
+  are rendered into the bar's slots by half a dozen pages. Two things
+  learned: a frosted BAR was rejected ("I want the buttons to float"),
+  and in the dev pipeline (Turbopack/lightningcss) writing
+  `-webkit-backdrop-filter` next to `backdrop-filter` made it emit only
+  the prefixed one, which Chrome dropped — write the standard property
+  alone and let the pipeline prefix it. Popovers are siblings of their
+  buttons, never children: `backdrop-filter` makes an element the
+  containing block of its fixed descendants. **Below 1120 px the search pill
+  is the search icon**, in the same centre column (7.18.6): the grid never
+  shrinks the pill, so at a narrower window it slid under a folder's five
+  right-hand actions. A breakpoint, by Dragos's call: a measured version
+  (ResizeObserver + MutationObserver on the slots, a content-sized grid in
+  compact mode) was built, looked wrong to him, and was reverted — do not
+  bring it back.
 - Menus are OPAQUE (`brand-menu-surface` + inline color-mix + translateZ(0)
   isolation for iOS); `glass-panel` is for page panels, never menus. The
   canonical player timeline/volume styling lives in CustomVideoControls —

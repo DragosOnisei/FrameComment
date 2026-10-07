@@ -74,7 +74,17 @@ export default function AdminTopBar() {
   return (
     <>
       <header
-        className="sticky top-0 z-30 grid grid-cols-[1fr_auto_1fr] items-center gap-2 md:gap-3 px-4 md:px-6 bg-transparent"
+        // 7.18.6: `data-topbar` scopes the frosted-glass rule in globals.css
+        // (`[data-topbar] button`): the bar itself stays clear so the controls
+        // float, and each control blurs what passes beneath it.
+        data-topbar=""
+        // 7.18.6: between `md` and 1120 px (search folded to an icon) the
+        // side columns size to their CONTENT (`auto 1fr auto`) and the icon
+        // centres in whatever is left between the two groups. With equal
+        // `1fr` sides a right group wider than half the bar overflowed its
+        // column and sat on the icon. From 1120 px (the pill) and on phones
+        // (the logo) the columns stay equal so the centre is dead-centre.
+        className="sticky top-0 z-30 grid grid-cols-[1fr_auto_1fr] md:grid-cols-[auto_1fr_auto] min-[1120px]:grid-cols-[1fr_auto_1fr] items-center gap-2 md:gap-3 px-4 md:px-6 bg-transparent"
         style={{
           // Always a 1fr | auto | 1fr grid so the CENTRE column is dead-centre.
           // Below `md` (sidebar hidden) the bar is a clean, CONSISTENT row on
@@ -101,10 +111,28 @@ export default function AdminTopBar() {
         {hideSearch ? (
           <span aria-hidden className="hidden md:block" />
         ) : (
+          <>
+            {/* 7.18.6: below 1120 px the pill becomes the search ICON, in the
+                same centre column. The grid never shrinks the pill, so on a
+                narrower window it slid under the right-hand actions (a
+                folder's bar carries five of them). A breakpoint, by
+                Dragos's call — a measured version was tried and reverted;
+                `xl` (1280) folded it too early for him. 1120 is the width
+                where the sidebar, Back, the 320 px pill and a folder's five
+                actions all still fit with a margin. */}
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className="hidden md:flex min-[1120px]:hidden justify-self-center items-center justify-center h-9 w-9 rounded-lg bg-white/[0.06] ring-1 ring-white/10 hover:bg-white/[0.12] hover:ring-white/20 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] transition-colors text-white/60 hover:text-white"
+              aria-label="Search videos (⌘K)"
+              title="Search videos (⌘K)"
+            >
+              <Search className="w-4 h-4" />
+            </button>
           <button
             type="button"
             onClick={() => setSearchOpen(true)}
-            className="hidden md:flex items-center justify-start gap-2 h-9 w-[260px] lg:w-[320px] max-w-sm px-3 rounded-lg bg-white/[0.06] ring-1 ring-white/10 hover:bg-white/[0.12] hover:ring-white/20 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] transition-colors text-sm text-white/55"
+            className="hidden min-[1120px]:flex items-center justify-start gap-2 h-9 w-[320px] max-w-sm px-3 rounded-lg bg-white/[0.06] ring-1 ring-white/10 hover:bg-white/[0.12] hover:ring-white/20 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] transition-colors text-sm text-white/55"
             aria-label="Search videos (⌘K)"
             title="Search videos (⌘K)"
           >
@@ -117,6 +145,7 @@ export default function AdminTopBar() {
               <span>K</span>
             </kbd>
           </button>
+          </>
         )}
 
         {/* 4.x: centred FrameComment mark — CENTRE column, phones only (< md).

@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.6] - 2026-10-07
+
+### Changed
+
+- **The top bar's controls are frosted glass.** Back, the search pill and
+  the right-hand buttons blur what scrolls beneath them; the bar itself
+  stays clear, so they float.
+- **The search pill folds into an icon on a narrower window** (below
+  1120 px), in the same centre spot, and the icon centres itself in the
+  space left between Back and the right-hand buttons instead of sliding
+  under them.
+
 ## [7.18.5] - 2026-10-07
 
 ### Fixed
