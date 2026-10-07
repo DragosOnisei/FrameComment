@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.5] - 2026-10-07
+
+### Fixed
+
+- **The "New Folder" tile is as tall as the cards next to it.** The cards
+  gained a type chip under the date line a while ago and the tile never
+  followed, so it sat one row shorter than its neighbours.
+
 ## [7.18.4] - 2026-10-07
 
 ### Changed

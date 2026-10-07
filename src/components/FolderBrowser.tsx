@@ -4250,6 +4250,15 @@ function FolderBrowserInner(
             <span className="flex flex-col items-center p-4 rounded-b-xl">
               <span className="text-base font-semibold">New Folder</span>
               <span className="text-xs mt-1 invisible" aria-hidden>.</span>
+              {/* 7.18.5: the cards grew a chip row under the meta line
+                  (4.9.x) and the tile never followed, so it sat a row
+                  short of its neighbours. Same chip, same classes,
+                  invisible — the box, not the label, is what matters. */}
+              <span className="flex flex-wrap gap-1 mt-1.5 invisible" aria-hidden>
+                <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium leading-none ring-1 ring-transparent">
+                  Folder
+                </span>
+              </span>
             </span>
           </button>
         </div>
