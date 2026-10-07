@@ -113,31 +113,18 @@ export async function fetchFolderPreviewData(
     )
   }
 
-  // 3. Pull READY+thumbnailed videos for the preview tiles. We
-  // over-fetch slightly so dedup by `name` (latest version per group)
-  // still leaves room for MAX_PREVIEW distinct rows.
-  const cap = Math.max(MAX_PREVIEW * 4, MAX_PREVIEW * folderIds.length * 2)
-  const videos = (await prisma.video.findMany({
-    where: {
-      folderId: { in: folderIds },
-      status: 'READY',
-      thumbnailPath: { not: null },
-      deletedAt: null,
-    } as any,
-    orderBy: [{ createdAt: 'desc' }],
-    take: cap,
-    select: {
-      id: true,
-      folderId: true,
-      projectId: true,
-      name: true,
-      stackId: true,
-      thumbnailPath: true,
-      storyboardPath: true,
-      storyboardCols: true,
-      storyboardRows: true,
-    } as any,
-  })) as unknown as Array<{
+  // 3. Pull READY+thumbnailed videos for the preview tiles — PER FOLDER.
+  //
+  // 7.18.7: this used to be ONE query over every folder on the page with a
+  // shared cap (`max(16, 8 × folders)`, newest first). The cap was shared,
+  // so a folder whose videos were older than its siblings' got nothing:
+  // on live, "Samuel" holds CLEAN (3 clips from 16 Sept), 9:16 and 4:5
+  // (18 stacks with newer versions) — the 24 newest rows were all 9:16 and
+  // 4:5, CLEAN fell outside the cap, and its card showed the glyph over "3
+  // items". A per-folder query cannot starve a sibling. The over-fetch
+  // stays (versions of one stack collapse to one tile, so more rows than
+  // tiles are read); the folder lists are short, so the fan-out is cheap.
+  type PreviewVideo = {
     id: string
     folderId: string | null
     projectId: string
@@ -147,7 +134,35 @@ export async function fetchFolderPreviewData(
     storyboardPath: string | null
     storyboardCols: number | null
     storyboardRows: number | null
-  }>
+  }
+  const perFolderCap = MAX_PREVIEW * 6
+  const perFolder = await Promise.all(
+    folderIds.map(
+      (folderId) =>
+        prisma.video.findMany({
+          where: {
+            folderId,
+            status: 'READY',
+            thumbnailPath: { not: null },
+            deletedAt: null,
+          } as any,
+          orderBy: [{ createdAt: 'desc' }],
+          take: perFolderCap,
+          select: {
+            id: true,
+            folderId: true,
+            projectId: true,
+            name: true,
+            stackId: true,
+            thumbnailPath: true,
+            storyboardPath: true,
+            storyboardCols: true,
+            storyboardRows: true,
+          } as any,
+        }) as unknown as Promise<PreviewVideo[]>,
+    ),
+  )
+  const videos: PreviewVideo[] = perFolder.flat()
   const videosByFolder = new Map<string, typeof videos>()
   for (const v of videos) {
     if (!v.folderId) continue

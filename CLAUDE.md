@@ -413,6 +413,12 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   latest-first row; equal dates fall back to the name. The public share
   player passes no `sortMode` and stays A→Z. Never put a second inline
   sort switch next to either caller.
+- **Folder covers are fetched per folder** (7.18.7): `fetchFolderPreviewData`
+  (src/lib/folder-previews.ts) used to run ONE query over every folder on
+  the page with a shared cap, newest first — so a folder whose videos were
+  older than its siblings' fell outside the cap and showed the glyph over
+  "3 items" (CLEAN next to 9:16 and 4:5 on live). One query per folder
+  now; never reintroduce a cap shared across folders.
 - **Quick Look is as wide as the video, never as wide as the title**
   (7.17.3): in video mode QuickPreviewOverlay's card carries `--qp-w` =
   `min(95vw, PREVIEW_MEDIA_MAX_VH vh × aspect)` (class `sm:w-[var(--qp-w,

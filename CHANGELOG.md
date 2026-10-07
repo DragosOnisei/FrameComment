@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.7] - 2026-10-07
+
+### Fixed
+
+- **A folder's cover no longer goes blank because its siblings are busier.**
+  The mosaic candidates were fetched for every folder on the page at once,
+  newest first with one shared cap, so a folder whose clips were older than
+  its neighbours' versions fell outside the cap and showed the folder glyph
+  over "3 items". Candidates are now fetched per folder.
+
 ## [7.18.6] - 2026-10-07
 
 ### Changed
