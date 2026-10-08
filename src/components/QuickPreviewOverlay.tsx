@@ -886,7 +886,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
   // 7.18.4: the shared artwork with the folder glyph, as on FolderCard.
   if (items.length === 0) {
     return (
-      <AudioArtwork glyph={FolderIcon} circle={64} icon={28} withBase className="absolute inset-0" />
+      <AudioArtwork glyph={FolderIcon} circle={64} icon={28} flat className="absolute inset-0" />
     )
   }
   // 2.5.2+: tile fill matches FolderCard's `bg-white/[0.03]` so the
@@ -920,7 +920,7 @@ function FolderCover({ previewItems }: { previewItems?: PreviewTile[] }) {
         circle={size === 'big' ? 48 : 36}
         icon={size === 'big' ? 22 : 16}
         staticRing={size === 'big'}
-        withBase
+        flat
         className="absolute inset-0"
       />
     )

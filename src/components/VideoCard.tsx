@@ -907,9 +907,10 @@ export default function VideoCard({
             <span className="text-xs">Generating thumbnail…</span>
           </div>
         ) : isAudio ? (
-          // 7.18.2: the player's artwork, at card size — glow, frosted circle
-          // and resting ring in the app's accent (AudioArtwork).
-          <AudioArtwork circle={56} icon={26} withBase className="absolute inset-0 rounded-t-xl" />
+          // 7.18.2: the player's artwork, at card size — frosted circle and
+          // resting ring in the app's accent (AudioArtwork); flat since
+          // 7.18.10, on the cover's own colour.
+          <AudioArtwork circle={56} icon={26} flat className="absolute inset-0 rounded-t-xl" />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/60">
             {/* 7.18.0: the kind's glyph is the whole thumbnail for images

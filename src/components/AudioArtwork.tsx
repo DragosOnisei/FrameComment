@@ -37,8 +37,14 @@ export interface AudioArtworkProps {
   className?: string
   /** Rendered centred behind the circle (the live ring). */
   children?: ReactNode
-  /** Paint the dark tinted base too (the card); the player's stage is already dark. */
-  withBase?: boolean
+  /**
+   * 7.18.10: FLAT — no glow, no tinted base; the container's own colour
+   * shows through. Cards and mosaic tiles use it so the artwork sits on
+   * exactly the colour a video's letter-box has beside it (Dragos: "one
+   * colour, not a gradient, the same as next to a video"). The player and
+   * Quick Look's audio stage keep the glow.
+   */
+  flat?: boolean
 }
 
 export default function AudioArtwork({
@@ -48,7 +54,7 @@ export default function AudioArtwork({
   staticRing = true,
   className,
   children,
-  withBase = false,
+  flat = false,
 }: AudioArtworkProps) {
   // The static ring sits just outside the circle, as the live bars do at rest.
   const ringOuter = circle + 24
@@ -56,12 +62,10 @@ export default function AudioArtwork({
   const outer = ((circle + 20) / ringOuter) * 100
   const glow =
     'radial-gradient(ellipse 70% 60% at 50% 45%, hsl(var(--spotlight-tint) / 0.28) 0%, hsl(var(--spotlight-tint) / 0.08) 55%, transparent 100%)'
-  const base =
-    'linear-gradient(180deg, hsl(var(--spotlight-tint) / 0.14) 0%, hsl(var(--spotlight-tint) / 0.05) 100%), #070a10'
   return (
     <div
       className={`flex items-center justify-center select-none ${className ?? ''}`}
-      style={{ background: withBase ? `${glow}, ${base}` : glow }}
+      style={flat ? undefined : { background: glow }}
       aria-hidden
     >
       <div className="relative flex items-center justify-center" style={{ width: circle, height: circle }}>

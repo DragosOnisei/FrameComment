@@ -762,7 +762,7 @@ function FolderCover({
         glyph={FolderIcon}
         circle={56}
         icon={26}
-        withBase
+        flat
         className="absolute inset-0"
       />
     )
@@ -810,7 +810,7 @@ function FolderCover({
         circle={size === 'big' ? 48 : 36}
         icon={size === 'big' ? 22 : 16}
         staticRing={size === 'big'}
-        withBase
+        flat
         className="absolute inset-0"
       />
     )

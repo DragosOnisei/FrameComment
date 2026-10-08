@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.10] - 2026-10-08
+
+### Changed
+
+- **Folder and audio thumbnails are flat again.** The frosted icon stays,
+  but it sits on the cover's own colour, the same one a video has around
+  its thumbnail, instead of a tinted gradient. The player keeps its glow.
+
 ## [7.18.9] - 2026-10-08
 
 ### Fixed

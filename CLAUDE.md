@@ -564,7 +564,11 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `glyph` (7.18.4): folders wear it too — an empty folder's cover, a
   folder tile inside a mosaic (smaller, ring only on the big tile) and
   the folder's Quick Look (FolderCard and QuickPreviewOverlay's
-  FolderCover).
+  FolderCover). On cards and mosaic tiles it is `flat` (7.18.10): no
+  glow, no tinted base, the cover's own colour shows through, so the
+  artwork sits on exactly what a video's letter-box has beside it —
+  Dragos asked for one colour, not a gradient, on thumbnails; only the
+  player and Quick Look's audio stage keep the glow.
 - **The accent is the company's, fetched WITH the token** (7.18.3):
   `/api/settings/theme` answers with the platform's theme for an anonymous
   caller and with the company's own only when a bearer arms the org.
