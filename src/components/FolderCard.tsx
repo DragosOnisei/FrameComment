@@ -17,6 +17,7 @@ import { computePopoverStyle } from '@/lib/popover-position'
 import { storyboardGridOf } from '@/lib/storyboard-grid'
 import { formatBytes } from '@/lib/project-gradient'
 import AudioArtwork from '@/components/AudioArtwork'
+import ThumbnailImage from '@/components/ThumbnailImage'
 
 /**
  * Frame.io-style folder card used in the admin folder browser. A
@@ -994,9 +995,10 @@ export function ScrubTile({
       onMouseMove={handleScrub}
       onMouseLeave={() => setScrubFraction(null)}
     >
-      <img
+      {/* 7.18.11: spinner until the picture has arrived (ThumbnailImage). */}
+      <ThumbnailImage
         src={thumbnailUrl}
-        alt=""
+        spinnerSize="sm"
         draggable={false}
         // `object-contain` keeps vertical clips (9:16) letter-boxed in
         // the tile rather than cropping them to a strip.

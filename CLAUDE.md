@@ -433,6 +433,16 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   6.15.2 bug, in the one copy of the mapping that never got the fix).
   Every place that hands a storyboard URL to a tile must hand the grid
   with it.
+- **Video thumbnails go through `ThumbnailImage`** (7.18.11): the app's
+  spinner ring over the slot until the picture decodes, then a 200 ms
+  fade — on the card, the folder mosaic (`ScrubTile`), Quick Look's
+  tiles, the list view and search results. It checks `img.complete`
+  right after mount (a cached image can finish before `onLoad` is
+  attached, and would spin forever) and shows the spinner only until the
+  FIRST load: folder pages re-mint tokens on every poll, so `src` changes
+  under a picture already on screen and resetting would flash a spinner
+  every few seconds. An error settles it too. The parent must be
+  positioned. A new thumbnail `<img>` anywhere should use it.
 - **Folder covers are fetched per folder** (7.18.7): `fetchFolderPreviewData`
   (src/lib/folder-previews.ts) used to run ONE query over every folder on
   the page with a shared cap, newest first — so a folder whose videos were

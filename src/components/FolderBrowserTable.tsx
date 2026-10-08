@@ -5,6 +5,7 @@ import { Folder as FolderIcon, Film, Image as ImageIcon } from 'lucide-react'
 import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { isTimelineMedia, mediaKindLabel, type MediaKind } from '@/lib/media-kind'
+import ThumbnailImage from '@/components/ThumbnailImage'
 
 /**
  * 1.7.0+: compact "table" layout for the FolderBrowser grid. Same data
@@ -409,14 +410,14 @@ function RowThumb({
 
   return (
     <div
-      className="shrink-0 flex items-center justify-center"
+      className="relative shrink-0 flex items-center justify-center"
       style={{ width: THUMB_SLOT_W, height: THUMB_H }}
     >
       {thumbnailUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        // 7.18.11: spinner until the picture has arrived (ThumbnailImage).
+        <ThumbnailImage
           src={thumbnailUrl}
-          alt=""
+          spinnerSize="sm"
           draggable={false}
           onLoad={(e) => {
             const img = e.currentTarget

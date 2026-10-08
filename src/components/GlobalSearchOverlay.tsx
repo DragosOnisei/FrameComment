@@ -9,6 +9,7 @@ import { formatBytes } from '@/lib/project-gradient'
 import { getPublicShareOrigin } from '@/lib/public-share-origin'
 import { triggerDownload } from '@/lib/trigger-download'
 import type { MediaKind } from '@/lib/media-kind'
+import ThumbnailImage from '@/components/ThumbnailImage'
 import {
   Search,
   X,
@@ -805,10 +806,10 @@ function ResultThumbnail({ r, small }: { r: SearchResult; small?: boolean }) {
       style={small ? { aspectRatio } : undefined}
     >
       {hasThumb ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        // 7.18.11: spinner until the picture has arrived (ThumbnailImage).
+        <ThumbnailImage
           src={r.thumbnailUrl!}
-          alt=""
+          spinnerSize="sm"
           className="w-full h-full object-cover"
           onError={() => setErrored(true)}
         />

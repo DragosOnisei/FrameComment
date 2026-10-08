@@ -13,6 +13,7 @@ import { storyboardGridOf } from '@/lib/storyboard-grid'
 import { legacyScrubAllowed } from '@/lib/card-scrub'
 import { fontOf, measureTextWidth, middleEllipsis } from '@/lib/middle-ellipsis'
 import AudioArtwork from '@/components/AudioArtwork'
+import ThumbnailImage from '@/components/ThumbnailImage'
 
 /**
  * 1.7.0+: macOS Quick Look-style preview overlay. Opens when the
@@ -841,10 +842,9 @@ function ScrubThumbnail({ video: v }: { video: FolderContents['videos'][number] 
           not scrubbing, or as a fallback if the sprite hasn't loaded. */}
       {!showSprite && !showLegacyVideo && (
         hasThumb ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          // 7.18.11: spinner until the picture has arrived (ThumbnailImage).
+          <ThumbnailImage
             src={v.thumbnailUrl!}
-            alt=""
             className="w-full h-full object-contain"
             onError={() => setThumbErrored(true)}
           />

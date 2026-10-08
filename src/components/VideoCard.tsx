@@ -63,6 +63,7 @@ import { getAccessToken } from '@/lib/token-store'
 import { legacyScrubAllowed, shouldRequestStoryboard } from '@/lib/card-scrub'
 import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
 import AudioArtwork from '@/components/AudioArtwork'
+import ThumbnailImage from '@/components/ThumbnailImage'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -890,10 +891,9 @@ export default function VideoCard({
           </div>
         )}
         {hasThumb ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          // 7.18.11: spinner until the picture has arrived (ThumbnailImage).
+          <ThumbnailImage
             src={thumbnailUrl!}
-            alt=""
             draggable={false}
             onError={() => setThumbErrored(true)}
             className="absolute inset-0 w-full h-full object-contain rounded-t-xl"

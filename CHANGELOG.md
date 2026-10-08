@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.11] - 2026-10-08
+
+### Added
+
+- **Video thumbnails show a spinner while they load.** Each card, each tile
+  of a folder's four-way cover, Quick Look's tiles, the list view and search
+  results draw the app's spinner ring in their own spot until the picture
+  arrives, then fade it in, instead of sitting as black boxes when the
+  server is slow.
+
 ## [7.18.10] - 2026-10-08
 
 ### Changed
