@@ -1461,11 +1461,11 @@ export default function CommentSection({
 
   const replyingToComment = mergedComments.find(c => c.id === replyingToCommentId) || null
 
-  // 6.15.2: when Reply is clicked on a REPLY rather than the root comment, the
-  // composer opens addressed to that person. Kept next to the composer instead
-  // of inside it so it survives the input being re-mounted when the user
-  // switches from one thread to another.
-  const [replyMention, setReplyMention] = useState<string | null>(null)
+  // 6.15.2 / 7.18.12: which REPLY the inline box opens under when Reply is
+  // pressed on a reply rather than the root (null = under the root). It used
+  // to be a name prefilled as "@Name "; the box now opens in place, no prefill.
+  // Kept here so it survives the input being re-mounted between threads.
+  const [replyAnchorId, setReplyAnchorId] = useState<string | null>(null)
 
   // Format message time
   const formatMessageTime = (date: Date) => {
@@ -3189,8 +3189,8 @@ export default function CommentSection({
                       comment={comment}
                       isReply={false}
                       focusGlowKey={focusGlow && focusGlow.id === comment.id ? focusGlow.nonce : null}
-                      onReply={(mentionName) => {
-                        setReplyMention(mentionName ?? null)
+                      onReply={(replyId) => {
+                        setReplyAnchorId(replyId ?? null)
                         handleReply(comment.id, comment.videoId)
                       }}
                       // 7.11.0: the 👍 button posts straight through the same
@@ -3243,18 +3243,19 @@ export default function CommentSection({
                       // replied to. The user types here, hits Send,
                       // and the reply lands in context — no page jump,
                       // no focus shift to a global input at the bottom.
+                      inlineReplyAnchorId={replyingToCommentId === comment.id ? replyAnchorId : null}
                       inlineReplyInput={
                         replyingToCommentId === comment.id ? (
                           <InlineReplyForm
-                            key={`${comment.id}:${replyMention ?? ''}`}
+                            key={`${comment.id}:${replyAnchorId ?? ''}`}
                             placeholder="Reply to comment..."
-                            initialText={replyMention ? `@${replyMention} ` : ''}
+                            initialText=""
                             onSubmit={(text) => {
-                              setReplyMention(null)
+                              setReplyAnchorId(null)
                               return submitInlineReply(comment.id, comment.videoId, text)
                             }}
                             onCancel={() => {
-                              setReplyMention(null)
+                              setReplyAnchorId(null)
                               handleCancelReply()
                             }}
                           />

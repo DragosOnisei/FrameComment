@@ -17,9 +17,14 @@ import {
  * takes a moment, and until it arrives the card, the folder mosaic and Quick
  * Look's tiles were plain black boxes (Dragos's screenshot of "DAV Patriot
  * Boot Camp"): no way to tell "loading" from "this video has no picture".
- * This draws the app's spinner — the same ring the "Generating thumbnail…"
- * state uses — over the slot until the image has decoded, then fades the
- * picture in.
+ * This draws the app's spinner over the slot until the image has decoded,
+ * then fades the picture in.
+ *
+ * 7.18.12: the ring is WHITE (the player's buffering spinner), not the
+ * accent. 7.18.11 shipped the accent ring of "Generating thumbnail…" at
+ * 1.5 px, and on live CPC's accent is a dark navy (rgb 0 79 163) on navy
+ * tiles — the spinner was there and turning, and nobody could see it. A
+ * loading cue has to read on every company's accent.
  *
  * Two details that matter:
  *   - A CACHED image can finish before React attaches `onLoad`, so the
@@ -43,8 +48,8 @@ const useIsoLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : use
 export type ThumbnailSpinnerSize = 'sm' | 'md'
 
 const SPINNER_CLASS: Record<ThumbnailSpinnerSize, string> = {
-  sm: 'w-4 h-4 border-[1.5px]',
-  md: 'w-6 h-6 border-2',
+  sm: 'w-5 h-5',
+  md: 'w-7 h-7',
 }
 
 export interface ThumbnailImageProps extends ImgHTMLAttributes<HTMLImageElement> {
@@ -98,7 +103,7 @@ export default function ThumbnailImage({
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
         >
           <span
-            className={`inline-block rounded-full border-muted-foreground/30 border-t-primary animate-spin ${SPINNER_CLASS[spinnerSize]}`}
+            className={`inline-block rounded-full border-2 border-white/20 border-t-white/85 animate-spin ${SPINNER_CLASS[spinnerSize]}`}
           />
         </span>
       )}

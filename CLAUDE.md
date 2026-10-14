@@ -359,6 +359,20 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   returns comments with `user` must select `avatarUrl`, because the
   sanitizer derives the flag from it (`/api/projects/[id]` and the share
   comments route did not, until 7.14.1).
+- **The reply box opens under the reply you answer** (7.18.12): threads
+  stay one level deep (every reply's `parentId` is the root), but Reply on
+  a REPLY passes that reply's id (`onReply(replyId)`), CommentSection keeps
+  it as `replyAnchorId`, and MessageBubble renders the inline box right
+  after that reply row (two grid cells, the box indented `pl-4`) instead
+  of under the root, above every answer. No "@Name " prefill any more —
+  Dragos's call; the 👍 quick reply on a reply still posts "@Name 👍".
+  Only the Reply button sets the anchor, and it always sets it (null for
+  the root), so a stale anchor cannot hide the box. The thread line is
+  SEGMENTS (`ThreadConnector`, 2 px, `bg-white/25`) drawn in each avatar
+  cell (`self-stretch`) from 6 px below its avatar to 6 px above the next,
+  centred on the 28 px column; the box's spacer cell carries it through
+  when replies follow. It used to be one absolute 1 px line painted over
+  the grid — off-centre, faint, and crossing the translucent avatars.
 - **Edit is the author's alone; Delete is moderation** (7.16.0):
   `canEditComment` in CommentSection decides the Edit button on cards and
   reply rows AND the right-click Edit item — staff own comments carrying
@@ -433,9 +447,12 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   6.15.2 bug, in the one copy of the mapping that never got the fix).
   Every place that hands a storyboard URL to a tile must hand the grid
   with it.
-- **Video thumbnails go through `ThumbnailImage`** (7.18.11): the app's
-  spinner ring over the slot until the picture decodes, then a 200 ms
-  fade — on the card, the folder mosaic (`ScrubTile`), Quick Look's
+- **Video thumbnails go through `ThumbnailImage`** (7.18.11): a spinner
+  ring over the slot until the picture decodes, then a 200 ms fade. The
+  ring is WHITE (`border-white/20 border-t-white/85`, the player's
+  buffering spinner) since 7.18.12 — the accent ring shipped first was
+  invisible on CPC's dark-navy accent; a loading cue must read on every
+  company's colour. It is used on the card, the folder mosaic (`ScrubTile`), Quick Look's
   tiles, the list view and search results. It checks `img.complete`
   right after mount (a cached image can finish before `onLoad` is
   attached, and would spin forever) and shows the spinner only until the

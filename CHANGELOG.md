@@ -14,6 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.18.12] - 2026-10-14
+
+### Fixed
+
+- **The thumbnail spinner can be seen.** 7.18.11's ring used the company's
+  accent at 1.5 px, and on a dark accent it was invisible on the dark
+  tiles. It is now the player's white buffering ring, 2 px and a little
+  larger, readable on every accent.
+
+### Changed
+
+- **Replying to a reply opens the box right under it.** The reply box used
+  to open under the original comment, above every answer, prefilled with
+  "@Name". It now opens under the reply you clicked, slightly indented, and
+  empty. The reply still joins the same thread.
+- **The thread line is centred on the avatars and easier to see.** It no
+  longer runs across the avatars; it is drawn between them, 2 px, and
+  continues past an open reply box.
+
 ## [7.18.11] - 2026-10-08
 
 ### Added

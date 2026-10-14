@@ -57,16 +57,43 @@ const COMMENT_LINK_CLASSES =
 const ACTION_ICON_BUTTON =
   'inline-flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground/80 hover:text-foreground hover:bg-white/[0.08] transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
 
+/**
+ * 7.18.12: the thread line, drawn as SEGMENTS in the avatar column.
+ *
+ * It used to be one absolute 1 px line from the root avatar to the last reply,
+ * painted over the grid: off-centre (18 px into a 28 px column), faint, and
+ * crossing over every avatar in between — the avatars are translucent, so it
+ * showed straight through them. Each avatar cell now stretches to its row and
+ * draws its own segment from just below its avatar to just above the next one
+ * (6 px clear at both ends, through the 12 px row gap), centred on the column.
+ * `top` is where the segment starts inside the cell: below the avatar, or
+ * above the cell for a row with no avatar (the inline reply box's spacer).
+ */
+function ThreadConnector({ top }: { top: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute left-1/2 -translate-x-1/2 -bottom-2 w-0.5 rounded-full bg-white/25"
+      style={{ top }}
+    />
+  )
+}
+
 interface MessageBubbleProps {
   comment: CommentWithReplies
   isReply: boolean
   /**
-   * 6.15.2: takes an optional name to address. Clicking Reply on a REPLY
-   * routes here too — the thread stays one level deep (that is deliberate:
-   * nested trees turn a review into a forum), so the new reply attaches to
-   * the same root comment and simply opens with "@Name " already typed.
+   * 6.15.2: clicking Reply on a REPLY routes here too — the thread stays one
+   * level deep (that is deliberate: nested trees turn a review into a forum),
+   * so the new reply attaches to the same root comment.
+   *
+   * 7.18.12: the argument is the id of the REPLY whose button was pressed
+   * (null for the root's own button), so the box opens right under that
+   * reply instead of under the root, above every answer. It used to be a
+   * name, prefilled as "@Name " — Dragos asked for the box in place and
+   * no prefill; the slight indent says who it answers.
    */
-  onReply?: (mentionName?: string | null) => void
+  onReply?: (replyId?: string | null) => void
   /**
    * 7.11.0: one-tap "👍" reply. Posts a reply to THIS thread straight away —
    * no composer, no Send — with the text the bubble decides ("👍", or
@@ -162,6 +189,11 @@ interface MessageBubbleProps {
    * directly under the bubble's action row — Frame.io style.
    */
   inlineReplyInput?: React.ReactNode
+  /**
+   * 7.18.12: which reply the inline box sits under — the one whose Reply was
+   * pressed. Null/absent: under the root comment's action row, as before.
+   */
+  inlineReplyAnchorId?: string | null
 }
 
 /**
@@ -209,6 +241,7 @@ export default function MessageBubble({
   onResolveToggle,
   onReact,
   inlineReplyInput,
+  inlineReplyAnchorId = null,
 }: MessageBubbleProps) {
   const t = useTranslations('comments')
 
@@ -757,9 +790,6 @@ export default function MessageBubble({
           isCarriedOver && !isResolved ? 'opacity-60 hover:opacity-100' : ''
         } comment-card`}
       >
-        {hasReplies && (
-          <div className="absolute left-[18px] top-9 bottom-9 w-px bg-border/50" aria-hidden="true" />
-        )}
         {/* 7.13.1: the arrival pulse — see `focusGlowKey` and `.comment-focus-glow`. */}
         {focusGlowKey != null && (
           <span key={focusGlowKey} className="comment-focus-glow" aria-hidden="true" />
@@ -772,13 +802,17 @@ export default function MessageBubble({
               takes a range, Cmd adds one — so the circle was a second control
               for something the whole card already did. What it signalled is now
               said by the ring, which is also what a picked video says. */}
-          <UserAvatar
-            userId={authorUserId}
-            hasAvatar={authorHasAvatar}
-            name={effectiveAuthorName}
-            size="sm"
-            isInternal={comment.isInternal ?? false}
-          />
+          <div className="relative self-stretch flex justify-center items-start">
+            <UserAvatar
+              userId={authorUserId}
+              hasAvatar={authorHasAvatar}
+              name={effectiveAuthorName}
+              size="sm"
+              isInternal={comment.isInternal ?? false}
+            />
+            {/* 28 px avatar + 6 px clear. */}
+            {hasReplies && <ThreadConnector top={34} />}
+          </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-sm font-semibold text-white truncate">
@@ -1255,12 +1289,13 @@ export default function MessageBubble({
                 <CommentInput> only for the matched comment so the
                 reply lands in context instead of jumping to the
                 global input at the top / bottom of the screen. */}
-            {inlineReplyInput && (
+            {inlineReplyInput && !inlineReplyAnchorId && (
               <div className="mt-3">{inlineReplyInput}</div>
             )}
           </div>
 
-          {threadReplies.map((reply) => {
+          {threadReplies.map((reply, replyIndex) => {
+            const hasNextReply = replyIndex < threadReplies.length - 1
             const replyEffectiveName = reply.authorName ||
               (reply.isInternal && (reply as any).user ?
                 ((reply as any).user.name || (reply as any).user.email) :
@@ -1268,7 +1303,7 @@ export default function MessageBubble({
 
             return (
               <div key={reply.id} className="contents">
-                <div className="flex justify-center pt-0.5">
+                <div className="relative self-stretch flex justify-center items-start pt-0.5">
                   <UserAvatar
                     userId={((reply as any).user?.id as string | null) ?? null}
                     hasAvatar={!!(reply as any).user?.hasAvatar}
@@ -1276,6 +1311,10 @@ export default function MessageBubble({
                     size="sm"
                     isInternal={reply.isInternal ?? false}
                   />
+                  {/* 2 px padding + 28 px avatar + 6 px clear. The segment
+                      continues when another reply follows, or when the reply
+                      box is open under this one with more replies below. */}
+                  {hasNextReply && <ThreadConnector top={36} />}
                 </div>
                 {/* 7.8.0: anchored like a card so a deep link (bell row, push
                     notification) can land ON the reply; `.comment-reply`
@@ -1369,7 +1408,7 @@ export default function MessageBubble({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation()
-                              onReply(replyEffectiveName || null)
+                              onReply(reply.id)
                             }}
                             className={ACTION_ICON_BUTTON}
                             title={t('reply')}
@@ -1410,6 +1449,19 @@ export default function MessageBubble({
                     </>
                   )}
                 </div>
+                {/* 7.18.12: the reply box opens under the reply whose Reply
+                    was pressed — two grid cells (an empty avatar column, then
+                    the box), indented a little so it reads as an answer. */}
+                {inlineReplyInput && inlineReplyAnchorId === reply.id && (
+                  <>
+                    {/* Spacer cell: carries the line through the box's row
+                        (from the 12 px gap above) when replies follow. */}
+                    <div aria-hidden className="relative self-stretch">
+                      {hasNextReply && <ThreadConnector top={-4} />}
+                    </div>
+                    <div className="min-w-0 pl-4">{inlineReplyInput}</div>
+                  </>
+                )}
               </div>
             )
           })}
