@@ -13,6 +13,7 @@ import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
 import LanguageToggle from '@/components/LanguageToggle'
+import { fcIdLabel } from '@/lib/fc-id'
 
 interface ThumbnailReelProps {
   videosByName: Record<string, any[]>
@@ -85,6 +86,7 @@ export default function ThumbnailReel({
   // 7.1.0: drives the "(22 Hours ago)" tag under the title.
   const nowMs = useNowMs()
   const tComments = useTranslations('comments')
+  const tCommon = useTranslations('common')
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // 3.2.x: click-and-drag (mouse) horizontal panning of the version
   // reel. `moved` tracks whether the pointer travelled far enough to
@@ -594,6 +596,23 @@ export default function ThumbnailReel({
                 </button>
               )}
 
+              {/* 7.19.0: the active version's ID, "FC453". Same pill vocabulary
+                  as Compare beside it; monospace so the number reads as an
+                  identifier. Every version has its own, so it changes with
+                  the version chip. */}
+              {fcIdLabel(activeVideo?.fcNumber) && (
+                <span
+                  className={cn(
+                    'inline-flex items-center shrink-0 h-7 px-2.5 rounded-full',
+                    'text-xs font-mono font-medium tabular-nums',
+                    'bg-white/[0.06] ring-1 ring-white/10 text-white/85',
+                  )}
+                  title={tCommon('videoId')}
+                >
+                  {fcIdLabel(activeVideo?.fcNumber)}
+                </span>
+              )}
+
               {/* 3.8.x: Compare versions — opens the existing side-by-side
                   comparison overlay (VideoPlayer listens for the event).
                   Shown ONLY when there are ≥2 versions AND only on large
@@ -673,6 +692,12 @@ export default function ThumbnailReel({
                         <span className="flex-1 text-sm truncate" title={video.originalFileName || video.name}>
                           {video.originalFileName || video.name}
                         </span>
+                        {/* 7.19.0: each version's own ID. */}
+                        {fcIdLabel(video.fcNumber) && (
+                          <span className="shrink-0 text-[10px] font-mono text-muted-foreground">
+                            {fcIdLabel(video.fcNumber)}
+                          </span>
+                        )}
                       </button>
                     )
                   })}
@@ -945,6 +970,12 @@ export default function ThumbnailReel({
                         >
                           {versionLabel}
                         </span>
+                        {/* 7.19.0: the version's ID beside its label. */}
+                        {fcIdLabel(version.fcNumber) && (
+                          <span className="text-[10px] font-mono text-white/70">
+                            {fcIdLabel(version.fcNumber)}
+                          </span>
+                        )}
                       </div>
                     </button>
                   )

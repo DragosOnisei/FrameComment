@@ -263,6 +263,8 @@ export async function GET(
       // longer assume 10x10.
       storyboardCols: (video as any).storyboardCols ?? null,
       storyboardRows: (video as any).storyboardRows ?? null,
+      // 7.19.0: the video's ID, shown in the reel and put in front of downloads.
+      fcNumber: (video as any).fcNumber ?? null,
       // folderId surfaced (1.0.6+) so the share page can scope the
       // title-flyout to videos from one folder when arriving via a
       // folder share link.
@@ -394,6 +396,8 @@ export async function GET(
       // longer assume 10x10.
       storyboardCols: (video as any).storyboardCols ?? null,
       storyboardRows: (video as any).storyboardRows ?? null,
+      // 7.19.0: the video's ID, shown in the reel and put in front of downloads.
+      fcNumber: (video as any).fcNumber ?? null,
     })) : videosSanitizedBase
 
     const sanitizedVideosByName = isGuest ? Object.keys(sortedVideosByName).reduce((acc: any, name: string) => {
@@ -422,6 +426,7 @@ export async function GET(
         // longer assume 10x10.
         storyboardCols: (video as any).storyboardCols ?? null,
         storyboardRows: (video as any).storyboardRows ?? null,
+        fcNumber: (video as any).fcNumber ?? null,
       }))
       return acc
     }, {}) : sortedVideosByName

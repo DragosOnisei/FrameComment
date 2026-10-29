@@ -1,6 +1,7 @@
 {
   "common": {
     "save": "Save",
+    "videoId": "Video ID",
     "saveChanges": "Save Changes",
     "saving": "Saving...",
     "cancel": "Cancel",

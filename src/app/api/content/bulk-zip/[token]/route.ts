@@ -12,6 +12,7 @@ import { Readable } from 'stream'
 import crypto from 'crypto'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
+import { fcPrefixFileName } from '@/lib/fc-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -97,6 +98,7 @@ export async function GET(
         originalFileName: true,
         originalStoragePath: true,
         storageBackend: true,
+        fcNumber: true,
       } as any,
     }) as any[]
 
@@ -139,7 +141,8 @@ export async function GET(
     for (const video of videos) {
       try {
         const ext = video.originalFileName?.match(/\.[^.]+$/)?.[0] || '.mp4'
-        const fileName = `${video.name}_${video.versionLabel}${ext}`
+        // 7.19.0: every file in the archive carries its video's ID in front.
+        const fileName = fcPrefixFileName(video.fcNumber, `${video.name}_${video.versionLabel}${ext}`)
         const fileStream = await downloadFile(video.originalStoragePath, resolveFileBackend(video.storageBackend))
         archive.append(fileStream, { name: fileName })
         appendedCount += 1

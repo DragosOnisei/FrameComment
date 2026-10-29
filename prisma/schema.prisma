@@ -521,6 +521,19 @@ model Video {
   // disappear from the grids and shares.
   deletedAt DateTime?
 
+  // 7.19.0: the video's ID, "FC<n>" — FC1 for the company's first upload,
+  // FC2 for the next, in upload order, one per file (every version has its
+  // own). Assigned by a BEFORE INSERT trigger in Postgres from a per-company
+  // counter (`VideoFcCounter`), never by application code: the two create
+  // sites today and any future one get a number without knowing about it,
+  // and the counter row is locked for the update, so two simultaneous
+  // uploads cannot draw the same number. A number is never reused — a
+  // deleted video keeps its hole. Only VIDEO rows carry one (Dragos's
+  // call); images, audio and documents stay NULL, as does a legacy row
+  // without an organizationId. The migration numbered every existing video
+  // by createdAt. The unique index is the guarantee, not the counter.
+  fcNumber Int?
+
   project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   folder    Folder?          @relation(fields: [folderId], references: [id], onDelete: SetNull)
   createdBy User?            @relation("VideoCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -541,6 +554,19 @@ model Video {
   @@index([deletedAt])
 
   @@index([organizationId])
+  // 7.19.0: no two videos of one company share an FC number.
+  @@unique([organizationId, fcNumber])
+}
+
+// 7.19.0: per-company counter behind Video.fcNumber. One row per company,
+// `lastNumber` = the highest FC number handed out; the Video insert trigger
+// upserts it (INSERT … ON CONFLICT DO UPDATE … RETURNING), which takes a row
+// lock, so concurrent uploads queue on it and each gets its own number.
+// Carries organizationId, so it is a tenant table with the same RLS policy
+// as the rest; the app role touches it only through the trigger.
+model VideoFcCounter {
+  organizationId String @id
+  lastNumber     Int    @default(0)
 }
 
 model VideoAsset {

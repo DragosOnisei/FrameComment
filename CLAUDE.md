@@ -610,6 +610,35 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   the tenant auto-save no longer carries it. Any other client of that
   route must use `apiFetch` as well (AdminSidebar does; BrandLogo reads
   only the logo path).
+- **Every video has an ID, and Postgres hands it out** (7.19.0): `Video.fcNumber`
+  is "FC<n>" — FC1 for the company's first upload, FC2 for the next, ONE PER
+  FILE (each version has its own), numbered PER COMPANY, VIDEO rows only
+  (images, audio, documents stay NULL) — all four by Dragos's call. A
+  `BEFORE INSERT` trigger (`assign_video_fc_number`, migration
+  `video_fc_id`) draws it from `VideoFcCounter` with an upsert that locks
+  the company's counter row, so simultaneous uploads get consecutive
+  numbers; `@@unique([organizationId, fcNumber])` is the guarantee. No
+  create site sets it and none should — the trigger covers POST
+  /api/videos, the duplicate route and whatever comes next. A deleted
+  video keeps its hole; numbers are never reused. The counter table
+  carries `organizationId`, so it has the same forced RLS policy as every
+  tenant table (the scan flags any organizationId table without one). The
+  migration numbered every existing video by `createdAt`, Trash included;
+  a legacy row without a company stays NULL, honestly. Verified locally
+  with a tsx script that inserts as `framecomment_app` with the org armed.
+  Everything that shows or uses it goes through `src/lib/fc-id.ts`
+  (pure, node-tested): `fcIdLabel` (card chip top-left, table, Quick
+  Look, the reel's header pill + versions menu + tiles, search rows),
+  `fcPrefixFileName` (the content route's download name, the single
+  ZIP's entries and archive name, the bulk ZIP's entries, AND the two
+  folder ZIPs — admin `/api/folders/[id]/download` and the public
+  `/api/share/folder/[slug]/download`, which the first cut missed because
+  a folder download never goes through bulk-zip; attached assets keep
+  their own names) and `fcNumberFromQuery` ("FC453", "fc 453", "453" add
+  an `fcNumber` match beside the name search). After `prisma generate`
+  a dev server started BEFORE the schema change still carries the old
+  client and never selects the column — restart it before concluding the
+  chip is missing.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   **A copy is credited to its original author** (7.18.1): the paste sends

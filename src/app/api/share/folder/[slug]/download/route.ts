@@ -12,6 +12,7 @@ import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { resolveFileBackend, type StorageBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError, logMessage } from '@/lib/logging'
+import { fcPrefixFileName } from '@/lib/fc-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -156,6 +157,7 @@ export async function GET(
               originalFileName: true,
               originalStoragePath: true,
               storageBackend: true,
+              fcNumber: true,
             } as any,
           },
         },
@@ -180,7 +182,8 @@ export async function GET(
           ? v.originalFileName.replace(/\.[^./]+$/, '')
           : v.name
         const safeBase = sanitizeFolderSegment(baseName)
-        const fileName = `${safeBase}${ext || '.mp4'}`
+        // 7.19.0: the video's ID in front, as on the admin folder ZIP.
+        const fileName = fcPrefixFileName(v.fcNumber, `${safeBase}${ext || '.mp4'}`)
         filesToAdd.push({
           storagePath: v.originalStoragePath,
           zipPath: `${zipPrefix}/${fileName}`,

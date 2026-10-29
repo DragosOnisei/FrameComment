@@ -14,6 +14,7 @@ import { legacyScrubAllowed } from '@/lib/card-scrub'
 import { fontOf, measureTextWidth, middleEllipsis } from '@/lib/middle-ellipsis'
 import AudioArtwork from '@/components/AudioArtwork'
 import ThumbnailImage from '@/components/ThumbnailImage'
+import { fcIdLabel } from '@/lib/fc-id'
 
 /**
  * 1.7.0+: macOS Quick Look-style preview overlay. Opens when the
@@ -55,6 +56,8 @@ export interface QuickPreviewVideo {
   thumbnailUrl?: string | null
   previewUrl?: string | null
   versionLabel?: string | null
+  /** 7.19.0: the video's ID number, shown in the meta row. */
+  fcNumber?: number | null
   uploaderName?: string | null
   createdAt?: string | Date | null
 }
@@ -667,6 +670,8 @@ function VideoPreviewBody({ video }: { video: QuickPreviewVideo }) {
             tooltip — the card is as wide as the video, not as the title. */}
         <MiddleEllipsisTitle text={video.name} className="text-sm font-medium text-white" />
         <div className="text-xs text-white/55 mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+          {/* 7.19.0: the video's ID first, then the version. */}
+          {fcIdLabel(video.fcNumber) && <span className="font-mono text-white/70">{fcIdLabel(video.fcNumber)}</span>}
           {video.versionLabel && <span>{video.versionLabel}</span>}
           {isTimelineMedia(video.mediaType) && typeof video.duration === 'number' && video.duration > 0 && (
             <span>{formatDuration(video.duration)}</span>
@@ -724,6 +729,7 @@ interface FolderContents {
     width?: number | null
     height?: number | null
     versionLabel?: string | null
+    fcNumber?: number | null
     uploaderName?: string | null
     createdAt?: string | Date | null
   }>

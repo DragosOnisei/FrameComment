@@ -64,6 +64,8 @@ import { legacyScrubAllowed, shouldRequestStoryboard } from '@/lib/card-scrub'
 import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
 import AudioArtwork from '@/components/AudioArtwork'
 import ThumbnailImage from '@/components/ThumbnailImage'
+import { fcIdLabel } from '@/lib/fc-id'
+import { useTranslations } from 'next-intl'
 
 /**
  * Frame.io-style video card used in the admin folder drill page
@@ -86,6 +88,8 @@ export interface VideoCardProps {
   id: string
   name: string
   versionLabel?: string
+  /** 7.19.0: the video's ID number, shown as "FC<n>" on the cover. */
+  fcNumber?: number | null
   duration?: number
   versionCount?: number
   thumbnailUrl?: string | null
@@ -355,6 +359,7 @@ export default function VideoCard({
   id,
   name,
   versionLabel,
+  fcNumber,
   duration,
   versionCount = 1,
   thumbnailUrl,
@@ -543,6 +548,8 @@ export default function VideoCard({
   // suppress the badge entirely — image versioning isn't a 1.0.9
   // feature, and a stray "v1" on every image card just looks noisy.
   const versionTag = isImage ? null : versionLabel || null
+  const fcLabel = fcIdLabel(fcNumber)
+  const tCommon = useTranslations('common')
   const hasThumb = !!thumbnailUrl && !thumbErrored
   // Storyboard sprite-sheet scrub (instant — preferred). Fall back to
   // <video> seeking when only previewUrl is available (legacy rows
@@ -972,6 +979,17 @@ export default function VideoCard({
         {versionTag && (
           <span className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/65 text-white text-[11px] font-medium tabular-nums ring-1 ring-white/25 backdrop-blur-md shadow-sm">
             {versionTag}
+          </span>
+        )}
+        {/* 7.19.0: the video's ID (top-left), the twin of the version tag:
+            same frosted chip, monospace so FC12 and FC120 line up. Only
+            VIDEO rows carry one; a card without it shows nothing there. */}
+        {fcLabel && (
+          <span
+            className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/65 text-white text-[11px] font-mono font-medium tabular-nums ring-1 ring-white/25 backdrop-blur-md shadow-sm"
+            title={tCommon('videoId')}
+          >
+            {fcLabel}
           </span>
         )}
         {/* 7.4.0: the checkbox is gone from the corner of the cover.

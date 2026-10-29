@@ -4,6 +4,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { logError } from '@/lib/logging'
 import { stackKeyOf } from '@/lib/video-stack'
+import { fcNumberFromQuery } from '@/lib/fc-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,10 +66,16 @@ export async function GET(request: NextRequest) {
     // Match on Video.name (case-insensitive `contains`). Excludes
     // soft-deleted videos AND videos whose owning project is in the
     // trash so the search mirrors what the admin sees in the UI.
+    //
+    // 7.19.0: a query that reads as a video ID ("FC453", "fc 453", "453" —
+    // src/lib/fc-id.ts) ALSO matches the row carrying that number. The name
+    // match stays beside it, a filename can contain the same digits.
+    const fcNumber = fcNumberFromQuery(rawQuery)
+    const nameMatch = { name: { contains: rawQuery, mode: 'insensitive' as const } }
     const where = {
       deletedAt: null,
-      name: { contains: rawQuery, mode: 'insensitive' as const },
       project: { deletedAt: null },
+      ...(fcNumber === null ? nameMatch : { OR: [nameMatch, { fcNumber }] }),
     }
 
     // 1.7.0+: stacks are modelled as multiple Video rows sharing the
@@ -105,6 +112,7 @@ export async function GET(request: NextRequest) {
         status: true,
         version: true,
         versionLabel: true,
+        fcNumber: true,
         project: {
           select: { id: true, title: true },
         },
@@ -224,6 +232,7 @@ export async function GET(request: NextRequest) {
           updatedAt: v.updatedAt,
           status: v.status,
           versionLabel: v.versionLabel,
+          fcNumber: v.fcNumber ?? null,
         }
       }),
     )

@@ -289,6 +289,8 @@ interface VideoRow {
   name: string
   version: number
   versionLabel?: string | null
+  /** 7.19.0: the video's ID number ("FC<n>"); null for images, audio, documents. */
+  fcNumber?: number | null
   /** Filename the admin uploaded the video as (e.g. "ep03_v2.mov").
    *  Used as the new card name when the Split-versions modal pulls
    *  this row out of its group (1.0.8+). */
@@ -336,6 +338,8 @@ interface VideoGroup {
   id: string
   name: string
   versionLabel?: string
+  /** 7.19.0: the latest version's FC number, for the card's chip. */
+  fcNumber?: number | null
   duration?: number
   versionCount: number
   thumbnailPath?: string | null
@@ -1198,6 +1202,7 @@ function FolderBrowserInner(
         id: latest.id,
         name,
         versionLabel: latest.versionLabel || `v${latest.version}`,
+        fcNumber: latest.fcNumber ?? null,
         duration: typeof latest.duration === 'number' ? latest.duration : undefined,
         versionCount: sorted.length,
         thumbnailPath: latest.thumbnailPath ?? null,
@@ -3446,6 +3451,7 @@ function FolderBrowserInner(
         thumbnailUrl: group.thumbnailUrl ?? null,
         previewUrl: group.previewUrl ?? null,
         versionLabel: group.versionLabel ?? null,
+        fcNumber: group.fcNumber ?? null,
         uploaderName: group.uploaderName ?? null,
         createdAt: group.createdAt ?? null,
       }
@@ -4150,6 +4156,7 @@ function FolderBrowserInner(
               id={v.id}
               name={v.name}
               versionLabel={v.versionLabel}
+              fcNumber={v.fcNumber ?? null}
               duration={v.duration}
               versionCount={v.versionCount}
               thumbnailUrl={v.thumbnailUrl ?? null}

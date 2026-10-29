@@ -6,6 +6,7 @@ import { formatDuration } from '@/lib/utils'
 import { formatBytes } from '@/lib/project-gradient'
 import { isTimelineMedia, mediaKindLabel, type MediaKind } from '@/lib/media-kind'
 import ThumbnailImage from '@/components/ThumbnailImage'
+import { fcIdLabel } from '@/lib/fc-id'
 
 /**
  * 1.7.0+: compact "table" layout for the FolderBrowser grid. Same data
@@ -40,6 +41,8 @@ interface VideoGroup {
   name: string
   duration?: number
   versionLabel?: string
+  /** 7.19.0: the video's ID number. */
+  fcNumber?: number | null
   versionCount?: number
   thumbnailUrl?: string | null
   mediaType?: MediaKind
@@ -356,6 +359,12 @@ export default function FolderBrowserTable({
                 {v.versionLabel && (
                   <span className="text-[10px] uppercase text-white/55 shrink-0">
                     {v.versionLabel}
+                  </span>
+                )}
+                {/* 7.19.0: the video's ID next to the version. */}
+                {fcIdLabel(v.fcNumber) && (
+                  <span className="text-[10px] font-mono text-white/55 shrink-0">
+                    {fcIdLabel(v.fcNumber)}
                   </span>
                 )}
               </div>

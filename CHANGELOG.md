@@ -14,6 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.19.0] - 2026-10-29
+
+### Added
+
+- **Every video has an ID.** FC1 is the company's first upload, FC2 the
+  next, and so on in upload order — one per file, so every version of a
+  stack has its own, numbered per company. Every video that already
+  existed was numbered retroactively by its upload date, Trash included.
+  Postgres hands the numbers out at insert from a per-company counter
+  with a row lock, and a unique index guarantees that no two videos of
+  one company ever share one; a deleted video keeps its hole, numbers
+  are never reused. Images, audio and documents carry no ID.
+- **The ID is visible everywhere a video is.** A frosted `FC453` chip at
+  the top-left of the card (the twin of the version tag), next to the
+  version in the list view and in Quick Look, and in the player beside
+  the version chip, in the versions menu and under each tile of the
+  reel.
+- **Search finds a video by its ID.** `FC453`, `fc 453` or just `453`
+  match the video carrying that number, beside the usual name search;
+  the ID leads the result's line.
+- **Downloads carry the ID in front of the name.** A single download,
+  a video's ZIP with its assets, a folder ZIP (admin and public link)
+  and a multi-selection ZIP all name their files
+  `FC453_<original name>`. Attached assets keep their own names.
+
 ## [7.18.12] - 2026-10-14
 
 ### Fixed

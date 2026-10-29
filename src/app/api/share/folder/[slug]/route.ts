@@ -233,6 +233,8 @@ export async function GET(
           // grid, which has only been right for short clips since 6.9.3.
           storyboardCols: true,
           storyboardRows: true,
+          // 7.19.0: the video's ID.
+          fcNumber: true,
           createdAt: true,
           _count: { select: { comments: true } },
         },
