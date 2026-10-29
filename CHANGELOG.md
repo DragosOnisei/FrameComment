@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.19.1] - 2026-10-29
+
+### Security
+
+- **Next.js 16.4.3, sharp 0.35.5, dompurify 3.4.17.** The 7.19.0 image
+  never built: the Dockerfile's `npm audit --audit-level=critical` gate
+  stopped it, because the three Next.js advisories from last week's
+  audit (unauthenticated RCE in the Image Optimization API with SVG,
+  unauthenticated RCE in `use cache` functions, DoS in Server Actions)
+  were published as CRITICAL that day, with three in dompurify beside
+  them. `npm audit fix` without `--force` resolves all of them on the
+  stable line; the remaining HIGHs (zod, nodemailer, deepmerge-ts) have
+  only breaking fixes and the gate does not block on them. No code
+  changed; this release carries 7.19.0's video IDs.
+
 ## [7.19.0] - 2026-10-29
 
 ### Added

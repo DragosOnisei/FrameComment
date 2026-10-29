@@ -63,6 +63,18 @@ RUN cp -R node_modules /tmp/prod_node_modules
 # to `high` still is not possible: the one remaining HIGH is `deepmerge-ts`
 # under `@prisma/config`, whose only fix is a breaking downgrade to prisma
 # 6.12. Re-tighten when Prisma ships a config that drops it.
+#
+# 7.19.1 (2026-10-29): it fired again. The three Next.js advisories from
+# the October audit (Image Optimization SVG RCE GHSA-2464-fhr4-w9xw, `use
+# cache` RCE GHSA-673q-mjm6-r5xr, Server Actions DoS GHSA-p3m5-59mp-jv5r)
+# went CRITICAL in the registry the day 7.19.0 was tagged, with three
+# dompurify ones beside them, and the 7.19.0 image never built. Fixed by
+# `npm audit fix` (no --force): next 16.4.3, sharp 0.35.5, dompurify
+# 3.4.17, undici 7.30.1. One npm trap met on the way: `npm audit fix`
+# rewrote both lockfiles but left the old files in node_modules, and a
+# following `npm install` trusted the hidden node_modules/.package-lock.json
+# and did nothing — delete that file and install again when the versions
+# on disk disagree with `npm ls`.
 RUN npm audit --audit-level=critical || \
     (echo "SECURITY: Critical vulnerabilities found!" && exit 1)
 

@@ -117,11 +117,22 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   `git reset --soft origin/main` plus a fresh patch version. This happened on
   2026-08-24 — he pushed 7.0.0 while the compare fix was still being written,
   and the amend had to be unwound into 7.0.1.
-- `package-lock.json` carries a stale root `version` (6.17.1 while package.json
-  moved on). It has been that way since 6.18 and every Docker image since has
-  built, because `npm ci` validates the dependency tree and not the root
-  version field. Do not "fix" it during a release bump — re-resolving the
-  lockfile is a far bigger change than the release it would be riding on.
+- `package-lock.json` carried a stale root `version` for months (6.17.1
+  while package.json moved on) and every Docker image built, because
+  `npm ci` validates the dependency tree and not the root version field.
+  Do not "fix" it during a release bump — re-resolving the lockfile is a
+  far bigger change than the release it would be riding on. (7.19.1's
+  `npm audit fix` re-resolved it as a side effect; the rule stands.)
+- **The Dockerfile's `npm audit --audit-level=critical` gate blocks the
+  image build** the day an advisory goes CRITICAL — 7.6.2 and 7.19.0 both
+  died there, each on a Next.js RCE. When a tag fails at "Build & push
+  image" with "Critical vulnerabilities found", run `npm audit fix` (no
+  `--force`) with the dev server STOPPED, check that `node_modules` really
+  changed (`npm audit fix` once rewrote the lockfiles and left the old
+  files on disk; `npm ls` lied because it reads the hidden
+  `node_modules/.package-lock.json` — delete it and `npm install` again),
+  typecheck, smoke-test, and ship the next PATCH. The failed tag number is
+  spent.
 - Migrations: additive, `IF NOT EXISTS`, never backfill a guess ("an open
   recorded before this release has no country, which is the truth about it").
   Entrypoint runs `prisma migrate deploy` with the privileged URL.
