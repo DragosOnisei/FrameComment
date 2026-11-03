@@ -13,6 +13,7 @@ import crypto from 'crypto'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
 import { fcPrefixFileName } from '@/lib/fc-id'
+import { fcCodeForVideo } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -139,13 +140,16 @@ export async function GET(
       logError('ZIP archive error:', err)
     })
 
+    // 7.20.0: the video's code (FC2E1V1) when it sits inside an ad folder.
+    const metaCode = await fcCodeForVideo(video)
+
     // Add video file to archive if requested
     let appendedCount = 0
     if (includeVideo && video.originalStoragePath) {
       try {
         const ext = video.originalFileName?.match(/\.[^.]+$/)?.[0] || '.mp4'
-        // 7.19.0: the video's ID in front of its name, as on a plain download.
-        const videoFileName = fcPrefixFileName((video as any).fcNumber, `${video.name}_${video.versionLabel}${ext}`)
+        // 7.19.0: the Meta ID in front of its name, as on a plain download.
+        const videoFileName = fcPrefixFileName(metaCode, `${video.name}_${video.versionLabel}${ext}`)
         const videoStream = await downloadFile(video.originalStoragePath, resolveFileBackend((video as any).storageBackend))
         archive.append(videoStream, { name: videoFileName })
         appendedCount += 1
@@ -180,7 +184,7 @@ export async function GET(
     const sanitizedVideoName = video.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const suffix = includeVideo ? 'complete' : 'assets'
     const zipFilename = sanitizeFilenameForHeader(
-      fcPrefixFileName((video as any).fcNumber, `${sanitizedVideoName}_${video.versionLabel}_${suffix}.zip`),
+      fcPrefixFileName(metaCode, `${sanitizedVideoName}_${video.versionLabel}_${suffix}.zip`),
     )
 
     // Stream ZIP directly to browser (no memory loading)

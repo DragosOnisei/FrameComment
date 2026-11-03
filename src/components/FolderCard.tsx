@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowUpFromLine,
   Copy,
@@ -18,6 +19,7 @@ import { storyboardGridOf } from '@/lib/storyboard-grid'
 import { formatBytes } from '@/lib/project-gradient'
 import AudioArtwork from '@/components/AudioArtwork'
 import ThumbnailImage from '@/components/ThumbnailImage'
+import { fcIdLabel } from '@/lib/fc-id'
 
 /**
  * Frame.io-style folder card used in the admin folder browser. A
@@ -140,6 +142,13 @@ export interface FolderCardProps {
    *  original names preserved. Different from `onBulkDownload` which
    *  flat-downloads each video individually. */
   onDownloadFolder?: (folderId: string) => void
+  /**
+   * 7.20.0: the Meta ID this folder carries — its own (an ad folder) or
+   * the ad's it sits in (a 9:16 / 4:5 subfolder). A tag after "Folder";
+   * an inherited one is quieter.
+   */
+  metaNumber?: number | null
+  metaInherited?: boolean
 }
 
 // Custom MIME types — folders carry FOLDER_MIME, videos carry
@@ -179,7 +188,11 @@ export default function FolderCard({
   onNewFolderWithSelection,
   onDuplicate,
   onDownloadFolder,
+  metaNumber = null,
+  metaInherited = false,
 }: FolderCardProps) {
+  const nameRef = useRef<HTMLDivElement>(null)
+  const [nameTip, setNameTip] = useState<{ x: number; y: number } | null>(null)
   // 1.1.0+: bulk-aware kebab gating (mirror of VideoCard).
   const isBulk = bulkSelectionCount >= 2
   const showRename = !!onRename && !isBulk
@@ -513,9 +526,42 @@ export default function FolderCard({
               aria-label="Folder name"
             />
           ) : (
-            <div className="text-base font-semibold text-white truncate" title={name}>
-              {name}
-            </div>
+            <>
+              {/* 7.20.0: the full name on hover, the same frosted tooltip as a
+                  video card's title (VideoCard) — only when the name is cut
+                  off. The native `title` it had took a second and was easy
+                  to miss (Dragos: "ASHLEY PO…"). */}
+              <div
+                ref={nameRef}
+                className="text-base font-semibold text-white truncate"
+                onMouseEnter={() => {
+                  const el = nameRef.current
+                  if (el && el.scrollWidth > el.clientWidth + 1) {
+                    const r = el.getBoundingClientRect()
+                    setNameTip({ x: r.left, y: r.bottom + 6 })
+                  }
+                }}
+                onMouseLeave={() => setNameTip(null)}
+              >
+                {name}
+              </div>
+              {nameTip && typeof document !== 'undefined' &&
+                createPortal(
+                  <div
+                    className="fixed z-[2147483600] max-w-[240px] rounded-md bg-[#162533] text-white text-xs px-2.5 py-1.5 ring-1 ring-white/15 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.75)] pointer-events-none"
+                    style={{
+                      left: Math.min(nameTip.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 252),
+                      top: nameTip.y,
+                      whiteSpace: 'normal',
+                      wordBreak: 'break-word',
+                      ...({ textWrap: 'balance' } as unknown as CSSProperties),
+                    }}
+                  >
+                    {name}
+                  </div>,
+                  document.body,
+                )}
+            </>
           )}
           {/* 1.5.9: append the recursive byte total when available so
               the subtitle matches the "N folders · X GB" affordance
@@ -533,6 +579,19 @@ export default function FolderCard({
             <span className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-medium leading-none ring-1 ring-white/10">
               Folder
             </span>
+            {/* 7.20.0: the Meta ID as a tag after "Folder" — Dragos's call;
+                on the cover it sat over the mosaic. An inherited one (a
+                9:16 / 4:5 subfolder of an ad) is quieter. */}
+            {fcIdLabel(metaNumber) && (
+              <span
+                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-medium leading-none ring-1 tabular-nums ${
+                  metaInherited ? 'bg-white/[0.06] text-white/55 ring-white/10' : 'bg-white/15 text-white ring-white/20'
+                }`}
+                title={metaInherited ? `Meta ID ${fcIdLabel(metaNumber)} (from the ad folder)` : `Meta ID ${fcIdLabel(metaNumber)}`}
+              >
+                {fcIdLabel(metaNumber)}
+              </span>
+            )}
           </div>
         </div>
         {/* Kebab — only renders when the card has at least one

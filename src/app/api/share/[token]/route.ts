@@ -14,6 +14,7 @@ import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logMessage } from '@/lib/logging'
 import { verifyVideoShareName, verifyVideoShareStack } from '@/lib/share-video-sig'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
+import { resolveVideoCodes } from '@/lib/meta-id'
 export const runtime = 'nodejs'
 
 
@@ -236,6 +237,8 @@ export async function GET(
       return project.videos as any[]
     })()
 
+    // 7.20.0: each video's code (FC2E1V1), from the ad folder it sits in.
+    const videoCodes = await resolveVideoCodes(rawVideosForShare)
     const videosSanitizedBase = rawVideosForShare.map((video: any) => ({
       id: video.id,
       name: video.name,
@@ -263,8 +266,8 @@ export async function GET(
       // longer assume 10x10.
       storyboardCols: (video as any).storyboardCols ?? null,
       storyboardRows: (video as any).storyboardRows ?? null,
-      // 7.19.0: the video's ID, shown in the reel and put in front of downloads.
-      fcNumber: (video as any).fcNumber ?? null,
+      // 7.20.0: the Meta ID, shown in the reel and put in front of downloads.
+      fcCode: videoCodes.get(video.id) ?? null,
       // folderId surfaced (1.0.6+) so the share page can scope the
       // title-flyout to videos from one folder when arriving via a
       // folder share link.
@@ -396,8 +399,8 @@ export async function GET(
       // longer assume 10x10.
       storyboardCols: (video as any).storyboardCols ?? null,
       storyboardRows: (video as any).storyboardRows ?? null,
-      // 7.19.0: the video's ID, shown in the reel and put in front of downloads.
-      fcNumber: (video as any).fcNumber ?? null,
+      // 7.20.0: carried over from the base list (the Meta ID).
+      fcCode: (video as any).fcCode ?? null,
     })) : videosSanitizedBase
 
     const sanitizedVideosByName = isGuest ? Object.keys(sortedVideosByName).reduce((acc: any, name: string) => {
@@ -426,7 +429,7 @@ export async function GET(
         // longer assume 10x10.
         storyboardCols: (video as any).storyboardCols ?? null,
         storyboardRows: (video as any).storyboardRows ?? null,
-        fcNumber: (video as any).fcNumber ?? null,
+        fcCode: (video as any).fcCode ?? null,
       }))
       return acc
     }, {}) : sortedVideosByName

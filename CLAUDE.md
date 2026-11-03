@@ -621,35 +621,62 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   the tenant auto-save no longer carries it. Any other client of that
   route must use `apiFetch` as well (AdminSidebar does; BrandLogo reads
   only the logo path).
-- **Every video has an ID, and Postgres hands it out** (7.19.0): `Video.fcNumber`
-  is "FC<n>" — FC1 for the company's first upload, FC2 for the next, ONE PER
-  FILE (each version has its own), numbered PER COMPANY, VIDEO rows only
-  (images, audio, documents stay NULL) — all four by Dragos's call. A
-  `BEFORE INSERT` trigger (`assign_video_fc_number`, migration
-  `video_fc_id`) draws it from `VideoFcCounter` with an upsert that locks
-  the company's counter row, so simultaneous uploads get consecutive
-  numbers; `@@unique([organizationId, fcNumber])` is the guarantee. No
-  create site sets it and none should — the trigger covers POST
-  /api/videos, the duplicate route and whatever comes next. A deleted
-  video keeps its hole; numbers are never reused. The counter table
-  carries `organizationId`, so it has the same forced RLS policy as every
-  tenant table (the scan flags any organizationId table without one). The
-  migration numbered every existing video by `createdAt`, Trash included;
-  a legacy row without a company stays NULL, honestly. Verified locally
-  with a tsx script that inserts as `framecomment_app` with the org armed.
-  Everything that shows or uses it goes through `src/lib/fc-id.ts`
-  (pure, node-tested): `fcIdLabel` (card chip top-left, table, Quick
-  Look, the reel's header pill + versions menu + tiles, search rows),
-  `fcPrefixFileName` (the content route's download name, the single
-  ZIP's entries and archive name, the bulk ZIP's entries, AND the two
-  folder ZIPs — admin `/api/folders/[id]/download` and the public
-  `/api/share/folder/[slug]/download`, which the first cut missed because
-  a folder download never goes through bulk-zip; attached assets keep
-  their own names) and `fcNumberFromQuery` ("FC453", "fc 453", "453" add
-  an `fcNumber` match beside the name search). After `prisma generate`
-  a dev server started BEFORE the schema change still carries the old
-  client and never selects the column — restart it before concluding the
-  chip is missing.
+- **The FC number is a Meta ad's, and it lives on the FOLDER** (7.20.0):
+  `Folder.metaNumber`, shown as "FC<n>" (src/lib/fc-id.ts). 7.19.0 gave
+  every FILE a number from an insert trigger; marketing could not use it —
+  Meta runs every size of one edit (9:16, 4:5, 1:1, 16:9) as ONE ad — and
+  CPC keeps exactly that unit as a folder: one folder per ad, a subfolder
+  per ratio. A naming-convention matcher (patterns per company, ad key =
+  fields minus ratio) was built and DROPPED before release: names vary too
+  much between projects to parse. So a person right-clicks the ad folder →
+  Generate Meta ID (FolderContextMenu `metaIdTarget`, route
+  `/api/folders/[id]/meta-id` POST/DELETE, src/lib/meta-id.ts). The number
+  comes from `VideoFcCounter` (row locked for the increment, reset to 0 by
+  migration `meta_id`, which also dropped the 7.19.0 trigger and emptied
+  `Video.fcNumber` — that column is retired, kept only because migrations
+  are additive). Refused (409, the server's sentence shown as-is) when a
+  folder above or below already has one: a video belongs to one ad.
+  Repeating the click answers with the existing number. Removing it never
+  frees the number. NOTHING is stored on videos: every route resolves the
+  number through the folder tree (`createMetaResolver`, memoised per
+  request, armed client) — folder/project/root listings, search, both
+  share routes, the single download, the single-video ZIP, bulk ZIP and
+  both folder ZIPs — so a V2 uploaded later or a file moved in carries it
+  with nobody re-running anything. A VIDEO's code is **"FC2E1V1"** — ad,
+  EDIT, version (`fcVideoCode`, payload field `fcCode`; `resolveVideoCodes`
+  in meta-id.ts). The edit is `editKeyFromName(name)` (src/lib/fc-id.ts,
+  node-tested on Dragos's 4_5 / 9_16 names): the CARD's name (the
+  stack's, so a rename fixes a pairing) minus a LEADING FC code (7.19.0's
+  per-file "FC7676_" reached real files through live downloads and comes
+  back on re-uploads — different on every size, it split "End Card as Ad"
+  into one E per file), extension and a " (2)" suffix, CUT AT ITS LAST
+  RATIO PART (a whitelist — 916, 9x16, 9_16, 45, 4x5, 11, 169… — never
+  "any digits"): everything after the ratio is the export's tail and may
+  differ between sizes ("_V7_Septembrie 2025" on Olivia's 1:1 and 4:5,
+  "_V7" on her 9:16 split one edit into two E's until the key stopped at
+  the ratio); version parts before it are dropped too. A name with no
+  ratio part keeps everything but versions. Keys
+  are numbered per ad in `MetaEdit` (unique per folder on key and on
+  number) and NEVER renumbered: all edits at Generate in natural name
+  order (C1 → E1 — upload order gave C3 the E1), a new key the first time
+  any route resolves it, under `SELECT … FOR UPDATE` on the ad folder's
+  row so two pages showing the 9:16 and the 4:5 together agree (verified
+  with two concurrent resolves as `framecomment_app`). V is the stack
+  position (the card's v1/v2 chip). Removing the Meta ID deletes its
+  edits. Only VIDEO rows get a code (Dragos's rule: no ID on images,
+  audio, documents). Folder cards show their own ID as a tag after
+  "Folder" (Dragos moved it off the cover), a subfolder of an ad the
+  inherited one, quieter (`inheritedMetaNumber`). Search (`fcQueryFrom`):
+  "FC2" / "FC2E1" / "FC2E1V2" / "2" match the ad folder in the Folders
+  tab and the videos carrying that code. Downloads get the code in front
+  (`fcPrefixFileName(code, name)`), REPLACING a code already there rather
+  than stacking "FC3E1V1_FC7676_…"; a file with no code keeps its name. The folder ZIP routes are BINARY to
+  grep (a stray byte) — use `grep -a`. After `prisma generate` a dev server started before it
+  still has the old client and 500s on columns that no longer exist —
+  restart it.
+- **A truncated folder name shows in full on hover** (7.20.0): FolderCard
+  uses the same portal tooltip as VideoCard's title (only when
+  `scrollWidth > clientWidth`); the native `title` was too slow to notice.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   **A copy is credited to its original author** (7.18.1): the paste sends

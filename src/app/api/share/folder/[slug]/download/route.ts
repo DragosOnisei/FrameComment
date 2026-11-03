@@ -13,6 +13,7 @@ import { resolveFileBackend, type StorageBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError, logMessage } from '@/lib/logging'
 import { fcPrefixFileName } from '@/lib/fc-id'
+import { resolveVideoCodes } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -155,14 +156,19 @@ export async function GET(
               name: true,
               version: true,
               originalFileName: true,
+              mediaType: true,
+              createdAt: true,
               originalStoragePath: true,
               storageBackend: true,
-              fcNumber: true,
             } as any,
           },
         },
       })
       if (!folder) continue
+      // 7.20.0: every video's code (FC2E1V1) when this folder is part of an ad.
+      const codes = await resolveVideoCodes(
+        (folder.videos as any[]).map((v) => ({ ...v, folderId })),
+      )
 
       // Latest-version-per-name grouping (matches the public grid).
       const byKey = new Map<string, any>()
@@ -182,8 +188,8 @@ export async function GET(
           ? v.originalFileName.replace(/\.[^./]+$/, '')
           : v.name
         const safeBase = sanitizeFolderSegment(baseName)
-        // 7.19.0: the video's ID in front, as on the admin folder ZIP.
-        const fileName = fcPrefixFileName(v.fcNumber, `${safeBase}${ext || '.mp4'}`)
+        // 7.19.0 / 7.20.0: the Meta ID in front, as on the admin folder ZIP.
+        const fileName = fcPrefixFileName(codes.get(v.id), `${safeBase}${ext || '.mp4'}`)
         filesToAdd.push({
           storagePath: v.originalStoragePath,
           zipPath: `${zipPrefix}/${fileName}`,

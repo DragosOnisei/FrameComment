@@ -22,7 +22,6 @@ import {
   FolderOpen,
   Check,
 } from 'lucide-react'
-import { fcIdLabel } from '@/lib/fc-id'
 
 /**
  * 1.7.0+: Frame.io-style global video search overlay. Mounted once
@@ -68,8 +67,8 @@ interface SearchResult {
   updatedAt: string
   status: string
   versionLabel: string
-  /** 7.19.0: the video's ID number; null for non-video media. */
-  fcNumber?: number | null
+  /** 7.20.0: the video's code, "FC2E1V1"; null outside an ad and for non-video media. */
+  fcCode?: string | null
 }
 
 // 3.3.x: folder search results for the "Folders" tab.
@@ -636,7 +635,7 @@ export default function GlobalSearchOverlay({ open, onClose }: GlobalSearchOverl
                         </div>
                         <div className={`text-xs truncate ${active ? 'text-primary/70' : 'text-white/55'}`}>
                           {/* 7.19.0: the ID leads the line — it is what an ID search is looking for. */}
-                          {fcIdLabel(r.fcNumber) ? `${fcIdLabel(r.fcNumber)} · ` : ''}
+                          {r.fcCode ? `${r.fcCode} · ` : ''}
                           {r.projectName || 'Unknown project'}
                           {r.folderName ? ` · ${r.folderName}` : ''}
                           {r.mediaType !== 'IMAGE' && r.duration > 0
@@ -946,7 +945,7 @@ function DetailsPane({
         {r.mediaType !== 'IMAGE' && r.duration > 0 && (
           <Meta label="Duration" value={formatDuration(r.duration)} />
         )}
-        {fcIdLabel(r.fcNumber) && <Meta label="ID" value={fcIdLabel(r.fcNumber) as string} />}
+        {r.fcCode && <Meta label="ID" value={r.fcCode} />}
         {r.versionLabel && <Meta label="Version" value={r.versionLabel} />}
         <Meta
           label="Uploaded"

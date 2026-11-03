@@ -15,6 +15,7 @@ import { legacyBackend } from '@/lib/storage-backends'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
 import { copyableCommentCountsByVideo } from '@/lib/folder-video-enrichment'
 import { computeFolderSizesByProject } from '@/lib/folder-sizes'
+import { metaNumberForFolder, resolveVideoCodes } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -116,6 +117,12 @@ export async function GET(
     // straight into <img src>. Stable sessionId per-admin so the
     // Redis cache amortises subsequent folder visits.
     const sessionId = `admin:${admin.id}`
+    // 7.20.0: the Meta ID this folder's videos carry — its own, or the one
+    // of the ad folder it sits in (src/lib/meta-id.ts).
+    const folderMetaNumber = await metaNumberForFolder(folder.id)
+    const videoCodes = await resolveVideoCodes(
+      (folder.videos as any[]).map((v) => ({ ...v, folderId: folder.id })),
+    )
     const videosWithExtras = await Promise.all(
       folder.videos.map(async (v: any) => {
         let thumbnailUrl: string | null = null
@@ -207,6 +214,8 @@ export async function GET(
           // 6.9.3: sprite geometry travels with the URL.
           storyboardCols: (v as any).storyboardCols ?? null,
           storyboardRows: (v as any).storyboardRows ?? null,
+          // 7.20.0: the video's code, FC2E1V1 (ad, edit, version).
+          fcCode: videoCodes.get(v.id) ?? null,
           commentCount: v._count?.comments ?? 0,
           // 7.5.0: what a bulk copy would carry (roots, not copies) — the
           // context menu's "Copy N comments" must not promise 12 and paste 2.
@@ -252,10 +261,13 @@ export async function GET(
         subfolderItemCounts.get(s.id) ??
         (s._count?.subfolders ?? 0) + (s._count?.videos ?? 0),
       totalSize: (folderSizes.get(s.id) ?? BigInt(0)).toString(),
+      // 7.20.0: a subfolder of an ad (9:16, 4:5…) shows the ad's Meta ID.
+      inheritedMetaNumber: s.metaNumber ?? folderMetaNumber,
     }))
 
     const safeFolder = {
       ...folder,
+      inheritedMetaNumber: folderMetaNumber,
       videos: videosWithExtras,
       subfolders: subfoldersWithPreviews,
     }

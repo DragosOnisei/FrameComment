@@ -281,6 +281,19 @@ model Folder {
   // so a restore lifts the whole subtree back at once.
   deletedAt DateTime?
 
+  // 7.20.0: the folder's Meta ID, "FC<n>". CPC keeps one folder per Meta ad
+  // with a subfolder per aspect ratio (9:16, 4:5, 1:1, 16:9), and Meta runs
+  // every size of one ad as ONE ad — so the ID belongs to the folder, not
+  // to a file. Given on demand (right-click → Generate Meta ID) from the
+  // company's counter (`VideoFcCounter`); every video anywhere under the
+  // folder carries it — on the card, in search and in front of its
+  // downloaded name — resolved through the folder tree at read time
+  // (src/lib/meta-id.ts), so a V2 uploaded later, or a file moved in,
+  // carries it without anyone doing anything. A folder inside an ad cannot
+  // have its own. NULL = no Meta ID. Unique per company; a removed ID is
+  // never handed out again.
+  metaNumber Int?
+
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parentFolder Folder?  @relation("FolderHierarchy", fields: [parentFolderId], references: [id], onDelete: Cascade)
   subfolders   Folder[] @relation("FolderHierarchy")
@@ -292,6 +305,31 @@ model Folder {
   @@index([parentFolderId])
   @@index([deletedAt])
 
+  @@index([organizationId])
+  @@unique([organizationId, metaNumber])
+}
+
+// 7.20.0: the EDITS of one Meta ad — the E of "FC2E1V1". An ad folder
+// (Folder.metaNumber) holds several edits, each exported in several sizes
+// into the 9:16 / 4:5 / 1:1 subfolders under the same name with only the
+// ratio changed; `editKey` is that name without ratio, version and
+// extension (`editKeyFromName`, src/lib/fc-id.ts). The first time a key is
+// seen under an ad it gets the next number, and keeps it: E numbers go into
+// Meta and must never shift when an edit is deleted or a new one arrives.
+// Rows are created by src/lib/meta-id.ts (all edits at Generate Meta ID,
+// a new one the first time any route resolves its code), under a lock on
+// the ad folder's row; the two unique indexes are the guarantee. FKs to
+// Folder and Organization (cascade) live in the migration SQL.
+model MetaEdit {
+  id             String   @id @default(cuid())
+  organizationId String
+  folderId       String
+  editKey        String
+  editNumber     Int
+  createdAt      DateTime @default(now())
+
+  @@unique([folderId, editKey])
+  @@unique([folderId, editNumber])
   @@index([organizationId])
 }
 
@@ -521,17 +559,12 @@ model Video {
   // disappear from the grids and shares.
   deletedAt DateTime?
 
-  // 7.19.0: the video's ID, "FC<n>" — FC1 for the company's first upload,
-  // FC2 for the next, in upload order, one per file (every version has its
-  // own). Assigned by a BEFORE INSERT trigger in Postgres from a per-company
-  // counter (`VideoFcCounter`), never by application code: the two create
-  // sites today and any future one get a number without knowing about it,
-  // and the counter row is locked for the update, so two simultaneous
-  // uploads cannot draw the same number. A number is never reused — a
-  // deleted video keeps its hole. Only VIDEO rows carry one (Dragos's
-  // call); images, audio and documents stay NULL, as does a legacy row
-  // without an organizationId. The migration numbered every existing video
-  // by createdAt. The unique index is the guarantee, not the counter.
+  // 7.19.0: a per-FILE ID, "FC<n>", handed out by an insert trigger.
+  // RETIRED in 7.20.0: marketing needs one ID per Meta ad (every size of an
+  // edit), which is now the folder's `metaNumber`. The migration `meta_id`
+  // dropped the trigger and emptied this column; nothing writes or reads it.
+  // Kept (and its unique index) so the schema matches the database —
+  // migrations here are additive.
   fcNumber Int?
 
   project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -558,12 +591,13 @@ model Video {
   @@unique([organizationId, fcNumber])
 }
 
-// 7.19.0: per-company counter behind Video.fcNumber. One row per company,
-// `lastNumber` = the highest FC number handed out; the Video insert trigger
-// upserts it (INSERT … ON CONFLICT DO UPDATE … RETURNING), which takes a row
-// lock, so concurrent uploads queue on it and each gets its own number.
-// Carries organizationId, so it is a tenant table with the same RLS policy
-// as the rest; the app role touches it only through the trigger.
+// 7.19.0: per-company counter, behind Video.fcNumber then and behind
+// Folder.metaNumber since 7.20.0 (reset to 0 by the `meta_id` migration, so
+// Meta IDs start again at FC1). One row per company, `lastNumber` = the
+// highest FC number handed out. "Generate Meta ID" locks the row for the
+// increment (src/lib/meta-id.ts), so two admins clicking at once get two
+// numbers. Carries organizationId, so it is a tenant table with the same
+// forced RLS policy as the rest.
 model VideoFcCounter {
   organizationId String @id
   lastNumber     Int    @default(0)

@@ -12,6 +12,7 @@ import {
 import { jsonSafe } from '@/lib/json-safe'
 import { computeFolderSizesByProject } from '@/lib/folder-sizes'
 import { logError } from '@/lib/logging'
+import { metaNumberForFolder } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -176,8 +177,11 @@ export async function GET(request: NextRequest) {
       logError('[GET /api/folders] folder-size compute failed:', err)
     }
 
+    // 7.20.0: a folder inside an ad shows the ad's Meta ID.
+    const parentMetaNumber = parentFolderId ? await metaNumberForFolder(parentFolderId) : null
     const enriched = folders.map((f) => ({
       ...f,
+      inheritedMetaNumber: (f as any).metaNumber ?? parentMetaNumber,
       previewItems: previewsByFolder.get(f.id) ?? [],
       itemCount:
         itemCountByFolder.get(f.id) ??

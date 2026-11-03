@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader, getVideoContentType, createWebReadableStream } from '@/lib/storage'
 import { fcPrefixFileName } from '@/lib/fc-id'
+import { fcCodeForVideo } from '@/lib/meta-id'
 import { s3GetPresignedDownloadUrl, s3GetPresignedStreamUrl, s3FileExists, s3GetFileSize, s3GetObjectRange } from '@/lib/s3-storage'
 import { resolveReadTarget } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
@@ -395,10 +396,12 @@ export async function GET(
         // 6.11.0: the obfuscated "ProjectTitle_quality" fallback existed to
         // hide working titles BEFORE approval. With approval gone there is
         // no "before", so everyone gets the real name.
-        // 7.19.0: a video's download carries its ID in front —
-        // "FC453_<original name>" (src/lib/fc-id.ts); an attached asset
+        // 7.19.0 / 7.20.0: a video's download carries its code in front —
+        // "FC2E1V1_<original name>": the ad folder it sits in, its edit,
+        // its version (src/lib/meta-id.ts); outside an ad, no prefix. An attached asset
         // (`filename` set above) keeps its own name.
-        const rawFilename = filename || fcPrefixFileName((video as any).fcNumber, video.originalFileName)
+        const rawFilename =
+          filename || fcPrefixFileName(await fcCodeForVideo(video), video.originalFileName)
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const ct = assetId ? contentType : getVideoContentType(video.originalFileName || '')
         const presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, ct, readTarget.config)
@@ -479,7 +482,8 @@ export async function GET(
     if (isDownload) {
       // Same rule as the S3 branch above: the real filename, for everyone.
       // 7.19.0: same ID prefix as the S3 branch above.
-      const rawFilename = filename || fcPrefixFileName((video as any).fcNumber, video.originalFileName)
+      const rawFilename =
+        filename || fcPrefixFileName(await fcCodeForVideo(video), video.originalFileName)
       const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
 
       // For non-asset downloads, use original file's content type

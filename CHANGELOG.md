@@ -14,6 +14,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.20.0] - 2026-11-04
+
+### Changed
+
+- **The FC code belongs to the Meta ad, not to the file.** Marketing runs
+  every size of one edit (9:16, 4:5, 1:1, 16:9) as ONE Meta ad, so
+  7.19.0's number-per-file gave them three codes for one ad. A folder
+  is the ad now: right-click it → **Generate Meta ID** gives it the
+  company's next `FC<n>` and copies it to the clipboard; the menu then
+  offers Copy and Remove. Everything inside the folder, its 9_16 / 4_5 /
+  1_1 subfolders included, carries the ID — a V2 uploaded next week or a
+  file moved in included, with nothing to re-run.
+- **Every video's code is `FC2E1V1`: ad, edit, version.** The sizes of
+  one edit are exported under the same name with only the ratio
+  changed, so they meet on one E: the name up to its ratio part (`_916`,
+  `_45`, `_11`, `9x16`, `9_16`…), with a leading old FC code ignored and
+  everything after the ratio — version, date — allowed to differ. Edit
+  numbers are given once, in name order (C1 → E1), and never shift
+  afterwards; a new edit takes the next free number. V is the card's
+  version (v1, v2). Only videos carry a code — not briefs, music or
+  stills.
+- **The per-file IDs from 7.19.0 are gone.** Every video's old `FC<n>`
+  is removed and the numbering starts again at FC1 for Meta IDs.
+
+### Added
+
+- The code is on every video card, in the player, Quick Look, the list
+  view and search; an ad folder shows its ID as a tag after "Folder", a
+  subfolder of an ad shows it quieter.
+- Downloads — a single video, a video's ZIP, a folder ZIP from the admin
+  grid or a public link, a multi-selection — put the code in front of
+  every file name, replacing an old code already there instead of
+  stacking two.
+- Search understands `FC2`, `FC2E1` and `FC2E1V2`.
+- A folder's full name appears in a tooltip when it is cut off on its
+  card, like a video's.
+
 ## [7.19.1] - 2026-10-29
 
 ### Security

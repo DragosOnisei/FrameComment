@@ -13,7 +13,6 @@ import { storyboardCellStyle, storyboardGridOf } from '@/lib/storyboard-grid'
 import { Button } from '@/components/ui/button'
 import ThemeToggle from '@/components/ThemeToggle'
 import LanguageToggle from '@/components/LanguageToggle'
-import { fcIdLabel } from '@/lib/fc-id'
 
 interface ThumbnailReelProps {
   videosByName: Record<string, any[]>
@@ -600,7 +599,7 @@ export default function ThumbnailReel({
                   as Compare beside it; monospace so the number reads as an
                   identifier. Every version has its own, so it changes with
                   the version chip. */}
-              {fcIdLabel(activeVideo?.fcNumber) && (
+              {activeVideo?.fcCode && (
                 <span
                   className={cn(
                     'inline-flex items-center shrink-0 h-7 px-2.5 rounded-full',
@@ -609,7 +608,7 @@ export default function ThumbnailReel({
                   )}
                   title={tCommon('videoId')}
                 >
-                  {fcIdLabel(activeVideo?.fcNumber)}
+                  {activeVideo?.fcCode}
                 </span>
               )}
 
@@ -693,9 +692,9 @@ export default function ThumbnailReel({
                           {video.originalFileName || video.name}
                         </span>
                         {/* 7.19.0: each version's own ID. */}
-                        {fcIdLabel(video.fcNumber) && (
+                        {video.fcCode && (
                           <span className="shrink-0 text-[10px] font-mono text-muted-foreground">
-                            {fcIdLabel(video.fcNumber)}
+                            {video.fcCode}
                           </span>
                         )}
                       </button>
@@ -971,9 +970,9 @@ export default function ThumbnailReel({
                           {versionLabel}
                         </span>
                         {/* 7.19.0: the version's ID beside its label. */}
-                        {fcIdLabel(version.fcNumber) && (
+                        {version.fcCode && (
                           <span className="text-[10px] font-mono text-white/70">
-                            {fcIdLabel(version.fcNumber)}
+                            {version.fcCode}
                           </span>
                         )}
                       </div>

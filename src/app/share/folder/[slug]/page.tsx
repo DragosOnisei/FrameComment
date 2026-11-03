@@ -88,7 +88,7 @@ interface VideoRow {
   version: number
   versionLabel: string
   /** 7.19.0: the video's ID number. */
-  fcNumber?: number | null
+  fcCode?: string | null
   duration: number
   status?: string
   thumbnailPath: string | null
@@ -609,7 +609,7 @@ function PublicFolderSharePageInner() {
       id: string
       name: string
       versionLabel: string
-      fcNumber?: number | null
+      fcCode?: string | null
       duration?: number
       versionCount: number
       thumbnailUrl?: string | null
@@ -635,7 +635,7 @@ function PublicFolderSharePageInner() {
         id: latest.id,
         name,
         versionLabel: latest.versionLabel || `v${latest.version}`,
-        fcNumber: latest.fcNumber ?? null,
+        fcCode: latest.fcCode ?? null,
         duration: typeof latest.duration === 'number' ? latest.duration : undefined,
         versionCount: sorted.length,
         thumbnailUrl: latest.thumbnailUrl ?? null,
@@ -871,7 +871,7 @@ function PublicFolderSharePageInner() {
                   id={v.id}
                   name={v.name}
                   versionLabel={v.versionLabel}
-                  fcNumber={v.fcNumber ?? null}
+                  fcCode={v.fcCode ?? null}
                   duration={v.duration}
                   versionCount={v.versionCount}
                   thumbnailUrl={v.thumbnailUrl}

@@ -16,11 +16,13 @@ import {
   Pencil,
   RefreshCw,
   FileText,
+  Hash,
   Share2,
   Smartphone,
   Trash2,
   Youtube,
 } from 'lucide-react'
+import { fcIdLabel } from '@/lib/fc-id'
 
 /**
  * Frame.io-style right-click context menu that pops up over the
@@ -100,6 +102,17 @@ export interface FolderContextMenuProps {
    *  when `canRegenerateThumbnail` (exactly one video selected). */
   canRegenerateThumbnail?: boolean
   onRegenerateThumbnail?: () => void
+  /**
+   * 7.20.0: the Meta ID of the ONE selected folder — set only when the
+   * selection is exactly one folder. `own` is the folder's (an ad folder),
+   * `inherited` the ad's it sits in. Own → Copy / Remove; inherited → the
+   * ID, greyed (a folder inside an ad cannot have its own); neither →
+   * Generate Meta ID.
+   */
+  metaIdTarget?: { own: number | null; inherited: number | null } | null
+  onGenerateMetaId?: () => void
+  onCopyMetaId?: () => void
+  onRemoveMetaId?: () => void
   /** 3.9.x: "Create Transcript" on a single video — same gate as
    *  regenerate thumbnail. */
   canCreateTranscript?: boolean
@@ -209,6 +222,10 @@ export default function FolderContextMenu({
   onSplitVersions,
   canRegenerateThumbnail = false,
   onRegenerateThumbnail,
+  metaIdTarget = null,
+  onGenerateMetaId,
+  onCopyMetaId,
+  onRemoveMetaId,
   canCreateTranscript = false,
   onCreateTranscript,
   downloadVideoId = null,
@@ -381,6 +398,42 @@ export default function FolderContextMenu({
               label="Split versions"
               onClick={onSplitVersions}
             />
+          )}
+          {singleTarget && metaIdTarget && (
+            <>
+              <div className="my-1 h-px bg-white/10" role="separator" />
+              {metaIdTarget.own != null ? (
+                <>
+                  <Row
+                    onClose={onClose}
+                    icon={<Hash className="w-4 h-4" />}
+                    label={`Copy Meta ID ${fcIdLabel(metaIdTarget.own)}`}
+                    onClick={onCopyMetaId}
+                  />
+                  <Row
+                    onClose={onClose}
+                    icon={<Hash className="w-4 h-4" />}
+                    label="Remove Meta ID"
+                    onClick={onRemoveMetaId}
+                    destructive
+                  />
+                </>
+              ) : metaIdTarget.inherited != null ? (
+                <Row
+                  onClose={onClose}
+                  icon={<Hash className="w-4 h-4" />}
+                  label={`Inside ad ${fcIdLabel(metaIdTarget.inherited)}`}
+                  disabled
+                />
+              ) : (
+                <Row
+                  onClose={onClose}
+                  icon={<Hash className="w-4 h-4" />}
+                  label="Generate Meta ID"
+                  onClick={onGenerateMetaId}
+                />
+              )}
+            </>
           )}
           {singleTarget && canCreateTranscript && (
             <>

@@ -13,6 +13,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
+import { resolveVideoCodes } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -233,8 +234,6 @@ export async function GET(
           // grid, which has only been right for short clips since 6.9.3.
           storyboardCols: true,
           storyboardRows: true,
-          // 7.19.0: the video's ID.
-          fcNumber: true,
           createdAt: true,
           _count: { select: { comments: true } },
         },
@@ -275,6 +274,10 @@ export async function GET(
     // Every authorized branch above sets `sessionId`; tighten the
     // type for the helper call below.
     const thumbSessionId = sessionId as string
+    // 7.20.0: each video's code (FC2E1V1) when this folder is part of an ad.
+    const videoCodes = await resolveVideoCodes(
+      (videos as any[]).map((v) => ({ ...v, folderId: folderMeta.id })),
+    )
     const videosWithThumb = await Promise.all(
       videos.map(async (v: any) => {
         let thumbnailUrl: string | null = null
@@ -343,6 +346,8 @@ export async function GET(
         const { storageBackend: _sb, storageLocations: _sl, ...vSafe } = v as any
         return {
           ...vSafe,
+          // 7.20.0: the Meta ID of the ad folder (this one or one above it).
+          fcCode: videoCodes.get(v.id) ?? null,
           thumbnailUrl,
           storyboardUrl,
           previewUrl,

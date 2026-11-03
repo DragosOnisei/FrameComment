@@ -28,7 +28,8 @@ import {
   ArrowUpFromLine,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { apiFetch } from '@/lib/api-client'
+import { apiDelete, apiFetch, apiPost } from '@/lib/api-client'
+import { fcIdLabel } from '@/lib/fc-id'
 import { logError } from '@/lib/logging'
 import {
   getClippedComments,
@@ -255,6 +256,10 @@ interface FolderRow {
   slug: string
   name: string
   itemCount: number
+  /** 7.20.0: this folder's own Meta ID (an ad folder). */
+  metaNumber?: number | null
+  /** 7.20.0: its own, or the one of the ad folder it sits in. */
+  inheritedMetaNumber?: number | null
   /** Up to 4 preview tiles for the Frame.io-style mosaic cover
    *  (1.0.7+). Tiles can be either video thumbnails (when the folder
    *  has videos directly inside) or folder glyphs (when the folder
@@ -289,8 +294,8 @@ interface VideoRow {
   name: string
   version: number
   versionLabel?: string | null
-  /** 7.19.0: the video's ID number ("FC<n>"); null for images, audio, documents. */
-  fcNumber?: number | null
+  /** 7.20.0: the video's code, "FC2E1V1" (ad, edit, version); null outside an ad and for non-video media. */
+  fcCode?: string | null
   /** Filename the admin uploaded the video as (e.g. "ep03_v2.mov").
    *  Used as the new card name when the Split-versions modal pulls
    *  this row out of its group (1.0.8+). */
@@ -339,7 +344,7 @@ interface VideoGroup {
   name: string
   versionLabel?: string
   /** 7.19.0: the latest version's FC number, for the card's chip. */
-  fcNumber?: number | null
+  fcCode?: string | null
   duration?: number
   versionCount: number
   thumbnailPath?: string | null
@@ -638,6 +643,9 @@ function FolderBrowserInner(
             // 4.7.x: carry the folder's createdAt so the Sort menu's
             // "Upload date" order works for folders too (not just videos).
             createdAt: f.createdAt ?? null,
+            // 7.20.0: the folder's Meta ID, its own and the one it inherits.
+            metaNumber: f.metaNumber ?? null,
+            inheritedMetaNumber: f.inheritedMetaNumber ?? f.metaNumber ?? null,
           })),
         )
         // Root-level videos (1.0.7+) — videos parked at the project
@@ -665,6 +673,9 @@ function FolderBrowserInner(
             totalSize: f.totalSize ?? null,
             // 4.7.x: carry createdAt so date sort works for folders.
             createdAt: f.createdAt ?? null,
+            // 7.20.0: same Meta ID pass-through as the project root above.
+            metaNumber: f.metaNumber ?? null,
+            inheritedMetaNumber: f.inheritedMetaNumber ?? f.metaNumber ?? null,
           })),
         )
       } else {
@@ -857,6 +868,49 @@ function FolderBrowserInner(
       }
     },
     [renameTarget, fetchFolders, onMutated],
+  )
+
+  /**
+   * 7.20.0: right-click → Generate Meta ID on a folder (one folder = one Meta
+   * ad, its 9:16 / 4:5 / 1:1 subfolders inside). The new "FC<n>" is copied to
+   * the clipboard at once — the next thing anyone does with it is paste it
+   * into Meta. A refusal (the folder sits inside an ad, or holds one) is the
+   * server's sentence, shown as it is.
+   */
+  const handleGenerateMetaId = useCallback(
+    async (folderId: string) => {
+      try {
+        const res = await apiPost<{ metaNumber: number }>(`/api/folders/${folderId}/meta-id`, {})
+        const label = fcIdLabel(res.metaNumber)
+        if (label) void navigator.clipboard?.writeText(label).catch(() => {})
+        await fetchFolders({ silent: true })
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Could not generate a Meta ID')
+      }
+    },
+    [fetchFolders, onMutated],
+  )
+
+  const handleRemoveMetaId = useCallback(
+    async (folderId: string) => {
+      const f = folders.find((x) => x.id === folderId)
+      const label = fcIdLabel(f?.metaNumber)
+      if (
+        !window.confirm(
+          `Remove Meta ID ${label ?? ''} from “${f?.name ?? 'this folder'}”? Its videos stop carrying it, and the number is never given out again.`,
+        )
+      )
+        return
+      try {
+        await apiDelete(`/api/folders/${folderId}/meta-id`)
+        await fetchFolders({ silent: true })
+        onMutated?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Could not remove the Meta ID')
+      }
+    },
+    [folders, fetchFolders, onMutated],
   )
 
   const handleShare = useCallback(
@@ -1202,7 +1256,7 @@ function FolderBrowserInner(
         id: latest.id,
         name,
         versionLabel: latest.versionLabel || `v${latest.version}`,
-        fcNumber: latest.fcNumber ?? null,
+        fcCode: latest.fcCode ?? null,
         duration: typeof latest.duration === 'number' ? latest.duration : undefined,
         versionCount: sorted.length,
         thumbnailPath: latest.thumbnailPath ?? null,
@@ -3451,7 +3505,7 @@ function FolderBrowserInner(
         thumbnailUrl: group.thumbnailUrl ?? null,
         previewUrl: group.previewUrl ?? null,
         versionLabel: group.versionLabel ?? null,
-        fcNumber: group.fcNumber ?? null,
+        fcCode: group.fcCode ?? null,
         uploaderName: group.uploaderName ?? null,
         createdAt: group.createdAt ?? null,
       }
@@ -3985,6 +4039,8 @@ function FolderBrowserInner(
               totalSize={(f as any).totalSize}
               slug={f.slug}
               previewItems={f.previewItems}
+              metaNumber={f.metaNumber ?? f.inheritedMetaNumber ?? null}
+              metaInherited={f.metaNumber == null && f.inheritedMetaNumber != null}
               onOpen={handleOpenFolder}
               onRename={handleRename}
               onShare={handleShare}
@@ -4156,7 +4212,7 @@ function FolderBrowserInner(
               id={v.id}
               name={v.name}
               versionLabel={v.versionLabel}
-              fcNumber={v.fcNumber ?? null}
+              fcCode={v.fcCode ?? null}
               duration={v.duration}
               versionCount={v.versionCount}
               thumbnailUrl={v.thumbnailUrl ?? null}
@@ -4402,6 +4458,28 @@ function FolderBrowserInner(
           } else if (firstFolder) {
             void handleRename(firstFolder)
           }
+        }}
+        // 7.20.0: Meta ID on exactly one selected folder (src/lib/meta-id.ts).
+        metaIdTarget={(() => {
+          if (selectedFolderIds.size !== 1 || selectedVideoIds.size !== 0) return null
+          const fid = selectedFolderIds.values().next().value as string | undefined
+          const f = fid ? folders.find((x) => x.id === fid) : undefined
+          if (!f) return null
+          return { own: f.metaNumber ?? null, inherited: f.inheritedMetaNumber ?? null }
+        })()}
+        onGenerateMetaId={() => {
+          const fid = selectedFolderIds.values().next().value as string | undefined
+          if (fid) void handleGenerateMetaId(fid)
+        }}
+        onCopyMetaId={() => {
+          const fid = selectedFolderIds.values().next().value as string | undefined
+          const f = fid ? folders.find((x) => x.id === fid) : undefined
+          const label = fcIdLabel(f?.metaNumber)
+          if (label) void navigator.clipboard?.writeText(label).catch(() => {})
+        }}
+        onRemoveMetaId={() => {
+          const fid = selectedFolderIds.values().next().value as string | undefined
+          if (fid) void handleRemoveMetaId(fid)
         }}
         onBulkDuplicate={() => {
           // handleDuplicate already reads the combined selection when

@@ -64,7 +64,6 @@ import { legacyScrubAllowed, shouldRequestStoryboard } from '@/lib/card-scrub'
 import DownloadQualitiesRow from '@/components/DownloadQualitiesRow'
 import AudioArtwork from '@/components/AudioArtwork'
 import ThumbnailImage from '@/components/ThumbnailImage'
-import { fcIdLabel } from '@/lib/fc-id'
 import { useTranslations } from 'next-intl'
 
 /**
@@ -88,8 +87,8 @@ export interface VideoCardProps {
   id: string
   name: string
   versionLabel?: string
-  /** 7.19.0: the video's ID number, shown as "FC<n>" on the cover. */
-  fcNumber?: number | null
+  /** 7.20.0: the video's code, "FC2E1V1" (ad, edit, version), shown on the cover. */
+  fcCode?: string | null
   duration?: number
   versionCount?: number
   thumbnailUrl?: string | null
@@ -359,7 +358,7 @@ export default function VideoCard({
   id,
   name,
   versionLabel,
-  fcNumber,
+  fcCode,
   duration,
   versionCount = 1,
   thumbnailUrl,
@@ -548,7 +547,7 @@ export default function VideoCard({
   // suppress the badge entirely — image versioning isn't a 1.0.9
   // feature, and a stray "v1" on every image card just looks noisy.
   const versionTag = isImage ? null : versionLabel || null
-  const fcLabel = fcIdLabel(fcNumber)
+  const fcLabel = fcCode || null
   const tCommon = useTranslations('common')
   const hasThumb = !!thumbnailUrl && !thumbErrored
   // Storyboard sprite-sheet scrub (instant — preferred). Fall back to

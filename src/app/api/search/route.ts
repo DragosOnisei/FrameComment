@@ -4,7 +4,8 @@ import { requireApiAdmin } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { logError } from '@/lib/logging'
 import { stackKeyOf } from '@/lib/video-stack'
-import { fcNumberFromQuery } from '@/lib/fc-id'
+import { fcQueryFrom } from '@/lib/fc-id'
+import { folderSubtreeIds, resolveVideoCodes } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -67,15 +68,43 @@ export async function GET(request: NextRequest) {
     // soft-deleted videos AND videos whose owning project is in the
     // trash so the search mirrors what the admin sees in the UI.
     //
-    // 7.19.0: a query that reads as a video ID ("FC453", "fc 453", "453" —
-    // src/lib/fc-id.ts) ALSO matches the row carrying that number. The name
-    // match stays beside it, a filename can contain the same digits.
-    const fcNumber = fcNumberFromQuery(rawQuery)
+    // 7.20.0: a query that reads as a code — "FC2", "FC2E1", "FC2E1V2",
+    // "fc 2", "2" (src/lib/fc-id.ts) — ALSO matches the videos carrying it:
+    // every video under ad folder FC2, narrowed to edit 1 and version 2 when
+    // the query says so, in every size. The ad folder itself shows in the
+    // Folders tab. The name match stays beside it — a filename can contain
+    // the same digits.
+    const fcQuery = fcQueryFrom(rawQuery)
+    let codeMatchIds: string[] = []
+    if (fcQuery) {
+      const adFolders = await prisma.folder.findMany({
+        where: { metaNumber: fcQuery.meta, deletedAt: null } as any,
+        select: { id: true },
+      })
+      if (adFolders.length > 0) {
+        const subtree = await folderSubtreeIds(adFolders.map((f) => f.id))
+        const candidates = await prisma.video.findMany({
+          where: { folderId: { in: subtree }, deletedAt: null, mediaType: 'VIDEO' } as any,
+          select: { id: true, folderId: true, name: true, version: true, mediaType: true, createdAt: true },
+          take: 5000,
+        })
+        const codes = await resolveVideoCodes(candidates as any[])
+        codeMatchIds = candidates
+          .filter((c) => {
+            const m = (codes.get(c.id) ?? '').match(/^FC(\d+)E(\d+)V(\d+)$/)
+            if (!m) return false
+            if (fcQuery.edit !== null && Number(m[2]) !== fcQuery.edit) return false
+            if (fcQuery.version !== null && Number(m[3]) !== fcQuery.version) return false
+            return true
+          })
+          .map((c) => c.id)
+      }
+    }
     const nameMatch = { name: { contains: rawQuery, mode: 'insensitive' as const } }
     const where = {
       deletedAt: null,
       project: { deletedAt: null },
-      ...(fcNumber === null ? nameMatch : { OR: [nameMatch, { fcNumber }] }),
+      ...(codeMatchIds.length === 0 ? nameMatch : { OR: [nameMatch, { id: { in: codeMatchIds } }] }),
     }
 
     // 1.7.0+: stacks are modelled as multiple Video rows sharing the
@@ -112,7 +141,6 @@ export async function GET(request: NextRequest) {
         status: true,
         version: true,
         versionLabel: true,
-        fcNumber: true,
         project: {
           select: { id: true, title: true },
         },
@@ -158,6 +186,8 @@ export async function GET(request: NextRequest) {
       where,
     })
     const total = stackGroups.length
+
+    const videoCodes = await resolveVideoCodes(videos)
 
     // Mint thumbnail tokens in parallel — same pattern as the
     // folder GET so the Redis cache amortises subsequent searches
@@ -232,7 +262,8 @@ export async function GET(request: NextRequest) {
           updatedAt: v.updatedAt,
           status: v.status,
           versionLabel: v.versionLabel,
-          fcNumber: v.fcNumber ?? null,
+          // 7.20.0: the video's code, FC2E1V1.
+          fcCode: videoCodes.get(v.id) ?? null,
         }
       }),
     )
@@ -241,10 +272,11 @@ export async function GET(request: NextRequest) {
     // can find folders (previously only Video.name was queried). Same
     // trash exclusion (folder + project `deletedAt`). One light query,
     // no per-row token minting, so it stays as fast as the video search.
+    const folderNameMatch = { name: { contains: rawQuery, mode: 'insensitive' as const } }
     const folderWhere = {
       deletedAt: null,
-      name: { contains: rawQuery, mode: 'insensitive' as const },
       project: { deletedAt: null },
+      ...(fcQuery === null ? folderNameMatch : { OR: [folderNameMatch, { metaNumber: fcQuery.meta }] }),
     }
     const folderRows = await prisma.folder.findMany({
       where: folderWhere as any,
@@ -254,6 +286,7 @@ export async function GET(request: NextRequest) {
         slug: true,
         projectId: true,
         updatedAt: true,
+        metaNumber: true,
         project: { select: { title: true } },
         parentFolder: { select: { name: true } },
         _count: { select: { videos: true, subfolders: true } },
@@ -271,6 +304,7 @@ export async function GET(request: NextRequest) {
       videoCount: f._count?.videos ?? 0,
       subfolderCount: f._count?.subfolders ?? 0,
       updatedAt: f.updatedAt,
+      metaNumber: f.metaNumber ?? null,
     }))
 
     return NextResponse.json({

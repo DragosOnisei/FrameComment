@@ -33,6 +33,7 @@ import {
 } from '@/lib/danger-zone'
 import { logError, logMessage } from '@/lib/logging'
 import { jsonSafe } from '@/lib/json-safe'
+import { resolveVideoCodes } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 
@@ -189,11 +190,15 @@ export async function GET(
     // Decrypt password for admin users (needed for settings form)
     const decryptedPassword = project.sharePassword ? decrypt(project.sharePassword) : null
 
+    // 7.20.0: each video's code (FC2E1V1), from the ad folder it sits in.
+    const videoCodes = await resolveVideoCodes(videos as any[])
+
     // Convert BigInt fields to strings for JSON serialization
     const projectData = {
       ...project,
       videos: videos.map((video: any) => ({
         ...video,
+        fcCode: videoCodes.get(video.id) ?? null,
         originalFileSize: video.originalFileSize.toString(),
         // 4.2.0+: resolve NULL (legacy) to the instance default backend so the
         // storage tag shows the real location for older videos too.
