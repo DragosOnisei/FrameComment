@@ -637,7 +637,8 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   are additive). Refused (409, the server's sentence shown as-is) when a
   folder above or below already has one: a video belongs to one ad.
   Repeating the click answers with the existing number. Removing it never
-  frees the number. NOTHING is stored on videos: every route resolves the
+  frees the number, and asks through FolderBrowser's shared ConfirmModal
+  (`setConfirmState`), never `window.confirm` (7.20.1). NOTHING is stored on videos: every route resolves the
   number through the folder tree (`createMetaResolver`, memoised per
   request, armed client) — folder/project/root listings, search, both
   share routes, the single download, the single-video ZIP, bulk ZIP and

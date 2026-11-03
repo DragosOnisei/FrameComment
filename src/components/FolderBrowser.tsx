@@ -893,22 +893,40 @@ function FolderBrowserInner(
   )
 
   const handleRemoveMetaId = useCallback(
-    async (folderId: string) => {
+    (folderId: string) => {
       const f = folders.find((x) => x.id === folderId)
-      const label = fcIdLabel(f?.metaNumber)
-      if (
-        !window.confirm(
-          `Remove Meta ID ${label ?? ''} from “${f?.name ?? 'this folder'}”? Its videos stop carrying it, and the number is never given out again.`,
-        )
-      )
-        return
-      try {
-        await apiDelete(`/api/folders/${folderId}/meta-id`)
-        await fetchFolders({ silent: true })
-        onMutated?.()
-      } catch (err) {
-        alert(err instanceof Error ? err.message : 'Could not remove the Meta ID')
-      }
+      const label = fcIdLabel(f?.metaNumber) ?? ''
+      // 7.20.0: the app's own confirm dialog (it was window.confirm — the
+      // browser's grey "localhost:3000 says" box, Dragos's screenshot).
+      setConfirmState({
+        open: true,
+        title: `Remove Meta ID ${label}?`,
+        description: (
+          <>
+            <span className="font-medium text-foreground">{f?.name ?? 'This folder'}</span>{' '}
+            and every video inside it stop carrying{' '}
+            <span className="font-mono text-foreground">{label}</span>. The number is never
+            given out again, so a new Meta ID for this folder will be a different one.
+          </>
+        ),
+        confirmLabel: 'Remove Meta ID',
+        variant: 'destructive',
+        onConfirm: async () => {
+          setConfirmState((s) => ({ ...s, busy: true }))
+          try {
+            await apiDelete(`/api/folders/${folderId}/meta-id`)
+            await fetchFolders({ silent: true })
+            onMutated?.()
+            setConfirmState({ open: false, title: '' })
+          } catch (err) {
+            setConfirmState((s) => ({
+              ...s,
+              busy: false,
+              description: err instanceof Error ? err.message : 'Could not remove the Meta ID',
+            }))
+          }
+        },
+      })
     },
     [folders, fetchFolders, onMutated],
   )

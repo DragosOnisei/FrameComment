@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.20.1] - 2026-11-04
+
+### Fixed
+
+- **Removing a Meta ID asks in the app's own dialog.** It was the
+  browser's grey "localhost says" box; it is now the confirmation every
+  other destructive action uses — the folder's name, what stops carrying
+  the code, that the number is never given out again, and a red
+  "Remove Meta ID" button. A failure is shown in the same dialog.
+
 ## [7.20.0] - 2026-11-04
 
 ### Changed
