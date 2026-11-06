@@ -1134,6 +1134,12 @@ export default function VideoPlayer({
   // and YIELD Space / shortcuts to it — otherwise pressing Space in
   // compare mode would play/pause the main player behind the overlay.
   const showComparisonRef = useRef(false)
+  // 7.20.2: Shift+Enter toggles fullscreen from the keyboard handler below,
+  // which is registered once per video (deps [selectedVideo]) and would
+  // otherwise call a stale copy of `handleToggleFullscreen` — a plain
+  // function re-created every render, declared further down. The ref is
+  // pointed at the current one on every render, right after it is defined.
+  const toggleFullscreenRef = useRef<(() => void) | null>(null)
   useEffect(() => {
     showComparisonRef.current = showComparison
   }, [showComparison])
@@ -2030,7 +2036,7 @@ export default function VideoPlayer({
     }
   }, [reverse, reverseRunning, playbackSpeed, selectedVideo?.fps])
 
-  // Keyboard shortcuts: Ctrl+Space (play/pause), Ctrl+,/. (speed), Ctrl+/ (reset speed), Ctrl+J/L (frame step)
+  // Keyboard shortcuts: Ctrl+Space (play/pause), Ctrl+,/. (speed), Ctrl+/ (reset speed), Ctrl+J/L (frame step), Shift+Enter (fullscreen)
   useEffect(() => {
     const handleKeyboard = (e: KeyboardEvent) => {
       // Compare overlay is open → it owns the player shortcuts.
@@ -2038,6 +2044,30 @@ export default function VideoPlayer({
       if (!videoRef.current) return
 
       const video = videoRef.current
+
+      // 7.20.2: Shift+Enter — fullscreen on, and off again, the way Esc
+      // leaves it (Dragos's shortcut). Never while typing: in the comment
+      // composer and the edit box Shift+Enter is a new line and continues a
+      // list (src/lib/comment-list-keys.ts), and that must keep working. A
+      // held key does not flicker in and out. Goes through the same toggle
+      // as the button, so Android's in-page fullscreen and iPhone's native
+      // one behave exactly as a click would.
+      if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement | null
+        const tag = target?.tagName
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target?.isContentEditable
+        ) {
+          return
+        }
+        e.preventDefault()
+        e.stopPropagation()
+        if (!e.repeat) toggleFullscreenRef.current?.()
+        return
+      }
 
       // 1.1.1+: every Ctrl-based shortcut below also requires
       // `!e.metaKey` so the macOS Character Viewer (Ctrl+Cmd+Space)
@@ -2718,6 +2748,7 @@ export default function VideoPlayer({
       exitFullscreenIfActive()
     }
   }
+  toggleFullscreenRef.current = handleToggleFullscreen
 
   // 4.1.10+: auto-fullscreen on device rotation (mobile). Rotating to
   // landscape enters fullscreen; rotating back to portrait exits it —

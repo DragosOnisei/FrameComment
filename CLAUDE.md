@@ -678,6 +678,15 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
 - **A truncated folder name shows in full on hover** (7.20.0): FolderCard
   uses the same portal tooltip as VideoCard's title (only when
   `scrollWidth > clientWidth`); the native `title` was too slow to notice.
+- **Shift+Enter is fullscreen in the player — except in a text field**
+  (7.20.2): handled first in VideoPlayer's capture-phase `handleKeyboard`,
+  skipped for INPUT / TEXTAREA / SELECT / contenteditable because the
+  composer and the edit box use Shift+Enter for a new line and list
+  continuation; `e.repeat` ignored. The handler is registered per video,
+  so it calls `toggleFullscreenRef` (pointed at `handleToggleFullscreen`
+  on every render) — calling the function directly would use a stale
+  copy. An automated keypress is refused by Chrome ("not granted": no
+  user activation); test it with a real keyboard.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   **A copy is credited to its original author** (7.18.1): the paste sends

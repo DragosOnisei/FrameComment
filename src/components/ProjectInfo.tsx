@@ -174,9 +174,13 @@ export default function ProjectInfo({
               <span className="text-muted-foreground">{t('previousFrame')}</span>
               <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Ctrl+J</kbd>
             </div>
-            <div className="flex justify-between items-center py-2">
+            <div className="flex justify-between items-center py-2 border-b border-border">
               <span className="text-muted-foreground">{t('nextFrame')}</span>
               <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Ctrl+L</kbd>
+            </div>
+            <div className="flex justify-between items-center py-2">
+              <span className="text-muted-foreground">{t('toggleFullscreen')}</span>
+              <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Shift+Enter</kbd>
             </div>
             <p className="text-xs text-muted-foreground mt-4 pt-4 border-t border-border">
               {t('frameSteppingHint')}

@@ -561,6 +561,7 @@
     "resetSpeed": "Reset Speed",
     "previousFrame": "Previous Frame",
     "nextFrame": "Next Frame",
+    "toggleFullscreen": "Fullscreen on / off",
     "frameSteppingHint": "Frame stepping pauses the video automatically. Speed range: 0.25x - 2.0x",
     "keyboardShortcuts": "Keyboard Shortcuts",
     "videoPlaybackControls": "Video playback controls",
@@ -754,7 +755,7 @@
   "comments": {
     "feedbackAndDiscussion": "All comments",
     "exportSubtitles": "Export comments as subtitles (.srt)",
-    "exportSubtitlesHint": "Downloads an .srt file with one caption per comment, at its timecode, replies included. Drop it on a caption track (Premiere Pro: File \u2192 Import) to read the notes over the picture.",
+    "exportSubtitlesHint": "Downloads an .srt file with one caption per comment, at its timecode, replies included. Drop it on a caption track (Premiere Pro: File → Import) to read the notes over the picture.",
     "importPremiereMarkers": "Import markers from Premiere…",
     "importPremiereMarkersHint": "Choose a Final Cut Pro 7 XML exported from Premiere Pro (File → Export → Final Cut Pro XML). Each sequence marker becomes a comment at its timecode, in your name.",
     "importPremiereMarkersConfirmTitle": "Import {count, plural, =1 {1 marker} other {# markers}} as comments?",
@@ -2002,6 +2003,7 @@
   "controls": {
     "previousFrame": "Previous Frame",
     "nextFrame": "Next Frame",
+    "toggleFullscreen": "Fullscreen on / off",
     "pauseVideo": "Pause",
     "playVideo": "Play",
     "reversePlayback": "Reverse",

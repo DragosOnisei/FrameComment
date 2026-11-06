@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.20.2] - 2026-11-06
+
+### Added
+
+- **Shift+Enter toggles fullscreen in the player.** Press it once to go
+  fullscreen and again to come back, as Esc does — in the admin player
+  and on public share links, through the same path as the fullscreen
+  button. It never fires while typing: in the comment box and the edit
+  box Shift+Enter is still a new line. Listed in the video's keyboard
+  shortcuts dialog.
+
 ## [7.20.1] - 2026-11-04
 
 ### Fixed
