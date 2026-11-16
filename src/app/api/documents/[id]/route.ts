@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAdmin } from '@/lib/auth'
 import { hardDeleteFolderDocumentById } from '@/lib/trash-cleanup'
 import { logError } from '@/lib/logging'
+import { canTouchTrashedRow } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 
@@ -79,9 +80,14 @@ export async function DELETE(
 
     const doc = await (prisma as any).folderDocument.findUnique({
       where: { id },
-      select: { id: true, deletedAt: true },
+      select: { id: true, deletedAt: true, deletedById: true },
     })
     if (!doc) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+    }
+    // 7.21.0: someone else's deletion is not this caller's to purge
+    // (src/lib/trash-scope.ts) — Owner and Admin excepted.
+    if (!canTouchTrashedRow(authResult as any, doc)) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
@@ -90,7 +96,8 @@ export async function DELETE(
     } else {
       await (prisma as any).folderDocument.update({
         where: { id },
-        data: { deletedAt: new Date() },
+        // 7.21.0: whose Trash it lands in.
+        data: { deletedAt: new Date(), deletedById: (authResult as any).id },
       })
     }
 

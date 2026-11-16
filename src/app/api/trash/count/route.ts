@@ -19,6 +19,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { stackKeyOf } from '@/lib/video-stack'
+import { trashOwnerWhere } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -37,12 +38,15 @@ export async function GET(request: NextRequest) {
   if (rl) return rl
 
   try {
+    // 7.21.0: the badge counts the caller's own Trash (their deletions plus
+    // the unattributed ones) — the page's default view (src/lib/trash-scope.ts).
+    const trashed = { deletedAt: { not: null }, ...trashOwnerWhere(authResult as any, 'mine') } as any
     const [folderCount, projectCount, documentCount, trashedVideos] = await Promise.all([
-      prisma.folder.count({ where: { deletedAt: { not: null } } as any }),
-      prisma.project.count({ where: { deletedAt: { not: null } } as any }),
-      (prisma as any).folderDocument.count({ where: { deletedAt: { not: null } } }),
+      prisma.folder.count({ where: trashed }),
+      prisma.project.count({ where: trashed }),
+      (prisma as any).folderDocument.count({ where: trashed }),
       prisma.video.findMany({
-        where: { deletedAt: { not: null } } as any,
+        where: trashed,
         select: { projectId: true, folderId: true, name: true, stackId: true } as any,
       }),
     ])

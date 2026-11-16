@@ -160,6 +160,12 @@ model Project {
   // than TRASH_RETENTION_DAYS (30). Listings filter `deletedAt IS NULL`
   // so trashed projects only show up on the dedicated Trash page.
   deletedAt       DateTime?
+  // 7.21.0: who moved it to the Trash. The Trash is personal: a person sees
+  // what they deleted; Owner and Admin can also see the whole team's. NULL =
+  // trashed before 7.21.0 (nobody was recorded — visible to everyone, as it
+  // always was) or by someone whose account is gone. Plain id, no relation:
+  // deleting a user purges their Trash first (src/lib/trash-scope.ts).
+  deletedById String?
 
   // Revision tracking (optional)
   enableRevisions Boolean @default(false)
@@ -280,6 +286,12 @@ model Folder {
   // application-level: deleting a folder marks its descendants too,
   // so a restore lifts the whole subtree back at once.
   deletedAt DateTime?
+  // 7.21.0: who moved it to the Trash. The Trash is personal: a person sees
+  // what they deleted; Owner and Admin can also see the whole team's. NULL =
+  // trashed before 7.21.0 (nobody was recorded — visible to everyone, as it
+  // always was) or by someone whose account is gone. Plain id, no relation:
+  // deleting a user purges their Trash first (src/lib/trash-scope.ts).
+  deletedById String?
 
   // 7.20.0: the folder's Meta ID, "FC<n>". CPC keeps one folder per Meta ad
   // with a subfolder per aspect ratio (9:16, 4:5, 1:1, 16:9), and Meta runs
@@ -362,6 +374,12 @@ model FolderDocument {
   // 3.9.x: soft-delete — same semantics as Video/Folder. Deleting a
   // document card moves it to Trash (restorable) instead of nuking it.
   deletedAt DateTime?
+  // 7.21.0: who moved it to the Trash. The Trash is personal: a person sees
+  // what they deleted; Owner and Admin can also see the whole team's. NULL =
+  // trashed before 7.21.0 (nobody was recorded — visible to everyone, as it
+  // always was) or by someone whose account is gone. Plain id, no relation:
+  // deleting a user purges their Trash first (src/lib/trash-scope.ts).
+  deletedById String?
 
   createdAt   DateTime @default(now())
   createdById String?
@@ -461,6 +479,14 @@ model Video {
   // Processing status
   status             VideoStatus @default(UPLOADING)
   uploadProgress     Int         @default(0) // 0-100 percentage
+  // 7.20.3: when the uploader pressed Pause, NULL while bytes are flowing.
+  // The server cannot tell a paused transfer from a dead one — both send
+  // nothing — so the upload window reports Pause/Resume here. The 30-minute
+  // abandoned-upload reaper (/api/processing-status) leaves a paused row
+  // alone for 24 h instead (the S3 floor), and the bottom-right banner says
+  // "Paused" instead of "No data — retrying". Cleared on Resume and by the
+  // next chunk the TUS hook receives.
+  uploadPausedAt     DateTime?
   processingProgress Float       @default(0)
   processingError    String?
 
@@ -558,6 +584,12 @@ model Video {
   // good. Listings filter `deletedAt: null` so deleted rows simply
   // disappear from the grids and shares.
   deletedAt DateTime?
+  // 7.21.0: who moved it to the Trash. The Trash is personal: a person sees
+  // what they deleted; Owner and Admin can also see the whole team's. NULL =
+  // trashed before 7.21.0 (nobody was recorded — visible to everyone, as it
+  // always was) or by someone whose account is gone. Plain id, no relation:
+  // deleting a user purges their Trash first (src/lib/trash-scope.ts).
+  deletedById String?
 
   // 7.19.0: a per-FILE ID, "FC<n>", handed out by an insert trigger.
   // RETIRED in 7.20.0: marketing needs one ID per Meta ad (every size of an

@@ -16,6 +16,7 @@ import { fetchFolderPreviewData } from '@/lib/folder-previews'
 import { copyableCommentCountsByVideo } from '@/lib/folder-video-enrichment'
 import { computeFolderSizesByProject } from '@/lib/folder-sizes'
 import { metaNumberForFolder, resolveVideoCodes } from '@/lib/meta-id'
+import { canTouchTrashedRow } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -434,9 +435,14 @@ export async function DELETE(
   try {
     const existing = await prisma.folder.findUnique({
       where: { id },
-      select: { id: true, deletedAt: true } as any,
+      select: { id: true, deletedAt: true, deletedById: true } as any,
     })
     if (!existing) {
+      return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
+    }
+    // 7.21.0: someone else's deletion is not this caller's to purge
+    // (src/lib/trash-scope.ts) — Owner and Admin excepted.
+    if (!canTouchTrashedRow(authResult as any, existing as any)) {
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
     }
 
@@ -482,11 +488,13 @@ export async function DELETE(
       await prisma.$transaction([
         prisma.folder.updateMany({
           where: { id: { in: Array.from(descendantIds) } },
-          data: { deletedAt: now } as any,
+          // 7.21.0: the whole subtree lands in the deleter's Trash.
+          data: { deletedAt: now, deletedById: (authResult as any).id } as any,
         }),
         prisma.video.updateMany({
           where: { folderId: { in: Array.from(descendantIds) } },
-          data: { deletedAt: now } as any,
+          // 7.21.0: the whole subtree lands in the deleter's Trash.
+          data: { deletedAt: now, deletedById: (authResult as any).id } as any,
         }),
       ])
       return NextResponse.json({ success: true, soft: true })

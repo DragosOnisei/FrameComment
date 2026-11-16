@@ -14,6 +14,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.21.0] - 2026-11-16
+
+### Changed
+
+- **The Trash is personal.** Everyone sees what they deleted — videos,
+  folders with everything in them, projects and documents — and the
+  Trash badge counts only that. Owner and Admin get a **Mine / All
+  team** switch to see the whole team's deletions, with "Deleted by …"
+  on each row, so a mistaken deletion can still be recovered after its
+  author has left. Restore and permanent delete of a single item work
+  only for the person who deleted it, or for Owner and Admin; Empty
+  Trash empties what you are looking at. Items already in the Trash
+  before this release were never attributed to anyone, so they stay
+  visible to everyone until they expire.
+- **Deleting a user account empties that user's Trash.** Everything the
+  person deleted is removed permanently, files included, so nothing is
+  left behind that nobody can see. A project deleted in the last 24
+  hours keeps its anti-mass-wipe protection: it moves to the team's
+  Trash and expires on the normal schedule.
+
+### Fixed
+
+- **A paused upload is no longer treated as abandoned.** The server
+  heard the same silence from a paused transfer and a dead one, so an
+  upload paused for more than 30 minutes turned Failed on every
+  colleague's card until it was resumed. Pause and Resume are now
+  reported to the server: a paused upload is only cleared after 24
+  hours, and the upload banner says "Paused" instead of "No data —
+  retrying".
+- **Resume no longer trips the stall watchdog.** After a pause longer
+  than 30 seconds, Resume was read as a stall within five seconds: the
+  transfer was restarted for nothing and lost its one automatic retry.
+  Resume now starts the watchdog's clock again.
+
 ## [7.20.2] - 2026-11-06
 
 ### Added

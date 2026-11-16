@@ -51,8 +51,18 @@ async function reapAbandonedUploads(): Promise<void> {
   try {
     const staleMs = isS3Mode() ? STALE_UPLOAD_S3_MS : STALE_UPLOAD_TUS_MS
     const cutoff = new Date(now - staleMs)
+    // 7.20.3: a row its uploader PAUSED is silent on purpose. It gets the
+    // 24 h floor S3 uploads get, not 30 minutes — a paused upload used to
+    // turn Failed on every colleague's card until it was resumed.
+    const pausedCutoff = new Date(now - STALE_UPLOAD_S3_MS)
     const reaped = await prisma.video.updateMany({
-      where: { status: 'UPLOADING', updatedAt: { lt: cutoff } },
+      where: {
+        status: 'UPLOADING',
+        OR: [
+          { uploadPausedAt: null, updatedAt: { lt: cutoff } },
+          { uploadPausedAt: { not: null }, updatedAt: { lt: pausedCutoff } },
+        ],
+      },
       data: {
         status: 'ERROR',
         processingError:
@@ -241,6 +251,8 @@ export async function GET(request: NextRequest) {
           // 7.10.0: who uploaded it — the banners show a row only to that person.
           createdById: true,
           uploadProgress: true,
+          // 7.20.3: the banner says "Paused" instead of "No data — retrying".
+          uploadPausedAt: true,
           processingProgress: true,
           // 6.14.0: the banner turns `uploadProgress` deltas into MB/s, which
           // needs the total. Works for ANY uploader — including a
@@ -309,6 +321,7 @@ export async function GET(request: NextRequest) {
           // 7.10.0: who uploaded it — the banners show a row only to that person.
           createdById: true,
           uploadProgress: true,
+          uploadPausedAt: true,
           processingProgress: true,
           originalFileSize: true,
           width: true,
@@ -435,6 +448,7 @@ export async function GET(request: NextRequest) {
         projectTitle: v.project?.title || '',
         folderId: v.folderId,
         uploadProgress: v.uploadProgress,
+        uploadPausedAt: (v as any).uploadPausedAt ? (v as any).uploadPausedAt.toISOString() : null,
         processingProgress: v.processingProgress,
         // BigInt → number. File sizes here are at most terabytes, far inside
         // the safe-integer range, and the client only does arithmetic on it.

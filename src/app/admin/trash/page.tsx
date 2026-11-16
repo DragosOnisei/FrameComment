@@ -62,7 +62,18 @@ interface TrashItem {
   expiresAt: string
   /** Whether a trashed project has an uploaded cover image. */
   hasCover?: boolean
+  /** 7.21.0: who moved it here; null for rows trashed before 7.21.0. */
+  deletedBy?: { id: string; name: string; isMe: boolean } | null
 }
+
+/**
+ * 7.21.0: the Trash is personal (src/lib/trash-scope.ts). Everyone sees
+ * what they deleted (plus the unattributed rows trashed before 7.21.0);
+ * Owner and Admin can switch to the whole team's, with the deleter's name
+ * on each row. The choice is remembered per browser.
+ */
+type TrashScope = 'mine' | 'all'
+const TRASH_SCOPE_KEY = 'fc:trash-scope'
 
 export default function TrashPage() {
   // 5.10.1: tenant companies see the 24h purge-window note (the throttle
@@ -99,6 +110,14 @@ export default function TrashPage() {
   // the page behind one giant blocking request.
   const { startManualDownload } = useDownloadManager()
   const [items, setItems] = useState<TrashItem[]>([])
+  const [scope, setScope] = useState<TrashScope>(() => {
+    try {
+      return typeof window !== 'undefined' && window.localStorage.getItem(TRASH_SCOPE_KEY) === 'all' ? 'all' : 'mine'
+    } catch {
+      return 'mine'
+    }
+  })
+  const [canSeeAll, setCanSeeAll] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
@@ -120,10 +139,11 @@ export default function TrashPage() {
   const fetchTrash = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await apiFetch('/api/trash')
+      const res = await apiFetch(`/api/trash?scope=${scope}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setItems(data.items || [])
+      setCanSeeAll(!!data.canSeeAll)
       setError(null)
     } catch (err) {
       logError('[TrashPage] fetch failed:', err)
@@ -131,11 +151,20 @@ export default function TrashPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [scope])
 
   useEffect(() => {
     fetchTrash()
   }, [fetchTrash])
+
+  const chooseScope = (next: TrashScope) => {
+    setScope(next)
+    try {
+      window.localStorage.setItem(TRASH_SCOPE_KEY, next)
+    } catch {
+      /* private window — the choice just isn't remembered */
+    }
+  }
 
   const markBusy = (id: string, busy: boolean) => {
     setBusyIds((prev) => {
@@ -494,10 +523,38 @@ export default function TrashPage() {
             <span className="truncate">Trash</span>
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">
-            Items here are recoverable for 30 days, then deleted
-            permanently.
+            {scope === 'all' && canSeeAll
+              ? "Everything your team deleted. Recoverable for 30 days, then deleted permanently."
+              : 'What you deleted. Recoverable for 30 days, then deleted permanently.'}
           </p>
         </div>
+        {canSeeAll && (
+          // 7.21.0: Owner / Admin only — the team's Trash, so a mistaken
+          // deletion by someone who has since left can still be recovered.
+          <div
+            role="radiogroup"
+            aria-label="Whose deletions to show"
+            className="shrink-0 inline-flex items-center rounded-lg bg-white/[0.06] ring-1 ring-white/10 p-0.5 text-xs"
+          >
+            {([
+              ['mine', 'Mine'],
+              ['all', 'All team'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={scope === value}
+                onClick={() => chooseScope(value)}
+                className={`px-2.5 sm:px-3 h-8 rounded-md transition-colors ${
+                  scope === value ? 'bg-white/15 text-white' : 'text-white/60 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {items.length > 0 && (
           // 1.3.1+: destructive accent so the action stands out on
           // phones — the plain outline button was easy to miss against
@@ -724,6 +781,10 @@ function TrashRow({
           </div>
           <div className="text-xs text-white/55 truncate">
             From: {node.parent?.name ?? '—'} ·{' '}
+            {/* 7.21.0: in the team view, whose deletion this is. */}
+            {node.deletedBy && !node.deletedBy.isMe && (
+              <>Deleted by {node.deletedBy.name} · </>
+            )}
             {daysLeft(node.expiresAt)} day
             {daysLeft(node.expiresAt) === 1 ? '' : 's'} left
           </div>

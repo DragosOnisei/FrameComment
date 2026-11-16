@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { tallyStep, tallyLive, type TallySnapshot } from '@/lib/tier-tally'
-import { Upload, Cog, ChevronDown, ChevronUp, CheckCircle2, FolderOpen, Trash2, AlertTriangle } from 'lucide-react'
+import { Upload, Cog, ChevronDown, ChevronUp, CheckCircle2, FolderOpen, Trash2, AlertTriangle, Pause } from 'lucide-react'
 import Link from 'next/link'
 import { useProcessingStatus, type ProcessingVideo } from '@/contexts/ProcessingStatusContext'
 import { ConfirmModal } from '@/components/ConfirmModal'
@@ -665,10 +665,13 @@ function VideoRow({
   // has uploadProgress > 0" as a sign that bytes are flowing.
   const uploadInFlight = kind === 'upload' && (video.uploadProgress ?? 0) > 0
   const { mbps, stalledMs } = useTransferRate(video, kind === 'upload')
-  const stalled = kind === 'upload' && stalledMs > BANNER_STALL_MS
-  // A stalled transfer is not an active one — dim it like a queued row so the
-  // banner stops implying that bytes are moving.
-  const isActive = (video.isActive || uploadInFlight) && !stalled
+  // 7.20.3: a transfer its uploader paused is silent on purpose — say
+  // "Paused", not "No data — retrying" (nothing is retrying it).
+  const paused = kind === 'upload' && !!video.uploadPausedAt
+  const stalled = kind === 'upload' && !paused && stalledMs > BANNER_STALL_MS
+  // A stalled or paused transfer is not an active one — dim it like a queued
+  // row so the banner stops implying that bytes are moving.
+  const isActive = (video.isActive || uploadInFlight) && !stalled && !paused
 
   return (
     <li>
@@ -694,7 +697,12 @@ function VideoRow({
           </div>
           {kind === 'upload' && (
             <div className="text-[10px] truncate">
-              {stalled ? (
+              {paused ? (
+                <span className="text-white/55 flex items-center gap-1">
+                  <Pause className="w-2.5 h-2.5 shrink-0" />
+                  Paused
+                </span>
+              ) : stalled ? (
                 <span className="text-amber-400 flex items-center gap-1">
                   <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
                   No data for {Math.round(stalledMs / 1000)}s — retrying

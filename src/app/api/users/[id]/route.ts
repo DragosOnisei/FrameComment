@@ -9,6 +9,7 @@ import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError } from '@/lib/logging'
 import { canManageUsers, canAssignRole, canActOnUser, isAppRole } from '@/lib/permissions'
 import { isGraceOwner } from '@/lib/ownership'
+import { purgeUserTrash } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 
@@ -481,6 +482,16 @@ export async function DELETE(
     await invalidateAdminSessions(id)
 
     // Delete user
+    // 7.21.0: the fail-safe Dragos asked for — the Trash is personal now, so
+    // a removed account's deletions would sit there with nobody able to see
+    // them. Purge them (files included) before the account goes; whatever
+    // cannot be purged yet is handed back to the team Trash
+    // (src/lib/trash-scope.ts). A failed purge must not block removing a
+    // person: what is left still expires with the 30-day cleanup.
+    await purgeUserTrash(id).catch((err) =>
+      logError(`[DELETE /api/users/${id}] trash purge failed (continuing):`, err),
+    )
+
     await prisma.user.delete({
       where: { id },
     })

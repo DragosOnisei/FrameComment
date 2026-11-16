@@ -7,6 +7,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getConfiguredLocale, loadLocaleMessages } from '@/i18n/locale'
 import { logError, logMessage } from '@/lib/logging'
 import { cancelPendingVideoJobs } from '@/lib/queue'
+import { canTouchTrashedRow } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 
@@ -248,6 +249,11 @@ export async function DELETE(
     if (!video) {
       return NextResponse.json({ error: videoMessages.videoNotFoundApi || 'Video not found' }, { status: 404 })
     }
+    // 7.21.0: someone else's deletion is not this caller's to purge
+    // (src/lib/trash-scope.ts) — Owner and Admin excepted.
+    if (!canTouchTrashedRow(authResult as any, video as any)) {
+      return NextResponse.json({ error: videoMessages.videoNotFoundApi || 'Video not found' }, { status: 404 })
+    }
 
     // Default path (1.0.8+): soft-delete. The row stays in the DB
     // with `deletedAt` set and disappears from every listing; users
@@ -255,7 +261,8 @@ export async function DELETE(
     if (!permanent) {
       await prisma.video.update({
         where: { id },
-        data: { deletedAt: new Date() } as any,
+        // 7.21.0: whose Trash it lands in.
+        data: { deletedAt: new Date(), deletedById: (authResult as any).id } as any,
       })
       // 2.2.0+: yank pending encode-tier + finalize jobs for this
       // videoId so the queue doesn't burn worker slots on a row

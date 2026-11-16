@@ -24,6 +24,7 @@ import {
 import { useS3MultipartUpload } from '@/hooks/useS3MultipartUpload'
 import { useStorageProvider } from '@/components/StorageConfigProvider'
 import { isAcceptedMediaFile, UPLOAD_ACCEPT } from '@/lib/media-kind'
+import { reportUploadPaused } from '@/lib/upload-pause'
 
 interface VideoUploadProps {
   projectId: string
@@ -393,10 +394,13 @@ export default function VideoUpload({ projectId, videoName, onUploadComplete, in
       // Resume upload
       uploadRef.current.start()
       setPaused(false)
+      // 7.20.3: tell the server, so a long pause is not reaped as abandoned.
+      reportUploadPaused(videoIdRef.current, false)
     } else {
       // Pause upload
       uploadRef.current.abort()
       setPaused(true)
+      reportUploadPaused(videoIdRef.current, true)
     }
   }
 

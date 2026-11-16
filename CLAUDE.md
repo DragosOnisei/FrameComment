@@ -687,6 +687,38 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   on every render) — calling the function directly would use a stale
   copy. An automated keypress is refused by Chrome ("not granted": no
   user activation); test it with a real keyboard.
+- **A paused upload is not an abandoned one** (7.20.3): the server hears
+  the same silence from both, so the upload windows (VideoUploadModal,
+  VideoUpload) report Pause/Resume to `/api/videos/[id]/upload-pause`
+  (`reportUploadPaused`, fire-and-forget), stored as
+  `Video.uploadPausedAt`; the TUS progress hook clears it on the next
+  chunk in case the Resume report was lost. The 30-minute reaper in
+  /api/processing-status gives a paused row the 24 h S3 floor instead
+  (before, a long pause turned the card Failed for everyone until the
+  upload finished and revived it), and the banner row says "Paused", not
+  "No data — retrying". The modal's own 30 s stall watchdog always
+  skipped paused rows, but Resume left `lastProgressAt` at the pause
+  moment, so it fired within 5 s of Resume, restarted the fresh transfer
+  and spent its one retry; Resume now resets the clock, `stalled` and
+  `stallRetried` (`resumedWatchdog()` — a function, so the clock is read
+  at the click, not at the last render).
+- **The Trash is personal; Owner and Admin can see the team's** (7.21.0):
+  every soft-delete stamps `deletedById` (Video, Folder — the whole
+  subtree — Project, FolderDocument; the four DELETE routes are the only
+  places that trash anything). src/lib/trash-scope.ts owns the rule: a
+  person sees their own deletions plus rows with no recorded deleter
+  (trashed before 7.21.0 — visible to all, never guessed); Owner/Admin
+  (`canSeeAllTrash` = `canManageUsers`) may ask `?scope=all`, and the
+  page shows "Deleted by …" there — Dragos's choice on the recommendation,
+  so an editor's mistaken deletion survives the editor leaving. Restore
+  and per-item permanent delete enforce the same rule
+  (`canTouchTrashedRow`, 404 otherwise); the badge counts "mine"; Empty
+  Trash empties what the caller sees. Deleting a user runs
+  `purgeUserTrash` first (files included, through the 30-day cleanup's
+  hard-delete helpers); a project inside its 24 h anti-mass-wipe window,
+  or anything that fails to purge, is handed back to everyone
+  (`deletedById = NULL`) and expires normally. `deletedById` is a plain
+  column with no relation — the purge is what keeps it honest.
 - **Pasted comments** (`isCopied`): excluded from the first-comment count,
   greyed in UI, not editable, carry `sourceVideoId`/`sourceVersionLabel`.
   **A copy is credited to its original author** (7.18.1): the paste sends

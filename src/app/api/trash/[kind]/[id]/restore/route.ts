@@ -18,6 +18,7 @@ import { requireApiAdmin } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { renumberVersionStack } from '@/lib/video-versions'
+import { canTouchTrashedRow } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -45,10 +46,16 @@ export async function POST(
         select: {
           id: true,
           parentFolderId: true,
+          deletedAt: true,
+          deletedById: true,
           parentFolder: { select: { id: true, deletedAt: true } } as any,
         } as any,
       })
       if (!folder) {
+        return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
+      }
+      // 7.21.0: only the deleter (or an Owner / Admin) restores a deletion.
+      if (!canTouchTrashedRow(authResult as any, folder as any)) {
         return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
       }
 
@@ -79,11 +86,11 @@ export async function POST(
       await prisma.$transaction([
         prisma.folder.updateMany({
           where: { id: { in: Array.from(descendantIds) } },
-          data: { deletedAt: null } as any,
+          data: { deletedAt: null, deletedById: null } as any,
         }),
         prisma.video.updateMany({
           where: { folderId: { in: Array.from(descendantIds) } },
-          data: { deletedAt: null } as any,
+          data: { deletedAt: null, deletedById: null } as any,
         }),
         ...(parentStillTrashed
           ? [
@@ -105,14 +112,18 @@ export async function POST(
       // listing endpoint stops filtering it out.
       const project = await prisma.project.findUnique({
         where: { id },
-        select: { id: true, deletedAt: true } as any,
+        select: { id: true, deletedAt: true, deletedById: true } as any,
       })
       if (!project) {
         return NextResponse.json({ error: 'Project not found' }, { status: 404 })
       }
+      // 7.21.0: only the deleter (or an Owner / Admin) restores a deletion.
+      if (!canTouchTrashedRow(authResult as any, project as any)) {
+        return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+      }
       await prisma.project.update({
         where: { id },
-        data: { deletedAt: null } as any,
+        data: { deletedAt: null, deletedById: null } as any,
       })
       return NextResponse.json({ success: true })
     }
@@ -123,6 +134,10 @@ export async function POST(
         include: { folder: true },
       })) as any
       if (!video) {
+        return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+      }
+      // 7.21.0: only the deleter (or an Owner / Admin) restores a deletion.
+      if (!canTouchTrashedRow(authResult as any, video as any)) {
         return NextResponse.json({ error: 'Video not found' }, { status: 404 })
       }
       // Restore the whole version group, not just this row.
@@ -169,6 +184,7 @@ export async function POST(
           where: { projectId, name, deletedAt: { not: null } } as any,
           data: {
             deletedAt: null,
+            deletedById: null,
             ...(restoredName !== name ? { name: restoredName } : {}),
             // Re-parent to the project root when the original
             // folder is also gone.
@@ -210,10 +226,16 @@ export async function POST(
         select: {
           id: true,
           folderId: true,
+          deletedAt: true,
+          deletedById: true,
           folder: { select: { id: true, deletedAt: true } },
         },
       })) as any
       if (!doc) {
+        return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+      }
+      // 7.21.0: only the deleter (or an Owner / Admin) restores a deletion.
+      if (!canTouchTrashedRow(authResult as any, doc as any)) {
         return NextResponse.json({ error: 'Document not found' }, { status: 404 })
       }
       // If the original folder is still trashed, drop the document to the
@@ -223,6 +245,7 @@ export async function POST(
         where: { id },
         data: {
           deletedAt: null,
+          deletedById: null,
           ...(folderStillTrashed ? { folderId: null } : {}),
         },
       })

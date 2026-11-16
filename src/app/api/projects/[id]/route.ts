@@ -34,6 +34,7 @@ import {
 import { logError, logMessage } from '@/lib/logging'
 import { jsonSafe } from '@/lib/json-safe'
 import { resolveVideoCodes } from '@/lib/meta-id'
+import { canTouchTrashedRow } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 
@@ -633,11 +634,16 @@ export async function DELETE(
     // from the Trash page within that window.
     const project = await prisma.project.findUnique({
       where: { id },
-      select: { id: true, deletedAt: true } as any,
+      select: { id: true, deletedAt: true, deletedById: true } as any,
     })
 
     if (!project) {
       return NextResponse.json({ error: projectMessages.projectNotFoundApi || 'Project not found' }, { status: 404 })
+    }
+    // 7.21.0: someone else's deletion is not this caller's to purge
+    // (src/lib/trash-scope.ts) — Owner and Admin excepted.
+    if (!canTouchTrashedRow(authResult as any, project as any)) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
     // SECURITY: invalidate all share sessions immediately so anyone
@@ -722,7 +728,8 @@ export async function DELETE(
 
     await prisma.project.update({
       where: { id },
-      data: { deletedAt: new Date() } as any,
+      // 7.21.0: whose Trash it lands in.
+      data: { deletedAt: new Date(), deletedById: (authResult as any).id } as any,
     })
     await markProjectTrashed()
 

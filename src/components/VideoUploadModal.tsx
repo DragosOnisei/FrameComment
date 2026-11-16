@@ -28,6 +28,7 @@ import {
 import { useStorageProvider } from '@/components/StorageConfigProvider'
 import { useS3MultipartUpload } from '@/hooks/useS3MultipartUpload'
 import { isAcceptedMediaFile, mediaKindFromFile, UPLOAD_ACCEPT } from '@/lib/media-kind'
+import { reportUploadPaused } from '@/lib/upload-pause'
 
 interface PendingUpload {
   id: string
@@ -1136,6 +1137,23 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
     }
   }
 
+  /**
+   * 7.20.3: what Resume resets. The stall watchdog measures silence from
+   * `lastProgressAt`, which still pointed at the moment of the Pause — so a
+   * pause longer than 30 s read as a stall within 5 s of Resume: the fresh
+   * transfer was aborted and restarted for nothing, and its one retry was
+   * spent, so a REAL stall later failed it outright. Resume starts the
+   * clock again with the retry intact.
+   */
+  // A function, not an object: `Date.now()` must be read at the click, not at
+  // the last render (a lone paused row may not re-render for minutes).
+  const resumedWatchdog = () => ({
+    paused: false,
+    lastProgressAt: Date.now(),
+    stalled: false,
+    stallRetried: false,
+  })
+
   const handlePauseResume = (id: string) => {
     const item = pendingUploads.find(u => u.id === id)
     if (!item) return
@@ -1146,13 +1164,15 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
       if (item.paused) {
         resumeS3Upload(s3Key)
         setPendingUploads(prev => prev.map(u =>
-          u.id === id ? { ...u, paused: false } : u
+          u.id === id ? { ...u, ...resumedWatchdog() } : u
         ))
+        reportUploadPaused(item.videoId, false)
       } else {
         pauseS3Upload(s3Key)
         setPendingUploads(prev => prev.map(u =>
           u.id === id ? { ...u, paused: true } : u
         ))
+        reportUploadPaused(item.videoId, true)
       }
     } else {
       const upload = uploadRefs.current.get(id)
@@ -1160,13 +1180,15 @@ export function VideoUploadModal({ isOpen, triggerNonce, onClose, projectId, onU
       if (item.paused) {
         upload.start()
         setPendingUploads(prev => prev.map(u =>
-          u.id === id ? { ...u, paused: false } : u
+          u.id === id ? { ...u, ...resumedWatchdog() } : u
         ))
+        reportUploadPaused(item.videoId, false)
       } else {
         upload.abort()
         setPendingUploads(prev => prev.map(u =>
           u.id === id ? { ...u, paused: true } : u
         ))
+        reportUploadPaused(item.videoId, true)
       }
     }
   }

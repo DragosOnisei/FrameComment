@@ -363,7 +363,9 @@ const UPLOAD_PROGRESS_THROTTLE_MS = 1500
     await prismaPrivileged.video
       .update({
         where: { id: videoId },
-        data: { uploadProgress: pct },
+        // 7.20.3: a chunk arriving means it is not paused any more, even if
+        // the Resume report was lost.
+        data: { uploadProgress: pct, uploadPausedAt: null },
       })
       .catch(async (err) => {
         // 6.14.0: P2025 = the row this session belongs to is gone. That is

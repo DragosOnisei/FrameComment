@@ -20,6 +20,7 @@ import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { TRASH_RETENTION_DAYS } from '@/lib/trash-cleanup'
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
+import { canSeeAllTrash, effectiveTrashScope, trashOwnerWhere } from '@/lib/trash-scope'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,6 +39,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const sessionId = `admin:${admin.id}`
+    // 7.21.0: the Trash is personal (src/lib/trash-scope.ts). `?scope=all`
+    // shows the whole team's to an Owner or Admin; anyone else gets their own.
+    const scope = effectiveTrashScope(admin as any, new URL(request.url).searchParams.get('scope'))
+    const trashed = { deletedAt: { not: null }, ...trashOwnerWhere(admin as any, scope) } as any
 
     // Fetch trashed folders + videos + projects in parallel. We only
     // surface items whose `deletedAt` is set; the rest of the listing
@@ -45,7 +50,7 @@ export async function GET(request: NextRequest) {
     // place these rows appear.
     const [trashedFolders, trashedVideos, trashedProjects, trashedDocuments] = await Promise.all([
       prisma.folder.findMany({
-        where: { deletedAt: { not: null } } as any,
+        where: trashed,
         orderBy: { deletedAt: 'desc' } as any,
         include: {
           project: { select: { id: true, title: true, slug: true } },
@@ -53,7 +58,7 @@ export async function GET(request: NextRequest) {
         },
       }),
       prisma.video.findMany({
-        where: { deletedAt: { not: null } } as any,
+        where: trashed,
         orderBy: { deletedAt: 'desc' } as any,
         include: {
           project: { select: { id: true, title: true, slug: true } },
@@ -64,19 +69,20 @@ export async function GET(request: NextRequest) {
       // alongside folders and videos. Restore returns the whole
       // project (and its subtree) to active state.
       prisma.project.findMany({
-        where: { deletedAt: { not: null } } as any,
+        where: trashed,
         orderBy: { deletedAt: 'desc' } as any,
         select: {
           id: true,
           title: true,
           slug: true,
           deletedAt: true,
+          deletedById: true,
           coverImagePath: true,
         } as any,
       }),
       // 3.9.x: trashed folder documents (transcript PDFs).
       (prisma as any).folderDocument.findMany({
-        where: { deletedAt: { not: null } },
+        where: trashed,
         orderBy: { deletedAt: 'desc' },
         include: {
           project: { select: { id: true, title: true, slug: true } },
@@ -128,6 +134,7 @@ export async function GET(request: NextRequest) {
             ? { kind: 'folder', id: latest.folder.id, name: latest.folder.name }
             : { kind: 'root', id: null, name: 'Project root' },
           deletedAt: (latest as any).deletedAt,
+          deletedById: (latest as any).deletedById ?? null,
           expiresAt: new Date(
             new Date((latest as any).deletedAt).getTime() +
               TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
@@ -147,6 +154,7 @@ export async function GET(request: NextRequest) {
         ? { kind: 'folder', id: f.parentFolder.id, name: f.parentFolder.name }
         : { kind: 'root', id: null, name: 'Project root' },
       deletedAt: (f as any).deletedAt,
+      deletedById: (f as any).deletedById ?? null,
       expiresAt: new Date(
         new Date((f as any).deletedAt).getTime() +
           TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
@@ -162,6 +170,7 @@ export async function GET(request: NextRequest) {
       projectSlug: p.slug ?? null,
       parent: { kind: 'root' as const, id: null, name: 'Dashboard' },
       deletedAt: p.deletedAt,
+      deletedById: p.deletedById ?? null,
       expiresAt: new Date(
         new Date(p.deletedAt).getTime() +
           TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
@@ -181,21 +190,40 @@ export async function GET(request: NextRequest) {
         ? { kind: 'folder', id: d.folder.id, name: d.folder.name }
         : { kind: 'root', id: null, name: 'Project root' },
       deletedAt: d.deletedAt,
+      deletedById: d.deletedById ?? null,
       expiresAt: new Date(
         new Date(d.deletedAt).getTime() +
           TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
       ),
     }))
 
-    const items = [...projectItems, ...folderItems, ...videoItems, ...documentItems].sort((a, b) => {
+    // 7.21.0: who deleted each row, so the team view can say it. NULL =
+    // trashed before anyone was recorded (or by a removed account).
+    const sorted = [...projectItems, ...folderItems, ...videoItems, ...documentItems].sort((a, b) => {
       const da = new Date(a.deletedAt).getTime()
       const db = new Date(b.deletedAt).getTime()
       return db - da
     })
+    const deleterIds = Array.from(new Set(sorted.map((i) => i.deletedById).filter((x): x is string => !!x)))
+    const deleters = deleterIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: deleterIds } },
+          select: { id: true, name: true, username: true, email: true },
+        })
+      : []
+    const nameOf = new Map(deleters.map((u) => [u.id, u.name || u.username || u.email || 'Someone']))
+    const items = sorted.map((i) => ({
+      ...i,
+      deletedBy: i.deletedById
+        ? { id: i.deletedById, name: nameOf.get(i.deletedById) ?? 'Removed account', isMe: i.deletedById === admin.id }
+        : null,
+    }))
 
     return NextResponse.json({
       items,
       retentionDays: TRASH_RETENTION_DAYS,
+      scope,
+      canSeeAll: canSeeAllTrash(admin as any),
     })
   } catch (error) {
     logError('[GET /api/trash] failed:', error)

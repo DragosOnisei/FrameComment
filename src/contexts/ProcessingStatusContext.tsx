@@ -52,6 +52,8 @@ export type ProcessingVideo = {
   folderId: string | null
   /** 0..100. Bytes-sent / total for UPLOADING rows (set by TUS clients). */
   uploadProgress: number
+  /** 7.20.3: ISO time its uploader pressed Pause; null while transferring. */
+  uploadPausedAt?: string | null
   /** 0..100. Overall transcode progress across all tiers for PROCESSING rows. */
   processingProgress: number
   /** 6.14.0: source size in bytes, so the banner can turn a percentage delta
