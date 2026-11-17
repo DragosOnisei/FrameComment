@@ -671,7 +671,13 @@ arms `app.current_organization_id` per request via AsyncLocalStorage + a
   "FC2" / "FC2E1" / "FC2E1V2" / "2" match the ad folder in the Folders
   tab and the videos carrying that code. Downloads get the code in front
   (`fcPrefixFileName(code, name)`), REPLACING a code already there rather
-  than stacking "FC3E1V1_FC7676_…"; a file with no code keeps its name. The folder ZIP routes are BINARY to
+  than stacking "FC3E1V1_FC7676_…"; a file with no code keeps its name.
+  7.21.1: the public folder share shows "Campaign code FC3" above
+  "Powered by" (`folder.metaNumber` from /api/share/folder/[slug], own or
+  inherited), and both folder ZIPs are named "<folder>_FC3.zip" — the
+  code AFTER the name, Dragos's call, unlike the files inside. "Powered
+  by FrameComment" links "FrameComment" to /login on both share pages
+  (the project share's GitHub link went; the source stays at /source). The folder ZIP routes are BINARY to
   grep (a stray byte) — use `grep -a`. After `prisma generate` a dev server started before it
   still has the old client and 500s on columns that no longer exist —
   restart it.

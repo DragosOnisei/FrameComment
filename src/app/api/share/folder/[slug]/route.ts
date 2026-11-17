@@ -13,7 +13,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { logError } from '@/lib/logging'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { fetchFolderPreviewData } from '@/lib/folder-previews'
-import { resolveVideoCodes } from '@/lib/meta-id'
+import { metaNumberForFolder, resolveVideoCodes } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -432,6 +432,9 @@ export async function GET(
         shareExpiresAt: (folderMeta as any).shareExpiresAt
           ? (folderMeta as any).shareExpiresAt.toISOString()
           : null,
+        // 7.21.1: the campaign's Meta ID — this folder's own, or the ad
+        // folder's it sits in — shown to the client above "Powered by".
+        metaNumber: await metaNumberForFolder(folderMeta.id),
       },
       subfolders: await (async () => {
         // Mirror the admin folder grid (1.0.7+): mint Frame.io-style

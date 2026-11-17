@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.21.1] - 2026-11-17
+
+### Added
+
+- **Clients see the campaign code.** A shared folder that is a Meta ad,
+  or sits inside one, shows "Campaign code FC3" above "Powered by
+  FrameComment", so the client can quote it back.
+- **A folder's ZIP carries the campaign code after its name** —
+  `Stephen_FC3.zip` — from the client's share link and from the admin
+  grid alike. The files inside keep their codes in front, as before.
+
+### Changed
+
+- **"FrameComment" in "Powered by FrameComment" opens the sign-in
+  page**, on both the folder share and the video share. The video
+  share's link used to go to the GitHub repository; the source remains
+  available at /source.
+
 ## [7.21.0] - 2026-11-16
 
 ### Changed

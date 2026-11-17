@@ -2027,14 +2027,12 @@ function SharePageClientInner({ token }: SharePageClientProps) {
               page without ever seeing the public site, and AGPL §13 is about
               everyone who uses the software over a network. The repository link
               below still reaches the source, and /source serves it too. */}
-          <div className="pb-4 text-center">
-            <a
-              href="https://github.com/DragosOnisei/FrameComment"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-            >
-              Powered by FrameComment
+          {/* 7.21.1: "FrameComment" opens the sign-in page (Dragos's call), as
+              on the folder share. The source stays reachable at /source. */}
+          <div className="pb-4 text-center text-xs text-muted-foreground/60">
+            Powered by{' '}
+            <a href="/login" className="hover:text-muted-foreground underline-offset-2 hover:underline transition-colors">
+              FrameComment
             </a>
           </div>
         </div>

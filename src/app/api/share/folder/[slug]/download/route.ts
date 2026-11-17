@@ -12,8 +12,8 @@ import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { resolveFileBackend, type StorageBackend } from '@/lib/storage-backends'
 import { rateLimit } from '@/lib/rate-limit'
 import { logError, logMessage } from '@/lib/logging'
-import { fcPrefixFileName } from '@/lib/fc-id'
-import { resolveVideoCodes } from '@/lib/meta-id'
+import { fcIdLabel, fcPrefixFileName } from '@/lib/fc-id'
+import { metaNumberForFolder, resolveVideoCodes } from '@/lib/meta-id'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -239,8 +239,12 @@ export async function GET(
     void archive.finalize()
     const readableStream = Readable.toWeb(archive as any) as ReadableStream
 
+    const zipMeta = fcIdLabel(await metaNumberForFolder(folderMeta.id))
+    const zipCampaignSuffix = zipMeta ? `_${zipMeta}` : ''
     const zipFilename = sanitizeFilenameForHeader(
-      `${folderMeta.name.replace(/[^a-zA-Z0-9._-]/g, '_')}.zip`,
+      // 7.21.1: the campaign code after the folder's name — "Stephen_FC3.zip"
+      // — when the folder is an ad or sits inside one.
+      `${folderMeta.name.replace(/[^a-zA-Z0-9._-]/g, '_')}${zipCampaignSuffix}.zip`,
     )
     return new NextResponse(readableStream, {
       headers: {

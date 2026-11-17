@@ -19,6 +19,7 @@ import { detectAdminAccessToProject, detectLoggedInAdmin } from '@/lib/share-aut
 import { groupByStack, sortVersionsDesc } from '@/lib/video-stack'
 import { useDownloadManager } from '@/contexts/DownloadManager'
 import { shouldDownloadAsFiles } from '@/lib/download-mode'
+import { fcIdLabel } from '@/lib/fc-id'
 
 /**
  * Public folder share page (1.0.6+).
@@ -57,6 +58,8 @@ interface FolderInfo {
   /** 1.4.x+: ISO datetime when the share link stops working. `null`
    *  (or absent) = no expiration. Renders the countdown banner. */
   shareExpiresAt?: string | null
+  /** 7.21.1: the campaign's Meta ID (own or inherited); null outside an ad. */
+  metaNumber?: number | null
 }
 
 interface SubfolderRow {
@@ -379,7 +382,8 @@ function PublicFolderSharePageInner() {
 
   const startZipDownload = useCallback(() => {
     startStreamDownload({
-      label: `${data?.folder?.name || 'Folder'}.zip`,
+      // 7.21.1: the campaign code after the name, as the server names it.
+      label: `${data?.folder?.name || 'Folder'}${fcIdLabel(data?.folder?.metaNumber) ? `_${fcIdLabel(data?.folder?.metaNumber)}` : ''}.zip`,
       url: `/api/share/folder/${slug}/download`,
       statUrl: `/api/share/folder/${slug}/download/stat`,
       fetcher: (input, init) =>
@@ -390,7 +394,7 @@ function PublicFolderSharePageInner() {
             ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
           },
         }),
-      fallbackFilename: `${data?.folder?.name || 'folder'}.zip`,
+      fallbackFilename: `${data?.folder?.name || 'folder'}${fcIdLabel(data?.folder?.metaNumber) ? `_${fcIdLabel(data?.folder?.metaNumber)}` : ''}.zip`,
     })
     // Release the button-disabled state after a brief beat — the
     // manager already prevents the UI from queuing a duplicate
@@ -914,8 +918,24 @@ function PublicFolderSharePageInner() {
         {/* 7.1.9: the "open in project folder" button is gone. A viewer who
             could use it is redirected into the admin app before this renders, so
             it only ever appeared for people it could not help. */}
-        <footer className="pt-6 text-[11px] text-muted-foreground text-center">
-          Powered by FrameComment
+        <footer className="pt-6 text-[11px] text-muted-foreground text-center space-y-2">
+          {/* 7.21.1: the campaign code, for the client to quote back —
+              "FC3" is what goes into Meta and what search finds. */}
+          {fcIdLabel(folder?.metaNumber) && (
+            <p className="text-xs text-white/70">
+              Campaign code{' '}
+              <span className="font-mono font-medium text-white tabular-nums select-all">
+                {fcIdLabel(folder?.metaNumber)}
+              </span>
+            </p>
+          )}
+          <p>
+            {/* 7.21.1: "FrameComment" opens the sign-in page. */}
+            Powered by{' '}
+            <a href="/login" className="hover:text-foreground underline-offset-2 hover:underline transition-colors">
+              FrameComment
+            </a>
+          </p>
         </footer>
       </div>
     </div>
